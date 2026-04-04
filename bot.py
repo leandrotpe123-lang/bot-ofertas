@@ -4,12 +4,14 @@
 # ============================================================
 
 from telethon import TelegramClient, events
-import re, requests, json, time, hashlib
+from telethon.sessions import StringSession
+import re, requests, json, time, hashlib, os
 from bs4 import BeautifulSoup
 
 api_id = 33768893
 api_hash = '7959ea0392ff7f91b4f7e207e75a1813'
-client = TelegramClient('session_leo', api_id, api_hash)
+session = StringSession(os.environ.get('SESSION_STRING', ''))
+client = TelegramClient(session, api_id, api_hash)
 
 grupos_origem = ['https://t.me/botofera']
 grupo_destino = '@ofertap'
