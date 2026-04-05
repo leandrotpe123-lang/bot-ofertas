@@ -33,16 +33,15 @@ AMAZON_TAG    = "leo21073-20"
 SHOPEE_APP_ID = "18348480261"
 SHOPEE_SECRET = "SGC7FQQQ4R5QCFULPXIBCANATLP272B3"
 
+# IMAGEM SHOPEE e AMAZON para cupons sem imagem
 IMAGEM_SHOPEE = "https://files.catbox.moe/myf04b.jpg"
 IMAGEM_AMAZON = "https://files.catbox.moe/u1ebbh.jpg"
 
 ofertas_enviadas   = {}  # hash -> timestamp
-cupons_enviados    = {}  # hash -> timestamp
 mensagens_enviadas = {}  # msg_id_original -> msg_id_destino
 
-TEMPO_DEDUP_OFERTA = 86400  # 24 horas
-TEMPO_DEDUP_CUPOM  = 7200   # 2 horas
-MAX_RETRIES        = 3
+TEMPO_DEDUP = 7200   # 2 horas
+MAX_RETRIES = 3
 
 # ============================================================
 # LOG COM DATA/HORA
@@ -144,11 +143,40 @@ def normalizar_para_hash(texto):
     texto = re.sub(r'\s+', ' ', texto)
     return texto.strip().lower()
 
-def gerar_hash(texto):
-    return hashlib.md5(normalizar_para_hash(texto).encode()).hexdigest()
+def extrair_cupom(texto):
+    # Formato monoespaco `CUPOM`
+    mono = re.findall(r'`([A-Za-z0-9]{4,20})`', texto)
+    if mono:
+        return mono[0]
+    # Linha com palavras chave - pega depois do ultimo ":"
+    palavras_chave = ['off', 'limite', 'acima', 'r$', 'cashback', 'desconto', 'cupom']
+    for linha in texto.split('\n'):
+        if any(p in linha.lower() for p in palavras_chave):
+            partes = linha.split(':')
+            if len(partes) > 1:
+                cupom = re.sub(r'[^A-Za-z0-9]', '', partes[-1].strip())
+                if 4 <= len(cupom) <= 20:
+                    return cupom
+    return None
+
+def gerar_hash(texto, cupom=None):
+    normalizado = normalizar_para_hash(texto)
+    cupom_str = cupom.upper() if cupom else ""
+    return hashlib.md5(f"{normalizado}_{cupom_str}".encode()).hexdigest()
+
+def ja_enviado(hash_val):
+    if hash_val in ofertas_enviadas:
+        if time.time() - ofertas_enviadas[hash_val] < TEMPO_DEDUP:
+            return True
+    return False
+
+def limpar_memoria():
+    agora = time.time()
+    for k in list(ofertas_enviadas.keys()):
+        if agora - ofertas_enviadas[k] > TEMPO_DEDUP * 2:
+            del ofertas_enviadas[k]
 
 def eh_cupom(texto):
-    # Tem codigo de cupom real na mensagem
     mono = re.findall(r'`([A-Za-z0-9]{4,20})`', texto)
     if mono:
         return True
@@ -162,76 +190,52 @@ def eh_cupom(texto):
                     return True
     return False
 
-def extrair_cupom(texto):
-    mono = re.findall(r'`([A-Za-z0-9]{4,20})`', texto)
-    if mono:
-        return mono[0]
-    palavras_chave = ['off', 'limite', 'acima', 'r$', 'cashback', 'desconto', 'cupom']
-    for linha in texto.split('\n'):
-        if any(p in linha.lower() for p in palavras_chave):
-            partes = linha.split(':')
-            if len(partes) > 1:
-                cupom = re.sub(r'[^A-Za-z0-9]', '', partes[-1].strip())
-                if 4 <= len(cupom) <= 20:
-                    return cupom
-    return None
-
 def adicionar_crases_cupom(texto, codigo):
     if not codigo:
         return texto
-    # Se já tem crases, não adiciona
     if f'`{codigo}`' in texto:
         return texto
-    # Adiciona crases ao redor do código
     return texto.replace(codigo, f'`{codigo}`', 1)
 
-def adicionar_emojis_oferta(texto, plataforma):
+def adicionar_emojis(texto, plataforma, is_cupom):
     linhas = texto.strip().split('\n')
-    emoji_inicio = "🚨" if plataforma == "shopee" else "✅"
-    nova_primeira = f"{emoji_inicio} {linhas[0]}" if linhas else ""
-    resultado = [nova_primeira] + linhas[1:]
-    # Adiciona emoji de fogo na linha de preço
-    for i, linha in enumerate(resultado):
-        if "r$" in linha.lower() and "🔥" not in linha:
-            resultado[i] = f"🔥 {linha}"
-            break
-    return '\n'.join(resultado)
+    novas_linhas = []
 
-def adicionar_emojis_cupom(texto, plataforma):
-    linhas = texto.strip().split('\n')
-    if plataforma == "shopee":
-        cabecalho = "🚨 CUPOM SHOPEE 🚨"
-    else:
-        cabecalho = "🚨 Cupom Amazon APP"
+    for linha in linhas:
+        linha_strip = linha.strip()
+        if not linha_strip:
+            novas_linhas.append(linha)
+            continue
 
-    # Adiciona emoji de fita na linha de desconto
-    for i, linha in enumerate(linhas):
-        if any(p in linha.lower() for p in ['off', 'r$', 'limite']) and '🎟' not in linha:
-            linhas[i] = f"🎟 {linha}"
-            break
+        # Linha de preço
+        if re.search(r'r\$\s*\d+', linha_strip.lower()) and '🔥' not in linha_strip:
+            novas_linhas.append(f"🔥 {linha_strip}")
 
-    # Adiciona emoji de check na linha de resgate
-    for i, linha in enumerate(linhas):
-        if 'resgate' in linha.lower() and '✅' not in linha:
-            linhas[i] = f"✅ {linha}"
-            break
+        # Linha de resgate/resgate aqui
+        elif 'resgate' in linha_strip.lower() and '✅' not in linha_strip:
+            novas_linhas.append(f"✅ {linha_strip}")
 
-    # Adiciona emoji de carrinho
-    for i, linha in enumerate(linhas):
-        if 'carrinho' in linha.lower() and '🛒' not in linha:
-            linhas[i] = f"🛒 {linha}"
-            break
+        # Linha de carrinho
+        elif 'carrinho' in linha_strip.lower() and '🛒' not in linha_strip:
+            novas_linhas.append(f"🛒 {linha_strip}")
 
-    return cabecalho + '\n\n' + '\n'.join(linhas)
+        # Linha de desconto com OFF
+        elif 'off' in linha_strip.lower() and '🎟' not in linha_strip and is_cupom:
+            novas_linhas.append(f"🎟 {linha_strip}")
 
-def limpar_memoria():
-    agora = time.time()
-    for k in list(ofertas_enviadas.keys()):
-        if agora - ofertas_enviadas[k] > TEMPO_DEDUP_OFERTA:
-            del ofertas_enviadas[k]
-    for k in list(cupons_enviados.keys()):
-        if agora - cupons_enviados[k] > TEMPO_DEDUP_CUPOM:
-            del cupons_enviados[k]
+        # Primeira linha sem emoji (nome do produto ou título)
+        elif (
+            novas_linhas == [] and
+            not linha_strip.startswith('http') and
+            not tem_emojis(linha_strip)
+        ):
+            emoji = "🚨" if plataforma == "shopee" or is_cupom else "✅"
+            novas_linhas.append(f"{emoji} {linha_strip}")
+
+        else:
+            novas_linhas.append(linha)
+
+    return '\n'.join(novas_linhas)
 
 # ============================================================
 # AMAZON
@@ -325,11 +329,11 @@ def buscar_melhor_imagem(texto):
             soup = BeautifulSoup(r.text, 'html.parser')
             og = soup.find("meta", property="og:image")
             if og and og.get("content"):
-                log(f"IMAGEM | og:image encontrada")
+                log("IMAGEM | og:image encontrada")
                 return og["content"]
             tw = soup.find("meta", attrs={"name": "twitter:image"})
             if tw and tw.get("content"):
-                log(f"IMAGEM | twitter:image encontrada")
+                log("IMAGEM | twitter:image encontrada")
                 return tw["content"]
             for img in soup.find_all("img", src=True):
                 src = img["src"]
@@ -340,31 +344,6 @@ def buscar_melhor_imagem(texto):
         except Exception as e:
             log(f"Erro ao buscar imagem: {e}")
     return None
-
-# ============================================================
-# PROCESSAR MENSAGEM
-# ============================================================
-def processar_mensagem(texto, plataforma, is_cupom):
-    # Atualiza links
-    texto_atualizado = atualizar_links(texto)
-    if texto_atualizado is None:
-        return None
-
-    # Extrai cupom
-    cupom = extrair_cupom(texto_atualizado)
-
-    # Adiciona crases no cupom se não tiver
-    if cupom:
-        texto_atualizado = adicionar_crases_cupom(texto_atualizado, cupom)
-
-    # Adiciona emojis se não tiver
-    if not tem_emojis(texto_atualizado):
-        if is_cupom:
-            texto_atualizado = adicionar_emojis_cupom(texto_atualizado, plataforma)
-        else:
-            texto_atualizado = adicionar_emojis_oferta(texto_atualizado, plataforma)
-
-    return texto_atualizado, cupom
 
 # ============================================================
 # EVENTO - NOVA MENSAGEM
@@ -383,23 +362,26 @@ async def handler(event):
 
     plataforma = detectar_plataforma(texto)
     is_cupom = eh_cupom(texto)
+    cupom = extrair_cupom(texto)
 
-    # Verifica duplicata
-    hash_val = gerar_hash(texto)
-    if is_cupom:
-        if hash_val in cupons_enviados and time.time() - cupons_enviados[hash_val] < TEMPO_DEDUP_CUPOM:
-            log("Cupom duplicado, ignorando.")
-            return
-    else:
-        if hash_val in ofertas_enviadas and time.time() - ofertas_enviadas[hash_val] < TEMPO_DEDUP_OFERTA:
-            log("Oferta duplicada, ignorando.")
-            return
-
-    resultado = processar_mensagem(texto, plataforma, is_cupom)
-    if resultado is None:
+    # Verifica duplicata pelo texto + cupom
+    hash_val = gerar_hash(texto, cupom)
+    if ja_enviado(hash_val):
+        log("Duplicado, ignorando.")
         return
 
-    texto_final, cupom = resultado
+    # Atualiza links
+    texto_final = atualizar_links(texto)
+    if texto_final is None:
+        return
+
+    # Adiciona crases no cupom se não tiver
+    if cupom:
+        texto_final = adicionar_crases_cupom(texto_final, cupom)
+
+    # Adiciona emojis se não tiver
+    if not tem_emojis(texto_final):
+        texto_final = adicionar_emojis(texto_final, plataforma, is_cupom)
 
     # Envia mensagem
     try:
@@ -412,7 +394,9 @@ async def handler(event):
                     caption=texto_final
                 )
             else:
+                # Usa imagem correta baseada na plataforma
                 imagem = IMAGEM_SHOPEE if plataforma == "shopee" else IMAGEM_AMAZON
+                log(f"IMAGEM | Usando imagem {plataforma}")
                 msg_enviada = await client.send_file(
                     grupo_destino,
                     imagem,
@@ -440,15 +424,8 @@ async def handler(event):
                         texto_final
                     )
 
-        # Registra mensagem para edição futura
         mensagens_enviadas[event.message.id] = msg_enviada.id
-
-        # Registra duplicata
-        if is_cupom:
-            cupons_enviados[hash_val] = time.time()
-        else:
-            ofertas_enviadas[hash_val] = time.time()
-
+        ofertas_enviadas[hash_val] = time.time()
         limpar_memoria()
 
         # ============================================================
@@ -464,10 +441,10 @@ async def handler(event):
         # except Exception as e:
         #     log(f"Erro ao salvar WhatsApp: {e}")
 
-        log(f"Enviado! Ofertas: {len(ofertas_enviadas)} | Cupons: {len(cupons_enviados)}")
+        log(f"Enviado! Total: {len(ofertas_enviadas)}")
 
     except Exception as e:
-        log(f"Erro ao enviar mensagem: {e}")
+        log(f"Erro ao enviar: {e}")
 
 # ============================================================
 # EVENTO - MENSAGEM EDITADA
@@ -487,12 +464,17 @@ async def handler_edited(event):
 
     plataforma = detectar_plataforma(texto)
     is_cupom = eh_cupom(texto)
+    cupom = extrair_cupom(texto)
 
-    resultado = processar_mensagem(texto, plataforma, is_cupom)
-    if resultado is None:
+    texto_final = atualizar_links(texto)
+    if texto_final is None:
         return
 
-    texto_final, cupom = resultado
+    if cupom:
+        texto_final = adicionar_crases_cupom(texto_final, cupom)
+
+    if not tem_emojis(texto_final):
+        texto_final = adicionar_emojis(texto_final, plataforma, is_cupom)
 
     try:
         msg_id_destino = mensagens_enviadas[msg_id_original]
@@ -503,7 +485,7 @@ async def handler_edited(event):
         )
         log(f"Mensagem editada! ID: {msg_id_destino}")
     except Exception as e:
-        log(f"Erro ao editar mensagem: {e}")
+        log(f"Erro ao editar: {e}")
 
 # ============================================================
 # INICIA O BOT
