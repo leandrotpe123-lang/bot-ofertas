@@ -1,38 +1,39 @@
-import os, re, requests, json, time, hashlib, sqlite3, logging
+# ============================================================
+# BOT DE OFERTAS - TELEGRAM (VERSÃO 15.0 - BITLY SÓ MAGALU)
+# ============================================================
+
 from telethon import TelegramClient, events
-from telethon.sessions import StringSession
-from bs4 import BeautifulSoup
-from datetime import datetime
+from telethon.tl.types import MessageMediaWebPage
+import re, requests, json, time, hashlib
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 # ============================================================
-# 🔹 1. CONFIGURAÇÕES E LOGS
+# 🔹 CONFIGURAÇÕES GERAIS
 # ============================================================
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 api_id = 33768893
 api_hash = '7959ea0392ff7f91b4f7e207e75a1813'
-# StringSession para Nuvem (Configurar na variável de ambiente SESSION_STRING)
-session_str = os.environ.get('SESSION_STRING', '') 
-client = TelegramClient(StringSession(session_str), api_id, api_hash)
+client = TelegramClient('session_leo', api_id, api_hash)
 
-GRUPO_DESTINO = '@ofertap'
-GRUPOS_ORIGEM = [
-    'https://t.me/botofera', 'https://t.me/promotom', 'https://t.me/ninjaofertas',
-    'https://t.me/fadadoscupons', 'https://t.me/SamuelF3lipePromo',
-    'https://t.me/fumotom', 'https://t.me/fadapromos', 'https://t.me/paraseubaby'
-]
+grupos_origem = ['https://t.me/botofera']
+grupo_destino = '@ofertap'
 
+# AFILIADOS
 AMAZON_TAG      = "leo21073-20"
+MAGALU_PARTNER  = "3440"
+MAGALU_PROMOTER = "5479317"
+ML_SOURCE       = "silvaleo20230518163534"
 SHOPEE_APP_ID   = "18348480261"
 SHOPEE_SECRET   = "SGC7FQQQ4R5QCFULPXIBCANATLP272B3"
 
-# IMAGENS PARA CUPONS (SEUS LINKS CORRIGIDOS)
-IMG_CUPOM_AMAZON = "https://files.catbox.moe/myf04b.jpg" # Foto do bolo/tag
-IMG_CUPOM_SHOPEE = "https://files.catbox.moe/u1ebbh.jpg" # Foto shopee
+# BITLY TOKEN (Exclusivo para Magalu)
+BITLY_TOKEN = "69cdfdea70096c9cf42a5eac20cb55b17668ede9"
 
-# ============================================================
-# 🔹 2. FILTRO DE PALAVRAS COMPLETO (RESTAURADO)
-# ============================================================
-filtro_palavras = [
+# SEU SOCIAL ML
+MEU_LINK_SOCIAL_ML = "https://mercadolivre.com/sec/23NpLSc"
+
+historico_ofertas = set()
+
+filtro = [
     "Monitor Samsung", "Fonte Mancer", "Placa de video", "Placa de Vídeo",
     "Monitor LG", "PC home Essential", "Suporte articulado",
     "Gabinetes em oferta", "Monitor Safe", "gabinete atx",
@@ -43,152 +44,162 @@ filtro_palavras = [
     "VHAGAR", "Superframe", "AM5", "AM4",
     "water cooler", "GTX", "CL18", "CL16",
     "CL32", "MT/s", "MHz", "SO-DIMM",
-    "DIMM", "DDR5", "DDR4", "Dram",
-    "shopee video", "shopee vídeo", "somente nos vídeos"
+    "DIMM", "DDR5", "DDR4", "Dram"
 ]
 
 # ============================================================
-# 🔹 3. BANCO DE DADOS (SQLITE - MEMÓRIA DE 24H)
-# ============================================================
-def iniciar_banco():
-    conn = sqlite3.connect('tanque_de_guerra.db')
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS ofertas 
-                     (id_hash TEXT PRIMARY KEY, timestamp REAL)''')
-    conn.commit()
-    return conn
-
-conexao_db = iniciar_banco()
-
-def limpar_banco():
-    """Apaga registros com mais de 24 horas"""
-    limite = time.time() - 86400
-    cursor = conexao_db.cursor()
-    cursor.execute('DELETE FROM ofertas WHERE timestamp < ?', (limite,))
-    conexao_db.commit()
-
-# ============================================================
-# 🔹 4. FUNÇÕES DE CONVERSÃO ORIGINAIS (FILÉ)
+# 🔹 FUNÇÕES DE APOIO
 # ============================================================
 
-def converter_amazon(url_original):
+def encurtar_bitly(url_longa):
+    """Encurta o link usando o token do Bitly (USADO APENAS NO MAGALU)."""
     try:
-        url = url_original.strip()
+        headers = {
+            "Authorization": f"Bearer {BITLY_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        payload = {"long_url": url_longa}
+        res = requests.post("https://api-ssl.bitly.com/v4/shorten", json=payload, headers=headers, timeout=10)
+        if res.status_code in [200, 201]:
+            return res.json().get("link")
+        return url_longa
+    except:
+        return url_longa
+
+def gerar_dna_oferta(texto):
+    """DNA baseado em Texto + Valor, ignorando emojis e links."""
+    t = re.sub(r'https?://\S+', '', texto)
+    precos = re.findall(r'R\$\s?\d+[.,\d]*', t)
+    valor = precos[0].replace(" ", "") if precos else "0"
+    t_limpo = re.sub(r'[^\w\s]', '', t)
+    return f"{' '.join(t_limpo.split()).lower()}_{valor}"
+
+def modificar_params(url, novos_params):
+    try:
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        for k, v in novos_params.items():
+            params[k] = [v]
+        nova_query = urlencode(params, doseq=True)
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, nova_query, parsed.fragment))
+    except: return url
+
+# ============================================================
+# 🔹 CONVERSORES POR PLATAFORMA
+# ============================================================
+
+def converter_ml(url):
+    try:
+        url_l = url.lower()
+        if "/sec/" in url_l: return MEU_LINK_SOCIAL_ML
+        
+        url_final = url
+        if "meli.la" in url_l:
+            try:
+                res = requests.get(url, allow_redirects=True, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+                url_final = res.url
+            except: pass
+            
+        tags = {"matt_tool": "afiliados", "matt_word": "oferta", "matt_source": ML_SOURCE, "matt_campaign": "ofertap"}
+        return modificar_params(url_final, tags)
+    except: return url
+
+def converter_amazon(url):
+    try:
         if "amzn.to" in url.lower():
-            r = requests.get(url, allow_redirects=True, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-            url = r.url
-        base = url.split("#")[0].split("?", 1)[0]
-        node = re.search(r'node=([^&]+)', url)
-        # Mantém tag e node conforme seu script original
-        return f"{base}?node={node.group(1)}&tag={AMAZON_TAG}" if node else f"{base}?tag={AMAZON_TAG}"
-    except: return url_original
+            res = requests.get(url, allow_redirects=True, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+            url = res.url
+        return modificar_params(url, {"tag": AMAZON_TAG})
+    except: return url
 
-def converter_shopee(url_original):
+def converter_magalu(url):
     try:
-        url_real = url_original.strip()
-        query = f'mutation {{ generateShortLink(input: {{ originUrl: "{url_real}" }}) {{ shortLink }} }}'
+        # 1. Gera o link longo com suas tags
+        long_url = modificar_params(url, {
+            "utm_source": "divulgador", "utm_medium": "magalu",
+            "partner_id": MAGALU_PARTNER, "promoter_id": MAGALU_PROMOTER,
+            "utm_campaign": MAGALU_PROMOTER
+        })
+        # 2. ENCURTA COM BITLY (Exclusivo para Magalu)
+        return encurtar_bitly(long_url)
+    except: return url
+
+def converter_shopee(url):
+    try:
+        query = f'mutation {{ generateShortLink(input: {{ originUrl: "{url}" }}) {{ shortLink }} }}'
         payload = json.dumps({"query": query}, separators=(",", ":"))
-        ts = str(int(time.time()))
-        # Assinatura SHA256 Profissional
-        sig = hashlib.sha256(f"{SHOPEE_APP_ID}{ts}{payload}{SHOPEE_SECRET}".encode()).hexdigest()
+        ts = str(int(time.time())); sig = hashlib.sha256(f"{SHOPEE_APP_ID}{ts}{payload}{SHOPEE_SECRET}".encode()).hexdigest()
         headers = {"Authorization": f"SHA256 Credential={SHOPEE_APP_ID},Timestamp={ts},Signature={sig}", "Content-Type": "application/json"}
-        r = requests.post("https://open-api.affiliate.shopee.com.br/graphql", headers=headers, data=payload, timeout=10).json()
-        return r["data"]["generateShortLink"]["shortLink"]
-    except: return url_original
+        res = requests.post("https://open-api.affiliate.shopee.com.br/graphql", headers=headers, data=payload, timeout=10)
+        return res.json()["data"]["generateShortLink"]["shortLink"]
+    except: return url
 
 # ============================================================
-# 🔹 5. UTILITÁRIOS (IMAGENS, CRASES E HASH)
+# 🔹 MOTOR DE PROCESSAMENTO
 # ============================================================
 
-def buscar_foto_no_site(texto, tentativa=1):
-    links = re.findall(r'https?://[^\s\)\]\>\"]+', texto)
-    for l in links:
-        try:
-            r = requests.get(l, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
-            soup = BeautifulSoup(r.text, 'html.parser')
-            og = soup.find("meta", property="og:image")
-            if og: return og["content"]
-        except:
-            if tentativa < 3:
-                time.sleep(1); return buscar_foto_no_site(texto, tentativa + 1)
-    return None
+def processar_texto(texto):
+    links = re.findall(r'(https?://[^\s,]+)', texto)
+    links = sorted(list(set(links)), key=len, reverse=True)
 
-def aplicar_crases(texto):
-    """Detecta cupom e coloca crases automaticamente"""
-    match = re.search(r'(?:CUPOM|🏷️|CODIGO):\s*([A-Z0-9]{4,15})', texto.upper())
-    if match:
-        cp = match.group(1)
-        if f'`{cp}`' not in texto:
-            return re.sub(re.escape(cp), f"`{cp}`", texto, flags=re.I, count=1)
+    for link in links:
+        link_limpo = link.rstrip('.,)!?')
+        l_link = link_limpo.lower()
+        novo = link_limpo
+
+        if "amazon" in l_link or "amzn" in l_link:
+            novo = converter_amazon(link_limpo)
+        elif "magalu" in l_link or "magazineluiza" in l_link:
+            novo = converter_magalu(link_limpo)
+        elif "mercadolivre" in l_link or "meli.la" in l_link:
+            novo = converter_ml(link_limpo)
+        elif "shopee" in l_link:
+            novo = converter_shopee(link_limpo)
+
+        if novo and novo != link_limpo:
+            texto = texto.replace(link_limpo, novo)
     return texto
 
-def gerar_hash_sensivel(texto):
-    """Cria um ID baseado no texto. Se o texto mudar (ex: 'Ainda ativo'), o ID muda."""
-    # Remove apenas os links (porque mudam de grupo para grupo)
-    t = re.sub(r'https?://\S+', '', texto)
-    # Remove emojis e mantém apenas letras/números para comparar o conteúdo real
-    t = re.sub(r'[^\w\s]', '', t).lower().strip()
-    return hashlib.md5(t.encode()).hexdigest()
-
 # ============================================================
-# 🔹 6. EVENTO PRINCIPAL (TANQUE DE GUERRA)
+# 🔹 HANDLER TELEGRAM
 # ============================================================
 
-@client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
+@client.on(events.NewMessage(chats=grupos_origem))
 async def handler(event):
-    raw_text = event.message.text
-    if not raw_text or not raw_text.strip(): return
+    raw_text = event.message.text or ""
+    if not raw_text.strip(): return
+    if any(p.lower() in raw_text.lower() for p in filtro): return
 
-    # A) Filtro de Palavras
-    if any(p.lower() in raw_text.lower() for p in filtro_palavras):
+    # DNA (Anti-duplicidade Texto + Valor)
+    dna = gerar_dna_oferta(raw_text)
+    if dna in historico_ofertas:
+        print(f"🚫 DNA Repetido: {dna}")
         return
 
-    # B) Plataforma
-    plat = "AMAZON" if "amazon" in raw_text.lower() or "amzn" in raw_text.lower() else "SHOPEE" if "shopee" in raw_text.lower() else None
-    if not plat: return
+    # Processa texto
+    texto_final = processar_texto(raw_text)
+    historico_ofertas.add(dna)
 
-    # C) Deduplicação Sensível (Permite repostar se o texto mudar)
-    limpar_banco()
-    h = gerar_hash_sensivel(raw_text)
-    
-    cursor = conexao_db.cursor()
-    cursor.execute('SELECT timestamp FROM ofertas WHERE id_hash=?', (h,))
-    if cursor.fetchone():
-        print("DEBUG | Oferta 100% idêntica ignorada.")
-        return
-
-    # D) Conversão de Links e Cupom
-    links = re.findall(r'https?://[^\s\)\]\>\"]+', raw_text)
-    texto_final = raw_text
-    for l in links:
-        novo = converter_amazon(l) if plat == "AMAZON" else converter_shopee(l)
-        texto_final = texto_final.replace(l, novo)
-    
-    texto_final = aplicar_crases(texto_final)
-    is_cupom = any(x in raw_text.lower() for x in ['cupom', '🏷️', '🎟️', 'vale', 'off'])
-
-    # E) Lógica de Envio de Imagens (Ordem correta)
     try:
-        if event.message.photo: # 1. Foto do grupo
-            await client.send_file(GRUPO_DESTINO, event.message.photo, caption=texto_final)
-        elif not is_cupom: # 2. Oferta: Busca foto no site
-            img = buscar_foto_no_site(raw_text)
-            if img: await client.send_file(GRUPO_DESTINO, img, caption=texto_final)
-            else: await client.send_message(GRUPO_DESTINO, texto_final)
-        else: # 3. Cupom: Imagem Fixa (Amazon: Bolo | Shopee: Shopee)
-            img_fixa = IMG_CUPOM_AMAZON if plat == "AMAZON" else IMG_CUPOM_SHOPEE
-            await client.send_file(GRUPO_DESTINO, img_fixa, caption=texto_final)
-
-        # F) Grava no Banco para evitar repetição do MESMO texto
-        cursor.execute('INSERT INTO ofertas (id_hash, timestamp) VALUES (?, ?)', (h, time.time()))
-        conexao_db.commit()
-        print(f"✅ Enviado: {plat} | Texto Novo detectado.")
+        tem_midia = event.message.media and not isinstance(event.message.media, MessageMediaWebPage)
+        
+        if tem_midia:
+            if len(texto_final) > 1024:
+                await client.send_file(grupo_destino, event.message.media)
+                await client.send_message(grupo_destino, texto_final)
+            else:
+                await client.send_file(grupo_destino, event.message.media, caption=texto_final)
+        else:
+            await client.send_message(grupo_destino, texto_final)
+        
+        print(f"✅ Enviado! (Bitly apenas no Magalu) DNA: {dna}")
 
     except Exception as e:
-        print(f"❌ Erro: {e}")
+        print(f"❌ Erro envio: {e}")
 
-# --- START ---
-print("🚀 BOT TANQUE DE GUERRA ONLINE!")
-print("Deduplicação Inteligente: Aceita reposts com textos diferentes.")
+# ============================================================
+# 🔹 START
+# ============================================================
+print("🚀 Bot Versão 15.0 Online! Bitly ativo EXCLUSIVAMENTE para Magalu.")
 client.start()
 client.run_until_disconnected()
