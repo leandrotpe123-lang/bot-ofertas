@@ -36,10 +36,10 @@ SHOPEE_SECRET = "SGC7FQQQ4R5QCFULPXIBCANATLP272B3"
 IMAGEM_SHOPEE = "https://files.catbox.moe/myf04b.jpg"
 IMAGEM_AMAZON = "https://files.catbox.moe/u1ebbh.jpg"
 
-enviados       = {}  # hash -> timestamp
-mensagens_map  = {}  # msg_id_original -> msg_id_destino
+enviados      = {}  # hash -> timestamp
+mensagens_map = {}  # msg_id_original -> msg_id_destino
 
-TEMPO_DEDUP = 7200   # 2 horas
+TEMPO_DEDUP = 7200
 MAX_RETRIES = 3
 
 # ============================================================
@@ -126,20 +126,10 @@ def remover_emojis(texto):
         '', texto
     )
 
-def normalizar(texto):
-    # Remove emojis, links, pontuacao especial, espacos extras, maiusculas
-    texto = remover_emojis(texto)
-    texto = re.sub(r'https?://\S+', '', texto)
-    texto = re.sub(r'[-*_~`#•|]', '', texto)
-    texto = re.sub(r'\s+', ' ', texto)
-    return texto.strip().lower()
-
 def extrair_cupom(texto):
-    # Formato monoespaco `CUPOM`
     mono = re.findall(r'`([A-Za-z0-9]{4,20})`', texto)
     if mono:
         return mono[0].upper()
-    # Depois de ":" no final da linha
     palavras_chave = ['off', 'limite', 'acima', 'r$', 'cashback', 'desconto', 'cupom']
     for linha in texto.split('\n'):
         if any(p in linha.lower() for p in palavras_chave):
@@ -149,23 +139,6 @@ def extrair_cupom(texto):
                 if 4 <= len(cupom) <= 20:
                     return cupom.upper()
     return None
-
-def gerar_hash(texto, cupom=None):
-    texto_norm = normalizar(texto)
-    cupom_str = cupom.upper() if cupom else ""
-    return hashlib.md5(f"{texto_norm}|{cupom_str}".encode()).hexdigest()
-
-def ja_enviado(hash_val):
-    if hash_val in enviados:
-        if time.time() - enviados[hash_val] < TEMPO_DEDUP:
-            return True
-    return False
-
-def limpar_memoria():
-    agora = time.time()
-    for k in list(enviados.keys()):
-        if agora - enviados[k] > TEMPO_DEDUP * 2:
-            del enviados[k]
 
 def eh_cupom(texto):
     mono = re.findall(r'`([A-Za-z0-9]{4,20})`', texto)
@@ -180,19 +153,75 @@ def eh_cupom(texto):
                     return True
     return False
 
+# ============================================================
+# HASH - DEDUPLICACAO INTELIGENTE
+# ============================================================
+def extrair_chave_oferta(texto, cupom=None):
+    texto_norm = remover_emojis(texto)
+    texto_norm = re.sub(r'https?://\S+', '', texto_norm)
+
+    # Pega nome do produto (primeira linha nao vazia com mais de 5 chars)
+    nome = ""
+    for linha in texto_norm.split('\n'):
+        linha_limpa = re.sub(r'[^a-zA-Z0-9\s]', '', linha).strip().lower()
+        if len(linha_limpa) > 5:
+            nome = linha_limpa
+            break
+
+    # Pega so os numeros do preco
+    preco = ""
+    precos = re.findall(r'\d+', texto_norm)
+    if precos:
+        preco = precos[0]
+
+    cupom_str = cupom.upper() if cupom else ""
+    chave = f"{nome}|{preco}|{cupom_str}"
+    log(f"HASH OFERTA | nome={nome} preco={preco} cupom={cupom_str}")
+    return hashlib.md5(chave.encode()).hexdigest()
+
+def extrair_chave_cupom(texto, cupom=None):
+    texto_norm = remover_emojis(texto)
+    texto_norm = re.sub(r'https?://\S+', '', texto_norm)
+    texto_norm = re.sub(r'[^a-zA-Z0-9\s]', '', texto_norm)
+    texto_norm = re.sub(r'\s+', ' ', texto_norm).strip().lower()
+    cupom_str = cupom.upper() if cupom else ""
+    chave = f"{texto_norm}|{cupom_str}"
+    log(f"HASH CUPOM | cupom={cupom_str}")
+    return hashlib.md5(chave.encode()).hexdigest()
+
+def gerar_hash(texto, cupom=None, is_cupom=False):
+    if is_cupom:
+        return extrair_chave_cupom(texto, cupom)
+    else:
+        return extrair_chave_oferta(texto, cupom)
+
+def ja_enviado(hash_val):
+    if hash_val in enviados:
+        if time.time() - enviados[hash_val] < TEMPO_DEDUP:
+            return True
+    return False
+
+def limpar_memoria():
+    agora = time.time()
+    for k in list(enviados.keys()):
+        if agora - enviados[k] > TEMPO_DEDUP * 2:
+            del enviados[k]
+
+# ============================================================
+# ADICIONAR CRASES E EMOJIS
+# ============================================================
 def adicionar_crases(texto, codigo):
     if not codigo:
         return texto
     if f'`{codigo}`' in texto:
         return texto
-    # Tenta substituir o código exato
     padrao = re.compile(r'(?<![`\w])' + re.escape(codigo) + r'(?![`\w])')
     return padrao.sub(f'`{codigo}`', texto, count=1)
 
 def adicionar_emojis(texto, plataforma, is_cupom):
     linhas = texto.strip().split('\n')
     novas = []
-    primeira_linha_processada = False
+    primeira_processada = False
 
     for linha in linhas:
         s = linha.strip()
@@ -200,12 +229,12 @@ def adicionar_emojis(texto, plataforma, is_cupom):
             novas.append('')
             continue
 
-        # Primeira linha não vazia - nome do produto ou titulo
-        if not primeira_linha_processada and not s.startswith('http'):
+        # Primeira linha nao vazia - titulo/nome
+        if not primeira_processada and not s.startswith('http'):
             if not tem_emojis(s):
                 emoji = "🚨" if (plataforma == "shopee" or is_cupom) else "✅"
                 s = f"{emoji} {s}"
-            primeira_linha_processada = True
+            primeira_processada = True
             novas.append(s)
             continue
 
@@ -246,7 +275,7 @@ def trocar_tag_amazon(url, tentativa=1):
         url = url.strip()
         if "amzn.to" in url.lower():
             r = requests.get(url, allow_redirects=True, timeout=10,
-                           headers={"User-Agent": "Mozilla/5.0"})
+                             headers={"User-Agent": "Mozilla/5.0"})
             url = r.url
             log(f"AMAZON | Desencurtado: {url}")
         url = url.split("#")[0]
@@ -299,12 +328,12 @@ def atualizar_links(texto):
         if "amazon" in link.lower() or "amzn" in link.lower():
             novo = trocar_tag_amazon(link)
             if novo is None:
-                log("AMAZON | Falhou. Descartando oferta.")
+                log("AMAZON | Falhou. Descartando.")
                 return None
         elif "shopee" in link.lower():
             novo = ajustar_link_shopee(link)
             if novo is None:
-                log("SHOPEE | Falhou. Descartando oferta.")
+                log("SHOPEE | Falhou. Descartando.")
                 return None
         if novo and novo != link:
             texto = texto.replace(link, novo, 1)
@@ -358,21 +387,21 @@ def processar(texto, plataforma, is_cupom):
     return texto_final, cupom
 
 # ============================================================
-# ENVIAR MENSAGEM
+# ENVIAR
 # ============================================================
-async def enviar(texto_final, plataforma, is_cupom, foto_original=None):
+async def enviar(texto_final, plataforma, is_cupom, foto=None):
     if is_cupom:
-        if foto_original:
+        if foto:
             log("IMAGEM | Foto original do cupom.")
-            return await client.send_file(grupo_destino, foto_original, caption=texto_final, link_preview=False)
+            return await client.send_file(grupo_destino, foto, caption=texto_final, link_preview=False)
         else:
             imagem = IMAGEM_SHOPEE if plataforma == "shopee" else IMAGEM_AMAZON
             log(f"IMAGEM | Usando imagem {plataforma.upper()}")
             return await client.send_file(grupo_destino, imagem, caption=texto_final, link_preview=False)
     else:
-        if foto_original:
+        if foto:
             log("IMAGEM | Foto original da oferta.")
-            return await client.send_file(grupo_destino, foto_original, caption=texto_final, link_preview=False)
+            return await client.send_file(grupo_destino, foto, caption=texto_final, link_preview=False)
         else:
             imagem = buscar_imagem(texto_final)
             if imagem:
@@ -401,7 +430,7 @@ async def handler(event):
     is_cupom = eh_cupom(texto)
     cupom_raw = extrair_cupom(texto)
 
-    hash_val = gerar_hash(texto, cupom_raw)
+    hash_val = gerar_hash(texto, cupom_raw, is_cupom)
     if ja_enviado(hash_val):
         log("Duplicado, ignorando.")
         return
