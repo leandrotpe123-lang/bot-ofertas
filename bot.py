@@ -9,7 +9,7 @@ from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 # ============================================================
 API_ID = 33768893
 API_HASH = '7959ea0392ff7f91b4f7e207e75a1813'
-SESSION = '/tmp/sessao_leo_v27'
+SESSION = '/tmp/sessao_leo_v28' # Railway safe
 
 GRUPOS_OFERTAS = ['fumotom', 'promotom']
 GRUPO_CUPONS_EXCLUSIVO = 'fadadoscupons'
@@ -30,7 +30,10 @@ MEU_LINK_SOCIAL_ML = "https://mercadolivre.com/sec/23NpLSc"
 IMG_ML_FIXA = "mercado_livre_c1a918503a.jpg" 
 ARQUIVO_CACHE = "cache_ofertas.json"
 
-# 🔹 FILTRO COMPLETO DE PALAVRAS BLOQUEADAS (TODAS AS 40+)
+# SEMÁFORO (Bypass de Flood - Máximo 2 mensagens simultâneas)
+envio_lock = asyncio.Semaphore(2)
+
+# FILTRO COMPLETO
 FILTRO = [
     "Monitor Samsung", "Fonte Mancer", "Placa de video", "Placa de Vídeo",
     "Monitor LG", "PC home Essential", "Suporte articulado",
@@ -46,7 +49,7 @@ FILTRO = [
 ]
 
 # ============================================================
-# 🔹 SUA LÓGICA DE CACHE (48H / 24H)
+# 🔹 SISTEMA DE CACHE (SUA LÓGICA DE 48H / 24H)
 # ============================================================
 TTL_OFERTA = 48 * 60 * 60
 TTL_CUPOM = 24 * 60 * 60
@@ -82,7 +85,7 @@ def marcar_como_enviado(plataforma, produto_id, preco, cupom=""):
     salvar_cache(cache)
 
 # ============================================================
-# 🔹 UTILITÁRIOS (EXPANSÃO, IMAGEM, BITLY)
+# 🔹 UTILITÁRIOS (DESCURTADOR + IMAGEM 3X + BITLY)
 # ============================================================
 
 async def expandir_url(url):
@@ -102,6 +105,7 @@ async def encurtar_bitly(url):
         except: return url
 
 async def buscar_imagem(url):
+    """Busca imagem 3x ou retorna None para ativar preview."""
     async with aiohttp.ClientSession() as session:
         for _ in range(3):
             try:
@@ -113,12 +117,13 @@ async def buscar_imagem(url):
     return None
 
 # ============================================================
-# 🔹 CONVERSORES (SHOPEE API + MULTI-LINK)
+# 🔹 CONVERSORES (MULTILINK + LIMPEZA LIXO)
 # ============================================================
 
 async def converter_shopee(url):
     ts = str(int(time.time()))
-    payload = json.dumps({"query": f'mutation {{ generateShortLink(input: {{ originUrl: "{url}" }}) {{ shortLink }} }}'}, separators=(",", ":"))
+    query = f'mutation {{ generateShortLink(input: {{ originUrl: "{url}" }}) {{ shortLink }} }}'
+    payload = json.dumps({"query": query}, separators=(",", ":"))
     sig = hashlib.sha256(f"{SHOPEE_APP_ID}{ts}{payload}{SHOPEE_SECRET}".encode()).hexdigest()
     headers = {"Authorization": f"SHA256 Credential={SHOPEE_APP_ID},Timestamp={ts},Signature={sig}", "Content-Type": "application/json"}
     async with aiohttp.ClientSession() as s:
@@ -148,12 +153,13 @@ async def converter_link(url):
     elif "magazineluiza" in url_l or "magalu" in url_l:
         q = parse_qs(urlparse(url).query)
         q.update({"partner_id": [MAGALU_PARTNER], "promoter_id": [MAGALU_PROMOTER]})
-        long_url = urlunparse(urlparse(url)._replace(query=urlencode(q, doseq=True)))
-        return await encurtar_bitly(long_url), "magalu", False
+        l_url = urlunparse(urlparse(url)._replace(query=urlencode(q, doseq=True)))
+        return await encurtar_bitly(l_url), "magalu", False
 
     elif "shopee" in url_l:
         return await converter_shopee(url), "shopee", False
 
+    # LIMPEZA DE LIXO: Se não for loja, apaga o link, exceto se for cadastro/ganhe
     if any(x in url_l for x in ["cadastro", "ganhe", "promo", "formulario", "inscricao"]):
         return url, "info", False
         
@@ -172,6 +178,7 @@ def formatar_oferta(texto, links_conv):
     linhas = texto.split('\n')
     titulo = re.sub(r'[✅🔥🎟🛒🚨]|https?://\S+', '', linhas[0]).strip()
     
+    # Monta padrão limpo
     msg = f"✅ Produto: {titulo}\n"
     if preco: msg += f"🔥 Preço: {preco}\n"
     if cupom: msg += f"🎟 Cupom: `{cupom.upper()}`\n"
@@ -185,15 +192,13 @@ def formatar_oferta(texto, links_conv):
 async def processar(event, is_edit=False):
     raw_text = event.message.text or ""
     if not raw_text.strip(): return
-    
-    # 🔹 FILTRO DE PALAVRAS BLOQUEADAS (CONFIRMADO)
     if any(p.lower() in raw_text.lower() for p in FILTRO): return
 
     chat = await event.get_chat()
     username = (chat.username or "").lower()
     links_brutos = re.findall(r'https?://\S+', raw_text)
     
-    # Regra exclusiva de cupons de texto
+    # Regra exclusiva fadadoscupons para mensagens de texto (sem link)
     if not links_brutos and username != GRUPO_CUPONS_EXCLUSIVO: return
 
     links_conv, usar_img_f, plat_p, p_id = [], False, "outro", "0"
@@ -209,36 +214,35 @@ async def processar(event, is_edit=False):
     
     final_msg, preco, cupom = formatar_oferta(raw_text, links_conv)
 
-    # DEDUPLICAÇÃO POR DNA
     if not is_edit:
         if ja_foi_enviado(plat_p, p_id, preco, cupom): return
         marcar_como_enviado(plat_p, p_id, preco, cupom)
 
-    # GESTÃO DE IMAGEM
+    # GESTÃO DE IMAGEM (ML Social/Lista, Mídia Original ou Raspagem)
     imagem = None
     if usar_img_f and os.path.exists(IMG_ML_FIXA): imagem = IMG_ML_FIXA
     elif event.message.media and not isinstance(event.message.media, MessageMediaWebPage): imagem = event.message.media
     elif links_conv: imagem = await buscar_imagem(links_conv[0])
 
-    try:
-        cache = carregar_cache()
-        mapping = cache.get("mapeamento", {})
-        
-        if is_edit and str(event.message.id) in mapping:
-            await client.edit_message(GRUPO_DESTINO, mapping[str(event.message.id)], final_msg)
-        else:
-            if imagem:
-                if len(final_msg) > 1024:
-                    f = await client.send_file(GRUPO_DESTINO, imagem)
-                    sent = await client.send_message(GRUPO_DESTINO, final_msg, reply_to=f.id)
-                else: sent = await client.send_file(GRUPO_DESTINO, imagem, caption=final_msg)
-            else: sent = await client.send_message(GRUPO_DESTINO, final_msg)
-            
-            if sent:
-                cache = carregar_cache()
-                cache["mapeamento"][str(event.message.id)] = sent.id
-                salvar_cache(cache)
-    except Exception as e: print(f"❌ Erro: {e}")
+    async with envio_lock: # BYPASS DE FLOOD
+        try:
+            cache = carregar_cache()
+            mapping = cache.get("mapeamento", {})
+            if is_edit and str(event.message.id) in mapping:
+                await client.edit_message(GRUPO_DESTINO, mapping[str(event.message.id)], final_msg)
+            else:
+                if imagem:
+                    if len(final_msg) > 1024:
+                        f = await client.send_file(GRUPO_DESTINO, imagem)
+                        sent = await client.send_message(GRUPO_DESTINO, final_msg, reply_to=f.id)
+                    else: sent = await client.send_file(GRUPO_DESTINO, imagem, caption=final_msg)
+                else: sent = await client.send_message(GRUPO_DESTINO, final_msg)
+                
+                if sent:
+                    cache = carregar_cache()
+                    cache["mapeamento"][str(event.message.id)] = sent.id
+                    salvar_cache(cache)
+        except Exception as e: print(f"❌ Erro: {e}")
 
 # ============================================================
 # 🔹 START
@@ -249,6 +253,6 @@ async def h1(e): await processar(e)
 @client.on(events.MessageEdited(chats=GRUPOS_ORIGEM))
 async def h2(e): await processar(e, is_edit=True)
 
-print("🚀 BOT MASTER v27.0 ONLINE - FILTRO E REGRAS COMPLETAS!")
+print("🚀 BOT DEFINITIVO v28.0 ONLINE!")
 client.start()
 client.run_until_disconnected()
