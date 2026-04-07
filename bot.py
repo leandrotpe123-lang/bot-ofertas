@@ -1,39 +1,38 @@
-# ============================================================
-# BOT DE OFERTAS - TELEGRAM (VERSÃO 15.0 - BITLY SÓ MAGALU)
-# ============================================================
-
+import re, asyncio, hashlib, json, time, os, aiohttp
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaWebPage
-import re, requests, json, time, hashlib
+from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 # ============================================================
 # 🔹 CONFIGURAÇÕES GERAIS
 # ============================================================
-api_id = 33768893
-api_hash = '7959ea0392ff7f91b4f7e207e75a1813'
-client = TelegramClient('session_leo', api_id, api_hash)
+API_ID = 33768893
+API_HASH = '7959ea0392ff7f91b4f7e207e75a1813'
+SESSION = 'sessao_leo_v22'
 
-grupos_origem = ['https://t.me/botofera']
-grupo_destino = '@ofertap'
+# Canais de Origem e Destino
+GRUPOS_OFERTAS = ['fumotom', 'promotom']
+GRUPO_CUPONS_EXCLUSIVO = 'fadadoscupons'
+GRUPOS_ORIGEM = GRUPOS_OFERTAS + [GRUPO_CUPONS_EXCLUSIVO]
+GRUPO_DESTINO = '@ofertap'
 
-# AFILIADOS
+# TAGS AFILIADOS
 AMAZON_TAG      = "leo21073-20"
 MAGALU_PARTNER  = "3440"
 MAGALU_PROMOTER = "5479317"
 ML_SOURCE       = "silvaleo20230518163534"
 SHOPEE_APP_ID   = "18348480261"
 SHOPEE_SECRET   = "SGC7FQQQ4R5QCFULPXIBCANATLP272B3"
+BITLY_TOKEN     = "69cdfdea70096c9cf42a5eac20cb55b17668ede9"
 
-# BITLY TOKEN (Exclusivo para Magalu)
-BITLY_TOKEN = "69cdfdea70096c9cf42a5eac20cb55b17668ede9"
-
-# SEU SOCIAL ML
+# ARQUIVOS E LINKS FIXOS
 MEU_LINK_SOCIAL_ML = "https://mercadolivre.com/sec/23NpLSc"
+IMG_ML_FIXA = "mercado_livre_c1a918503a.jpg"
+ARQUIVO_MAPEAMENTO = "map_mensagens.json"
 
-historico_ofertas = set()
-
-filtro = [
+# 🔹 FILTRO DE PALAVRAS BLOQUEADAS (Recolocado!)
+FILTRO = [
     "Monitor Samsung", "Fonte Mancer", "Placa de video", "Placa de Vídeo",
     "Monitor LG", "PC home Essential", "Suporte articulado",
     "Gabinetes em oferta", "Monitor Safe", "gabinete atx",
@@ -48,158 +47,220 @@ filtro = [
 ]
 
 # ============================================================
-# 🔹 FUNÇÕES DE APOIO
+# 🔹 SUA LÓGICA DE CACHE (EXATAMENTE COMO VOCÊ MANDOU)
+# ============================================================
+ARQUIVO_CACHE = "cache_ofertas.json"
+TTL_OFERTA = 48 * 60 * 60   # 48 horas
+TTL_CUPOM = 24 * 60 * 60    # 24 horas
+
+def carregar_cache():
+    if not os.path.exists(ARQUIVO_CACHE): return {"ofertas": {}, "cupons": {}}
+    try:
+        with open(ARQUIVO_CACHE, "r", encoding="utf-8") as f: return json.load(f)
+    except: return {"ofertas": {}, "cupons": {}}
+
+def salvar_cache(cache):
+    with open(ARQUIVO_CACHE, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
+def limpar_expirados(cache):
+    agora = time.time()
+    cache["ofertas"] = {k: v for k, v in cache["ofertas"].items() if agora - v < TTL_OFERTA}
+    cache["cupons"] = {k: v for k, v in cache["cupons"].items() if agora - v < TTL_CUPOM}
+    return cache
+
+def gerar_hash(plataforma, produto_id, preco, cupom=""):
+    chave = f"{plataforma}|{produto_id}|{preco}|{cupom}"
+    return hashlib.md5(chave.encode()).hexdigest()
+
+def ja_foi_enviado(plataforma, produto_id, preco, cupom=""):
+    cache = carregar_cache()
+    cache = limpar_expirados(cache)
+    hash_oferta = gerar_hash(plataforma, produto_id, preco, cupom)
+    chave_cupom = f"{plataforma}|{cupom}".lower().strip()
+    if hash_oferta in cache["ofertas"]: return True
+    if cupom and chave_cupom in cache["cupons"]: return True
+    return False
+
+def marcar_como_enviado(plataforma, produto_id, preco, cupom=""):
+    cache = carregar_cache()
+    cache = limpar_expirados(cache)
+    agora = time.time()
+    hash_oferta = gerar_hash(plataforma, produto_id, preco, cupom)
+    cache["ofertas"][hash_oferta] = agora
+    if cupom:
+        chave_cupom = f"{plataforma}|{cupom}".lower().strip()
+        cache["cupons"][chave_cupom] = agora
+    salvar_cache(cache)
+
+# ============================================================
+# 🔹 UTILITÁRIOS (ASYNC, IMAGEM, EDIÇÃO)
 # ============================================================
 
-def encurtar_bitly(url_longa):
-    """Encurta o link usando o token do Bitly (USADO APENAS NO MAGALU)."""
-    try:
-        headers = {
-            "Authorization": f"Bearer {BITLY_TOKEN}",
-            "Content-Type": "application/json"
-        }
-        payload = {"long_url": url_longa}
-        res = requests.post("https://api-ssl.bitly.com/v4/shorten", json=payload, headers=headers, timeout=10)
-        if res.status_code in [200, 201]:
-            return res.json().get("link")
-        return url_longa
-    except:
-        return url_longa
+async def expandir_url(url):
+    headers = {"User-Agent": "Mozilla/5.0"}
+    async with aiohttp.ClientSession(headers=headers) as session:
+        try:
+            async with session.get(url, allow_redirects=True, timeout=12) as r:
+                return str(r.url)
+        except: return url
 
-def gerar_dna_oferta(texto):
-    """DNA baseado em Texto + Valor, ignorando emojis e links."""
-    t = re.sub(r'https?://\S+', '', texto)
-    precos = re.findall(r'R\$\s?\d+[.,\d]*', t)
-    valor = precos[0].replace(" ", "") if precos else "0"
-    t_limpo = re.sub(r'[^\w\s]', '', t)
-    return f"{' '.join(t_limpo.split()).lower()}_{valor}"
+def extrair_id(url):
+    url = url.split('?')[0]
+    amz = re.search(r'/dp/([A-Z0-9]{10})', url)
+    if amz: return amz.group(1)
+    ml = re.search(r'(MLB\d+)', url.replace("-", ""))
+    if ml: return ml.group(1)
+    return url[-12:]
 
-def modificar_params(url, novos_params):
-    try:
-        parsed = urlparse(url)
-        params = parse_qs(parsed.query)
-        for k, v in novos_params.items():
-            params[k] = [v]
-        nova_query = urlencode(params, doseq=True)
-        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, nova_query, parsed.fragment))
-    except: return url
+async def encurtar_bitly(url):
+    async with aiohttp.ClientSession() as session:
+        h = {"Authorization": f"Bearer {BITLY_TOKEN}"}
+        try:
+            async with session.post("https://api-ssl.bitly.com/v4/shorten", json={"long_url": url}, headers=h) as r:
+                d = await resp.json()
+                return d.get("link", url)
+        except: return url
 
-# ============================================================
-# 🔹 CONVERSORES POR PLATAFORMA
-# ============================================================
-
-def converter_ml(url):
-    try:
-        url_l = url.lower()
-        if "/sec/" in url_l: return MEU_LINK_SOCIAL_ML
-        
-        url_final = url
-        if "meli.la" in url_l:
+async def buscar_imagem(url):
+    async with aiohttp.ClientSession() as session:
+        for _ in range(3):
             try:
-                res = requests.get(url, allow_redirects=True, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-                url_final = res.url
-            except: pass
-            
-        tags = {"matt_tool": "afiliados", "matt_word": "oferta", "matt_source": ML_SOURCE, "matt_campaign": "ofertap"}
-        return modificar_params(url_final, tags)
-    except: return url
+                async with session.get(url, timeout=7) as r:
+                    soup = BeautifulSoup(await r.text(), 'html.parser')
+                    img = soup.find("meta", property="og:image") or soup.find("meta", attrs={"name": "twitter:image"})
+                    if img: return img['content']
+            except: await asyncio.sleep(1)
+    return None
 
-def converter_amazon(url):
-    try:
-        if "amzn.to" in url.lower():
-            res = requests.get(url, allow_redirects=True, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-            url = res.url
-        return modificar_params(url, {"tag": AMAZON_TAG})
-    except: return url
+# ============================================================
+# 🔹 CONVERSORES E FORMATAÇÃO
+# ============================================================
 
-def converter_magalu(url):
-    try:
-        # 1. Gera o link longo com suas tags
-        long_url = modificar_params(url, {
-            "utm_source": "divulgador", "utm_medium": "magalu",
-            "partner_id": MAGALU_PARTNER, "promoter_id": MAGALU_PROMOTER,
-            "utm_campaign": MAGALU_PROMOTER
-        })
-        # 2. ENCURTA COM BITLY (Exclusivo para Magalu)
-        return encurtar_bitly(long_url)
-    except: return url
+def formatar_texto(texto, links_conv):
+    preco_m = re.search(r'R\$\s?\d+[.,\d]*', texto)
+    preco = preco_m.group(0) if preco_m else ""
+    cupom_m = re.search(r'(?i)cupom[:\s]+([A-Z0-9]{4,20})', texto)
+    cupom = cupom_m.group(1) if cupom_m else ""
+    
+    linhas = texto.split('\n')
+    titulo = re.sub(r'[✅🔥🎟🛒🚨]|https?://\S+', '', linhas[0]).strip() if linhas else "Produto"
 
-def converter_shopee(url):
-    try:
-        query = f'mutation {{ generateShortLink(input: {{ originUrl: "{url}" }}) {{ shortLink }} }}'
-        payload = json.dumps({"query": query}, separators=(",", ":"))
-        ts = str(int(time.time())); sig = hashlib.sha256(f"{SHOPEE_APP_ID}{ts}{payload}{SHOPEE_SECRET}".encode()).hexdigest()
+    msg = f"✅ Produto: {titulo}\n"
+    if preco: msg += f"🔥 Preço: {preco}\n"
+    if cupom: msg += f"🎟 Cupom: `{cupom.upper()}`\n"
+    msg += "\n" + "\n".join(links_conv)
+    return msg, preco, cupom
+
+async def converter_link(url):
+    url_l = url.lower()
+    
+    if "mercadolivre" in url_l or "meli.la" in url_l:
+        if "/sec/" in url_l or "/lista/" in url_l or "/lists/" in url_l: return MEU_LINK_SOCIAL_ML, "ml", True
+        url_ex = await expandir_url(url)
+        p = {"matt_tool": "afiliados", "matt_source": ML_SOURCE, "matt_campaign": "ofertap"}
+        return urlunparse(urlparse(url_ex)._replace(query=urlencode(parse_qs(urlparse(url_ex).query) | {k:[v] for k,v in p.items()}, doseq=True))), "ml", False
+    
+    elif "amazon" in url_l or "amzn" in url_l:
+        url_ex = await expandir_url(url)
+        return urlunparse(urlparse(url_ex)._replace(query=urlencode(parse_qs(urlparse(url_ex).query) | {'tag': [AMAZON_TAG]}, doseq=True))), "amazon", False
+    
+    elif "magazineluiza" in url_l or "magalu" in url_l:
+        p = {"utm_source": "divulgador", "partner_id": MAGALU_PARTNER, "promoter_id": MAGALU_PROMOTER}
+        l_url = urlunparse(urlparse(url)._replace(query=urlencode(parse_qs(urlparse(url).query) | {k:[v] for k,v in p.items()}, doseq=True)))
+        return await encurtar_bitly(l_url), "magalu", False
+    
+    elif "shopee" in url_l:
+        ts = str(int(time.time()))
+        payload = json.dumps({"query": f'mutation {{ generateShortLink(input: {{ originUrl: "{url}" }}) {{ shortLink }} }}'}, separators=(",", ":"))
+        sig = hashlib.sha256(f"{SHOPEE_APP_ID}{ts}{payload}{SHOPEE_SECRET}".encode()).hexdigest()
         headers = {"Authorization": f"SHA256 Credential={SHOPEE_APP_ID},Timestamp={ts},Signature={sig}", "Content-Type": "application/json"}
-        res = requests.post("https://open-api.affiliate.shopee.com.br/graphql", headers=headers, data=payload, timeout=10)
-        return res.json()["data"]["generateShortLink"]["shortLink"]
-    except: return url
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post("https://open-api.affiliate.shopee.com.br/graphql", data=payload, headers=headers) as resp:
+                    res = await resp.json()
+                    return res["data"]["generateShortLink"]["shortLink"], "shopee", False
+            except: return url, "shopee", False
+
+    if any(x in url_l for x in ["cadastro", "ganhe", "promo", "formulario"]): return url, "info", False
+    return None, None, False
 
 # ============================================================
 # 🔹 MOTOR DE PROCESSAMENTO
 # ============================================================
 
-def processar_texto(texto):
-    links = re.findall(r'(https?://[^\s,]+)', texto)
-    links = sorted(list(set(links)), key=len, reverse=True)
+async def processar(event, is_edit=False):
+    texto_orig = event.message.text or ""
+    if not texto_orig.strip(): return
 
-    for link in links:
-        link_limpo = link.rstrip('.,)!?')
-        l_link = link_limpo.lower()
-        novo = link_limpo
-
-        if "amazon" in l_link or "amzn" in l_link:
-            novo = converter_amazon(link_limpo)
-        elif "magalu" in l_link or "magazineluiza" in l_link:
-            novo = converter_magalu(link_limpo)
-        elif "mercadolivre" in l_link or "meli.la" in l_link:
-            novo = converter_ml(link_limpo)
-        elif "shopee" in l_link:
-            novo = converter_shopee(link_limpo)
-
-        if novo and novo != link_limpo:
-            texto = texto.replace(link_limpo, novo)
-    return texto
-
-# ============================================================
-# 🔹 HANDLER TELEGRAM
-# ============================================================
-
-@client.on(events.NewMessage(chats=grupos_origem))
-async def handler(event):
-    raw_text = event.message.text or ""
-    if not raw_text.strip(): return
-    if any(p.lower() in raw_text.lower() for p in filtro): return
-
-    # DNA (Anti-duplicidade Texto + Valor)
-    dna = gerar_dna_oferta(raw_text)
-    if dna in historico_ofertas:
-        print(f"🚫 DNA Repetido: {dna}")
+    # 🔹 FILTRO DE PALAVRAS BLOQUEADAS (Aplicado aqui)
+    if any(p.lower() in texto_orig.lower() for p in FILTRO):
+        print(f"🚫 Bloqueado pelo filtro: {texto_orig[:30]}...")
         return
 
-    # Processa texto
-    texto_final = processar_texto(raw_text)
-    historico_ofertas.add(dna)
+    chat = await event.get_chat()
+    username = (chat.username or "").lower()
+    links_brutos = re.findall(r'https?://\S+', texto_orig)
+    
+    # Regra: Mensagem sem link só passa se for do fadadoscupons
+    if not links_brutos and username != GRUPO_CUPONS_EXCLUSIVO: return
+
+    links_conv = []
+    usar_img_f = False
+    plat_p, p_id = "outro", "0"
+
+    for link in links_brutos:
+        novo, plat, img_f = await converter_link(link)
+        if novo:
+            links_conv.append(novo)
+            if plat != "info": 
+                plat_p, p_id = plat, extrair_id(novo)
+            if img_f: usar_img_f = True
+
+    final_msg, preco, cupom = formatar_texto(texto_orig, links_conv)
+
+    # LÓGICA DE CACHE
+    if not is_edit:
+        if ja_foi_enviado(plat_p, p_id, preco, cupom): return
+        marcar_como_enviado(plat_p, p_id, preco, cupom)
+
+    # Imagem
+    imagem = None
+    if usar_img_f and os.path.exists(IMG_ML_FIXA): imagem = IMG_ML_FIXA
+    elif event.message.media and not isinstance(event.message.media, MessageMediaWebPage): imagem = event.message.media
+    elif links_conv: imagem = await buscar_imagem(links_conv[0])
 
     try:
-        tem_midia = event.message.media and not isinstance(event.message.media, MessageMediaWebPage)
-        
-        if tem_midia:
-            if len(texto_final) > 1024:
-                await client.send_file(grupo_destino, event.message.media)
-                await client.send_message(grupo_destino, texto_final)
-            else:
-                await client.send_file(grupo_destino, event.message.media, caption=texto_final)
+        mapping = carregar_cache().get("mapeamento", {})
+        if is_edit and str(event.message.id) in mapping:
+            await client.edit_message(GRUPO_DESTINO, mapping[str(event.message.id)], final_msg)
         else:
-            await client.send_message(grupo_destino, texto_final)
-        
-        print(f"✅ Enviado! (Bitly apenas no Magalu) DNA: {dna}")
-
-    except Exception as e:
-        print(f"❌ Erro envio: {e}")
+            sent = None
+            if imagem:
+                if len(final_msg) > 1024:
+                    photo = await client.send_file(GRUPO_DESTINO, imagem)
+                    sent = await client.send_message(GRUPO_DESTINO, final_msg, reply_to=photo.id)
+                else:
+                    sent = await client.send_file(GRUPO_DESTINO, imagem, caption=final_msg)
+            else:
+                sent = await client.send_message(GRUPO_DESTINO, final_msg)
+            
+            if sent:
+                cache = carregar_cache()
+                if "mapeamento" not in cache: cache["mapeamento"] = {}
+                cache["mapeamento"][str(event.message.id)] = sent.id
+                salvar_cache(cache)
+    except Exception as e: print(f"❌ Erro: {e}")
 
 # ============================================================
 # 🔹 START
 # ============================================================
-print("🚀 Bot Versão 15.0 Online! Bitly ativo EXCLUSIVAMENTE para Magalu.")
+client = TelegramClient(SESSION, API_ID, API_HASH)
+@client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
+async def h1(e): await processar(e)
+@client.on(events.MessageEdited(chats=GRUPOS_ORIGEM))
+async def h2(e): await processar(e, is_edit=True)
+
+print("🚀 BOT BLACK OPS v22.0 ONLINE - FILTRO ATIVO!")
 client.start()
 client.run_until_disconnected()
