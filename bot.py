@@ -1,5 +1,7 @@
-import re, asyncio, hashlib, json, time, os, aiohttp
+import re, asyncio, hashlib, json, time, os, aiohttp, random
+from datetime import datetime
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaWebPage
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
@@ -9,7 +11,9 @@ from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 # ============================================================
 API_ID = 33768893
 API_HASH = '7959ea0392ff7f91b4f7e207e75a1813'
-SESSION = '/tmp/sessao_leo_v28' # Railway safe
+
+# LÊ A CHAVE MESTRA DAS VARIÁVEIS DO RAILWAY (NOME AJUSTADO)
+SESSION_STRING = os.environ.get("TELEGRAM_SESSION", "")
 
 GRUPOS_OFERTAS = ['fumotom', 'promotom']
 GRUPO_CUPONS_EXCLUSIVO = 'fadadoscupons'
@@ -25,15 +29,20 @@ SHOPEE_APP_ID   = "18348480261"
 SHOPEE_SECRET   = "SGC7FQQQ4R5QCFULPXIBCANATLP272B3"
 BITLY_TOKEN     = "69cdfdea70096c9cf42a5eac20cb55b17668ede9"
 
-# ARQUIVOS E LINKS FIXOS
+# ARQUIVOS E IMAGENS
 MEU_LINK_SOCIAL_ML = "https://mercadolivre.com/sec/23NpLSc"
-IMG_ML_FIXA = "mercado_livre_c1a918503a.jpg" 
+IMG_FIXA = "mercado_livre_c1a918503a.jpg" 
 ARQUIVO_CACHE = "cache_ofertas.json"
 
-# SEMÁFORO (Bypass de Flood - Máximo 2 mensagens simultâneas)
+# SEMÁFORO DE FLOOD (Bypass)
 envio_lock = asyncio.Semaphore(2)
 
-# FILTRO COMPLETO
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+]
+
 FILTRO = [
     "Monitor Samsung", "Fonte Mancer", "Placa de video", "Placa de Vídeo",
     "Monitor LG", "PC home Essential", "Suporte articulado",
@@ -49,7 +58,7 @@ FILTRO = [
 ]
 
 # ============================================================
-# 🔹 SISTEMA DE CACHE (SUA LÓGICA DE 48H / 24H)
+# 🔹 SISTEMA DE CACHE E MAPEAMENTO (PERSISTENTE)
 # ============================================================
 TTL_OFERTA = 48 * 60 * 60
 TTL_CUPOM = 24 * 60 * 60
@@ -67,33 +76,35 @@ def salvar_cache(cache):
 def ja_foi_enviado(plataforma, produto_id, preco, cupom=""):
     cache = carregar_cache()
     agora = time.time()
-    cache["ofertas"] = {k: v for k, v in cache.get("ofertas", {}).items() if agora - v < TTL_OFERTA}
-    cache["cupons"] = {k: v for k, v in cache.get("cupons", {}).items() if agora - v < TTL_CUPOM}
+    # Limpeza de expirados (Sua Lógica)
+    cache["ofertas"] = {k: v for k, v in cache["ofertas"].items() if agora - v < TTL_OFERTA}
+    cache["cupons"] = {k: v for k, v in cache["cupons"].items() if agora - v < TTL_CUPOM}
     
-    hash_o = hashlib.md5(f"{plataforma}|{produto_id}|{preco}|{cupom}".encode()).hexdigest()
-    chave_c = f"{plataforma}|{cupom}".lower().strip()
+    hash_oferta = hashlib.md5(f"{plataforma}|{produto_id}|{preco}|{cupom}".encode()).hexdigest()
+    chave_cupom = f"{plataforma}|{cupom}".lower().strip()
     
-    if hash_o in cache["ofertas"]: return True
-    if cupom and chave_c in cache["cupons"]: return True
+    if hash_oferta in cache["ofertas"]: return True
+    if cupom and chave_cupom in cache["cupons"]: return True
     return False
 
 def marcar_como_enviado(plataforma, produto_id, preco, cupom=""):
     cache = carregar_cache()
-    hash_o = hashlib.md5(f"{plataforma}|{produto_id}|{preco}|{cupom}".encode()).hexdigest()
-    cache["ofertas"][hash_o] = time.time()
+    hash_oferta = hashlib.md5(f"{plataforma}|{produto_id}|{preco}|{cupom}".encode()).hexdigest()
+    cache["ofertas"][hash_oferta] = time.time()
     if cupom: cache["cupons"][f"{plataforma}|{cupom}".lower().strip()] = time.time()
     salvar_cache(cache)
 
 # ============================================================
-# 🔹 UTILITÁRIOS (DESCURTADOR + IMAGEM 3X + BITLY)
+# 🔹 UTILITÁRIOS (EXPANSÃO, IMAGEM, BITLY)
 # ============================================================
 
 async def expandir_url(url):
-    try:
-        async with aiohttp.ClientSession() as session:
+    headers = {"User-Agent": random.choice(USER_AGENTS)}
+    async with aiohttp.ClientSession(headers=headers) as session:
+        try:
             async with session.get(url, allow_redirects=True, timeout=12) as r:
                 return str(r.url)
-    except: return url
+        except: return url
 
 async def encurtar_bitly(url):
     async with aiohttp.ClientSession() as session:
@@ -104,12 +115,12 @@ async def encurtar_bitly(url):
                 return d.get("link", url)
         except: return url
 
-async def buscar_imagem(url):
-    """Busca imagem 3x ou retorna None para ativar preview."""
-    async with aiohttp.ClientSession() as session:
+async def buscar_imagem_scrape(url):
+    headers = {"User-Agent": random.choice(USER_AGENTS)}
+    async with aiohttp.ClientSession(headers=headers) as session:
         for _ in range(3):
             try:
-                async with session.get(url, timeout=7) as r:
+                async with session.get(url, timeout=8) as r:
                     soup = BeautifulSoup(await r.text(), 'html.parser')
                     img = soup.find("meta", property="og:image") or soup.find("meta", attrs={"name": "twitter:image"})
                     if img: return img['content']
@@ -117,13 +128,12 @@ async def buscar_imagem(url):
     return None
 
 # ============================================================
-# 🔹 CONVERSORES (MULTILINK + LIMPEZA LIXO)
+# 🔹 CONVERSORES POR PLATAFORMA
 # ============================================================
 
 async def converter_shopee(url):
     ts = str(int(time.time()))
-    query = f'mutation {{ generateShortLink(input: {{ originUrl: "{url}" }}) {{ shortLink }} }}'
-    payload = json.dumps({"query": query}, separators=(",", ":"))
+    payload = json.dumps({"query": f'mutation {{ generateShortLink(input: {{ originUrl: "{url}" }}) {{ shortLink }} }}'}, separators=(",", ":"))
     sig = hashlib.sha256(f"{SHOPEE_APP_ID}{ts}{payload}{SHOPEE_SECRET}".encode()).hexdigest()
     headers = {"Authorization": f"SHA256 Credential={SHOPEE_APP_ID},Timestamp={ts},Signature={sig}", "Content-Type": "application/json"}
     async with aiohttp.ClientSession() as s:
@@ -135,41 +145,37 @@ async def converter_shopee(url):
 
 async def converter_link(url):
     url_l = url.lower()
-    
+    # Mercado Livre
     if "mercadolivre" in url_l or "meli.la" in url_l:
         if any(x in url_l for x in ["/sec/", "/lista/", "/lists/", "/social/"]): 
-            return MEU_LINK_SOCIAL_ML, "ml", True
+            return MEU_LINK_SOCIAL_ML, "ml", True # Força imagem ML
         url_ex = await expandir_url(url)
-        q = parse_qs(urlparse(url_ex).query)
-        q.update({"matt_tool": ["afiliados"], "matt_source": [ML_SOURCE], "matt_campaign": ["ofertap"]})
+        q = parse_qs(urlparse(url_ex).query); q.update({"matt_tool": ["afiliados"], "matt_source": [ML_SOURCE], "matt_campaign": ["ofertap"]})
         return urlunparse(urlparse(url_ex)._replace(query=urlencode(q, doseq=True))), "ml", False
-
+    # Amazon
     elif "amazon" in url_l or "amzn" in url_l:
         url_ex = await expandir_url(url)
-        q = parse_qs(urlparse(url_ex).query)
-        q.update({"tag": [AMAZON_TAG]})
+        q = parse_qs(urlparse(url_ex).query); q.update({"tag": [AMAZON_TAG]})
         return urlunparse(urlparse(url_ex)._replace(query=urlencode(q, doseq=True))), "amazon", False
-
+    # Magalu
     elif "magazineluiza" in url_l or "magalu" in url_l:
-        q = parse_qs(urlparse(url).query)
-        q.update({"partner_id": [MAGALU_PARTNER], "promoter_id": [MAGALU_PROMOTER]})
+        q = parse_qs(urlparse(url).query); q.update({"partner_id": [MAGALU_PARTNER], "promoter_id": [MAGALU_PROMOTER]})
         l_url = urlunparse(urlparse(url)._replace(query=urlencode(q, doseq=True)))
         return await encurtar_bitly(l_url), "magalu", False
-
+    # Shopee
     elif "shopee" in url_l:
         return await converter_shopee(url), "shopee", False
-
-    # LIMPEZA DE LIXO: Se não for loja, apaga o link, exceto se for cadastro/ganhe
-    if any(x in url_l for x in ["cadastro", "ganhe", "promo", "formulario", "inscricao"]):
+    
+    # Limpeza de links externos (Lixo)
+    if any(x in url_l for x in ["cadastro", "ganhe", "promo", "formulario", "inscricao", "ajuda"]):
         return url, "info", False
-        
     return None, None, False
 
 # ============================================================
-# 🔹 FORMATAÇÃO (EMOJIS ✅🔥🎟 + CRASES)
+# 🔹 FORMATAÇÃO (✅🔥🎟 + CRASES)
 # ============================================================
 
-def formatar_oferta(texto, links_conv):
+def formatar_texto(texto, links_conv):
     preco_m = re.search(r'R\$\s?\d+[.,\d]*', texto)
     preco = preco_m.group(0) if preco_m else ""
     cupom_m = re.search(r'(?i)cupom[:\s]+([A-Z0-9]{4,20})', texto)
@@ -178,81 +184,120 @@ def formatar_oferta(texto, links_conv):
     linhas = texto.split('\n')
     titulo = re.sub(r'[✅🔥🎟🛒🚨]|https?://\S+', '', linhas[0]).strip()
     
-    # Monta padrão limpo
     msg = f"✅ Produto: {titulo}\n"
     if preco: msg += f"🔥 Preço: {preco}\n"
     if cupom: msg += f"🎟 Cupom: `{cupom.upper()}`\n"
+    
     msg += "\n" + "\n".join(links_conv)
     return msg, preco, cupom
 
 # ============================================================
-# 🔹 MOTOR DE PROCESSAMENTO (MENSAGEM E EDIÇÃO)
+# 🔹 MOTOR DE PROCESSAMENTO CENTRAL
 # ============================================================
 
-async def processar(event, is_edit=False):
-    raw_text = event.message.text or ""
-    if not raw_text.strip(): return
-    if any(p.lower() in raw_text.lower() for p in FILTRO): return
+async def processar_evento(event, is_edit=False):
+    texto_bruto = event.message.text or ""
+    if not texto_bruto.strip(): return
+    
+    # 1. Filtro de Palavras
+    if any(p.lower() in texto_bruto.lower() for p in FILTRO):
+        print(f"🚫 Bloqueado pelo filtro.")
+        return
 
     chat = await event.get_chat()
     username = (chat.username or "").lower()
-    links_brutos = re.findall(r'https?://\S+', raw_text)
+    links_detectados = re.findall(r'https?://\S+', texto_bruto)
     
-    # Regra exclusiva fadadoscupons para mensagens de texto (sem link)
-    if not links_brutos and username != GRUPO_CUPONS_EXCLUSIVO: return
+    # 2. Regra exclusiva para Canal de Cupons (Mensagens sem link)
+    if not links_detectados and username != GRUPO_CUPONS_EXCLUSIVO:
+        return
 
-    links_conv, usar_img_f, plat_p, p_id = [], False, "outro", "0"
+    # 3. Conversão de Links (Multi-link)
+    links_convertidos = []
+    forcar_img_ml = False
+    plataforma_p, prod_id = "outro", "0"
 
-    for link in links_brutos:
-        novo, plat, img_f = await converter_link(link)
+    for link in links_detectados:
+        novo, plat, force_img = await converter_link(link)
         if novo:
-            links_conv.append(novo)
-            if plat != "info": 
-                plat_p = plat
-                p_id = novo[-12:]
-            if img_f: usar_img_f = True
+            links_convertidos.append(novo)
+            if plat != "info":
+                plataforma_p = plat
+                prod_id = novo[-15:] # ID de segurança
+            if force_img: forcar_img_ml = True
     
-    final_msg, preco, cupom = formatar_oferta(raw_text, links_conv)
+    final_msg, preco, cupom = formatar_texto(texto_bruto, links_convertidos)
 
+    # 4. Deduplicação (Sua Lógica JSON)
     if not is_edit:
-        if ja_foi_enviado(plat_p, p_id, preco, cupom): return
-        marcar_como_enviado(plat_p, p_id, preco, cupom)
+        if ja_foi_enviado(plataforma_p, prod_id, preco, cupom):
+            print(f"🚫 DNA repetido ignorado.")
+            return
+        marcar_como_enviado(plataforma_p, prod_id, preco, cupom)
 
-    # GESTÃO DE IMAGEM (ML Social/Lista, Mídia Original ou Raspagem)
+    # 5. Lógica de Mídia (Hierarquia Blindada)
     imagem = None
-    if usar_img_f and os.path.exists(IMG_ML_FIXA): imagem = IMG_ML_FIXA
-    elif event.message.media and not isinstance(event.message.media, MessageMediaWebPage): imagem = event.message.media
-    elif links_conv: imagem = await buscar_imagem(links_conv[0])
+    tem_original = event.message.media and not isinstance(event.message.media, MessageMediaWebPage)
 
-    async with envio_lock: # BYPASS DE FLOOD
+    if forcar_img_ml:
+        # Mercado Livre Lista/Social -> SEMPRE FIXA
+        imagem = IMG_FIXA
+    elif username == GRUPO_CUPONS_EXCLUSIVO:
+        # Shopee/Amazon Cupons -> Original ou Fixa se vier sem foto
+        imagem = event.message.media if tem_original else IMG_FIXA
+    elif tem_original:
+        # Ofertas Normais -> Original
+        imagem = event.message.media
+    elif links_convertidos:
+        # Ofertas sem foto -> Scrape 3x
+        imagem = await buscar_imagem_scrape(links_convertidos[0])
+
+    # 6. Envio com Bypass de Flood e Legenda Longa
+    async with envio_lock:
         try:
             cache = carregar_cache()
             mapping = cache.get("mapeamento", {})
+            
             if is_edit and str(event.message.id) in mapping:
-                await client.edit_message(GRUPO_DESTINO, mapping[str(event.message.id)], final_msg)
+                msg_id_dest = mapping[str(event.message.id)]
+                await client.edit_message(GRUPO_DESTINO, msg_id_dest, final_msg)
+                print(f"✏️ Oferta editada.")
             else:
+                sent = None
                 if imagem:
+                    # Tratamento de Legenda Longa (>1024)
                     if len(final_msg) > 1024:
-                        f = await client.send_file(GRUPO_DESTINO, imagem)
-                        sent = await client.send_message(GRUPO_DESTINO, final_msg, reply_to=f.id)
-                    else: sent = await client.send_file(GRUPO_DESTINO, imagem, caption=final_msg)
-                else: sent = await client.send_message(GRUPO_DESTINO, final_msg)
+                        photo_msg = await client.send_file(GRUPO_DESTINO, imagem)
+                        sent = await client.send_message(GRUPO_DESTINO, final_msg, reply_to=photo_msg.id)
+                    else:
+                        sent = await client.send_file(GRUPO_DESTINO, imagem, caption=final_msg)
+                else:
+                    # Envio apenas texto (Ativa Preview Automático)
+                    sent = await client.send_message(GRUPO_DESTINO, final_msg)
                 
                 if sent:
                     cache = carregar_cache()
                     cache["mapeamento"][str(event.message.id)] = sent.id
                     salvar_cache(cache)
-        except Exception as e: print(f"❌ Erro: {e}")
+                    print(f"✅ Oferta enviada escorregando!")
+                    
+        except Exception as e:
+            print(f"❌ Erro no envio: {e}")
 
 # ============================================================
-# 🔹 START
+# 🔹 HANDLERS TELEGRAM
 # ============================================================
-client = TelegramClient(SESSION, API_ID, API_HASH)
-@client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
-async def h1(e): await processar(e)
+client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+
+@client.on(events.NewMessage(chats=GRUPO_ORIGEM))
+async def novo_msg_handler(e): await processar_evento(e)
+
 @client.on(events.MessageEdited(chats=GRUPOS_ORIGEM))
-async def h2(e): await processar(e, is_edit=True)
+async def edit_msg_handler(e): await processar_evento(e, is_edit=True)
 
-print("🚀 BOT DEFINITIVO v28.0 ONLINE!")
+# ============================================================
+# 🔹 EXECUÇÃO
+# ============================================================
+print("🚀 BOT MASTER v34.0 ONLINE - O SISTEMA DEFINITIVO")
 client.start()
 client.run_until_disconnected()
