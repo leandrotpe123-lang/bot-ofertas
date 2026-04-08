@@ -33,8 +33,8 @@ API_ID = 33768893
 API_HASH = '7959ea0392ff7f91b4f7e207e75a1813'
 SESSION_STRING = os.environ.get("TELEGRAM_SESSION")
 
-GRUPOS_PRODUTOS = ['promotom', 'fumotom'] 
-GRUPO_CUPONS_ONLY = 'fadadoscupons'
+GRUPOS_PRODUTOS = ['promotom', 'fumotom','botofera'] 
+GRUPO_CUPONS_ONLY = ['fadadoscupons', 'botofera']
 GRUPOS_ORIGEM = GRUPOS_PRODUTOS + [GRUPO_CUPONS_ONLY]
 GRUPO_DESTINO = '@ofertap'
 
@@ -44,7 +44,7 @@ SHOPEE_SECRET = "SGC7FQQQ4R5QCFULPXIBCANATLP272B3"
 
 # Imagens de Cupons (Devem estar no GitHub)
 IMG_AMAZON_CUPOM = "amazon_logo.jpg" 
-IMG_SHOPEE_CUPOM = "mercado_livre_c1a918503a.jpg"
+IMG_SHOPEE_CUPOM = "IMG_20260404_180150.jpg"
 
 ARQUIVO_CACHE = "cache_dedup_profissional.json"
 ARQUIVO_MAPEAMENTO = "map_mensagens_edicao.json"
