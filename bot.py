@@ -30,8 +30,8 @@ BITLY_TOKEN     = "69cdfdea70096c9cf42a5eac20cb55b17668ede9"
 
 # IMAGENS FIXAS
 IMG_ML_FIXA = "mercado_livre_c1a918503a.jpg"
-IMG_SHOPEE_FIXA = "shopee_fixa.jpg"
-IMG_AMAZON_FIXA = "amazon_fixa.jpg"
+IMG_SHOPEE_FIXA = "shopee_3764834888.jpg"
+IMG_AMAZON_FIXA = "amazon_46545785.jpg"
 
 ARQUIVO_CACHE = "cache_dedup_profissional.json"
 ARQUIVO_MAPEAMENTO = "map_mensagens.json"
