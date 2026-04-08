@@ -177,27 +177,118 @@ async def converter_link(url):
     return None, None, False # Descarta qualquer outro link
 
 # ============================================================
-# 🔹 FORMATAÇÃO E EMOJIS
+# 🔹 FORMATAÇÃO
 # ============================================================
+async def processar_evento(event, is_edit=False):
+    texto_bruto = event.message.text or ""
+    if not texto_bruto.strip(): return
 
-def formatar_texto(texto, links_conv):
-    # Craser nos cupons
-    texto = re.sub(r'\b([A-Z0-9]{5,25})\b', r'`\1`', texto)
+    # 1. Filtro de palavras (Blacklist)
+    if any(p.lower() in texto_bruto.lower() for p in FILTRO):
+        print(f"🔎 DEBUG | Bloqueado pelo filtro de palavras.")
+        return
+
+    chat = await event.get_chat()
+    username = (chat.username or "").lower()
+    links_detectados = re.findall(r'https?://\S+', texto_bruto)
     
-    linhas = texto.split('\n')
-    novas_linhas = []
-    for i, linha in enumerate(linhas):
-        linha = linha.strip()
-        if not linha: continue
-        # Se não tem emoji, coloca o certo na linha certa
-        if not re.match(r'[^\w\s]', linha):
-            if i == 0: linha = "🔥 " + linha
-            elif "R$" in linha: linha = "💵 " + linha
-            elif "`" in linha: linha = "🎟 " + linha
-        novas_linhas.append(linha)
-    
-    corpo = re.sub(r'https?://\S+', '', "\n".join(novas_linhas)).strip()
-    return corpo + "\n\n" + "\n".join(links_conv)
+    # Bloqueia se não for grupo de cupons e não tiver link
+    if not links_detectados and username != "fadadoscupons": return
+
+    # 2. Converte os links (Até 50) e identifica plataforma/ID para o Cache
+    links_conv = []
+    forcar_img_ml = False
+    plataforma_p, prod_id = "outro", "0"
+    texto_final = texto_bruto # Começa com o texto original fiel
+
+    for link in links_detectados[:50]:
+        # O robô usa o seu Desencurtador Elite (Amazon, ML, Magalu, Shopee)
+        novo, plat, force_img = await converter_link(link) 
+        if novo:
+            links_conv.append(novo)
+            # Troca o link antigo pelo novo diretamente no texto original
+            texto_final = texto_final.replace(link, novo)
+            if plat != "info": 
+                plataforma_p = plat
+                # Extrai o ID para a sua lógica de deduplicação profissional
+                id_m = re.search(r'/(?:dp|MLB|product|i\.)/([A-Z0-9.\-_]+)', novo)
+                prod_id = id_m.group(1) if id_m else novo[-15:]
+            if force_img: forcar_img_ml = True
+
+    # 🛑 BLOQUEIO: Se a oferta original tinha links, mas nenhum foi convertido, ABORTA.
+    if links_detectados and not links_conv:
+        print("🔎 DEBUG | Bloqueado: Link desconhecido/estranho detectado.")
+        return
+
+    # 3. Extração de dados para a Deduplicação Profissional (Sua Lógica JSON)
+    preco_m = re.search(r'R\$\s?\d+[.,\d]*', texto_bruto)
+    preco = preco_m.group(0) if preco_m else "0"
+    cupom_m = re.search(r'\b([A-Z0-9]{5,25})\b', texto_bruto)
+    cupom = cupom_m.group(1) if cupom_m else ""
+
+    # 4. APLICA SUA LÓGICA DE DEDUPLICAÇÃO (Similaridade 90% / Janela 15min)
+    if not is_edit:
+        if not deve_enviar_oferta(plataforma_p, prod_id, preco, cupom, texto_bruto):
+            print("🔎 DEBUG | Bloqueado por similaridade/deduplicação.")
+            return
+
+    # 5. LÓGICA DE IMAGEM (Suas Regras Rígidas)
+    imagem = None
+    tem_media_original = event.message.media and not isinstance(event.message.media, MessageMediaWebPage)
+    is_ml_cupom = any(x in texto_bruto.upper() for x in ["CUPOM", "CUPONS"]) and "MERCADO LIVRE" in texto_bruto.upper()
+
+    if forcar_img_ml or is_ml_cupom:
+        # REGRA ML: Lista, Social ou Cupom ML -> SEMPRE FIXA (Apaga a original)
+        imagem = IMG_ML_FIXA
+    elif username == "fadadoscupons":
+        # REGRA CUPONS: Se tem foto original, usa. Se não, usa a fixa da loja.
+        if tem_media_original:
+            imagem = event.message.media
+        else:
+            txt_l = texto_final.lower()
+            if "shopee" in txt_l: imagem = IMG_SHOPEE_FIXA
+            elif "amazon" in txt_l: imagem = IMG_AMAZON_FIXA
+            else: imagem = IMG_ML_FIXA
+    elif tem_media_original:
+        # REGRA GERAL: Usa a foto que veio na oferta
+        imagem = event.message.media
+    elif links_conv:
+        # REGRA SEM FOTO: Tenta buscar imagem no site 3x (Scrape)
+        imagem = await buscar_imagem_3x(links_conv[0])
+
+    # 6. ENVIO / EDIÇÃO ATIVA (Bypass de Flood)
+    async with envio_lock:
+        try:
+            # Carrega mapeamento para edições (Edição Ativa)
+            mapping = json.load(open(ARQUIVO_MAPEAMENTO, "r")) if os.path.exists(ARQUIVO_MAPEAMENTO) else {}
+            
+            if is_edit and str(event.message.id) in mapping:
+                msg_id_dest = mapping[str(event.message.id)]
+                try: 
+                    await client.edit_message(GRUPO_DESTINO, msg_id_dest, texto_final)
+                    print(f"🔎 DEBUG | Mensagem editada com sucesso.")
+                except MessageNotModifiedError: 
+                    pass
+            else:
+                sent = None
+                # Tratamento de legenda longa (>1024 caracteres)
+                if imagem:
+                    if len(texto_final) > 1024:
+                        photo_msg = await client.send_file(GRUPO_DESTINO, imagem)
+                        sent = await client.send_message(GRUPO_DESTINO, texto_final, reply_to=photo_msg.id)
+                    else:
+                        sent = await client.send_file(GRUPO_DESTINO, imagem, caption=texto_final)
+                else:
+                    # Sem foto e sem scrape: Envia texto puro (ativa preview automático)
+                    sent = await client.send_message(GRUPO_DESTINO, texto_final)
+                
+                if sent:
+                    mapping[str(event.message.id)] = sent.id
+                    json.dump(mapping, open(ARQUIVO_MAPEAMENTO, "w"))
+                    print("✅ DEBUG | Oferta enviada escorregando!")
+        except Exception as e: 
+            print(f"❌ DEBUG | Erro no envio: {e}")
+
 
 # ============================================================
 # 🔹 MOTOR DE PROCESSAMENTO
