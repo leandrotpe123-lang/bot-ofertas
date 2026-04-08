@@ -16,7 +16,7 @@ API_HASH = '7959ea0392ff7f91b4f7e207e75a1813'
 SESSION_STRING = os.environ.get("TELEGRAM_SESSION")
 
 # Grupos monitorados
-GRUPOS_ORIGEM = ['fumotom', 'promotom', 'fadadoscupons', 'botofera']
+GRUPOS_ORIGEM = ['fumotom', 'promotom', 'botofera']
 GRUPO_DESTINO = '@ofertap'
 
 # TAGS AFILIADOS
