@@ -32,8 +32,8 @@ API_ID = 33768893
 API_HASH = '7959ea0392ff7f91b4f7e207e75a1813'
 SESSION_STRING = os.environ.get("TELEGRAM_SESSION")
 
-GRUPOS_PRODUTOS = ['promotom', 'fumotom'] 
-GRUPO_CUPONS_ONLY = 'fadadoscupons'
+GRUPOS_PRODUTOS = ['promotom', 'botofera', 'fumotom'] 
+GRUPO_CUPONS_ONLY = ['fadadoscupons','botofera']
 GRUPOS_ORIGEM = GRUPOS_PRODUTOS + [GRUPO_CUPONS_ONLY]
 GRUPO_DESTINO = '@ofertap'
 
