@@ -28,8 +28,8 @@ log_sys = get_custom_logger('SISTEMA', '1;32') # Verde
 # ============================================================
 # 🔹 CONFIGURAÇÕES GERAIS
 # ============================================================
-API_ID = 33768893
-API_HASH = '7959ea0392ff7f91b4f7e207e75a1813'
+API_ID = int(os.environ.get("API_ID"))
+API_HASH = os.environ.get("API_HASH")
 SESSION_STRING = os.environ.get("TELEGRAM_SESSION")
 
 # CANAIS MONITORADOS
