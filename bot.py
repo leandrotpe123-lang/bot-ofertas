@@ -9,7 +9,7 @@ from difflib import SequenceMatcher
 from threading import Lock
 
 # ============================================================
-# 🔹 MÓDULO 1: DEBUG & LOGGING INDIVIDUAL
+# 🔹 MÓDULO 1: DEBUG INDIVIDUAL (LOGS)
 # ============================================================
 def get_custom_logger(name, color_code):
     logger = logging.getLogger(name)
@@ -32,8 +32,8 @@ API_ID = 33768893
 API_HASH = '7959ea0392ff7f91b4f7e207e75a1813'
 SESSION_STRING = os.environ.get("TELEGRAM_SESSION")
 
-GRUPOS_PRODUTOS = ['promotom', 'botofera', 'fumotom'] 
-GRUPO_CUPONS_ONLY = ['fadadoscupons','botofera']
+GRUPOS_PRODUTOS = ['promotom', 'fumotom'] 
+GRUPO_CUPONS_ONLY = 'fadadoscupons'
 GRUPOS_ORIGEM = GRUPOS_PRODUTOS + [GRUPO_CUPONS_ONLY]
 GRUPO_DESTINO = '@ofertap'
 
@@ -49,16 +49,17 @@ ARQUIVO_MAPEAMENTO = "map_mensagens_edicao.json"
 
 envio_lock = asyncio.Semaphore(3)
 
-FILTRO = ["Monitor Samsung", "Fonte Mancer", "Placa de video", "Monitor LG", "VHAGAR", "Superframe", "Dram", "Monitor Safe", "Monitor Redragon"]
+FILTRO = ["Monitor Samsung", "Fonte Mancer", "Placa de video", "Monitor LG", "VHAGAR", "Superframe", "AM5", "AM4", "GTX", "DDR5", "DDR4", "Dram", "Monitor Safe", "Monitor Redragon", "CL18", "CL16", "CL32", "MT/s", "MHz"]
 
-USER_AGENTS = ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"]
+USER_AGENTS = ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"]
 
 # ============================================================
 # 🔹 MÓDULO 2: DEDUPLICAÇÃO PROFISSIONAL (SUA LÓGICA)
 # ============================================================
 LOCK_DEDUP = Lock()
 TTL_SEGUNDOS = 120 * 60
-SIMILARIDADE_BLOQUEIO = 0.90
+JANELA_ANTISPAM = 900
+SIMILARIDADE_MINIMA = 0.90
 PALAVRAS_RUIDO = {"promo", "promocao", "promoção", "oferta", "desconto", "cupom", "corre", "aproveita", "urgente", "gratis"}
 
 def normalizar_texto(texto):
@@ -79,7 +80,7 @@ def deve_enviar_oferta(plataforma, produto_id, preco, cupom="", texto=""):
         if h in cache: return False
         for oferta in cache.values():
             if str(oferta["produto_id"]) == str(produto_id) and str(oferta["preco"]) == str(preco) and \
-               SequenceMatcher(None, texto_norm, oferta["texto"]).ratio() >= SIMILARIDADE_BLOQUEIO:
+               SequenceMatcher(None, texto_norm, oferta["texto"]).ratio() >= SIMILARIDADE_MINIMA:
                 return False
         cache[h] = {"produto_id": str(produto_id), "preco": str(preco), "cupom": str(cupom).lower(), 
                     "texto": texto_norm, "timestamp": agora, "plataforma": plataforma}
@@ -87,17 +88,34 @@ def deve_enviar_oferta(plataforma, produto_id, preco, cupom="", texto=""):
         return True
 
 # ============================================================
-# 🔹 MÓDULO 3: MOTORES DE CONVERSÃO (MASSIVO 50 LINKS)
+# 🔹 MÓDULO 3: MOTORES DE CONVERSÃO (DESCASCADOR ELITE)
 # ============================================================
+
 async def motor_amazon(url):
+    """Simula JavaScript Redirect e descasca o link até o osso."""
     try:
         async with aiohttp.ClientSession(headers={"User-Agent": random.choice(USER_AGENTS)}) as s:
             async with s.get(url, allow_redirects=True, timeout=15) as r:
-                final = str(r.url)
-                p = urlparse(final); q = parse_qs(p.query)
+                html = await r.text()
+                soup = BeautifulSoup(html, 'html.parser')
+                # Procura por Meta Refresh ou JS Redirect no HTML
+                refresh = soup.find('meta', attrs={'http-equiv': 'refresh'})
+                if refresh:
+                    new_url = re.search(r'url=(.*)', refresh['content'], re.I)
+                    if new_url: 
+                        url = new_url.group(1)
+                        async with s.get(url, allow_redirects=True) as r2:
+                            url = str(r2.url)
+                else:
+                    url = str(r.url)
+
+                log_amz.info(f"✅ Descascado: {url[:50]}...")
+                p = urlparse(url); q = parse_qs(p.query)
                 q.update({"tag": [AMAZON_TAG]})
                 return urlunparse(p._replace(query=urlencode(q, doseq=True)))
-    except: return url
+    except Exception as e:
+        log_amz.error(f"❌ Erro Descascador: {e}")
+        return url
 
 async def motor_shopee(url):
     ts = str(int(time.time()))
@@ -120,12 +138,12 @@ async def converter_link_massivo(url):
     return None, None
 
 # ============================================================
-# 🔹 MÓDULO 4: FORMATAÇÃO (CÓPIA FIEL + DETECÇÃO DE CUPOM)
+# 🔹 MÓDULO 4: FORMATAÇÃO (RESPEITO AO ORIGINAL)
 # ============================================================
+
 def formatar_texto_lamborghini(texto_original, links_conv):
-    # Remove qualquer label manual antiga e links originais do texto
+    # Remove qualquer lixo de labels antigas
     texto = re.sub(r'(?i)(produto|preço|cupom|valor|oferta):\s*', '', texto_original)
-    
     keywords_cupom = ["cupom", "off", "resgate", "carrinho", "ganhe"]
     eh_cupom_post = any(x in texto.lower() for x in keywords_cupom)
 
@@ -135,29 +153,23 @@ def formatar_texto_lamborghini(texto_original, links_conv):
 
     for i, linha in enumerate(linhas):
         if any(link in linha for link in links_originais): continue
-            
         conteudo = linha.strip()
         if not conteudo:
             novas_linhas.append(linha)
             continue
 
-        # Lógica de Emoji para cada linha (Respeita traços no início)
-        # Se a linha começa com Letra, Número ou Traço (-)
+        # Injeção de Emojis em linhas que começam com Letra, Número ou Traço
         if conteudo[0].isalnum() or conteudo.startswith('-'):
-            # PRIORIDADE 1: Se a linha fala de CUPOM ou DESCONTO (Independente de onde vier)
             if any(x in conteudo.lower() for x in ["cupom", "off", "resgate"]):
                 linha = "🎟" + linha
-            # PRIORIDADE 2: Título da Oferta
             elif i == 0:
                 linha = ("🔥" if eh_cupom_post else "✅") + linha
-            # PRIORIDADE 3: Preço
             elif "R$" in conteudo:
                 linha = ("💵" if eh_cupom_post else "🔥") + linha
         
         novas_linhas.append(linha)
 
-    corpo_limpo = "\n".join(novas_linhas).rstrip()
-    return corpo_limpo + "\n\n" + "\n".join(links_conv)
+    return "\n".join(novas_linhas).rstrip() + "\n\n" + "\n".join(links_conv)
 
 async def buscar_imagem_3x(url):
     for _ in range(3):
@@ -171,69 +183,21 @@ async def buscar_imagem_3x(url):
     return None
 
 # ============================================================
-# 🔹 MÓDULO 5: MOTOR DE EVENTOS
+# 🔹 MÓDULO 5: PROCESSAMENTO E EDIÇÃO
 # ============================================================
+
 async def processar_evento(event, is_edit=False):
     texto = event.message.text or ""
     if not texto.strip() or any(p.lower() in texto.lower() for p in FILTRO): return
-    
-    chat = await event.get_chat()
-    username = (chat.username or "").lower()
+    chat = await event.get_chat(); username = (chat.username or "").lower()
     links_raw = re.findall(r'https?://\S+', texto)
     if not links_raw and username != GRUPO_CUPONS_ONLY: return
 
-    # Conversão Paralela de até 50 links
+    # 🏎️ MULTILINK PARALELO (O SEGREDO DA VELOCIDADE)
     tarefas = [converter_link_massivo(l) for l in links_raw[:50]]
     resultados = await asyncio.gather(*tarefas)
     links_conv = [r[0] for r in resultados if r[0]]
     plataforma_p = "shopee" if any(r[1] == "shopee" for r in resultados) else "amazon"
-    
     if links_raw and not links_conv: return 
 
-    prod_id = re.search(r'/(?:dp|product|i\.)/([A-Z0-9.\-_]+)', links_conv[0]).group(1) if links_conv and re.search(r'/(?:dp|product|i\.)/([A-Z0-9.\-_]+)', links_conv[0]) else "0"
-    preco = re.search(r'R\$\s?\d+[.,\d]*', texto).group(0) if re.search(r'R\$\s?\d+[.,\d]*', texto) else "0"
-    cupom = re.search(r'\b([A-Z0-9]{4,20})\b', texto).group(1) if re.search(r'\b([A-Z0-9]{4,20})\b', texto) else ""
-
-    if not is_edit and not deve_enviar_oferta(plataforma_p, prod_id, preco, cupom, texto): return
-
-    final_msg = formatar_texto_lamborghini(texto, links_conv)
-    tem_media = event.message.media and not isinstance(event.message.media, MessageMediaWebPage)
-    
-    if username == GRUPO_CUPONS_ONLY:
-        imagem = event.message.media if tem_media else (IMG_AMAZON if plataforma_p == "amazon" else IMG_SHOPEE)
-    elif tem_media: imagem = event.message.media
-    elif links_conv: imagem = await buscar_imagem_3x(links_conv[0])
-
-    async with envio_lock:
-        try:
-            mapa = json.load(open(ARQUIVO_MAPEAMENTO, "r")) if os.path.exists(ARQUIVO_MAPEAMENTO) else {}
-            if is_edit and str(event.message.id) in mapa:
-                try: await client.edit_message(GRUPO_DESTINO, mapa[str(event.message.id)], final_msg)
-                except MessageNotModifiedError: pass
-            else:
-                sent = None
-                if imagem:
-                    if len(final_msg) > 1024:
-                        f = await client.send_file(GRUPO_DESTINO, imagem)
-                        sent = await client.send_message(GRUPO_DESTINO, final_msg, reply_to=f.id)
-                    else: sent = await client.send_file(GRUPO_DESTINO, imagem, caption=final_msg)
-                else: sent = await client.send_message(GRUPO_DESTINO, final_msg)
-                if sent:
-                    mapa[str(event.message.id)] = sent.id
-                    json.dump(mapa, open(ARQUIVO_MAPEAMENTO, "w"))
-        except Exception as e: log_sys.error(f"Erro: {e}")
-
-# ============================================================
-# 🔹 START
-# ============================================================
-client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
-async def main():
-    await client.connect()
-    if not await client.is_user_authorized(): return
-    log_sys.info("🚀 FOGUETÃO v10.0 ONLINE - CUPONS DETECTADOS!")
-    @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
-    async def n_h(e): await processar_evento(e)
-    @client.on(events.MessageEdited(chats=GRUPOS_ORIGEM))
-    async def e_h(e): await processar_evento(e, is_edit=True)
-    await client.run_until_disconnected()
-if __name__ == '__main__': asyncio.run(main())
+    prod_id = re.search(r'/(?:dp|product|i\.)/([A-Z0-9.\-_]+)', links_conv[0]).group(1) if links_conv and re.search(r'/(?:dp|pr
