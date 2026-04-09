@@ -566,4 +566,4 @@ def _layout_cupom_amazon(linhas_texto: list, links: list) -> str:
     out = ["🚨 Cupons Amazon APP", ""]
 
     for ld in linhas_desc:
-        out.append(f"🎟 {ld}
+        out.append(f"🎟 {ld}")
