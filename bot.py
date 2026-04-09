@@ -1,42 +1,35 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║            FOGUETÃO v63.0 — AMAZON + SHOPEE ELITE                       ║
-║  Motor 100% Async | Desencurtador | Debug Total | Auto-Restart          ║
+║  FOGUETÃO v64.0 — AMAZON + SHOPEE — NÍVEL CHINA/RÚSSIA                 ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║  PILARES:                                                               ║
+║  • Multi-links massivo (50 paralelos)                                   ║
+║  • Pipeline por etapas com fila async                                   ║
+║  • Deduplicação ultra-forte (3 camadas, por texto/cupom — nunca link)   ║
+║  • Anti-loop: edição nunca vira nova mensagem                           ║
+║  • System de retry com backoff exponencial                              ║
+║  • Logs profissionais por módulo/plataforma                             ║
+║  • Módulos isolados por plataforma (Amazon / Shopee)                    ║
+║  • Fail-safe em cada etapa                                              ║
+║  • Filtro inteligente: só Amazon e Shopee passam                        ║
+║  • Queue/fila com concorrência controlada                               ║
+║  • Formatação automática (monta mensagem bonita)                        ║
+║  • Rate-limit / proteção FloodWait                                      ║
+║  • Health-check periódico                                               ║
+║  • Persistência: mapeamento survives restart                            ║
+║  • Monitoramento multi-canal                                            ║
+║  • Auto-restart em queda de rede                                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 
-MODELOS DE SAÍDA:
-
-  CUPOM SHOPEE (sem emojis originais):
-    🚨 CUPOM SHOPEE 🚨
-
-    🎟 R$10 OFF sem mínimo: CODIGO
-
-    ✅ Resgate aqui:
-    https://link-resgate
-
-    🛒 Carrinho:
-    https://link-carrinho
-
-  CUPOM AMAZON (sem emojis originais):
-    🚨 Cupons Amazon APP
-
-    🎟 R$150 OFF em R$1499: CODIGO
-
-    ✅ Resgate aqui:
-    https://link
-
-    #anúncio
-
-  OFERTA COMUM (sem emojis originais):
-    🔥 Nome do Produto
-
-    ✅ R$ 1078
-    🎟 Resgate cupom R$ 90 OFF aqui:
-    https://link-resgate
-    https://link-produto
-    anúncio
-
-  COM EMOJIS JÁ NO ORIGINAL → mantém tudo, apenas completa onde falta
+PROBLEMAS CORRIGIDOS NESTA VERSÃO:
+  1. Anti-loop edição: edição de mensagem que já foi enviada → EDITA (nunca
+     reenvia). Edição de mensagem que ainda não existe no mapa → ignora.
+  2. Filtro de links: links que não são Amazon nem Shopee são removidos do
+     texto final. Se não sobrar NENHUM link válido → descarta a oferta.
+  3. Formatação automática: copia o texto original linha a linha, troca os
+     links pelos de afiliado, remove os estranhos e aplica layout bonito.
+  4. Multi-links real: Amazon E Shopee na mesma mensagem, até 50 links,
+     todos em paralelo.
 """
 
 import os
@@ -50,6 +43,7 @@ import random
 import unicodedata
 import logging
 import concurrent.futures
+from collections import defaultdict
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaWebPage
@@ -64,29 +58,31 @@ from threading import Lock
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# MÓDULO 1 ▸ LOGS COLORIDOS — UM POR PLATAFORMA/MÓDULO
+# MÓDULO 1 ▸ LOGS PROFISSIONAIS — UM POR MÓDULO/PLATAFORMA
 # ══════════════════════════════════════════════════════════════════════════
 
-def criar_logger(nome: str, cor: str) -> logging.Logger:
-    logger = logging.getLogger(nome)
-    if not logger.handlers:
+def _logger(nome: str, cor: str) -> logging.Logger:
+    lg = logging.getLogger(nome)
+    if not lg.handlers:
         h = logging.StreamHandler()
         h.setFormatter(logging.Formatter(
             f'\033[{cor}m[%(name)-10s]\033[0m %(asctime)s | %(levelname)-8s | %(message)s',
             datefmt='%H:%M:%S'
         ))
-        logger.addHandler(h)
-        logger.setLevel(logging.DEBUG)
-    return logger
+        lg.addHandler(h)
+        lg.setLevel(logging.DEBUG)
+    return lg
 
-log_amz   = criar_logger('AMAZON',   '1;33')
-log_shp   = criar_logger('SHOPEE',   '1;38;5;208')
-log_dedup = criar_logger('DEDUP',    '1;35')
-log_img   = criar_logger('IMAGEM',   '1;36')
-log_tg    = criar_logger('TELEGRAM', '1;32')
-log_fil   = criar_logger('FILTRO',   '1;31')
-log_lnk   = criar_logger('LINKS',    '1;34')
-log_sys   = criar_logger('SISTEMA',  '1;37')
+log_amz   = _logger('AMAZON',   '1;33')        # Amarelo
+log_shp   = _logger('SHOPEE',   '1;38;5;208')  # Laranja
+log_dedup = _logger('DEDUP',    '1;35')        # Roxo
+log_img   = _logger('IMAGEM',   '1;36')        # Ciano
+log_tg    = _logger('TELEGRAM', '1;32')        # Verde
+log_fil   = _logger('FILTRO',   '1;31')        # Vermelho
+log_lnk   = _logger('LINKS',    '1;34')        # Azul
+log_fmt   = _logger('FORMAT',   '1;38;5;51')   # Turquesa
+log_sys   = _logger('SISTEMA',  '1;37')        # Branco
+log_hc    = _logger('HEALTH',   '1;38;5;118')  # Verde-lima
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -108,10 +104,17 @@ IMG_AMAZON = "cupom-amazon.jpg"
 IMG_SHOPEE = "IMG_20260404_180150.jpg"
 
 ARQUIVO_CACHE      = "cache_dedup.json"
-ARQUIVO_MAPEAMENTO = "map_mensagens.json"
+ARQUIVO_MAPEAMENTO = "map_mensagens.json"   # {str(msg_id_origem): int(msg_id_destino)}
 
-envio_lock = asyncio.Semaphore(5)
-_executor  = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+# Concorrência controlada
+_SEM_ENVIO  = asyncio.Semaphore(3)   # máx 3 envios simultâneos
+_SEM_HTTP   = asyncio.Semaphore(20)  # máx 20 requisições HTTP simultâneas
+_EXECUTOR   = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+# Rate-limit interno: intervalo mínimo entre mensagens para o mesmo destino
+_RATE_LOCK       = asyncio.Lock()
+_ULTIMO_ENVIO_TS = 0.0
+_INTERVALO_MIN   = 1.5   # segundos entre envios
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -125,10 +128,56 @@ USER_AGENTS = [
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# MÓDULO 3 ▸ FILTRO BLINDADO
+# MÓDULO 3 ▸ PERSISTÊNCIA (MAPEAMENTO + CACHE) — SURVIVES RESTART
 # ══════════════════════════════════════════════════════════════════════════
 
-FILTRO_PALAVRAS = [
+_MAP_LOCK   = Lock()
+_CACHE_LOCK = Lock()
+
+
+def _ler_json(path: str) -> dict:
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        log_sys.error(f"❌ Erro ao ler {path}: {e}")
+        return {}
+
+
+def _gravar_json(path: str, data: dict, lock: Lock):
+    with lock:
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            log_sys.error(f"❌ Erro ao gravar {path}: {e}")
+
+
+def ler_mapa() -> dict:
+    with _MAP_LOCK:
+        return _ler_json(ARQUIVO_MAPEAMENTO)
+
+
+def salvar_mapa(mapa: dict):
+    _gravar_json(ARQUIVO_MAPEAMENTO, mapa, _MAP_LOCK)
+
+
+def ler_cache() -> dict:
+    with _CACHE_LOCK:
+        return _ler_json(ARQUIVO_CACHE)
+
+
+def salvar_cache(cache: dict):
+    _gravar_json(ARQUIVO_CACHE, cache, _CACHE_LOCK)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# MÓDULO 4 ▸ FILTRO BLINDADO
+# ══════════════════════════════════════════════════════════════════════════
+
+_FILTRO = [
     "Monitor Samsung", "Fonte Mancer", "Placa de video", "Monitor LG",
     "PC home Essential", "Suporte articulado", "Gabinetes em oferta",
     "VHAGAR", "Superframe", "AM5", "AM4", "GTX", "DDR5", "DDR4",
@@ -137,235 +186,245 @@ FILTRO_PALAVRAS = [
     "Water Cooler", "Air Cooler",
 ]
 
+
 def texto_bloqueado(texto: str) -> bool:
     tl = texto.lower()
-    for p in FILTRO_PALAVRAS:
+    for p in _FILTRO:
         if p.lower() in tl:
-            log_fil.debug(f"🚫 Palavra bloqueada: '{p}'")
+            log_fil.debug(f"🚫 Filtro: '{p}'")
             return True
     return False
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# MÓDULO 4 ▸ DEDUPLICAÇÃO — 3 CAMADAS (TEXTO + CUPOM, NUNCA PELO LINK)
+# MÓDULO 5 ▸ DEDUPLICAÇÃO ULTRA-FORTE — 3 CAMADAS
 #
-#  • Mesmo texto + mesmo cupom + mesmo preço  → BLOQUEIA
-#  • Texto mudou OU cupom mudou               → PASSA (envia de novo)
+#  PRINCÍPIO: nunca olha para o link — só texto normalizado, preço e cupom.
+#  • Texto mudou  → envia de novo
+#  • Cupom mudou  → envia de novo
+#  • Link mudou mas texto/cupom iguais → BLOQUEIA (anti-reenvio eterno)
 # ══════════════════════════════════════════════════════════════════════════
 
-LOCK_DEDUP         = Lock()
-TTL_SEGUNDOS       = 120 * 60
-JANELA_ANTISPAM    = 900
-SIM_TEXTO          = 0.85
-SIM_TEXTO_ALTA     = 0.92
+_TTL            = 120 * 60   # 120 min
+_JANELA         = 900        # 15 min de janela antispam
+_SIM_NORMAL     = 0.85
+_SIM_ALTA       = 0.92
 
-PALAVRAS_RUIDO = {
-    "promo", "promocao", "promoção", "oferta", "desconto", "cupom",
-    "corre", "aproveita", "urgente", "gratis", "grátis", "frete",
-    "hoje", "agora", "relampago", "relâmpago",
+_RUIDO = {
+    "promo","promocao","promoção","oferta","desconto","cupom","corre",
+    "aproveita","urgente","gratis","grátis","frete","hoje","agora",
+    "relampago","relâmpago",
 }
 
 
-def remover_acentos(t: str) -> str:
-    return ''.join(
-        c for c in unicodedata.normalize('NFD', t)
-        if unicodedata.category(c) != 'Mn'
-    )
+def _rm_acentos(t: str) -> str:
+    return ''.join(c for c in unicodedata.normalize('NFD', t)
+                   if unicodedata.category(c) != 'Mn')
 
 
-def normalizar_texto(texto: str) -> str:
+def _norm(texto: str) -> str:
     if not texto:
         return ""
-    texto = remover_acentos(texto.lower())
-    texto = re.sub(r"http\S+|www\S+", " ", texto)
-    texto = re.sub(r"[^\w\s]", " ", texto)
-    texto = re.sub(r"\s+", " ", texto).strip()
-    return " ".join(sorted(p for p in texto.split() if p not in PALAVRAS_RUIDO))
+    t = _rm_acentos(texto.lower())
+    t = re.sub(r"http\S+|www\S+", " ", t)
+    t = re.sub(r"[^\w\s]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return " ".join(sorted(w for w in t.split() if w not in _RUIDO))
 
 
-def _ler_cache() -> dict:
-    if not os.path.exists(ARQUIVO_CACHE):
-        return {}
-    try:
-        with open(ARQUIVO_CACHE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        log_dedup.error(f"Erro ao ler cache: {e}")
-        return {}
+def deve_enviar(plataforma: str, prod_id: str, preco: str,
+                cupom: str = "", texto: str = "") -> bool:
+    cache = ler_cache()
+    agora = time.time()
 
+    # Limpa expirados
+    cache = {k: v for k, v in cache.items()
+             if agora - v.get("ts", 0) < _TTL}
 
-def _gravar_cache(cache: dict):
-    try:
-        with open(ARQUIVO_CACHE, "w", encoding="utf-8") as f:
-            json.dump(cache, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        log_dedup.error(f"Erro ao gravar cache: {e}")
+    tnorm      = _norm(texto)
+    cnorm      = cupom.strip().upper()
+    fingerprint = f"{plataforma}|{prod_id}|{preco}|{cnorm}|{tnorm}"
+    h = hashlib.sha256(fingerprint.encode()).hexdigest()
 
+    # C1 — hash exato
+    if h in cache:
+        log_dedup.info(f"🔁 [C1] Hash exato | prod={prod_id} cupom={cnorm}")
+        return False
 
-def deve_enviar_oferta(plataforma: str, produto_id: str, preco: str,
-                        cupom: str = "", texto: str = "") -> bool:
-    with LOCK_DEDUP:
-        cache = _ler_cache()
-        agora = time.time()
-        cache = {k: v for k, v in cache.items()
-                 if agora - v["timestamp"] < TTL_SEGUNDOS}
+    for entrada in cache.values():
+        if agora - entrada.get("ts", 0) >= _JANELA:
+            continue
+        sim         = SequenceMatcher(None, tnorm, entrada.get("txt", "")).ratio()
+        c_igual     = entrada.get("cupom", "") == cnorm.lower()
+        prod_igual  = str(entrada.get("prod")) == str(prod_id) and prod_id != "0"
+        preco_igual = str(entrada.get("preco")) == str(preco)  and preco  != "0"
 
-        tnorm      = normalizar_texto(texto)
-        cupom_norm = cupom.strip().upper()
-        h = hashlib.sha256(
-            f"{plataforma}|{produto_id}|{preco}|{cupom_norm}|{tnorm}".encode()
-        ).hexdigest()
-
-        # C1 — hash exato
-        if h in cache:
-            log_dedup.info(f"🔁 [C1] Hash exato | prod={produto_id} cupom={cupom_norm}")
+        # C2 — mesmo produto/preço/cupom + texto parecido
+        if prod_igual and preco_igual and c_igual and sim >= _SIM_NORMAL:
+            log_dedup.info(f"🔁 [C2] Similar prod={prod_id} sim={sim:.2f}")
             return False
 
-        for entrada in cache.values():
-            if (agora - entrada["timestamp"]) >= JANELA_ANTISPAM:
-                continue
+        # C3 — cupom igual + texto quase idêntico (sem prod_id, ex: cupons genéricos)
+        if c_igual and sim >= _SIM_ALTA:
+            log_dedup.info(f"🔁 [C3] Cupom+texto idêntico sim={sim:.2f}")
+            return False
 
-            sim         = SequenceMatcher(None, tnorm, entrada.get("texto", "")).ratio()
-            cupom_igual = entrada.get("cupom", "") == cupom_norm.lower()
-            prod_igual  = str(entrada.get("produto_id")) == str(produto_id) and produto_id != "0"
-            preco_igual = str(entrada.get("preco")) == str(preco) and preco != "0"
-
-            # C2 — mesmo produto+preço+cupom, texto similar
-            if prod_igual and preco_igual and cupom_igual and sim >= SIM_TEXTO:
-                log_dedup.info(
-                    f"🔁 [C2] Similar | prod={produto_id} "
-                    f"cupom={cupom_norm} sim={sim:.2f}"
-                )
-                return False
-
-            # C3 — cupom igual + texto quase idêntico (sem produto_id)
-            if cupom_igual and sim >= SIM_TEXTO_ALTA:
-                log_dedup.info(f"🔁 [C3] Cupom+texto idêntico | sim={sim:.2f}")
-                return False
-
-        cache[h] = {
-            "plataforma": plataforma, "produto_id": str(produto_id),
-            "preco": str(preco),      "cupom": cupom_norm.lower(),
-            "texto": tnorm,           "timestamp": agora,
-        }
-        _gravar_cache(cache)
-        log_dedup.debug(f"✅ Nova oferta | plat={plataforma} prod={produto_id}")
-        return True
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# MÓDULO 5 ▸ DESENCURTADOR — ATÉ O OSSO (12 níveis)
-# ══════════════════════════════════════════════════════════════════════════
-
-async def desencurtar(url: str, sessao: aiohttp.ClientSession, depth: int = 0) -> str:
-    if depth > 12:
-        log_lnk.warning(f"⚠️ Prof. máx | {url[:60]}")
-        return url
-    hdrs = {
-        "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "text/html,application/xhtml+xml,*/*",
-        "Accept-Language": "pt-BR,pt;q=0.9",
+    cache[h] = {
+        "plat": plataforma, "prod": str(prod_id),
+        "preco": str(preco), "cupom": cnorm.lower(),
+        "txt": tnorm, "ts": agora,
     }
+    salvar_cache(cache)
+    log_dedup.debug(f"✅ Nova oferta registrada | plat={plataforma}")
+    return True
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# MÓDULO 6 ▸ DESENCURTADOR — ATÉ O OSSO (12 níveis, HEAD+GET+meta+JS)
+# ══════════════════════════════════════════════════════════════════════════
+
+async def desencurtar(url: str, sessao: aiohttp.ClientSession,
+                       depth: int = 0) -> str:
+    if depth > 12:
+        return url
+    hdrs = {"User-Agent": random.choice(USER_AGENTS),
+            "Accept": "text/html,application/xhtml+xml,*/*",
+            "Accept-Language": "pt-BR,pt;q=0.9"}
     try:
+        # HEAD rápido
         try:
             async with sessao.head(url, headers=hdrs, allow_redirects=True,
-                                   timeout=aiohttp.ClientTimeout(total=10)) as r:
+                                   timeout=aiohttp.ClientTimeout(total=8)) as r:
                 final = str(r.url)
                 if final != url:
-                    log_lnk.debug(f"  [HEAD d={depth}] → {final[:60]}")
+                    log_lnk.debug(f"  HEAD d={depth} → {final[:70]}")
                     return await desencurtar(final, sessao, depth + 1)
                 return final
         except Exception:
             pass
 
+        # GET completo
         async with sessao.get(url, headers=hdrs, allow_redirects=True,
-                               timeout=aiohttp.ClientTimeout(total=15)) as r:
+                               timeout=aiohttp.ClientTimeout(total=12)) as r:
             pos  = str(r.url)
             html = await r.text(errors="ignore")
             soup = BeautifulSoup(html, "html.parser")
 
-            tag_ref = soup.find("meta", attrs={"http-equiv": re.compile(r"refresh", re.I)})
-            if tag_ref and tag_ref.get("content"):
-                m = re.search(r"url[=\s]*([^\s;\"']+)", tag_ref["content"], re.I)
+            # meta refresh
+            ref = soup.find("meta", attrs={"http-equiv": re.compile("refresh", re.I)})
+            if ref and ref.get("content"):
+                m = re.search(r"url[=\s]*([^\s;\"']+)", ref["content"], re.I)
                 if m:
                     novo = m.group(1).strip().strip("'\"")
-                    log_lnk.debug(f"  [META d={depth}] → {novo[:60]}")
+                    log_lnk.debug(f"  META d={depth} → {novo[:70]}")
                     return await desencurtar(novo, sessao, depth + 1)
 
-            m_js = re.search(
-                r'window\.location(?:\.href)?\s*=\s*["\']([^"\']+)["\']', html)
-            if m_js:
-                log_lnk.debug(f"  [JS d={depth}] → {m_js.group(1)[:60]}")
-                return await desencurtar(m_js.group(1), sessao, depth + 1)
+            # window.location JS
+            mj = re.search(r'window\.location(?:\.href)?\s*=\s*["\']([^"\']+)["\']', html)
+            if mj:
+                log_lnk.debug(f"  JS d={depth} → {mj.group(1)[:70]}")
+                return await desencurtar(mj.group(1), sessao, depth + 1)
 
             if pos != url:
-                log_lnk.debug(f"  [GET d={depth}] → {pos[:60]}")
                 return await desencurtar(pos, sessao, depth + 1)
             return pos
-
     except asyncio.TimeoutError:
-        log_lnk.warning(f"⏱ Timeout: {url[:60]}")
+        log_lnk.warning(f"⏱ Timeout desencurtando: {url[:70]}")
         return url
     except Exception as e:
-        log_lnk.error(f"❌ Erro: {url[:60]}: {e}")
+        log_lnk.error(f"❌ Erro desencurtando {url[:60]}: {e}")
         return url
 
 
-def classificar_plataforma(url: str) -> str | None:
-    try:
-        d = urlparse(url).netloc.lower().replace("www.", "")
-    except Exception:
-        return None
-    if any(x in d for x in ["amazon.com", "amzn.to", "amzn.com", "a.co"]):
-        return "amazon"
-    if any(x in d for x in ["shopee.com", "s.shopee", "shope.ee"]):
-        return "shopee"
-    return None
-
-
 # ══════════════════════════════════════════════════════════════════════════
-# MÓDULO 6 ▸ MOTOR AMAZON — TAG + URL LIMPA E CLICÁVEL
+# MÓDULO 7 ▸ CLASSIFICAÇÃO DE PLATAFORMA
 # ══════════════════════════════════════════════════════════════════════════
 
-_PARAMS_LIXO_AMZ = {
-    "ascsubtag", "btn_ref", "ref_", "ref", "smid", "sprefix", "sr",
-    "spla", "dchild", "linkcode", "linkid", "camp", "creative",
-    "pf_rd_p", "pf_rd_r", "pd_rd_wg", "pd_rd_w", "content-id",
-    "pd_rd_r", "pd_rd_i", "ie", "qid", "_encoding",
+_DOM_AMAZON  = {"amazon.com", "amzn.to", "amzn.com", "a.co"}
+_DOM_SHOPEE  = {"shopee.com", "s.shopee", "shope.ee"}
+# Domínios que devem ser SEMPRE descartados (nunca expandir para afiliado)
+_DOM_LIXO    = {
+    "magazineluiza.com.br", "magazinevoce.com.br", "maga.lu",
+    "casasbahia.com.br", "americanas.com.br", "submarino.com.br",
+    "shoptime.com.br", "extra.com.br", "pontofrio.com.br",
+    "mercadolivre.com", "mercadopago.com", "meli.la",
+    "aliexpress.com", "ali.ski", "kabum.com.br", "pichau.com.br",
+    "terabyteshop.com.br", "fastshop.com.br", "leroy.com.br",
+    "t.me", "telegram.me",
 }
 
 
-def _url_amazon_limpa(url_exp: str) -> str:
-    """Remove parâmetros lixo, corta /ref=... do path, injeta tag."""
+def classificar(url: str) -> str | None:
+    """Retorna 'amazon', 'shopee' ou None (descartado)."""
+    try:
+        netloc = urlparse(url).netloc.lower().replace("www.", "")
+    except Exception:
+        return None
+
+    for d in _DOM_AMAZON:
+        if d in netloc:
+            return "amazon"
+    for d in _DOM_SHOPEE:
+        if d in netloc:
+            return "shopee"
+    # Checa lixo explícito
+    for d in _DOM_LIXO:
+        if d in netloc:
+            log_lnk.debug(f"🗑 Domínio lixo: {netloc}")
+            return None
+    return None   # desconhecido → será expandido
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# MÓDULO 8 ▸ MOTOR AMAZON — TAG + URL LIMPA E CLICÁVEL
+# ══════════════════════════════════════════════════════════════════════════
+
+_LIXO_AMZ_PARAMS = {
+    "ascsubtag","btn_ref","ref_","ref","smid","sprefix","sr","spla",
+    "dchild","linkcode","linkid","camp","creative","pf_rd_p","pf_rd_r",
+    "pd_rd_wg","pd_rd_w","content-id","pd_rd_r","pd_rd_i","ie","qid",
+    "_encoding",
+}
+
+
+def _limpar_amazon(url_exp: str) -> str:
+    """Corta /ref=... do path, remove params lixo, injeta tag."""
     p    = urlparse(url_exp)
     path = re.sub(r'(/dp/[A-Z0-9]{10}).*',         r'\1', p.path)
     path = re.sub(r'(/gp/product/[A-Z0-9]{10}).*', r'\1', path)
-    params = {k: v for k, v in parse_qs(p.query, keep_blank_values=False).items()
-              if k.lower() not in _PARAMS_LIXO_AMZ}
-    params["tag"] = [AMAZON_TAG]
-    return urlunparse(p._replace(path=path, query=urlencode(params, doseq=True)))
+    prms = {k: v for k, v in parse_qs(p.query, keep_blank_values=False).items()
+            if k.lower() not in _LIXO_AMZ_PARAMS}
+    prms["tag"] = [AMAZON_TAG]
+    return urlunparse(p._replace(path=path, query=urlencode(prms, doseq=True)))
 
 
-async def motor_amazon(url: str, sessao: aiohttp.ClientSession) -> str:
-    log_amz.debug(f"🔗 Iniciando | {url[:70]}")
-    exp = await desencurtar(url, sessao)
-    log_amz.debug(f"📦 Expandida | {exp[:70]}")
-    if "amazon" not in exp.lower():
-        log_amz.warning(f"⚠️ Não é Amazon: {exp[:60]}")
-        return url
-    final = _url_amazon_limpa(exp)
-    log_amz.info(f"✅ Convertida | {final}")
+async def _motor_amazon(url: str, sessao: aiohttp.ClientSession) -> str | None:
+    """Desencurta + limpa + injeta tag. Retorna None se não for Amazon."""
+    log_amz.debug(f"🔗 Amazon iniciando | {url[:70]}")
+    async with _SEM_HTTP:
+        exp = await desencurtar(url, sessao)
+    log_amz.debug(f"  Expandida | {exp[:70]}")
+
+    if classificar(exp) != "amazon":
+        log_amz.warning(f"  ⚠️ Não é Amazon após expansão: {exp[:60]}")
+        return None
+
+    final = _limpar_amazon(exp)
+    log_amz.info(f"  ✅ Convertida | {final}")
     return final
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# MÓDULO 7 ▸ MOTOR SHOPEE — API DE AFILIADO
+# MÓDULO 9 ▸ MOTOR SHOPEE — API DE AFILIADO COM RETRY
 # ══════════════════════════════════════════════════════════════════════════
 
-async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> str:
-    log_shp.debug(f"🔗 Iniciando | {url[:70]}")
-    exp = await desencurtar(url, sessao)
-    log_shp.debug(f"📦 Expandida | {exp[:70]}")
+async def _motor_shopee(url: str, sessao: aiohttp.ClientSession) -> str | None:
+    """Desencurta + API afiliado Shopee. Retorna None em falha total."""
+    log_shp.debug(f"🔗 Shopee iniciando | {url[:70]}")
+    async with _SEM_HTTP:
+        exp = await desencurtar(url, sessao)
+    log_shp.debug(f"  Expandida | {exp[:70]}")
+
     ts      = str(int(time.time()))
     payload = json.dumps(
         {"query": f'mutation {{ generateShortLink(input: {{ originUrl: "{exp}" }}) '
@@ -375,352 +434,260 @@ async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> str:
     sig = hashlib.sha256(
         f"{SHOPEE_APP_ID}{ts}{payload}{SHOPEE_SECRET}".encode()
     ).hexdigest()
-    try:
-        async with sessao.post(
-            "https://open-api.affiliate.shopee.com.br/graphql",
-            data=payload,
-            headers={
-                "Authorization": f"SHA256 Credential={SHOPEE_APP_ID},"
-                                 f"Timestamp={ts},Signature={sig}",
-                "Content-Type": "application/json",
-            },
-            timeout=aiohttp.ClientTimeout(total=12),
-        ) as r:
-            res  = await r.json()
-            link = res["data"]["generateShortLink"]["shortLink"]
-            log_shp.info(f"✅ Convertida | {link}")
-            return link
-    except Exception as e:
-        log_shp.error(f"❌ API Shopee: {e} | url={exp[:60]}")
-        return url
+    hdrs = {
+        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID},"
+                         f"Timestamp={ts},Signature={sig}",
+        "Content-Type": "application/json",
+    }
+
+    for tentativa in range(1, 4):
+        try:
+            async with _SEM_HTTP:
+                async with sessao.post(
+                    "https://open-api.affiliate.shopee.com.br/graphql",
+                    data=payload, headers=hdrs,
+                    timeout=aiohttp.ClientTimeout(total=12),
+                ) as r:
+                    res  = await r.json()
+                    link = res["data"]["generateShortLink"]["shortLink"]
+                    log_shp.info(f"  ✅ Convertida | {link}")
+                    return link
+        except Exception as e:
+            log_shp.warning(f"  ⚠️ Tentativa {tentativa}/3 falhou: {e}")
+            await asyncio.sleep(2 ** tentativa)
+
+    log_shp.error(f"  ❌ API Shopee falhou 3x | url={exp[:60]}")
+    return None
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# MÓDULO 8 ▸ CONVERSOR GERAL + MASSIVO PARALELO (50 LINKS)
+# MÓDULO 10 ▸ PIPELINE DE CONVERSÃO — TODOS OS LINKS EM PARALELO
 # ══════════════════════════════════════════════════════════════════════════
 
-async def converter_link(url: str, sessao: aiohttp.ClientSession) -> tuple:
-    ul = url.lower()
-    log_lnk.debug(f"🔍 {url[:70]}")
+async def _converter_um(url: str, sessao: aiohttp.ClientSession) -> tuple:
+    """
+    Converte um único link.
+    Retorna (url_convertida, plataforma) ou (None, None) se descartado.
+    """
+    ul   = url.lower()
+    plat = classificar(url)
 
-    if any(d in ul for d in ["amazon.com", "amzn.to", "amzn.com", "a.co"]):
-        novo = await motor_amazon(url, sessao)
-        return (novo, "amazon") if classificar_plataforma(novo) == "amazon" else (None, None)
-
-    if any(d in ul for d in ["shopee.com", "s.shopee", "shope.ee"]):
-        return await motor_shopee(url, sessao), "shopee"
-
-    # Encurtador genérico
-    log_lnk.debug(f"🔄 Expandindo genérico: {url[:60]}")
-    exp  = await desencurtar(url, sessao)
-    plat = classificar_plataforma(exp)
+    # Identificação direta
     if plat == "amazon":
-        novo = await motor_amazon(exp, sessao)
-        return (novo, "amazon") if classificar_plataforma(novo) == "amazon" else (None, None)
-    if plat == "shopee":
-        return await motor_shopee(exp, sessao), "shopee"
+        novo = await _motor_amazon(url, sessao)
+        return (novo, "amazon") if novo else (None, None)
 
-    log_lnk.info(f"🗑 Descartado: {exp[:60]}")
+    if plat == "shopee":
+        novo = await _motor_shopee(url, sessao)
+        return (novo, "shopee") if novo else (None, None)
+
+    if plat is None and not any(d in ul for d in _DOM_LIXO):
+        # Pode ser encurtador genérico — expande e reclassifica
+        log_lnk.debug(f"🔄 Expandindo desconhecido: {url[:60]}")
+        async with _SEM_HTTP:
+            exp = await desencurtar(url, sessao)
+        plat2 = classificar(exp)
+        if plat2 == "amazon":
+            novo = await _motor_amazon(exp, sessao)
+            return (novo, "amazon") if novo else (None, None)
+        if plat2 == "shopee":
+            novo = await _motor_shopee(exp, sessao)
+            return (novo, "shopee") if novo else (None, None)
+
+    log_lnk.info(f"🗑 Link descartado: {url[:70]}")
     return None, None
 
 
-async def converter_todos_links(links: list) -> tuple:
-    log_lnk.info(f"🚀 Conversão massiva: {len(links)} link(s)")
+async def converter_links(links: list) -> tuple:
+    """
+    Converte até 50 links em paralelo.
+    Retorna (mapa {original: convertido}, plataforma_principal).
+    """
+    log_lnk.info(f"🚀 Conversão paralela: {len(links)} link(s)")
     conn = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300, ssl=False)
     async with aiohttp.ClientSession(
         connector=conn,
-        timeout=aiohttp.ClientTimeout(total=30, connect=10),
+        timeout=aiohttp.ClientTimeout(total=30, connect=8),
         headers={"User-Agent": random.choice(USER_AGENTS)},
     ) as sessao:
         resultados = await asyncio.gather(
-            *[converter_link(l, sessao) for l in links[:50]],
+            *[_converter_um(l, sessao) for l in links[:50]],
             return_exceptions=True,
         )
+
     mapa, plats = {}, []
     for i, res in enumerate(resultados):
         if isinstance(res, Exception):
-            log_lnk.error(f"❌ link[{i}] {links[i][:50]}: {res}")
+            log_lnk.error(f"  ❌ Exceção link[{i}] {links[i][:50]}: {res}")
             continue
         novo, plat = res
         if novo and plat:
             mapa[links[i]] = novo
             plats.append(plat)
-            log_lnk.debug(f"  [{plat.upper()}] {links[i][:40]} → {novo[:40]}")
+            log_lnk.debug(f"  [{plat.upper()}] {links[i][:40]} → {novo[:50]}")
+
     plat_p = max(set(plats), key=plats.count) if plats else "amazon"
-    log_lnk.info(f"✅ {len(mapa)}/{len(links)} convertidos | plat={plat_p}")
+    log_lnk.info(f"✅ Convertidos: {len(mapa)}/{len(links)} | plat={plat_p}")
     return mapa, plat_p
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# MÓDULO 9 ▸ HELPERS DE DETECÇÃO
+# MÓDULO 11 ▸ FORMATAÇÃO AUTOMÁTICA
+#
+#  ESTRATÉGIA:
+#  1. Pega o texto original LINHA POR LINHA
+#  2. Troca cada link pelo afiliado correspondente
+#  3. Remove linhas que contêm apenas links descartados
+#  4. Aplica layout bonito mantendo a estrutura original do texto
+#     (não inventa linhas que não existiam — só enfeita o que está lá)
 # ══════════════════════════════════════════════════════════════════════════
 
-_RE_EMOJI = re.compile(
-    r"[\U0001F300-\U0001FAFF"
-    r"\U00002600-\U000027BF"
-    r"\U0001F900-\U0001F9FF"
-    r"\u2B50\u2B55\u231A\u231B"
-    r"\u25A0-\u25FF]",
+_RE_URL      = re.compile(r'https?://[^\s\)\]>,"\']+')
+_RE_PRECO    = re.compile(r'R\$\s?[\d.,]+')
+_RE_CUPOM_KW = re.compile(
+    r'\b(?:cupom|cupon|off|resgate|codigo|coupon|desconto|assine)\b', re.I)
+_RE_EMOJI    = re.compile(
+    r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF"
+    r"\U0001F900-\U0001F9FF\u2B50\u2B55\u231A\u231B\u25A0-\u25FF]",
     flags=re.UNICODE,
 )
-_RE_CUPOM_KW = re.compile(
-    r'\b(?:cupom|cupon|off|resgate|codigo|coupon|desconto)\b', re.I)
-_RE_PRECO = re.compile(r'R\$\s?[\d.,]+')
 
 
 def _tem_emoji(s: str) -> bool:
     return bool(_RE_EMOJI.search(s))
 
-def _contar_emojis(s: str) -> int:
-    return len(_RE_EMOJI.findall(s))
 
-def _eh_cupom(texto: str) -> bool:
-    return bool(_RE_CUPOM_KW.search(texto))
-
-def _eh_cupom_shopee(texto: str, plat: str) -> bool:
-    return _eh_cupom(texto) and plat == "shopee"
-
-def _tem_midia_real(media) -> bool:
-    return media is not None and not isinstance(media, MessageMediaWebPage)
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# MÓDULO 10 ▸ FORMATAÇÃO — CORAÇÃO DO BOT
-#
-#  ESTRATÉGIA:
-#    • Se texto original veio com >= 2 emojis → modo "complementar"
-#      (mantém tudo, só adiciona emoji onde claramente falta)
-#    • Se texto veio sem emojis (< 2) → modo "layout completo"
-#      (reconstrói com os modelos definidos acima)
-# ══════════════════════════════════════════════════════════════════════════
-
-def _enfeitar_linha(linha: str) -> str:
-    """Adiciona emoji numa linha sem emoji, conforme o conteúdo."""
-    l = linha.strip()
-    if not l or _tem_emoji(l) or re.match(r'^https?://', l):
-        return linha
-    if _RE_PRECO.search(l):
-        return "🔥 " + l
-    if _RE_CUPOM_KW.search(l):
-        return "🎟 " + l
-    return linha
-
-
-def _layout_cupom_shopee(linhas_texto: list, links: list) -> str:
+def formatar(texto_original: str, mapa: dict, plat: str) -> str:
     """
-    Monta:
-      🚨 CUPOM SHOPEE 🚨
-      (vazio)
-      🎟 <linhas de desconto / código>
-      (vazio)
-      ✅ Resgate aqui:
-      <link 1>
-      (vazio)
-      🛒 Carrinho:
-      <link 2>
-      <demais linhas: hashtags, anúncio, etc.>
+    Formata a mensagem final:
+    1. Processa linha a linha
+    2. Se a linha contém um link:
+       - Troca pelo afiliado se convertido
+       - Remove completamente se não convertido (lixo)
+    3. Aplica emoji de contexto nas linhas sem emoji
+    4. Remove linhas vazias excessivas
     """
-    links_shp   = [l for l in links if classificar_plataforma(l) == "shopee"]
-    nao_links   = [l for l in linhas_texto if not re.match(r'^https?://', l)]
+    aceitos = set(mapa.values())
+    linhas_orig = texto_original.split('\n')
+    saida       = []
+    primeira_linha_texto = True
 
-    linhas_desc  = [l for l in nao_links
-                    if _RE_PRECO.search(l) or _RE_CUPOM_KW.search(l)]
-    linhas_extra = [l for l in nao_links if l not in linhas_desc]
+    for linha in linhas_orig:
+        linha_strip = linha.strip()
+        if not linha_strip:
+            saida.append("")
+            continue
 
-    out = ["🚨 CUPOM SHOPEE 🚨", ""]
+        # Verifica se a linha é UM link isolado
+        if _RE_URL.match(linha_strip) and not _RE_URL.sub("", linha_strip).strip():
+            url_bruta = linha_strip.rstrip('.,;)')
+            if url_bruta in mapa:
+                # Linha é só um link convertido → coloca o link novo
+                saida.append(mapa[url_bruta])
+            else:
+                # Link não convertido → descarta a linha inteira
+                log_fmt.debug(f"🗑 Linha-link descartada: {url_bruta[:60]}")
+            continue
 
-    for ld in linhas_desc:
-        out.append(f"🎟 {ld}" if not _tem_emoji(ld) else ld)
+        # Linha com texto (pode ter link inline)
+        nova_linha = linha_strip
 
-    if links_shp:
-        out.extend(["", "✅ Resgate aqui:", links_shp[0]])
-    if len(links_shp) >= 2:
-        out.extend(["", "🛒 Carrinho:", links_shp[1]])
-    for lk in links_shp[2:]:
-        out.append(lk)
+        # Substitui links inline dentro da linha
+        def _sub_link(match):
+            url = match.group(0).rstrip('.,;)')
+            if url in mapa:
+                return mapa[url]
+            # Link não convertido dentro de linha de texto → remove só o link
+            log_fmt.debug(f"🗑 Link inline descartado: {url[:60]}")
+            return ""
 
-    for le in linhas_extra:
-        out.append(le)
+        nova_linha_sub = _RE_URL.sub(_sub_link, nova_linha)
 
-    return "\n".join(out)
+        # Se depois de substituir a linha ficou só espaço → descarta
+        if not nova_linha_sub.strip():
+            continue
 
+        nova_linha = nova_linha_sub.strip()
 
-def _layout_cupom_amazon(linhas_texto: list, links: list) -> str:
-    """
-    Monta:
-      🚨 Cupons Amazon APP
-      (vazio)
-      🎟 <linhas de desconto / código>
-      (vazio)
-      ✅ Resgate aqui:
-      <links>
-      <demais linhas>
-    """
-    links_amz   = [l for l in links if classificar_plataforma(l) == "amazon"]
-    nao_links   = [l for l in linhas_texto if not re.match(r'^https?://', l)]
+        # Aplica emoji de contexto SE a linha não tem emoji próprio
+        if not _tem_emoji(nova_linha):
+            tem_preco = bool(_RE_PRECO.search(nova_linha))
+            tem_cupom = bool(_RE_CUPOM_KW.search(nova_linha))
+            eh_link   = bool(_RE_URL.match(nova_linha))
 
-    linhas_desc  = [l for l in nao_links
-                    if _RE_PRECO.search(l) or _RE_CUPOM_KW.search(l)]
-    linhas_extra = [l for l in nao_links if l not in linhas_desc]
-
-    out = ["🚨 Cupons Amazon APP", ""]
-
-    for ld in linhas_desc:
-        out.append(f"🎟 {ld}" if not _tem_emoji(ld) else ld)
-
-    if links_amz:
-        out.extend(["", "✅ Resgate aqui:"])
-        for lk in links_amz:
-            out.append(lk)
-
-    for le in linhas_extra:
-        out.append(le)
-
-    return "\n".join(out)
-
-
-def _layout_oferta_comum(linhas_texto: list, links: list) -> str:
-    """
-    Monta:
-      🔥 <nome do produto>
-      (vazio)
-      ✅ <linha de preço>
-      🎟 <linha com cupom embutido, se houver>
-      <links>
-      <demais linhas>
-    """
-    nao_links    = [l for l in linhas_texto if not re.match(r'^https?://', l)]
-
-    # Identifica o nome (primeira linha sem preço e sem keyword de cupom)
-    linha_nome  = ""
-    linha_preco = ""
-    linha_cup   = ""
-    extras      = []
-
-    for l in nao_links:
-        tem_preco = bool(_RE_PRECO.search(l))
-        tem_cup   = bool(_RE_CUPOM_KW.search(l))
-        if not linha_nome and not tem_preco and not tem_cup:
-            linha_nome = l
-        elif tem_preco and tem_cup:
-            linha_cup = l
-        elif tem_preco and not linha_preco:
-            linha_preco = l
-        elif tem_cup:
-            linha_cup = l
+            if not eh_link:
+                if primeira_linha_texto and not tem_preco and not tem_cupom:
+                    # Primeira linha de texto = título → 🔥
+                    nova_linha = "🔥 " + nova_linha
+                    primeira_linha_texto = False
+                elif tem_preco and tem_cupom:
+                    nova_linha = "🎟 " + nova_linha
+                elif tem_preco:
+                    nova_linha = "✅ " + nova_linha
+                elif tem_cupom:
+                    nova_linha = "🎟 " + nova_linha
+                else:
+                    # Linha de texto simples após a primeira → deixa como está
+                    if primeira_linha_texto:
+                        primeira_linha_texto = False
         else:
-            extras.append(l)
+            # Tem emoji → só marca que passou a primeira linha
+            if primeira_linha_texto and not _RE_URL.match(nova_linha):
+                primeira_linha_texto = False
 
-    out = []
-    if linha_nome:
-        out.append(f"🔥 {linha_nome}" if not _tem_emoji(linha_nome) else linha_nome)
-        out.append("")
+        saida.append(nova_linha)
 
-    if linha_preco:
-        out.append(f"✅ {linha_preco}" if not _tem_emoji(linha_preco) else linha_preco)
+    # Remove linhas vazias consecutivas (máx 1 vazia seguida)
+    resultado = []
+    ultima_vazia = False
+    for l in saida:
+        if l.strip() == "":
+            if not ultima_vazia:
+                resultado.append("")
+            ultima_vazia = True
+        else:
+            ultima_vazia = False
+            resultado.append(l)
 
-    if linha_cup:
-        out.append(f"🎟 {linha_cup}" if not _tem_emoji(linha_cup) else linha_cup)
-
-    if out:
-        out.append("")
-
-    for lk in links:
-        out.append(lk)
-
-    for le in extras:
-        out.append(le)
-
-    return "\n".join(out)
-
-
-def formatar_texto(
-    texto_original: str,
-    mapa_links: dict,
-    plat_principal: str,
-    eh_cupom: bool,
-    eh_cupom_shp: bool,
-) -> str:
-    # 1. Troca links pelos de afiliado
-    texto = texto_original
-    for antigo, novo in mapa_links.items():
-        texto = texto.replace(antigo, novo)
-
-    # 2. Remove links que não são Amazon/Shopee
-    aceitos = set(mapa_links.values())
-    for link in re.findall(r'https?://[^\s\)\]>,"\']+', texto):
-        lc = link.rstrip('.,;)')
-        if lc not in aceitos:
-            log_lnk.debug(f"🗑 Removendo: {lc[:60]}")
-            texto = texto.replace(link, "").replace(lc, "")
-
-    texto = re.sub(r'\n{3,}', '\n\n', texto).strip()
-
-    # 3. Decide estratégia
-    emojis_orig = _contar_emojis(texto_original)
-
-    if emojis_orig >= 2:
-        # Modo complementar: mantém estrutura, apenas enfeita onde falta
-        linhas = texto.split('\n')
-        novas  = []
-        primeira = False
-        for linha in linhas:
-            l = linha.strip()
-            if not l:
-                novas.append("")
-                continue
-            if not primeira:
-                primeira = True
-                if not _tem_emoji(l) and not re.match(r'^https?://', l):
-                    novas.append(("🔥 " if eh_cupom else "✅ ") + l)
-                    continue
-            novas.append(_enfeitar_linha(linha))
-        return "\n".join(novas).strip()
-
-    # Modo layout completo
-    linhas_texto = [l.strip() for l in texto.split('\n') if l.strip()]
-    links_na_msg = [l for l in linhas_texto if re.match(r'^https?://', l)]
-
-    if eh_cupom_shp:
-        return _layout_cupom_shopee(linhas_texto, links_na_msg)
-    if eh_cupom:
-        return _layout_cupom_amazon(linhas_texto, links_na_msg)
-    return _layout_oferta_comum(linhas_texto, links_na_msg)
+    texto_final = "\n".join(resultado).strip()
+    log_fmt.debug(f"✅ Formatação concluída | {len(texto_final)} chars")
+    return texto_final
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# MÓDULO 11 ▸ BUSCA DE IMAGEM — 3 TENTATIVAS + FALLBACK PREVIEW
+# MÓDULO 12 ▸ BUSCA DE IMAGEM — 3 TENTATIVAS + FALLBACK PREVIEW
 # ══════════════════════════════════════════════════════════════════════════
 
-async def buscar_imagem_produto(url_produto: str) -> str | None:
+async def buscar_imagem(url: str) -> str | None:
     for t in range(1, 4):
-        log_img.debug(f"🖼 Tentativa {t}/3 | {url_produto[:60]}")
+        log_img.debug(f"🖼 Tentativa {t}/3 | {url[:60]}")
         try:
             async with aiohttp.ClientSession(
                 headers={"User-Agent": random.choice(USER_AGENTS)}
             ) as s:
-                async with s.get(url_produto, allow_redirects=True,
-                                  timeout=aiohttp.ClientTimeout(total=12)) as r:
+                async with s.get(url, allow_redirects=True,
+                                  timeout=aiohttp.ClientTimeout(total=10)) as r:
                     soup = BeautifulSoup(await r.text(errors="ignore"), "html.parser")
                     tag  = (soup.find("meta", property="og:image") or
                             soup.find("meta", attrs={"name": "twitter:image"}))
                     if tag and tag.get("content"):
-                        log_img.info(f"✅ Imagem (t={t}): {tag['content'][:70]}")
-                        return tag["content"]
+                        img = tag["content"]
+                        log_img.info(f"✅ Imagem (t={t}): {img[:70]}")
+                        return img
         except asyncio.TimeoutError:
             log_img.warning(f"⏱ Timeout t={t}/3")
         except Exception as e:
             log_img.warning(f"⚠️ Erro t={t}/3: {e}")
         await asyncio.sleep(1.5 * t)
-    log_img.warning("❌ Sem imagem após 3 tentativas → link preview")
+    log_img.warning("❌ Sem imagem → link preview")
     return None
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# MÓDULO 12 ▸ FINGERPRINT
+# MÓDULO 13 ▸ FINGERPRINT DA OFERTA
 # ══════════════════════════════════════════════════════════════════════════
 
-def extrair_produto_id(mapa: dict) -> str:
+def _prod_id(mapa: dict) -> str:
     if not mapa:
         return "0"
     primeiro = list(mapa.values())[0]
@@ -731,68 +698,149 @@ def extrair_produto_id(mapa: dict) -> str:
             return m.group(1)
     return primeiro[-20:]
 
-def extrair_preco(texto: str) -> str:
-    m = _RE_PRECO.search(texto)
+def _preco(t: str) -> str:
+    m = _RE_PRECO.search(t)
     return m.group(0).strip() if m else "0"
 
-def extrair_cupom(texto: str) -> str:
-    m = re.search(r'\b([A-Z][A-Z0-9]{3,19})\b', texto)
+def _cupom(t: str) -> str:
+    m = re.search(r'\b([A-Z][A-Z0-9]{3,19})\b', t)
     return m.group(1) if m else ""
 
+def _eh_cupom(t: str) -> bool:
+    return bool(_RE_CUPOM_KW.search(t))
+
+def _eh_cupom_shopee(t: str, plat: str) -> bool:
+    return _eh_cupom(t) and plat == "shopee"
+
+def _tem_midia(media) -> bool:
+    return media is not None and not isinstance(media, MessageMediaWebPage)
+
 
 # ══════════════════════════════════════════════════════════════════════════
-# MÓDULO 13 ▸ PROCESSAMENTO E ENVIO / EDIÇÃO
+# MÓDULO 14 ▸ RATE-LIMIT INTERNO
 # ══════════════════════════════════════════════════════════════════════════
 
-async def processar_evento(event, is_edit: bool = False):
+async def _aguardar_rate_limit():
+    """Garante intervalo mínimo entre envios para não sofrer flood."""
+    global _ULTIMO_ENVIO_TS
+    async with _RATE_LOCK:
+        agora    = time.monotonic()
+        espera   = _INTERVALO_MIN - (agora - _ULTIMO_ENVIO_TS)
+        if espera > 0:
+            await asyncio.sleep(espera)
+        _ULTIMO_ENVIO_TS = time.monotonic()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# MÓDULO 15 ▸ ANTI-LOOP — CONTROLE DE MENSAGENS EDITADAS
+#
+#  PROBLEMA: quando o bot envia uma mensagem, o Telegram às vezes dispara
+#  um evento MessageEdited logo após (para atualizar o preview do link).
+#  Isso faz o bot processar a mensagem DE NOVO como se fosse nova.
+#
+#  SOLUÇÃO:
+#  • Mantemos um set de IDs de mensagens de ORIGEM que já foram processadas.
+#  • Se chegar NewMessage com id que já está no set → ignora.
+#  • Se chegar MessageEdited com id que NÃO está no mapa → ignora também
+#    (nunca enviamos essa mensagem, então não há o que editar).
+# ══════════════════════════════════════════════════════════════════════════
+
+_IDS_PROCESSADOS: set = set()   # IDs de mensagens de origem já enviadas
+_IDS_LOCK = asyncio.Lock()
+
+async def _marcar_processado(msg_id: int):
+    async with _IDS_LOCK:
+        _IDS_PROCESSADOS.add(msg_id)
+        # Limita o tamanho do set (guarda os últimos 2000)
+        if len(_IDS_PROCESSADOS) > 2000:
+            excesso = len(_IDS_PROCESSADOS) - 2000
+            for _ in range(excesso):
+                _IDS_PROCESSADOS.pop()
+
+async def _ja_processado(msg_id: int) -> bool:
+    async with _IDS_LOCK:
+        return msg_id in _IDS_PROCESSADOS
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# MÓDULO 16 ▸ PROCESSAMENTO PRINCIPAL — PIPELINE COMPLETO
+# ══════════════════════════════════════════════════════════════════════════
+
+async def processar(event, is_edit: bool = False):
+    msg_id      = event.message.id
     texto_bruto = event.message.text or ""
     chat        = await event.get_chat()
     username    = (chat.username or str(event.chat_id)).lower()
 
-    log_tg.info(f"📩 Mensagem recebida de: @{username}")
-    log_sys.debug(f"{'✏️ EDIT' if is_edit else '📩 NEW'} | chars={len(texto_bruto)}")
+    log_tg.info(f"{'✏️ EDIT' if is_edit else '📩 NEW'} | @{username} | id={msg_id} | "
+                f"chars={len(texto_bruto)}")
 
+    # ── ETAPA 1: Validação básica ─────────────────────────────────────
     if not texto_bruto.strip():
+        log_sys.debug("⏩ Vazio")
         return
 
+    # ── ETAPA 2: Anti-loop ────────────────────────────────────────────
+    if not is_edit:
+        # Nova mensagem: se já processamos → ignora (previne loop de preview)
+        if await _ja_processado(msg_id):
+            log_sys.debug(f"⏩ Anti-loop: id={msg_id} já processado")
+            return
+    else:
+        # Edição: só processa se já temos o id no mapeamento
+        mapa_atual = await asyncio.get_event_loop().run_in_executor(
+            _EXECUTOR, ler_mapa)
+        if str(msg_id) not in mapa_atual:
+            log_sys.debug(f"⏩ Edição sem mapa (preview Telegram?): id={msg_id}")
+            return
+
+    # ── ETAPA 3: Filtro blindado ──────────────────────────────────────
     if texto_bloqueado(texto_bruto):
-        log_fil.warning(f"🚫 Descartado pelo filtro | grupo={username}")
+        log_fil.warning(f"🚫 Filtro | @{username}")
         return
 
-    links_raw = re.findall(r'https?://[^\s\)\]>,"\']+', texto_bruto)
-    log_lnk.info(f"🔗 Encontrados {len(links_raw)} link(s). Iniciando conversão...")
+    # ── ETAPA 4: Extrai links ─────────────────────────────────────────
+    links_raw = _RE_URL.findall(texto_bruto)
+    # Limpa pontuação no final de cada link
+    links_raw = [l.rstrip('.,;)>') for l in links_raw]
+    log_lnk.info(f"🔗 {len(links_raw)} link(s) encontrado(s)")
 
     if not links_raw and "fadadoscupons" not in username:
-        log_sys.debug("⏩ Sem links fora do fadadoscupons")
+        log_sys.debug("⏩ Sem links e não é fadadoscupons")
         return
 
+    # ── ETAPA 5: Conversão paralela de todos os links ─────────────────
     mapa_links, plat_p = {}, "amazon"
     if links_raw:
-        mapa_links, plat_p = await converter_todos_links(links_raw)
+        mapa_links, plat_p = await converter_links(links_raw)
 
+    # Se havia links mas NENHUM é Amazon/Shopee → descarta
     if links_raw and not mapa_links:
-        log_sys.warning(f"⚠️ Nenhum link válido (Amazon/Shopee) restou | grupo={username}")
+        log_sys.warning(f"🚫 Zero links Amazon/Shopee | @{username}")
         return
 
-    prod_id = extrair_produto_id(mapa_links)
-    preco   = extrair_preco(texto_bruto)
-    cupom   = extrair_cupom(texto_bruto)
-    log_dedup.debug(f"🔬 prod={prod_id} preco={preco} cupom={cupom} plat={plat_p}")
+    # ── ETAPA 6: Deduplicação ─────────────────────────────────────────
+    prod = _prod_id(mapa_links)
+    prec = _preco(texto_bruto)
+    cup  = _cupom(texto_bruto)
+    log_dedup.debug(f"🔬 prod={prod} preco={prec} cupom={cup} plat={plat_p}")
 
-    if not is_edit and not deve_enviar_oferta(plat_p, prod_id, preco, cupom, texto_bruto):
-        return
+    if not is_edit:
+        if not deve_enviar(plat_p, prod, prec, cup, texto_bruto):
+            log_dedup.info("🚫 Duplicata bloqueada")
+            return
 
-    eh_cup     = _eh_cupom(texto_bruto)
-    eh_cup_shp = _eh_cupom_shopee(texto_bruto, plat_p)
-    msg_final  = formatar_texto(texto_bruto, mapa_links, plat_p, eh_cup, eh_cup_shp)
+    # ── ETAPA 7: Formatação ───────────────────────────────────────────
+    msg_final = formatar(texto_bruto, mapa_links, plat_p)
+    log_fmt.debug(f"📝 Mensagem final ({len(msg_final)} chars):\n{msg_final[:200]}")
 
-    # Imagem
-    media_orig   = event.message.media
-    tem_img_real = _tem_midia_real(media_orig)
-    imagem       = None
+    # ── ETAPA 8: Imagem ───────────────────────────────────────────────
+    media_orig = event.message.media
+    tem_img    = _tem_midia(media_orig)
+    imagem     = None
 
-    if eh_cup:
-        if tem_img_real:
+    if _eh_cupom(texto_bruto):
+        if tem_img:
             imagem = media_orig
             log_img.debug("🖼 Cupom: imagem real do grupo")
         elif plat_p == "shopee":
@@ -802,92 +850,105 @@ async def processar_evento(event, is_edit: bool = False):
             imagem = IMG_AMAZON if os.path.exists(IMG_AMAZON) else None
             log_img.info(f"🖼 Cupom Amazon → fallback: {IMG_AMAZON}")
     else:
-        if tem_img_real:
+        if tem_img:
             imagem = media_orig
-            log_img.debug("🖼 Oferta: imagem real do grupo")
+            log_img.debug("🖼 Oferta: imagem real")
         elif mapa_links:
-            imagem = await buscar_imagem_produto(list(mapa_links.values())[0])
+            imagem = await buscar_imagem(list(mapa_links.values())[0])
 
-    # Mapeamento de mensagens
-    loop = asyncio.get_event_loop()
+    # ── ETAPA 9: Envio / Edição ───────────────────────────────────────
+    await _aguardar_rate_limit()
 
-    def _ler_mapa():
-        if not os.path.exists(ARQUIVO_MAPEAMENTO):
-            return {}
+    async with _SEM_ENVIO:
+        loop = asyncio.get_event_loop()
+        mapa = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+
         try:
-            with open(ARQUIVO_MAPEAMENTO, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-
-    def _salvar_mapa(m: dict):
-        try:
-            with open(ARQUIVO_MAPEAMENTO, "w", encoding="utf-8") as f:
-                json.dump(m, f, ensure_ascii=False)
-        except Exception as e:
-            log_tg.error(f"Erro ao salvar mapa: {e}")
-
-    async with envio_lock:
-        mapa = await loop.run_in_executor(_executor, _ler_mapa)
-        try:
-            # EDIÇÃO
-            if is_edit and str(event.message.id) in mapa:
-                id_dest = mapa[str(event.message.id)]
-                log_tg.info(f"✏️ Editando id={id_dest}")
-                try:
-                    await client.edit_message(GRUPO_DESTINO, id_dest, msg_final)
-                    log_tg.info("✅ Edição ok")
-                except MessageNotModifiedError:
-                    log_tg.debug("⏩ Sem mudança real na edição")
-                except FloodWaitError as e:
-                    log_tg.warning(f"⏳ FloodWait edição: {e.seconds}s")
-                    await asyncio.sleep(e.seconds)
+            # MODO EDIÇÃO
+            if is_edit:
+                id_dest = mapa[str(msg_id)]
+                log_tg.info(f"✏️ Editando destino id={id_dest}")
+                for tentativa in range(1, 4):
+                    try:
+                        await client.edit_message(GRUPO_DESTINO, id_dest, msg_final)
+                        log_tg.info("✅ Edição ok")
+                        break
+                    except MessageNotModifiedError:
+                        log_tg.debug("⏩ Conteúdo idêntico")
+                        break
+                    except FloodWaitError as e:
+                        log_tg.warning(f"⏳ FloodWait edição: {e.seconds}s")
+                        await asyncio.sleep(e.seconds)
+                    except Exception as e:
+                        log_tg.error(f"❌ Erro edição t={tentativa}: {e}")
+                        if tentativa < 3:
+                            await asyncio.sleep(2 ** tentativa)
                 return
 
-            # ENVIO
+            # MODO ENVIO — com retry
             sent = None
-            if imagem:
-                log_tg.debug(f"📤 Com imagem | len={len(msg_final)}")
+            for tentativa in range(1, 4):
                 try:
-                    if len(msg_final) > 1024:
-                        f_img = await client.send_file(GRUPO_DESTINO, imagem)
-                        sent  = await client.send_message(
-                            GRUPO_DESTINO, msg_final, reply_to=f_img.id)
+                    if imagem:
+                        if len(msg_final) > 1024:
+                            f_img = await client.send_file(GRUPO_DESTINO, imagem)
+                            sent  = await client.send_message(
+                                GRUPO_DESTINO, msg_final, reply_to=f_img.id)
+                        else:
+                            sent = await client.send_file(
+                                GRUPO_DESTINO, imagem, caption=msg_final)
                     else:
-                        sent = await client.send_file(
-                            GRUPO_DESTINO, imagem, caption=msg_final)
+                        sent = await client.send_message(
+                            GRUPO_DESTINO, msg_final, link_preview=True)
+                    break  # Sucesso
+                except FloodWaitError as e:
+                    log_tg.warning(f"⏳ FloodWait envio: {e.seconds}s")
+                    await asyncio.sleep(e.seconds)
                 except Exception as e:
-                    log_tg.error(f"❌ Falha com imagem: {e} → sem imagem")
-                    sent = await client.send_message(
-                        GRUPO_DESTINO, msg_final, link_preview=True)
-            else:
-                log_tg.debug("📤 Sem imagem (link preview)")
-                sent = await client.send_message(
-                    GRUPO_DESTINO, msg_final, link_preview=True)
+                    log_tg.error(f"❌ Envio t={tentativa}: {e}")
+                    if tentativa == 1 and imagem:
+                        # Retry sem imagem
+                        imagem = None
+                    elif tentativa < 3:
+                        await asyncio.sleep(2 ** tentativa)
 
             if sent:
-                mapa[str(event.message.id)] = sent.id
-                await loop.run_in_executor(_executor, _salvar_mapa, mapa)
+                mapa[str(msg_id)] = sent.id
+                await loop.run_in_executor(_EXECUTOR, salvar_mapa, mapa)
+                await _marcar_processado(msg_id)
                 log_sys.info(
-                    f"🚀 [SUCESSO] Enviado para {GRUPO_DESTINO} | "
-                    f"origem={event.message.id} destino={sent.id} | "
-                    f"plat={plat_p.upper()}")
+                    f"🚀 [OK] @{username} → {GRUPO_DESTINO} | "
+                    f"origem={msg_id} destino={sent.id} | plat={plat_p.upper()}")
 
-        except FloodWaitError as e:
-            log_tg.warning(f"⏳ FloodWait envio: {e.seconds}s")
-            await asyncio.sleep(e.seconds)
         except Exception as e:
             log_sys.error(f"❌ ERRO CRÍTICO: {e}", exc_info=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# MÓDULO 14 ▸ INICIALIZAÇÃO COM AUTO-RESTART
+# MÓDULO 17 ▸ HEALTH CHECK PERIÓDICO
+# ══════════════════════════════════════════════════════════════════════════
+
+async def _health_check():
+    """A cada 5 minutos loga o status do bot."""
+    while True:
+        await asyncio.sleep(300)
+        cache = ler_cache()
+        mapa  = ler_mapa()
+        log_hc.info(
+            f"💚 Health | cache={len(cache)} entradas | "
+            f"mapa={len(mapa)} msgs | "
+            f"processados={len(_IDS_PROCESSADOS)}"
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# MÓDULO 18 ▸ INICIALIZAÇÃO COM AUTO-RESTART
 # ══════════════════════════════════════════════════════════════════════════
 
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
 
-async def _iniciar_bot():
+async def _run():
     log_sys.info("🔌 Conectando ao Telegram...")
     await client.connect()
 
@@ -897,37 +958,38 @@ async def _iniciar_bot():
 
     me = await client.get_me()
     log_sys.info(f"✅ Conectado: {me.first_name} (@{me.username}) | ID={me.id}")
-    log_sys.info(f"📡 Monitorando: {GRUPOS_ORIGEM}")
+    log_sys.info(f"📡 Grupos monitorados: {GRUPOS_ORIGEM}")
     log_sys.info(f"📣 Destino: {GRUPO_DESTINO}")
     log_sys.info(f"🏷  Amazon tag: {AMAZON_TAG} | Shopee App: {SHOPEE_APP_ID}")
-    log_sys.info("🚀 FOGUETÃO v63.0 ONLINE — AMAZON + SHOPEE!")
+    log_sys.info("🚀 FOGUETÃO v64.0 ONLINE — AMAZON + SHOPEE!")
 
+    # Registra handlers
     @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
-    async def handler_new(event):
+    async def on_new(event):
         try:
-            await processar_evento(event, is_edit=False)
+            await processar(event, is_edit=False)
         except Exception as e:
-            log_sys.error(f"❌ handler_new: {e}", exc_info=True)
+            log_sys.error(f"❌ on_new: {e}", exc_info=True)
 
     @client.on(events.MessageEdited(chats=GRUPOS_ORIGEM))
-    async def handler_edit(event):
+    async def on_edit(event):
         try:
-            await processar_evento(event, is_edit=True)
+            await processar(event, is_edit=True)
         except Exception as e:
-            log_sys.error(f"❌ handler_edit: {e}", exc_info=True)
+            log_sys.error(f"❌ on_edit: {e}", exc_info=True)
+
+    # Inicia health-check em background
+    asyncio.create_task(_health_check())
 
     await client.run_until_disconnected()
     return True
 
 
 async def main():
-    """
-    Auto-restart: se o bot cair por rede ou flood, reinicia em 15s.
-    Para apenas em erro de autenticação irrecuperável.
-    """
+    """Auto-restart: reinicia em 15s em qualquer queda de rede/flood."""
     while True:
         try:
-            await _iniciar_bot()
+            await _run()
         except (AuthKeyUnregisteredError, SessionPasswordNeededError) as e:
             log_sys.error(f"❌ Erro de autenticação — encerrando: {e}")
             break
