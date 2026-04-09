@@ -566,4 +566,379 @@ def _layout_cupom_amazon(linhas_texto: list, links: list) -> str:
     out = ["🚨 Cupons Amazon APP", ""]
 
     for ld in linhas_desc:
-        out.append(f"🎟 {ld}")
+        out.append(f"🎟 {ld}" if not _tem_emoji(ld) else ld)
+
+    if links_amz:
+        out.extend(["", "✅ Resgate aqui:"])
+        for lk in links_amz:
+            out.append(lk)
+
+    for le in linhas_extra:
+        out.append(le)
+
+    return "\n".join(out)
+
+
+def _layout_oferta_comum(linhas_texto: list, links: list) -> str:
+    """
+    Monta:
+      🔥 <nome do produto>
+      (vazio)
+      ✅ <linha de preço>
+      🎟 <linha com cupom embutido, se houver>
+      <links>
+      <demais linhas>
+    """
+    nao_links    = [l for l in linhas_texto if not re.match(r'^https?://', l)]
+
+    # Identifica o nome (primeira linha sem preço e sem keyword de cupom)
+    linha_nome  = ""
+    linha_preco = ""
+    linha_cup   = ""
+    extras      = []
+
+    for l in nao_links:
+        tem_preco = bool(_RE_PRECO.search(l))
+        tem_cup   = bool(_RE_CUPOM_KW.search(l))
+        if not linha_nome and not tem_preco and not tem_cup:
+            linha_nome = l
+        elif tem_preco and tem_cup:
+            linha_cup = l
+        elif tem_preco and not linha_preco:
+            linha_preco = l
+        elif tem_cup:
+            linha_cup = l
+        else:
+            extras.append(l)
+
+    out = []
+    if linha_nome:
+        out.append(f"🔥 {linha_nome}" if not _tem_emoji(linha_nome) else linha_nome)
+        out.append("")
+
+    if linha_preco:
+        out.append(f"✅ {linha_preco}" if not _tem_emoji(linha_preco) else linha_preco)
+
+    if linha_cup:
+        out.append(f"🎟 {linha_cup}" if not _tem_emoji(linha_cup) else linha_cup)
+
+    if out:
+        out.append("")
+
+    for lk in links:
+        out.append(lk)
+
+    for le in extras:
+        out.append(le)
+
+    return "\n".join(out)
+
+
+def formatar_texto(
+    texto_original: str,
+    mapa_links: dict,
+    plat_principal: str,
+    eh_cupom: bool,
+    eh_cupom_shp: bool,
+) -> str:
+    # 1. Troca links pelos de afiliado
+    texto = texto_original
+    for antigo, novo in mapa_links.items():
+        texto = texto.replace(antigo, novo)
+
+    # 2. Remove links que não são Amazon/Shopee
+    aceitos = set(mapa_links.values())
+    for link in re.findall(r'https?://[^\s\)\]>,"\']+', texto):
+        lc = link.rstrip('.,;)')
+        if lc not in aceitos:
+            log_lnk.debug(f"🗑 Removendo: {lc[:60]}")
+            texto = texto.replace(link, "").replace(lc, "")
+
+    texto = re.sub(r'\n{3,}', '\n\n', texto).strip()
+
+    # 3. Decide estratégia
+    emojis_orig = _contar_emojis(texto_original)
+
+    if emojis_orig >= 2:
+        # Modo complementar: mantém estrutura, apenas enfeita onde falta
+        linhas = texto.split('\n')
+        novas  = []
+        primeira = False
+        for linha in linhas:
+            l = linha.strip()
+            if not l:
+                novas.append("")
+                continue
+            if not primeira:
+                primeira = True
+                if not _tem_emoji(l) and not re.match(r'^https?://', l):
+                    novas.append(("🔥 " if eh_cupom else "✅ ") + l)
+                    continue
+            novas.append(_enfeitar_linha(linha))
+        return "\n".join(novas).strip()
+
+    # Modo layout completo
+    linhas_texto = [l.strip() for l in texto.split('\n') if l.strip()]
+    links_na_msg = [l for l in linhas_texto if re.match(r'^https?://', l)]
+
+    if eh_cupom_shp:
+        return _layout_cupom_shopee(linhas_texto, links_na_msg)
+    if eh_cupom:
+        return _layout_cupom_amazon(linhas_texto, links_na_msg)
+    return _layout_oferta_comum(linhas_texto, links_na_msg)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# MÓDULO 11 ▸ BUSCA DE IMAGEM — 3 TENTATIVAS + FALLBACK PREVIEW
+# ══════════════════════════════════════════════════════════════════════════
+
+async def buscar_imagem_produto(url_produto: str) -> str | None:
+    for t in range(1, 4):
+        log_img.debug(f"🖼 Tentativa {t}/3 | {url_produto[:60]}")
+        try:
+            async with aiohttp.ClientSession(
+                headers={"User-Agent": random.choice(USER_AGENTS)}
+            ) as s:
+                async with s.get(url_produto, allow_redirects=True,
+                                  timeout=aiohttp.ClientTimeout(total=12)) as r:
+                    soup = BeautifulSoup(await r.text(errors="ignore"), "html.parser")
+                    tag  = (soup.find("meta", property="og:image") or
+                            soup.find("meta", attrs={"name": "twitter:image"}))
+                    if tag and tag.get("content"):
+                        log_img.info(f"✅ Imagem (t={t}): {tag['content'][:70]}")
+                        return tag["content"]
+        except asyncio.TimeoutError:
+            log_img.warning(f"⏱ Timeout t={t}/3")
+        except Exception as e:
+            log_img.warning(f"⚠️ Erro t={t}/3: {e}")
+        await asyncio.sleep(1.5 * t)
+    log_img.warning("❌ Sem imagem após 3 tentativas → link preview")
+    return None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# MÓDULO 12 ▸ FINGERPRINT
+# ══════════════════════════════════════════════════════════════════════════
+
+def extrair_produto_id(mapa: dict) -> str:
+    if not mapa:
+        return "0"
+    primeiro = list(mapa.values())[0]
+    for pat in [r'/dp/([A-Z0-9]{10})', r'/gp/product/([A-Z0-9]{10})',
+                r'/i\.(\d+\.\d+)',     r'/product/(\d+)']:
+        m = re.search(pat, primeiro)
+        if m:
+            return m.group(1)
+    return primeiro[-20:]
+
+def extrair_preco(texto: str) -> str:
+    m = _RE_PRECO.search(texto)
+    return m.group(0).strip() if m else "0"
+
+def extrair_cupom(texto: str) -> str:
+    m = re.search(r'\b([A-Z][A-Z0-9]{3,19})\b', texto)
+    return m.group(1) if m else ""
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# MÓDULO 13 ▸ PROCESSAMENTO E ENVIO / EDIÇÃO
+# ══════════════════════════════════════════════════════════════════════════
+
+async def processar_evento(event, is_edit: bool = False):
+    texto_bruto = event.message.text or ""
+    chat        = await event.get_chat()
+    username    = (chat.username or str(event.chat_id)).lower()
+
+    log_tg.info(f"📩 Mensagem recebida de: @{username}")
+    log_sys.debug(f"{'✏️ EDIT' if is_edit else '📩 NEW'} | chars={len(texto_bruto)}")
+
+    if not texto_bruto.strip():
+        return
+
+    if texto_bloqueado(texto_bruto):
+        log_fil.warning(f"🚫 Descartado pelo filtro | grupo={username}")
+        return
+
+    links_raw = re.findall(r'https?://[^\s\)\]>,"\']+', texto_bruto)
+    log_lnk.info(f"🔗 Encontrados {len(links_raw)} link(s). Iniciando conversão...")
+
+    if not links_raw and "fadadoscupons" not in username:
+        log_sys.debug("⏩ Sem links fora do fadadoscupons")
+        return
+
+    mapa_links, plat_p = {}, "amazon"
+    if links_raw:
+        mapa_links, plat_p = await converter_todos_links(links_raw)
+
+    if links_raw and not mapa_links:
+        log_sys.warning(f"⚠️ Nenhum link válido (Amazon/Shopee) restou | grupo={username}")
+        return
+
+    prod_id = extrair_produto_id(mapa_links)
+    preco   = extrair_preco(texto_bruto)
+    cupom   = extrair_cupom(texto_bruto)
+    log_dedup.debug(f"🔬 prod={prod_id} preco={preco} cupom={cupom} plat={plat_p}")
+
+    if not is_edit and not deve_enviar_oferta(plat_p, prod_id, preco, cupom, texto_bruto):
+        return
+
+    eh_cup     = _eh_cupom(texto_bruto)
+    eh_cup_shp = _eh_cupom_shopee(texto_bruto, plat_p)
+    msg_final  = formatar_texto(texto_bruto, mapa_links, plat_p, eh_cup, eh_cup_shp)
+
+    # Imagem
+    media_orig   = event.message.media
+    tem_img_real = _tem_midia_real(media_orig)
+    imagem       = None
+
+    if eh_cup:
+        if tem_img_real:
+            imagem = media_orig
+            log_img.debug("🖼 Cupom: imagem real do grupo")
+        elif plat_p == "shopee":
+            imagem = IMG_SHOPEE if os.path.exists(IMG_SHOPEE) else None
+            log_img.info(f"🖼 Cupom Shopee → fallback: {IMG_SHOPEE}")
+        else:
+            imagem = IMG_AMAZON if os.path.exists(IMG_AMAZON) else None
+            log_img.info(f"🖼 Cupom Amazon → fallback: {IMG_AMAZON}")
+    else:
+        if tem_img_real:
+            imagem = media_orig
+            log_img.debug("🖼 Oferta: imagem real do grupo")
+        elif mapa_links:
+            imagem = await buscar_imagem_produto(list(mapa_links.values())[0])
+
+    # Mapeamento de mensagens
+    loop = asyncio.get_event_loop()
+
+    def _ler_mapa():
+        if not os.path.exists(ARQUIVO_MAPEAMENTO):
+            return {}
+        try:
+            with open(ARQUIVO_MAPEAMENTO, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _salvar_mapa(m: dict):
+        try:
+            with open(ARQUIVO_MAPEAMENTO, "w", encoding="utf-8") as f:
+                json.dump(m, f, ensure_ascii=False)
+        except Exception as e:
+            log_tg.error(f"Erro ao salvar mapa: {e}")
+
+    async with envio_lock:
+        mapa = await loop.run_in_executor(_executor, _ler_mapa)
+        try:
+            # EDIÇÃO
+            if is_edit and str(event.message.id) in mapa:
+                id_dest = mapa[str(event.message.id)]
+                log_tg.info(f"✏️ Editando id={id_dest}")
+                try:
+                    await client.edit_message(GRUPO_DESTINO, id_dest, msg_final)
+                    log_tg.info("✅ Edição ok")
+                except MessageNotModifiedError:
+                    log_tg.debug("⏩ Sem mudança real na edição")
+                except FloodWaitError as e:
+                    log_tg.warning(f"⏳ FloodWait edição: {e.seconds}s")
+                    await asyncio.sleep(e.seconds)
+                return
+
+            # ENVIO
+            sent = None
+            if imagem:
+                log_tg.debug(f"📤 Com imagem | len={len(msg_final)}")
+                try:
+                    if len(msg_final) > 1024:
+                        f_img = await client.send_file(GRUPO_DESTINO, imagem)
+                        sent  = await client.send_message(
+                            GRUPO_DESTINO, msg_final, reply_to=f_img.id)
+                    else:
+                        sent = await client.send_file(
+                            GRUPO_DESTINO, imagem, caption=msg_final)
+                except Exception as e:
+                    log_tg.error(f"❌ Falha com imagem: {e} → sem imagem")
+                    sent = await client.send_message(
+                        GRUPO_DESTINO, msg_final, link_preview=True)
+            else:
+                log_tg.debug("📤 Sem imagem (link preview)")
+                sent = await client.send_message(
+                    GRUPO_DESTINO, msg_final, link_preview=True)
+
+            if sent:
+                mapa[str(event.message.id)] = sent.id
+                await loop.run_in_executor(_executor, _salvar_mapa, mapa)
+                log_sys.info(
+                    f"🚀 [SUCESSO] Enviado para {GRUPO_DESTINO} | "
+                    f"origem={event.message.id} destino={sent.id} | "
+                    f"plat={plat_p.upper()}")
+
+        except FloodWaitError as e:
+            log_tg.warning(f"⏳ FloodWait envio: {e.seconds}s")
+            await asyncio.sleep(e.seconds)
+        except Exception as e:
+            log_sys.error(f"❌ ERRO CRÍTICO: {e}", exc_info=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# MÓDULO 14 ▸ INICIALIZAÇÃO COM AUTO-RESTART
+# ══════════════════════════════════════════════════════════════════════════
+
+client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+
+
+async def _iniciar_bot():
+    log_sys.info("🔌 Conectando ao Telegram...")
+    await client.connect()
+
+    if not await client.is_user_authorized():
+        log_sys.error("❌ Sessão inválida! Verifique TELEGRAM_SESSION no Railway.")
+        return False
+
+    me = await client.get_me()
+    log_sys.info(f"✅ Conectado: {me.first_name} (@{me.username}) | ID={me.id}")
+    log_sys.info(f"📡 Monitorando: {GRUPOS_ORIGEM}")
+    log_sys.info(f"📣 Destino: {GRUPO_DESTINO}")
+    log_sys.info(f"🏷  Amazon tag: {AMAZON_TAG} | Shopee App: {SHOPEE_APP_ID}")
+    log_sys.info("🚀 FOGUETÃO v63.0 ONLINE — AMAZON + SHOPEE!")
+
+    @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
+    async def handler_new(event):
+        try:
+            await processar_evento(event, is_edit=False)
+        except Exception as e:
+            log_sys.error(f"❌ handler_new: {e}", exc_info=True)
+
+    @client.on(events.MessageEdited(chats=GRUPOS_ORIGEM))
+    async def handler_edit(event):
+        try:
+            await processar_evento(event, is_edit=True)
+        except Exception as e:
+            log_sys.error(f"❌ handler_edit: {e}", exc_info=True)
+
+    await client.run_until_disconnected()
+    return True
+
+
+async def main():
+    """
+    Auto-restart: se o bot cair por rede ou flood, reinicia em 15s.
+    Para apenas em erro de autenticação irrecuperável.
+    """
+    while True:
+        try:
+            await _iniciar_bot()
+        except (AuthKeyUnregisteredError, SessionPasswordNeededError) as e:
+            log_sys.error(f"❌ Erro de autenticação — encerrando: {e}")
+            break
+        except Exception as e:
+            log_sys.error(f"💥 Bot caiu: {e} — reiniciando em 15s...", exc_info=True)
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            await asyncio.sleep(15)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
