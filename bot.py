@@ -7,7 +7,6 @@
 REGRAS DE FORMATAÇÃO:
   - Texto original copiado fielmente
   - Emojis originais mantidos; se não vier emoji, adiciona conforme contexto
-  - 🛒 Carrinho: adicionado nos cupons Shopee (e só neles)
   - Links Amazon enviados como URL clicável limpa (sem parâmetros lixo)
   - Zero crases em cupons
   - Links não-Amazon/Shopee removidos silenciosamente do texto
@@ -526,8 +525,7 @@ async def converter_todos_links(links: list) -> tuple:
 #  2. Troca links antigos pelos novos (limpos, clicáveis)
 #  3. Remove links que não são Amazon/Shopee
 #  4. Mantém emojis que já vieram; adiciona emojis onde não tem
-#  5. Cupom Shopee → insere "🛒 Carrinho:" antes do link
-#  6. Zero crases
+#  5. Zero crases
 # ══════════════════════════════════════════════════════════════════════════
 
 # Detecta se já tem algum emoji na linha
@@ -537,3 +535,85 @@ _RE_TEM_EMOJI = re.compile(
     "\u2600-\u26FF"
     "\u2700]"
 )
+# ══════════════════════════════════════════════════════════════════════════
+# MÓDULO 10 ▸ EXECUÇÃO COM DEBUG COMPLETO POR PLATAFORMA
+# ══════════════════════════════════════════════════════════════════════════
+
+# Inicializa o cliente Telegram
+client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+
+@client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
+async def processar_oferta(event):
+    try:
+        texto = event.text
+        if not texto:
+            return
+
+        origem = event.chat.username if event.chat.username else event.chat_id
+        log_tg.info(f"📩 Mensagem recebida de: @{origem}")
+
+        # --- DEBUG FILTRO ---
+        if texto_bloqueado(texto):
+            log_fil.warning(f"🚫 Mensagem descartada pelo filtro de palavras.")
+            return
+
+        # --- DEBUG LINKS ---
+        links = re.findall(r'(https?://\S+)', texto)
+        if not links:
+            log_lnk.debug("ℹ️ Nenhuma URL encontrada nesta mensagem.")
+            return
+        
+        log_lnk.info(f"🔗 Encontrados {len(links)} link(s). Iniciando conversão...")
+
+        # Converte os links usando o Módulo 8 (que já tem debug de Amazon/Shopee dentro)
+        mapa_links, plat_principal = await converter_todos_links(links)
+
+        if not mapa_links:
+            log_sys.warning("⚠️ Nenhum link válido (Amazon/Shopee) restou após a conversão.")
+            return
+
+        # --- MONTAGEM DO TEXTO FINAL ---
+        texto_final = texto
+        for link_antigo, link_novo in mapa_links.items():
+            # Debug específico por plataforma no texto
+            if "shopee" in link_novo.lower():
+                log_shp.debug(f"🧡 Aplicando formato Shopee no link...")
+                link_novo = f"🛒 Carrinho: {link_novo}"
+            elif "amazon" in link_novo.lower():
+                log_amz.debug(f"💛 Aplicando formato Amazon no link...")
+
+            texto_final = texto_final.replace(link_antigo, link_novo)
+
+        # Limpeza final
+        texto_final = texto_final.replace("`", "")
+
+        # --- ENVIO FINAL ---
+        async with envio_lock:
+            await client.send_message(GRUPO_DESTINO, texto_final)
+            log_sys.info(f"🚀 [SUCESSO] Oferta enviada para {GRUPO_DESTINO} | Plat: {plat_principal.upper()}")
+
+    except Exception as e:
+        log_sys.error(f"❌ ERRO CRÍTICO: {str(e)}")
+
+async def iniciar_foguetao():
+    log_sys.info("🚀 FOGUETÃO v62.0 — Autenticando...")
+    try:
+        await client.start()
+        # Log de confirmação que aparecerá no Railway
+        print("\n" + "="*50)
+        print("✅ CONECTADO COM SUCESSO!")
+        print(f"📡 Monitorando: {GRUPOS_ORIGEM}")
+        print(f"📤 Destino: {GRUPO_DESTINO}")
+        print("="*50 + "\n")
+        
+        log_sys.info("🎮 Bot em modo de escuta... Pode mandar as promoções!")
+        await client.run_until_disconnected()
+    except Exception as e:
+        log_sys.error(f"❌ Falha ao ligar o bot: {e}")
+
+if __name__ == '__main__':
+    # Força os logs a aparecerem na hora no Railway (sem delay)
+    import sys
+    sys.stdout.reconfigure(line_buffering=True)
+    
+    asyncio.run(iniciar_foguetao())
