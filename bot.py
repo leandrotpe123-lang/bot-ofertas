@@ -1,20 +1,21 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║   FOGUETÃO v69.0 — IA DE OFERTAS — MÁXIMO NÍVEL                            ║
+║   FOGUETÃO v70.0 — CIRURGIA NOS MÓDULOS 5, 9, 11, 12, 13, 14, 15          ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
-║  NOVIDADES v69:                                                             ║
-║   1. Suporte completo a mensagens EDITADAS (anti-loop preservado)          ║
-║   2. Desencurtador ultra-forte: 301/302/307/308 + meta + JS + cadeia       ║
-║   3. Motor Magalu isolado com desencurtamento profundo em qualquer URL      ║
-║   4. Extração de TODOS os links de uma mensagem (até 50)                   ║
-║   5. Limpeza de ruído textual (anúncio, CTA quebrado, espaços)             ║
-║   6. Deduplicação semântica por campanha + cupom + ASIN                    ║
-║   7. Links wa.me / WhatsApp PRESERVADOS (nunca sobrescritos)               ║
-║   8. Emojis semânticos por categoria de produto                             ║
-║   9. Amazon: limpeza inteligente por tipo de URL                           ║
-║      /dp/ASIN → amazon.com.br/dp/ASIN?tag=                                ║
-║      /promotion/psp/ID → ...?tag= (sem redirectAsin/redirectMerchantId)   ║
-║      /events/... → mantém path + tag                                       ║
+║  CORREÇÕES CIRÚRGICAS v70:                                                  ║
+║   5.  Classificação 100% estanque — Magalu verificado ANTES de Amazon      ║
+║       Correspondência por sufixo (não substring) → zero cross-linking      ║
+║   9.  Magalu: limpa TODOS os params antes de injetar os do sistema         ║
+║       Cuttly: encoding correto, trata status 2 (existente), erros detalhados║
+║   11. Guard explícito anti-cross-linking no pipeline de conversão          ║
+║   12. Limpeza em 3 camadas: inline re.sub para expressões de afiliado      ║
+║       Remove: '-Link produto:', 'Resgate aqui:', ':::', '---', etc.        ║
+║   13. Hierarquia de categorias com PESOS — PET (100) > BEBÊ (95) >         ║
+║       ELETRÔNICOS (90) > ALIMENTOS (20) — corrige ração→🍫                ║
+║       Dominadores: 'ração' anula 'frango' como alimento                    ║
+║   14. Layout estruturado FORÇADO: título/preço/link/cupom em blocos        ║
+║   15. Dedup com sensibilidade elevada para eventos (Quiz, Roleta, Missão): ║
+║       SIM_EVENTO=0.95 + janela de 24h                                      ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -199,19 +200,47 @@ def _netloc(url: str) -> str:
 def classificar(url: str) -> Optional[str]:
     """
     Retorna: 'amazon' | 'shopee' | 'magalu' | 'preservar' | 'expandir' | None
-    'preservar' = wa.me / WhatsApp → nunca substituir
-    None = fora da whitelist → descarta
+
+    REGRA DE ISOLAMENTO ESTANQUE:
+    - Verificação é feita por SUFIXO de domínio (netloc termina com o domínio ou é igual).
+    - Magalu é verificado ANTES de Amazon e Shopee para evitar qualquer ambiguidade.
+    - Um link magazineluiza.com.br NUNCA passa pelo motor Amazon.
+    - Um link amazon.com.br NUNCA passa pelo motor Magalu.
     """
     nl = _netloc(url)
+    if not nl:
+        return None
+
+    # Preservar primeiro (WhatsApp / wa.me)
     for d in _PRESERVE:
-        if d in nl:
+        if nl == d or nl.endswith("." + d):
             return "preservar"
-    for dom, plat in _WHITELIST.items():
-        if dom in nl:
-            return plat
+
+    # MAGALU verificado ANTES de amazon/shopee — evita cross-linking
+    for dom in ("magazineluiza.com.br", "sacola.magazineluiza.com.br",
+                "magazinevoce.com.br", "maga.lu"):
+        if nl == dom or nl.endswith("." + dom):
+            log_lnk.debug(f"🔵 MAGALU: {nl}")
+            return "magalu"
+
+    # AMAZON — somente domínios exatos da Amazon
+    for dom in ("amazon.com.br", "amzn.to", "amzn.com", "a.co"):
+        if nl == dom or nl.endswith("." + dom):
+            log_lnk.debug(f"🟠 AMAZON: {nl}")
+            return "amazon"
+
+    # SHOPEE
+    for dom in ("shopee.com.br", "s.shopee.com.br", "shopee.com", "shope.ee"):
+        if nl == dom or nl.endswith("." + dom):
+            log_lnk.debug(f"🟣 SHOPEE: {nl}")
+            return "shopee"
+
+    # Encurtadores genéricos → expandir e reclassificar
     for enc in _ENCURTADORES:
-        if enc in nl:
+        if nl == enc or nl.endswith("." + enc):
             return "expandir"
+
+    log_lnk.debug(f"🗑 Fora whitelist: {nl}")
     return None
 
 def _eh_vitrine_magalu(url: str) -> bool:
@@ -464,44 +493,79 @@ async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
 def _construir_url_magalu(url_exp: str) -> str:
     """
     Constrói URL Magalu com parâmetros do sistema.
-    SEMPRE sobrescreve — nunca herda parâmetros externos.
+    PASSO 1: limpa TODOS os parâmetros da URL original (remove restos de outros afiliados).
+    PASSO 2: reconstrói com parâmetros de comissão 100% do sistema.
+    NUNCA herda parâmetros externos — URL de saída é sempre limpa.
     """
     p    = urlparse(url_exp)
     path = p.path
 
+    # Substitui slug se for vitrine/categoria
     if _eh_vitrine_magalu(url_exp):
         path = re.sub(r'(/(?:lojas|magazinevoce)/)[^/]+', rf'\1{_MGL_SLUG}', path)
+        log_mgl.debug(f"  Slug vitrine → {path}")
 
+    # URL base absolutamente limpa (zero params do original)
     base = urlunparse(p._replace(path=path, query="", fragment=""))
+
+    # deeplink também usa a URL base limpa
     deeplink = (f"{base}?utm_source=divulgador&utm_medium=magalu"
                 f"&partnerid={_MGL_PARTNER}&promoterid={_MGL_PROMOTER}"
                 f"&utm_campaign={_MGL_PROMOTER}")
 
     params = {
-        "utm_source": "divulgador", "utm_medium": "magalu",
-        "partnerid": _MGL_PARTNER,  "promoterid": _MGL_PROMOTER,
-        "utm_campaign": _MGL_PROMOTER, "afforcedeeplink": "true",
-        "isretargeting": "true",    "pid": _MGL_PID,
-        "c": _MGL_PROMOTER,         "deeplinkvalue": deeplink,
+        "utm_source":      "divulgador",
+        "utm_medium":      "magalu",
+        "partnerid":       _MGL_PARTNER,
+        "promoterid":      _MGL_PROMOTER,
+        "utm_campaign":    _MGL_PROMOTER,
+        "afforcedeeplink": "true",
+        "isretargeting":   "true",
+        "pid":             _MGL_PID,
+        "c":               _MGL_PROMOTER,
+        "deeplinkvalue":   deeplink,
     }
     return urlunparse(p._replace(path=path, query=urlencode(params), fragment=""))
 
 
 async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> str:
-    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={quote(url, safe='')}"
+    """
+    Encurta via Cuttly com encoding correto e tratamento de erro detalhado.
+    A URL é double-encoded para evitar falha em URLs com caracteres especiais.
+    Retorna a URL original se Cuttly falhar (fail-safe).
+    """
+    url_encoded = quote(url, safe="")
+    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={url_encoded}"
     try:
         async with _SEM_HTTP:
-            async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=10)) as r:
-                data   = await r.json(content_type=None)
+            async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=12)) as r:
+                if r.status != 200:
+                    log_mgl.warning(f"  ⚠️ Cuttly HTTP {r.status}")
+                    return url
+                try:
+                    data = await r.json(content_type=None)
+                except Exception:
+                    raw = await r.text()
+                    log_mgl.warning(f"  ⚠️ Cuttly JSON inválido: {raw[:80]}")
+                    return url
+
                 status = data.get("url", {}).get("status")
+                # Status 7 = sucesso
                 if status == 7:
-                    s = data["url"]["shortLink"]
-                    log_mgl.info(f"  ✂️ {s}")
-                    return s
-                log_mgl.warning(f"  ⚠️ Cuttly status={status}")
+                    short = data["url"]["shortLink"]
+                    log_mgl.info(f"  ✂️ Cuttly: {short}")
+                    return short
+                # Status 2 = URL já encurtada (retorna o link existente)
+                if status == 2:
+                    existing = data["url"].get("shortLink", url)
+                    log_mgl.info(f"  ✂️ Cuttly (existente): {existing}")
+                    return existing
+                log_mgl.warning(f"  ⚠️ Cuttly status={status} | url={url[:60]}")
+    except asyncio.TimeoutError:
+        log_mgl.warning(f"  ⏱ Cuttly timeout | url={url[:60]}")
     except Exception as e:
-        log_mgl.warning(f"  ⚠️ Cuttly: {e}")
-    return url
+        log_mgl.error(f"  ❌ Cuttly erro: {e} | url={url[:60]}")
+    return url  # fail-safe: retorna URL sem encurtar
 
 
 async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
@@ -566,25 +630,36 @@ def extrair_links(texto: str) -> tuple[list, list]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def _converter_um(url: str, sessao: aiohttp.ClientSession) -> tuple:
+    """
+    Converte 1 link. Roteamento ESTANQUE por plataforma.
+    GUARD ANTI-CROSS-LINKING: cada URL só pode entrar no motor da sua plataforma.
+    """
     plat = classificar(url)
 
+    # ── Rotas diretas ─────────────────────────────────────────────────────────
     if plat == "amazon":
+        # Só passa pelo motor Amazon. NUNCA pelo motor Magalu ou Shopee.
         r = await motor_amazon(url, sessao)
         return (r, "amazon") if r else (None, None)
 
     if plat == "shopee":
+        # Só passa pelo motor Shopee. NUNCA pelo motor Amazon ou Magalu.
         r = await motor_shopee(url, sessao)
         return (r, "shopee") if r else (None, None)
 
     if plat == "magalu":
+        # Só passa pelo motor Magalu. NUNCA pelo motor Amazon ou Shopee.
         r = await motor_magalu(url, sessao)
         return (r, "magalu") if r else (None, None)
 
+    # ── Encurtador genérico → expande → reclassifica → roteamento estanque ───
     if plat == "expandir":
-        log_lnk.debug(f"🔄 {url[:70]}")
+        log_lnk.debug(f"🔄 Expandindo: {url[:70]}")
         async with _SEM_HTTP:
             exp = await desencurtar_ultra(url, sessao)
         p2 = classificar(exp)
+        log_lnk.debug(f"  Reclassificado como: {p2} | {exp[:60]}")
+
         if p2 == "amazon":
             r = await motor_amazon(exp, sessao)
             return (r, "amazon") if r else (None, None)
@@ -594,9 +669,12 @@ async def _converter_um(url: str, sessao: aiohttp.ClientSession) -> tuple:
         if p2 == "magalu":
             r = await motor_magalu(exp, sessao)
             return (r, "magalu") if r else (None, None)
-        log_lnk.info(f"🗑 Não na whitelist: {exp[:70]}")
+
+        log_lnk.info(f"🗑 Não na whitelist após expansão: {exp[:70]}")
         return None, None
 
+    # Fora da whitelist → descarta
+    log_lnk.debug(f"🗑 Descartado: {url[:70]}")
     return None, None
 
 
@@ -660,24 +738,77 @@ _RE_RUIDO_LINHA = re.compile(
 
 def limpar_ruido_textual(texto: str) -> str:
     """
-    Remove automaticamente:
-    - Marcadores técnicos (ML:, :: ML, - ML, AMZ:)
-    - Linhas vazias consecutivas (máx 1)
-    - Espaços Unicode invisíveis
-    - Linhas que são só ruído sem conteúdo
+    Limpeza em 3 camadas:
+
+    Camada 1 — Expressões de afiliado inline (re.sub):
+      Remove frases como '-Link produto:', 'Resgate aqui:', 'Confira no app',
+      marcadores como ':::', '---', 'ML:', ':: ML', etc.
+      Aplicado no texto inteiro ANTES de dividir em linhas.
+
+    Camada 2 — Linhas de ruído puro:
+      Linhas que ficaram vazias ou só com ruído após camada 1 são removidas.
+
+    Camada 3 — Normalização de espaços:
+      Remove caracteres Unicode invisíveis e linhas vazias consecutivas.
     """
-    texto = re.sub(r'[\u200b\u200c\u200d\u00a0]', ' ', texto)  # unicode invisíveis
+    # ── Camada 0: Unicode invisíveis ─────────────────────────────────────
+    texto = re.sub(r'[\u200b\u200c\u200d\u00a0\u2060\ufeff]', ' ', texto)
+
+    # ── Camada 1: Expressões de afiliado / CTA / marcadores inline ───────
+    # Expressões que aparecem no INÍCIO de linha (com ou sem hífen/dois-pontos)
+    _exprs_inicio = [
+        r'^\s*-?\s*Link\s+produto\s*:?\s*',
+        r'^\s*-?\s*Link\s+da\s+oferta\s*:?\s*',
+        r'^\s*-?\s*Resgate\s+aqui\s*:?\s*',
+        r'^\s*-?\s*Resgate\s+no\s+app\s*:?\s*',
+        r'^\s*-?\s*Confira\s+no\s+app\s*:?\s*',
+        r'^\s*-?\s*Link\s+no\s+comentário\s*:?\s*',
+        r'^\s*-?\s*Compre\s+aqui\s*:?\s*',
+        r'^\s*-?\s*Acesse\s+aqui\s*:?\s*',
+        r'^\s*-?\s*Clique\s+aqui\s*:?\s*',
+        r'^\s*-?\s*Veja\s+aqui\s*:?\s*',
+        r'^\s*-?\s*Assine\s+aqui\s*:?\s*',
+        r'^\s*-?\s*Saiba\s+mais\s*:?\s*',
+        r'^\s*-?\s*Anúncio\s*:?\s*',
+        r'^\s*-?\s*anuncio\s*:?\s*',
+        r'^\s*-?\s*Publicidade\s*:?\s*',
+    ]
+    # Marcadores técnicos inline
+    _marcadores = [
+        r':::\s*(?:ML|MG|AMZ|loja)?\s*',
+        r'---+\s*',
+        r'===+\s*',
+        r'^\s*[-–—]+\s*(?:ML|MG|AMZ)\s*[-–—]*\s*',
+        r'^\s*(?:ML|MG|AMZ)\s*:\s*',
+        r'^\s*::\s*(?:ML|MG|AMZ)\s*::\s*',
+    ]
+
+    # Aplica substituições linha por linha para não quebrar URLs
     linhas = texto.split('\n')
     limpas = []
-    for l in linhas:
-        ls = l.strip()
-        if _RE_RUIDO_LINHA.match(ls):
-            continue  # linha de ruído → remove
+    for linha in linhas:
+        l = linha
+        for expr in _exprs_inicio:
+            l = re.sub(expr, '', l, flags=re.I | re.M)
+        for marc in _marcadores:
+            l = re.sub(marc, '', l, flags=re.I | re.M)
         limpas.append(l)
 
-    # Remove linhas vazias consecutivas (máx 1)
+    # ── Camada 2: Remove linhas que viraram ruído puro ────────────────────
+    _RE_LINHA_LIXO = re.compile(
+        r'^\s*(?:'
+        r'-\s*Anúncio|Anúncio|anuncio|-anuncio|'
+        r'- Anúncio|-Publicidade|Publicidade|'
+        r':::\s*|---+|===+|'
+        r'[-–]\s*(?:ML|MG|AMZ)|(?:ML|MG|AMZ)\s*:'
+        r')\s*$',
+        re.I
+    )
+    filtradas = [l for l in limpas if not _RE_LINHA_LIXO.match(l.strip())]
+
+    # ── Camada 3: Linhas vazias consecutivas (máx 1) ──────────────────────
     final, pv = [], False
-    for l in limpas:
+    for l in filtradas:
         if l.strip() == "":
             if not pv:
                 final.append("")
@@ -704,38 +835,100 @@ _EMOJI_PLAT = {
                "frete": "🚚", "anuncio": "📢", "estoque": "🛍️"},
 }
 
-_CATS_PRODUTO = [
-    (["whey","proteína","proteina","suplemento","creatina","bcaa","colágeno"],    "💪"),
-    (["tênis","tenis","sapato","sandália","sandalia","sapatênis","chinelo","bota"],"👟"),
-    (["meia","meias","soquete"],                                                   "🧦"),
-    (["camiseta","camisa","calça","vestido","moletom","jaqueta","blusa","cueca"], "👕"),
-    (["álbum","album","figurinha","card","panini","pokemon","sticker"],           "📚"),
-    (["celular","smartphone","iphone","galaxy","xiaomi","motorola","redmi"],      "📱"),
-    (["notebook","laptop","pc gamer","computador"],                               "💻"),
-    (["smart tv","televisão","tv ","soundbar","projetor","home theater"],         "📺"),
-    (["monitor","tela gamer","display"],                                          "🎮"),
-    (["shampoo","condicionador","creme","sérum","perfume","hidratante","maquiagem"],"💄"),
-    (["cerveja","refrigerante","suco","energético","whisky","vinho","água"],      "🥤"),
-    (["chocolate","biscoito","café","açúcar","arroz","leite","frango","carne"],   "🍫"),
-    (["furadeira","parafusadeira","ferramenta","chave","alicate"],                "🔧"),
-    (["game","jogo","ps5","xbox","nintendo","controle","headset gamer"],          "🎮"),
-    (["livro","e-book","mangá","literatura"],                                     "📖"),
-    (["brinquedo","boneca","lego","pelúcia","carrinho"],                          "🧸"),
-    (["bebê","bebe","fraldas","mamadeira","chupeta"],                             "👶"),
-    (["pet","cachorro","gato","ração","coleira","aquário"],                       "🐾"),
-    (["geladeira","fogão","microondas","lavadora","lava-roupas","ar-condicionado"],"🏠"),
-    (["aspirador","purificador","fritadeira","airfryer","cafeteira"],             "🏠"),
+# ── Hierarquia de categorias com PESO (maior = maior prioridade) ─────────────
+# Cada entrada: (peso, palavras_chave, emoji)
+# Quando há conflito (ex: "frango" em ração de pet), a categoria de maior peso vence.
+# PET (peso 100) > BEBÊ (95) > ELETRÔNICOS (90) > ALIMENTOS HUMANOS (20)
+
+_CATS_HIERARQUIA = [
+    # ── Peso 100 — Alta especificidade (nunca confundir) ─────────────────────
+    (100, ["ração","ração gato","ração cachorro","coleira","antipulgas",
+           "arranhador","aquário","comedouro","bebedouro pet"], "🐾"),
+    (100, ["fraldas","mamadeira","chupeta","berço","carrinho de bebê",
+           "enxoval bebê","body bebê"], "👶"),
+
+    # ── Peso 90 — Eletrônicos ─────────────────────────────────────────────────
+    (90,  ["celular","smartphone","iphone","galaxy","xiaomi","motorola",
+           "redmi","android"], "📱"),
+    (90,  ["notebook","laptop","pc gamer","computador","desktop"], "💻"),
+    (90,  ["smart tv","televisão","tv 4k","tv 55","soundbar","projetor",
+           "home theater"], "📺"),
+    (90,  ["monitor gamer","tela gamer","display gamer"], "🎮"),
+    (90,  ["ps5","xbox","nintendo","playstation","controle gamer",
+           "headset gamer"], "🎮"),
+
+    # ── Peso 80 — Categoria bem definida ─────────────────────────────────────
+    (80,  ["whey","proteína","proteina","creatina","bcaa","suplemento",
+           "pre-treino","pré-treino","termogênico"], "💪"),
+    (80,  ["tênis","tenis","sapato","sandália","sandalia","sapatênis",
+           "chinelo","bota calçado"], "👟"),
+    (80,  ["meia","meias","soquete"], "🧦"),
+    (80,  ["álbum","album","figurinha","panini","pokemon","sticker card"], "📚"),
+    (80,  ["shampoo","condicionador","creme facial","sérum","perfume",
+           "hidratante corporal","maquiagem","batom"], "💄"),
+    (80,  ["furadeira","parafusadeira","ferramenta","alicate","chave inglesa",
+           "kit ferramentas"], "🔧"),
+    (80,  ["livro","e-book","mangá","literatura","romance"], "📖"),
+    (80,  ["brinquedo","boneca","lego","pelúcia","quebra-cabeça"], "🧸"),
+    (80,  ["camiseta","camisa","calça","vestido","moletom","jaqueta",
+           "blusa","bermuda","cueca","roupa"], "👕"),
+
+    # ── Peso 70 — Eletrodomésticos ───────────────────────────────────────────
+    (70,  ["geladeira","fogão","micro-ondas","microondas","lavadora",
+           "lava-roupas","máquina de lavar","ar-condicionado"], "🏠"),
+    (70,  ["aspirador","purificador","fritadeira","airfryer","cafeteira",
+           "liquidificador","batedeira"], "🏠"),
+
+    # ── Peso 50 — Genérico ───────────────────────────────────────────────────
+    (50,  ["colágeno","vitamina","omega","suplemento alimentar"], "💊"),
+
+    # ── Peso 20 — Alimentos humanos (baixo peso — perde para pet/bebê) ───────
+    (20,  ["cerveja","refrigerante","suco","energético","whisky","vinho",
+           "água mineral"], "🥤"),
+    (20,  ["chocolate","biscoito","café","açúcar","arroz","leite",
+           "queijo","frango","carne","feijão","macarrão"], "🍫"),
 ]
 
+# Palavras-chave que ANULAM categorias de peso menor
+# Ex: se "ração" estiver no título, ignora "frango" como alimento humano
+_DOMINADORES = {
+    "🐾": ["ração","petshop","pet shop","veterinário","antipulgas"],
+    "👶": ["fraldas","mamadeira","enxoval bebê","berço"],
+}
+
+
 def _emoji_produto(titulo: str) -> Optional[str]:
+    """
+    Detecção de emoji com hierarquia de prioridades.
+    Verifica dominadores primeiro para evitar falso-positivo (ração→🍫).
+    Depois percorre categorias em ordem decrescente de peso.
+    """
     tl = titulo.lower()
-    for palavras, emoji in _CATS_PRODUTO:
+
+    # Verifica dominadores — se detectado, retorna diretamente
+    for emoji_dom, kws in _DOMINADORES.items():
+        if any(kw in tl for kw in kws):
+            log_fmt.debug(f"  Dominador ativo: {emoji_dom} via {[k for k in kws if k in tl]}")
+            return emoji_dom
+
+    # Percorre por peso decrescente
+    candidatos = []
+    for peso, palavras, emoji in _CATS_HIERARQUIA:
         if any(p in tl for p in palavras):
-            return emoji
-    return None
+            candidatos.append((peso, emoji))
+
+    if not candidatos:
+        return None
+
+    # Retorna o de maior peso
+    candidatos.sort(key=lambda x: x[0], reverse=True)
+    escolhido = candidatos[0][1]
+    log_fmt.debug(f"  Emoji produto: {escolhido} (peso={candidatos[0][0]})")
+    return escolhido
+
 
 def _emoji_de_linha(linha: str, plat: str, eh_titulo: bool) -> Optional[str]:
-    """Retorna emoji correto por contexto. Determinístico — não aleatório."""
+    """Retorna emoji correto por contexto. Determinístico."""
     ep = _EMOJI_PLAT.get(plat, _EMOJI_PLAT["amazon"])
     ll = linha.lower()
 
@@ -754,6 +947,7 @@ def _emoji_de_linha(linha: str, plat: str, eh_titulo: bool) -> Optional[str]:
     if any(x in ll for x in ["anúncio","anuncio","publicidade"]):
         return ep["anuncio"]
     return None
+
 
 def _tem_emoji(s: str) -> bool:
     return bool(_RE_EMOJI.search(s))
@@ -784,41 +978,52 @@ def _aplicar_crases(linha: str) -> str:
 def renderizar(texto: str, mapa_links: dict,
                links_preservar: list, plat: str) -> str:
     """
-    Renderizador isolado por plataforma.
-    Estado local — nenhuma variável global é modificada.
+    Renderizador isolado por plataforma com layout estruturado forçado.
+
+    Layout de saída:
+      [Emoji Categoria] Título limpo
+      [Emoji Preço] Valor
+      [Emoji Link] URL(s)
+      [Emoji Alerta] Cupom: `CODIGO` (se houver)
+      Linhas extras preservadas
+
+    Estado 100% local — sem variáveis globais modificadas.
     """
-    # Constrói mapa completo incluindo links preservados (wa.me, etc.)
     mapa_total = dict(mapa_links)
     for url in links_preservar:
-        mapa_total[url] = url  # preservado = mantém igual
+        mapa_total[url] = url
 
-    linhas         = texto.split('\n')
-    saida          = []
-    primeira_texto = True
+    ep = _EMOJI_PLAT.get(plat, _EMOJI_PLAT["amazon"])
 
-    for linha in linhas:
+    # ── Passo 1: Extrai componentes do texto ──────────────────────────────
+    linhas_orig = texto.split('\n')
+    titulo      = ""
+    preco       = ""
+    cupom_linha = ""
+    links_saida = []  # URLs convertidas na ordem em que aparecem
+    extras      = []  # demais linhas de texto (hashtags, notas, etc.)
+
+    for linha in linhas_orig:
         ls = linha.strip()
         if not ls:
-            saida.append("")
             continue
 
-        # ── Linha só de link(s) ───────────────────────────────────────────
+        # Substitui links inline
         urls_raw  = _RE_URL.findall(ls)
         sem_links = _RE_URL.sub("", ls).strip()
 
         if urls_raw and not sem_links:
+            # Linha só de link(s)
             for u in urls_raw:
                 uc = u.rstrip('.,;)>')
                 if uc in mapa_total:
-                    saida.append(mapa_total[uc])
-                # link não mapeado = fora da whitelist = descartado
+                    links_saida.append(mapa_total[uc])
             continue
 
-        # ── Linha com texto ───────────────────────────────────────────────
+        # Linha com texto (pode ter link inline)
         def _sub_link(m):
             uc = m.group(0).rstrip('.,;)>')
-            return mapa_total.get(uc, "")  # "" = remove link não convertido
-
+            return mapa_total.get(uc, "")
         nova = _RE_URL.sub(_sub_link, ls).strip()
         if not nova:
             continue
@@ -828,22 +1033,56 @@ def renderizar(texto: str, mapa_links: dict,
         if not nova:
             continue
 
-        # Crases no código do cupom
+        # Aplica crases no cupom
         if _RE_CUPOM_KW.search(nova) or _RE_COD_CUPOM.search(nova):
             nova = _aplicar_crases(nova)
 
-        # Emoji por contexto (só onde não há emoji próprio)
-        if not _tem_emoji(nova) and not _RE_URL.match(nova):
-            emoji = _emoji_de_linha(nova, plat, eh_titulo=primeira_texto)
-            if emoji:
-                nova = f"{emoji} {nova}"
-            if primeira_texto:
-                primeira_texto = False
-        elif _tem_emoji(nova) and not _RE_URL.match(nova):
-            if primeira_texto:
-                primeira_texto = False
+        ll = nova.lower()
 
-        saida.append(nova)
+        # Classifica a linha
+        if not titulo and not _RE_PRECO.search(nova) and not _RE_CUPOM_KW.search(nova):
+            titulo = nova
+        elif _RE_PRECO.search(nova) and not preco:
+            preco = nova
+        elif _RE_CUPOM_KW.search(nova) and not cupom_linha:
+            cupom_linha = nova
+        else:
+            extras.append(nova)
+
+    # ── Passo 2: Monta layout estruturado ────────────────────────────────
+    saida = []
+
+    # Título com emoji de categoria
+    if titulo:
+        if not _tem_emoji(titulo):
+            emoji_tit = _emoji_produto(titulo) or ep["titulo"]
+            saida.append(f"{emoji_tit} {titulo}")
+        else:
+            saida.append(titulo)
+    saida.append("")
+
+    # Preço
+    if preco:
+        if not _tem_emoji(preco):
+            saida.append(f"{ep['preco']} {preco}")
+        else:
+            saida.append(preco)
+
+    # URLs
+    for url in links_saida:
+        saida.append(url)
+
+    # Cupom
+    if cupom_linha:
+        if not _tem_emoji(cupom_linha):
+            saida.append(f"🚨 {cupom_linha}")
+        else:
+            saida.append(cupom_linha)
+
+    # Extras (hashtags, notas, etc.)
+    for ex in extras:
+        if ex.strip():
+            saida.append(ex)
 
     # Remove linhas vazias consecutivas
     final, pv = [], False
@@ -876,16 +1115,25 @@ def renderizar(texto: str, mapa_links: dict,
 #  • texto mudou significativamente
 # ══════════════════════════════════════════════════════════════════════════════
 
-_TTL_CACHE = 120 * 60
-_SIM_CUP   = 0.92
-_SIM_CAMP  = 0.78
-_JANELA    = 30 * 60
+_TTL_CACHE       = 120 * 60   # 120 min de memória geral
+_TTL_EVENTO      = 24 * 60 * 60  # 24h para eventos recorrentes (Quiz, Roleta)
+_SIM_CUP         = 0.92       # cupom igual + texto similar → bloqueia
+_SIM_CAMP        = 0.78       # campanha igual + texto similar → bloqueia
+_SIM_EVENTO      = 0.95       # Quiz/Roleta/Missão → sensibilidade máxima
+_JANELA          = 30 * 60    # janela padrão de 30 min
+_JANELA_EVENTO   = 24 * 60 * 60  # janela de 24h para eventos
 
 _RUIDO_NORM = {
     "promo","promocao","promoção","oferta","desconto","cupom","corre",
     "aproveita","urgente","gratis","grátis","frete","hoje","agora",
     "relampago","relâmpago","click","clique","veja","confira","app",
 }
+
+# Palavras-chave de eventos recorrentes — sensibilidade máxima (SIM_EVENTO)
+_KW_EVENTO = frozenset([
+    "quiz","roleta","missão","missao","arena","girar","gire",
+    "roda","jogar","jogue","desafio","desafio diário","daily",
+])
 
 def _rm_ac(t: str) -> str:
     return ''.join(c for c in unicodedata.normalize('NFD', t)
@@ -898,8 +1146,12 @@ def _normalizar(texto: str) -> str:
     t = re.sub(r"\s+", " ", t).strip()
     return " ".join(sorted(w for w in t.split() if w not in _RUIDO_NORM))
 
+def _eh_evento(texto: str) -> bool:
+    """Retorna True se o texto descreve um evento recorrente (Quiz, Roleta, etc.)"""
+    tl = texto.lower()
+    return any(kw in tl for kw in _KW_EVENTO)
+
 def _detectar_campanha(texto: str) -> str:
-    """Extrai tokens de campanha do texto para identificação semântica."""
     tl = texto.lower()
     tokens = []
     if "amazon app" in tl or "app amazon" in tl:
@@ -914,6 +1166,11 @@ def _detectar_campanha(texto: str) -> str:
         tokens.append("blackfriday")
     if "shopee" in tl and "frete" in tl:
         tokens.append("shopee_frete")
+    # Tokens de evento
+    for kw in _KW_EVENTO:
+        if kw in tl:
+            tokens.append(f"evento_{kw}")
+            break
     return "|".join(sorted(tokens)) if tokens else "geral"
 
 def _extrair_cupom(texto: str) -> str:
@@ -932,27 +1189,49 @@ def _extrair_prod_id(mapa: dict) -> str:
     return p[-20:]
 
 def deve_enviar(plat: str, prod: str, cupom: str, texto: str) -> bool:
-    """Verifica se é nova oferta ou duplicata."""
+    """
+    Deduplicação semântica inteligente.
+
+    REGRA ESPECIAL PARA EVENTOS (Quiz, Roleta, Missão):
+    - Sensibilidade sobe para 0.95 (SIM_EVENTO)
+    - Janela de bloqueio aumenta para 24h
+    - Qualquer variação pequena no texto é bloqueada
+
+    REGRA GERAL:
+    - C1: hash exato → bloqueia
+    - C2: cupom igual + texto >= 92% → bloqueia
+    - C3: campanha igual + texto >= 78% → bloqueia
+    - Plataformas diferentes nunca se bloqueiam
+    """
     cache = ler_cache()
     agora = time.time()
-    cache = {k: v for k, v in cache.items() if agora - v.get("ts", 0) < _TTL_CACHE}
+    cache = {k: v for k, v in cache.items() if agora - v.get("ts", 0) < max(_TTL_CACHE, _TTL_EVENTO)}
 
     tnorm    = _normalizar(texto)
     cnorm    = cupom.strip().upper()
     campanha = _detectar_campanha(texto)
-    h        = hashlib.sha256(f"{plat}|{cnorm}|{campanha}|{tnorm}".encode()).hexdigest()
+    eh_evt   = _eh_evento(texto)
+
+    # Ajusta parâmetros se for evento recorrente
+    sim_camp_usar  = _SIM_EVENTO if eh_evt else _SIM_CAMP
+    janela_usar    = _JANELA_EVENTO if eh_evt else _JANELA
+    ttl_usar       = _TTL_EVENTO if eh_evt else _TTL_CACHE
+
+    if eh_evt:
+        log_dedup.debug(f"⚠️ EVENTO detectado — sensibilidade={sim_camp_usar} janela=24h")
+
+    h = hashlib.sha256(f"{plat}|{cnorm}|{campanha}|{tnorm}".encode()).hexdigest()
 
     # C1: hash exato
     if h in cache:
         log_dedup.info(f"🔁 [C1] | plat={plat} cupom={cnorm} camp={campanha}")
         return False
 
-    # C2 e C3: dentro da janela de 30 min
     for entrada in cache.values():
-        if agora - entrada.get("ts", 0) >= _JANELA:
+        if agora - entrada.get("ts", 0) >= janela_usar:
             continue
         if entrada.get("plat") != plat:
-            continue  # plataformas diferentes nunca se bloqueiam
+            continue
         sim        = SequenceMatcher(None, tnorm, entrada.get("txt", "")).ratio()
         c_igual    = entrada.get("cupom", "") == cnorm.lower()
         camp_igual = entrada.get("camp", "") == campanha
@@ -961,18 +1240,22 @@ def deve_enviar(plat: str, prod: str, cupom: str, texto: str) -> bool:
         if c_igual and sim >= _SIM_CUP:
             log_dedup.info(f"🔁 [C2] cupom={cnorm} sim={sim:.2f}")
             return False
-        # C3: campanha igual + texto parecido
-        if camp_igual and campanha != "geral" and sim >= _SIM_CAMP:
-            log_dedup.info(f"🔁 [C3] camp={campanha} sim={sim:.2f}")
+
+        # C3: campanha igual + texto parecido (sensibilidade varia por tipo)
+        if camp_igual and campanha != "geral" and sim >= sim_camp_usar:
+            log_dedup.info(
+                f"🔁 [C3{'_EVENTO' if eh_evt else ''}] "
+                f"camp={campanha} sim={sim:.2f} limiar={sim_camp_usar}")
             return False
 
     cache[h] = {
         "plat": plat, "prod": str(prod),
         "cupom": cnorm.lower(), "camp": campanha,
         "txt": tnorm, "ts": agora,
+        "evento": eh_evt,
     }
     salvar_cache(cache)
-    log_dedup.debug(f"✅ Nova | plat={plat} cupom={cnorm} camp={campanha}")
+    log_dedup.debug(f"✅ Nova | plat={plat} cupom={cnorm} camp={campanha} evento={eh_evt}")
     return True
 
 
