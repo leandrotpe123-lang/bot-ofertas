@@ -1,21 +1,22 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║   FOGUETÃO v71.0 — MÓDULO 14 REESCRITO: RENDERIZADOR LINEAR               ║
+║   FOGUETÃO v72.0 — CIRURGIA MÓDULO 9 + MÓDULO 20                          ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
-║  MUDANÇA CIRÚRGICA v71 — MÓDULO 14 APENAS:                                 ║
+║  MUDANÇAS v72:                                                              ║
 ║                                                                             ║
-║  ANTES (v70): reconstrução total — separava título/preço/links em buckets  ║
-║    e remontava → QUEBRAVA LISTAS LONGAS (10 produtos JBL misturados)        ║
+║  MÓDULO 9 — DNA Magalu preservado:                                         ║
+║   • _construir_url_magalu agora SUBSTITUI parâmetros, não reconstrói       ║
+║   • Path original do produto (/produto-xyz/p/123/) SEMPRE preservado       ║
+║   • Parâmetros com underscore: partner_id, promoter_id, deep_link_value    ║
+║   • Cuttly: timeout 15s + 3 tentativas com backoff                         ║
+║     Prioridade: NENHUM link Magalu sai gigante no grupo                    ║
 ║                                                                             ║
-║  AGORA (v71): processamento LINEAR linha por linha — espelho do original   ║
-║    • Linha de link     → substitui pelo convertido NA MESMA POSIÇÃO        ║
-║    • Linha de ruído    → remove sem mover nada                             ║
-║    • Linha de anúncio  → remove e coloca 1 único '#anúncio' no final       ║
-║    • Linha de texto    → mantém posição + emoji se não tiver               ║
-║    • 🛒 Shopee/Magalu → só adiciona se 'carrinho' não estiver na linha     ║
+║  MÓDULO 20 — Filtro de Post Preguiçoso (Shopee):                           ║
+║   • Se a mensagem tiver lista numerada (1. 2. 3.) E não tiver R$ nem %     ║
+║     → descarta silenciosamente (post "lixo" sem valor informativo)         ║
+║   • Passa apenas posts que informam o benefício ao seguidor                ║
 ║                                                                             ║
-║  RESULTADO: lista de 10 produtos Amazon fica com cada link abaixo do seu  ║
-║  título, exatamente como no canal de origem.                               ║
+║  NÃO ALTERADO: todos os outros módulos (1-8, 10-19, 21-22)                ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -484,115 +485,132 @@ async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 9 ▸ MOTOR MAGALU (CIRURGIA FINAL - PRESERVAÇÃO DE DNA - v73.0)
+# MÓDULO 9 ▸ MOTOR MAGALU (ISOLADO)
+# Desencurta qualquer link Magalu (maga.lu, cutt.ly, bit.ly apontando p/ MGL).
+# SEMPRE sobrescreve parâmetros com os do sistema.
+# Somente _MGL_* e _CUTTLY_KEY são usados aqui.
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _construir_url_magalu(url_exp: str) -> str:
     """
-    Constrói URL Magalu preservando o caminho (path) original do produto.
-    Substitui identidades de outros afiliados pelas minhas.
+    SUBSTITUIÇÃO de parâmetros — NUNCA reconstrói do zero.
+
+    REGRA DE DNA:
+    • O path original do produto (/produto-xyz/p/123456789/) é PRESERVADO intacto.
+    • Apenas o slug de loja antiga é substituído pelo _MGL_SLUG quando for vitrine.
+    • Todos os parâmetros de query do original são DESCARTADOS.
+    • Os parâmetros de comissão do sistema são injetados usando nomes com underline
+      (partner_id, promoter_id, deep_link_value) conforme API Magazine Você.
     """
-    p = urlparse(url_exp)
-    path = p.path
-    netloc = p.netloc.lower()
+    p    = urlparse(url_exp)
+    path = p.path  # ← PATH PRESERVADO — nunca apagado
 
-    # 1. Padronização de Host: Mata o 'm.' mobile e usa 'www.'
-    if netloc.startswith("m."):
-        netloc = netloc.replace("m.", "www.", 1)
+    # Vitrine/categoria: substitui só o slug, mantém o restante do path
+    if _eh_vitrine_magalu(url_exp):
+        path = re.sub(r'(/(?:lojas|magazinevoce)/)[^/]+', rf'\1{_MGL_SLUG}', path)
+        log_mgl.debug(f"  Slug vitrine → {path}")
 
-    # 2. Substituição de Slug (Troca loja de origem pela sua)
-    # Se for magazinevoce.com.br/LOJA_DE_OUTRO/...
-    if "magazinevoce.com.br" in netloc:
-        # Regex captura o slug logo após a primeira barra
-        path = re.sub(r'^/([^/]+)', f'/{_MGL_SLUG}', path)
+    # URL base = mesmo domínio + path preservado + zero query (descarta params externos)
+    base = urlunparse(p._replace(path=path, query="", fragment=""))
 
-    # 3. Filtragem de Parâmetros Originais ( DNA vs Lixo )
-    query_orig = parse_qs(p.query, keep_blank_values=False)
-    params_finais = {}
-    
-    # Whitelist: Mantém apenas o que identifica o produto ou a lista
-    whitelist = {'f', 'l', 'id', 'p', 'sku', 'node', 'item_id', 'categoria'}
-    for k, v in query_orig.items():
-        if k.lower() in whitelist:
-            params_finais[k] = v
+    # deep_link_value aponta para o produto com utm mínimo
+    deep_link = (f"{base}"
+                 f"?utm_source=divulgador&utm_medium=magalu"
+                 f"&partner_id={_MGL_PARTNER}&promoter_id={_MGL_PROMOTER}"
+                 f"&utm_campaign={_MGL_PROMOTER}")
 
-    # 4. Injeção de Parâmetros de Comissão (Underlines Oficiais)
-    meus_ids = {
-        "utm_source": "divulgador",
-        "utm_medium": "magalu",
-        "partner_id": _MGL_PARTNER,   # Ex: 3440
-        "promoter_id": _MGL_PROMOTER, # Seu ID
-        "utm_campaign": _MGL_PROMOTER,
-        "af_force_deeplink": "true",
-        "is_retargeting": "true",
-        "pid": _MGL_PID,
-        "c": _MGL_PROMOTER
+    # Parâmetros com underscore — formato correto da API Magazine Você
+    params = {
+        "utm_source":     "divulgador",
+        "utm_medium":     "magalu",
+        "partner_id":     _MGL_PARTNER,     # ← underscore (não partnerid)
+        "promoter_id":    _MGL_PROMOTER,    # ← underscore (não promoterid)
+        "utm_campaign":   _MGL_PROMOTER,
+        "pid":            _MGL_PID,
+        "c":              _MGL_PROMOTER,
+        "deep_link_value": deep_link,       # ← underscore (não deeplinkvalue)
     }
-    params_finais.update(meus_ids)
+    url_final = urlunparse(p._replace(path=path, query=urlencode(params), fragment=""))
+    log_mgl.debug(f"  🏷 URL construída: {url_final[:100]}")
+    return url_final
 
-    # 5. Construção da URL de Destino (Onde o cliente vai cair)
-    # Aqui o PATH é mantido intacto!
-    url_destino = urlunparse(p._replace(
-        netloc=netloc,
-        path=path, 
-        query=urlencode(params_finais, doseq=True), 
-        fragment=""
-    ))
-    
-    # 6. Criação do Link Final de Afiliado com deep_link_value
-    # O Magalu exige que a URL final esteja dentro deste parâmetro
-    params_finais["deep_link_value"] = url_destino
-    
-    final_url = urlunparse(p._replace(
-        netloc=netloc,
-        path=path, 
-        query=urlencode(params_finais, doseq=True), 
-        fragment=""
-    ))
-    
-    return final_url
 
 async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> str:
-    """Encurtador robusto: envia URL codificada e aceita status 7 e 2."""
-    url_enc = quote(url, safe="")
-    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={url_enc}"
-    try:
-        async with _SEM_HTTP:
-            async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=15)) as r:
-                if r.status == 200:
-                    data = await r.json(content_type=None)
-                    u = data.get("url", {})
-                    if u.get("status") in (7, 2):
-                        # Tenta pegar a versão curta disponível
-                        return u.get("shortLink") or u.get("short_link") or url
-                    log_mgl.warning(f"  ⚠️ Cuttly Status {u.get('status')}")
-    except Exception as e:
-        log_mgl.warning(f"  ⚠️ Falha Cuttly: {e}")
-    return url
+    """
+    Encurta via Cuttly com 3 tentativas e timeout de 15s.
+    Prioridade: NENHUM link Magalu pode sair gigante.
+    Só retorna a URL longa se todas as 3 tentativas falharem.
+    """
+    url_encoded = quote(url, safe="")
+    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={url_encoded}"
+
+    for tentativa in range(1, 4):
+        try:
+            async with _SEM_HTTP:
+                async with sessao.get(
+                    api,
+                    timeout=aiohttp.ClientTimeout(total=15)   # ← 15s (era 12s)
+                ) as r:
+                    if r.status != 200:
+                        log_mgl.warning(f"  ⚠️ Cuttly HTTP {r.status} | t={tentativa}/3")
+                        await asyncio.sleep(2 ** tentativa)
+                        continue
+                    try:
+                        data = await r.json(content_type=None)
+                    except Exception:
+                        raw = await r.text()
+                        log_mgl.warning(f"  ⚠️ Cuttly JSON inválido t={tentativa}: {raw[:80]}")
+                        await asyncio.sleep(2 ** tentativa)
+                        continue
+
+                    status = data.get("url", {}).get("status")
+
+                    if status == 7:
+                        short = data["url"]["shortLink"]
+                        log_mgl.info(f"  ✂️ Cuttly t={tentativa}: {short}")
+                        return short
+
+                    if status == 2:
+                        existing = data["url"].get("shortLink", url)
+                        log_mgl.info(f"  ✂️ Cuttly existente t={tentativa}: {existing}")
+                        return existing
+
+                    log_mgl.warning(f"  ⚠️ Cuttly status={status} | t={tentativa}/3")
+                    await asyncio.sleep(2 ** tentativa)
+
+        except asyncio.TimeoutError:
+            log_mgl.warning(f"  ⏱ Cuttly timeout t={tentativa}/3 | {url[:60]}")
+            await asyncio.sleep(2 ** tentativa)
+        except Exception as e:
+            log_mgl.error(f"  ❌ Cuttly t={tentativa}: {e} | {url[:60]}")
+            await asyncio.sleep(2 ** tentativa)
+
+    log_mgl.error(f"  ❌ Cuttly falhou 3x — link saiu longo | {url[:80]}")
+    return url  # fail-safe: melhor longo do que quebrado
+
 
 async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
-    """Motor Magalu v73.0 - Foco em Integridade de Link."""
-    log_mgl.debug(f"🔗 Magalu Entrada: {url[:60]}...")
+    """Motor exclusivo Magalu. Desencurta qualquer variante."""
+    log_mgl.debug(f"🔗 {url[:80]}")
+
+    # SEMPRE desencurta — garante chegar no domínio final
     nl = _netloc(url)
-    
-    # Desencurta apenas se for link curto conhecido
-    if "maga.lu" in nl or nl in _ENCURTADORES:
-        exp = await desencurtar_ultra(url, sessao)
-        log_mgl.debug(f"  📦 Expandido: {exp[:60]}")
+    precisa = "maga.lu" in nl or nl in _ENCURTADORES
+    if precisa or classificar(url) == "expandir":
+        async with _SEM_HTTP:
+            exp = await desencurtar_ultra(url, sessao)
+        log_mgl.debug(f"  📦 {exp[:80]}")
     else:
         exp = url
 
     if classificar(exp) != "magalu":
-        log_mgl.warning("  🗑 Descartado: Link pós-expansão não é Magalu")
+        log_mgl.warning(f"  ⚠️ Não-Magalu: {exp[:60]}")
         return None
 
-    url_convertida = _construir_url_magalu(exp)
-    
-    # Debug para você ver se o código do produto está lá
-    log_mgl.info(f"✅ Magalu Finalizado: {url_convertida[:70]}...")
-    
-    return await _cuttly(url_convertida, sessao)
-
+    url_c = _construir_url_magalu(exp)
+    final = await _cuttly(url_c, sessao)
+    log_mgl.info(f"  ✅ {final}")
+    return final
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1513,6 +1531,22 @@ async def processar(event, is_edit: bool = False):
 
     # E4: Limpeza de ruído textual
     texto_limpo = limpar_ruido_textual(texto)
+
+    # ── E4b: FILTRO DE POST PREGUIÇOSO (Shopee) ──────────────────────────────
+    # Descarta posts que são apenas listas numeradas de links sem valor informativo.
+    # Regra: tem lista numerada (1. / 2. / 3.) E não tem R$ nem % no texto
+    #        → post "lixo" — sem descrição de benefício para o seguidor.
+    # Posts de qualidade SEMPRE informam o valor: "R$ 30 OFF" ou "20% de desconto".
+    _tem_lista_numerada = bool(re.search(r'^\s*\d+[\.\)]\s', texto_limpo, re.M))
+    _tem_valor          = bool(re.search(r'R\$\s?[\d.,]+|[\d]+\s?%', texto_limpo))
+    _tem_shopee_link    = any("shopee" in l.lower() for l in _RE_URL.findall(texto_limpo))
+
+    if _tem_shopee_link and _tem_lista_numerada and not _tem_valor:
+        log_fil.info(
+            f"🗑 Post preguiçoso Shopee descartado | @{uname} | "
+            f"lista_num=True valor=False | {len(texto_limpo)}c")
+        return
+    # ── Fim do Filtro de Post Preguiçoso ─────────────────────────────────────
 
     # E5: Extração inteligente de links (converter + preservar)
     links_conv, links_pres = extrair_links(texto_limpo)
