@@ -1,21 +1,21 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║   FOGUETÃO v70.0 — CIRURGIA NOS MÓDULOS 5, 9, 11, 12, 13, 14, 15          ║
+║   FOGUETÃO v71.0 — MÓDULO 14 REESCRITO: RENDERIZADOR LINEAR               ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
-║  CORREÇÕES CIRÚRGICAS v70:                                                  ║
-║   5.  Classificação 100% estanque — Magalu verificado ANTES de Amazon      ║
-║       Correspondência por sufixo (não substring) → zero cross-linking      ║
-║   9.  Magalu: limpa TODOS os params antes de injetar os do sistema         ║
-║       Cuttly: encoding correto, trata status 2 (existente), erros detalhados║
-║   11. Guard explícito anti-cross-linking no pipeline de conversão          ║
-║   12. Limpeza em 3 camadas: inline re.sub para expressões de afiliado      ║
-║       Remove: '-Link produto:', 'Resgate aqui:', ':::', '---', etc.        ║
-║   13. Hierarquia de categorias com PESOS — PET (100) > BEBÊ (95) >         ║
-║       ELETRÔNICOS (90) > ALIMENTOS (20) — corrige ração→🍫                ║
-║       Dominadores: 'ração' anula 'frango' como alimento                    ║
-║   14. Layout estruturado FORÇADO: título/preço/link/cupom em blocos        ║
-║   15. Dedup com sensibilidade elevada para eventos (Quiz, Roleta, Missão): ║
-║       SIM_EVENTO=0.95 + janela de 24h                                      ║
+║  MUDANÇA CIRÚRGICA v71 — MÓDULO 14 APENAS:                                 ║
+║                                                                             ║
+║  ANTES (v70): reconstrução total — separava título/preço/links em buckets  ║
+║    e remontava → QUEBRAVA LISTAS LONGAS (10 produtos JBL misturados)        ║
+║                                                                             ║
+║  AGORA (v71): processamento LINEAR linha por linha — espelho do original   ║
+║    • Linha de link     → substitui pelo convertido NA MESMA POSIÇÃO        ║
+║    • Linha de ruído    → remove sem mover nada                             ║
+║    • Linha de anúncio  → remove e coloca 1 único '#anúncio' no final       ║
+║    • Linha de texto    → mantém posição + emoji se não tiver               ║
+║    • 🛒 Shopee/Magalu → só adiciona se 'carrinho' não estiver na linha     ║
+║                                                                             ║
+║  RESULTADO: lista de 10 produtos Amazon fica com cada link abaixo do seu  ║
+║  título, exatamente como no canal de origem.                               ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -958,9 +958,41 @@ def _tem_emoji(s: str) -> bool:
 # Estado local por chamada — sem estado global compartilhado.
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════════════════
+# MÓDULO 14 ▸ RENDERIZADOR LINEAR — ESPELHO DO CANAL DE ORIGEM
+#
+# PRINCÍPIO: Substituição de conteúdo, NÃO reconstrução de layout.
+#
+# O bot percorre a mensagem LINHA POR LINHA na ordem original:
+#   • Linha de link       → substitui pelo link convertido (posição preservada)
+#   • Linha de ruído      → remove
+#   • Linha de anúncio    → remove (coloca 1 único no final)
+#   • Linha de texto      → mantém posição, enfeita com emoji se não tiver
+#
+# Resultado: espelho perfeito do canal de origem com links trocados.
+# Listas longas (10 produtos da Amazon) ficam com cada link abaixo do título.
+# ══════════════════════════════════════════════════════════════════════════════
+
 _RE_LIXO_PREFIXO = re.compile(
     r'^\s*(?:::?\s*ML|[-–]\s*ML|ML\s*:|[-:•|]\s*(?:ML|MG|AMZ)\s*[-:•]?)\s*',
     re.I)
+
+# Regex para detectar linha de "anúncio" em qualquer variação
+_RE_ANUNCIO_LINHA = re.compile(
+    r'^\s*[-#]?\s*(?:anúncio|anuncio|publicidade|patrocinado|sponsored)\s*$',
+    re.I)
+
+# Regex para detectar se uma linha de texto é APENAS ruído (sem valor comercial)
+_RE_LINHA_APENAS_LIXO = re.compile(
+    r'^\s*(?:'
+    r'[-–—]{2,}|'                          # separadores como --- ou ===
+    r'===+|'
+    r':::\s*$|'
+    r'(?:ML|MG|AMZ)\s*:\s*$|'             # marcadores técnicos sozinhos
+    r'::\s*(?:ML|MG|AMZ)\s*::\s*$'
+    r')\s*$',
+    re.I)
+
 
 def _aplicar_crases(linha: str) -> str:
     """Coloca crases no código do cupom se ainda não tiver."""
@@ -975,116 +1007,142 @@ def _aplicar_crases(linha: str) -> str:
     return _RE_COD_CUPOM.sub(_sub, linha)
 
 
+def _enfeitar_texto(linha: str, plat: str, eh_primeira: bool) -> str:
+    """
+    Adiciona emoji contextual se a linha não tiver nenhum.
+    Usa o emoji de produto para a primeira linha, contexto para as demais.
+    Linhas que são só URL nunca recebem emoji.
+    """
+    ls = linha.strip()
+    if not ls or _tem_emoji(ls) or _RE_URL.match(ls):
+        return linha  # já tem emoji ou é link → não mexe
+
+    ep = _EMOJI_PLAT.get(plat, _EMOJI_PLAT["amazon"])
+    ll = ls.lower()
+
+    if eh_primeira:
+        # Primeira linha de texto = título do produto
+        emoji = _emoji_produto(ls) or ep["titulo"]
+        return f"{emoji} {ls}"
+
+    # Demais linhas — emoji por contexto
+    if any(x in ll for x in ["frete grátis","frete gratis","entrega grátis",
+                               "entrega gratis","sem frete","frete free"]):
+        return f"{ep['frete']} {ls}"
+    if any(x in ll for x in ["cupom","cupon","código","codigo","off",
+                               "resgate","desconto","coupon"]):
+        return f"{ep['cupom']} {ls}"
+    if _RE_PRECO.search(ls):
+        return f"{ep['preco']} {ls}"
+
+    # Linha de texto simples sem contexto claro → não adiciona emoji
+    return linha
+
+
+def _emoji_carrinho_shopee_magalu(url: str, linha_texto: str) -> str:
+    """
+    Se o link for Shopee ou Magalu e a linha associada não tiver 🛒,
+    adiciona 🛒 no início da linha (somente se 'carrinho' não estiver já lá).
+    """
+    if "carrinho" in linha_texto.lower() or "🛒" in linha_texto:
+        return linha_texto  # já tem → não duplica
+    plat_link = classificar(url) if url else None
+    if plat_link in ("shopee", "magalu"):
+        ls = linha_texto.strip()
+        if ls and not _RE_URL.match(ls):
+            return f"🛒 {ls}"
+    return linha_texto
+
+
 def renderizar(texto: str, mapa_links: dict,
                links_preservar: list, plat: str) -> str:
     """
-    Renderizador isolado por plataforma com layout estruturado forçado.
+    Renderizador linear — espelho do canal de origem.
 
-    Layout de saída:
-      [Emoji Categoria] Título limpo
-      [Emoji Preço] Valor
-      [Emoji Link] URL(s)
-      [Emoji Alerta] Cupom: `CODIGO` (se houver)
-      Linhas extras preservadas
+    Percorre LINHA POR LINHA na ordem original:
+      1. Ruído puro        → remove
+      2. Anúncio           → remove (vai para o final como único '#anúncio')
+      3. Linha só de link  → substitui pelo convertido na mesma posição
+                             Link fora da whitelist → remove a linha
+      4. Texto com link    → substitui links inline, remove links inválidos
+      5. Texto puro        → mantém posição + aplica emoji se não tiver
 
     Estado 100% local — sem variáveis globais modificadas.
     """
+    # Mapa completo: links convertidos + links preservados (wa.me, etc.)
     mapa_total = dict(mapa_links)
     for url in links_preservar:
         mapa_total[url] = url
 
-    ep = _EMOJI_PLAT.get(plat, _EMOJI_PLAT["amazon"])
+    linhas     = texto.split('\n')
+    saida      = []         # linhas de saída na ordem original
+    tem_anuncio = False     # rastreia se havia anúncio no original
+    eh_primeira_texto = True  # controla emoji do título
 
-    # ── Passo 1: Extrai componentes do texto ──────────────────────────────
-    linhas_orig = texto.split('\n')
-    titulo      = ""
-    preco       = ""
-    cupom_linha = ""
-    links_saida = []  # URLs convertidas na ordem em que aparecem
-    extras      = []  # demais linhas de texto (hashtags, notas, etc.)
-
-    for linha in linhas_orig:
+    for linha in linhas:
         ls = linha.strip()
+
+        # ── Linha vazia → preserva (máx 1 consecutiva — tratado no final) ─
+        if not ls:
+            saida.append("")
+            continue
+
+        # ── Ruído puro (---, :::, ML: etc.) → remove ─────────────────────
+        if _RE_LINHA_APENAS_LIXO.match(ls):
+            log_fmt.debug(f"🗑 Ruído puro: {ls[:50]}")
+            continue
+
+        # ── Anúncio → registra e remove (voltará no final como único) ─────
+        if _RE_ANUNCIO_LINHA.match(ls):
+            tem_anuncio = True
+            log_fmt.debug(f"📢 Anúncio registrado, removido da posição")
+            continue
+
+        # ── Limpa prefixos técnicos da linha ─────────────────────────────
+        ls = _RE_LIXO_PREFIXO.sub("", ls).strip()
         if not ls:
             continue
 
-        # Substitui links inline
-        urls_raw  = _RE_URL.findall(ls)
-        sem_links = _RE_URL.sub("", ls).strip()
+        # ── Extrai URLs da linha ──────────────────────────────────────────
+        urls_na_linha = _RE_URL.findall(ls)
+        sem_urls      = _RE_URL.sub("", ls).strip()
 
-        if urls_raw and not sem_links:
-            # Linha só de link(s)
-            for u in urls_raw:
+        # ── Caso A: linha é SOMENTE link(s) ──────────────────────────────
+        if urls_na_linha and not sem_urls:
+            for u in urls_na_linha:
                 uc = u.rstrip('.,;)>')
                 if uc in mapa_total:
-                    links_saida.append(mapa_total[uc])
+                    saida.append(mapa_total[uc])
+                    log_fmt.debug(f"🔗 Link substituído: {uc[:40]} → {mapa_total[uc][:40]}")
+                else:
+                    # Link fora da whitelist → linha removida (não polui o post)
+                    log_fmt.debug(f"🗑 Link inválido removido: {uc[:60]}")
             continue
 
-        # Linha com texto (pode ter link inline)
-        def _sub_link(m):
+        # ── Caso B: linha tem texto + possível link inline ────────────────
+        def _sub_inline(m):
             uc = m.group(0).rstrip('.,;)>')
-            return mapa_total.get(uc, "")
-        nova = _RE_URL.sub(_sub_link, ls).strip()
+            if uc in mapa_total:
+                return mapa_total[uc]
+            return ""  # link inválido inline → remove apenas o link
+
+        nova = _RE_URL.sub(_sub_inline, ls).strip()
         if not nova:
             continue
 
-        # Limpa prefixos técnicos
-        nova = _RE_LIXO_PREFIXO.sub("", nova).strip()
-        if not nova:
-            continue
-
-        # Aplica crases no cupom
+        # Aplica crases em códigos de cupom
         if _RE_CUPOM_KW.search(nova) or _RE_COD_CUPOM.search(nova):
             nova = _aplicar_crases(nova)
 
-        ll = nova.lower()
+        # Enfeita com emoji (mantém posição, só decora)
+        nova = _enfeitar_texto(nova, plat, eh_primeira=eh_primeira_texto)
 
-        # Classifica a linha
-        if not titulo and not _RE_PRECO.search(nova) and not _RE_CUPOM_KW.search(nova):
-            titulo = nova
-        elif _RE_PRECO.search(nova) and not preco:
-            preco = nova
-        elif _RE_CUPOM_KW.search(nova) and not cupom_linha:
-            cupom_linha = nova
-        else:
-            extras.append(nova)
+        if eh_primeira_texto and not _RE_URL.match(nova.strip()):
+            eh_primeira_texto = False
 
-    # ── Passo 2: Monta layout estruturado ────────────────────────────────
-    saida = []
+        saida.append(nova)
 
-    # Título com emoji de categoria
-    if titulo:
-        if not _tem_emoji(titulo):
-            emoji_tit = _emoji_produto(titulo) or ep["titulo"]
-            saida.append(f"{emoji_tit} {titulo}")
-        else:
-            saida.append(titulo)
-    saida.append("")
-
-    # Preço
-    if preco:
-        if not _tem_emoji(preco):
-            saida.append(f"{ep['preco']} {preco}")
-        else:
-            saida.append(preco)
-
-    # URLs
-    for url in links_saida:
-        saida.append(url)
-
-    # Cupom
-    if cupom_linha:
-        if not _tem_emoji(cupom_linha):
-            saida.append(f"🚨 {cupom_linha}")
-        else:
-            saida.append(cupom_linha)
-
-    # Extras (hashtags, notas, etc.)
-    for ex in extras:
-        if ex.strip():
-            saida.append(ex)
-
-    # Remove linhas vazias consecutivas
+    # ── Normaliza linhas vazias consecutivas (máx 1) ─────────────────────
     final, pv = [], False
     for l in saida:
         if l.strip() == "":
@@ -1095,7 +1153,20 @@ def renderizar(texto: str, mapa_links: dict,
             pv = False
             final.append(l)
 
-    return "\n".join(final).strip()
+    # Remove vazia no início/fim
+    while final and final[0].strip() == "":
+        final.pop(0)
+    while final and final[-1].strip() == "":
+        final.pop()
+
+    # ── Adiciona 1 único "#anúncio" no final se havia no original ────────
+    if tem_anuncio:
+        final.append("")
+        final.append("#anúncio")
+
+    resultado = "\n".join(final).strip()
+    log_fmt.debug(f"✅ Renderizado [{plat.upper()}] {len(resultado)} chars")
+    return resultado
 
 
 # ══════════════════════════════════════════════════════════════════════════════
