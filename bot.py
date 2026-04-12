@@ -483,115 +483,119 @@ async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
     log_shp.error("  ❌ Shopee API falhou 3x")
     return url  # URL original Shopee ainda é válida
 
-
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 9 ▸ MOTOR MAGALU (VERSÃO BLINDADA v75.0 - ANTI-LINK QUEBRADO)
+# MÓDULO 9 ▸ MOTOR MAGALU (LÓGICA LINEAR + RESILIÊNCIA CUTTLY)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _construir_url_magalu(url_exp: str) -> str:
-    """
-    Substituição Inteligente: Preserva o DNA do produto e impede links quebrados.
-    """
+    """Substituição pura de parâmetros conforme regra do Léo."""
     p = urlparse(url_exp)
     path = p.path
-    netloc = p.netloc.lower()
+    query_params = parse_qs(p.query, keep_blank_values=True)
 
-    # 🚩 SEGURANÇA: Se o link for apenas a home ou o redirect (/r/), não converte
-    if path in ["", "/", "/r", "/r/"]:
-        log_mgl.warning(f"⚠️ Tentativa de converter link sem produto: {url_exp}")
-        return url_exp
+    if "magazinevoce.com.br" in p.netloc:
+        partes = path.strip("/").split("/")
+        if partes:
+            partes[0] = _MGL_SLUG
+            path = "/" + "/".join(partes)
 
-    # 1. Padronização de Host (Mata mobile e sacola se for produto)
-    if netloc.startswith("m."):
-        netloc = netloc.replace("m.", "www.", 1)
-    
-    # 2. Troca de Loja (Slug)
-    if "magazinevoce.com.br" in netloc:
-        path = re.sub(r'^/([^/]+)', f'/{_MGL_SLUG}', path)
-
-    # 3. Limpeza Seletiva de Parâmetros (DNA vs Lixo)
-    query_orig = parse_qs(p.query, keep_blank_values=False)
-    params_finais = {}
-    
-    # Whitelist: SÓ mantém o que é ID de produto ou de lista
-    whitelist = {'f', 'l', 'id', 'p', 'sku', 'node', 'item_id', 'categoria'}
-    for k, v in query_orig.items():
-        if k.lower() in whitelist:
-            params_finais[k] = v
-
-    # 4. Injeção de Identidade (Nomes com Underline)
-    meus_ids = {
-        "utm_source": "divulgador",
-        "utm_medium": "magalu",
-        "partner_id": _MGL_PARTNER,
-        "promoter_id": _MGL_PROMOTER,
-        "utm_campaign": _MGL_PROMOTER,
-        "af_force_deeplink": "true",
-        "is_retargeting": "true",
-        "pid": _MGL_PID,
-        "c": _MGL_PROMOTER
+    substituicoes = {
+        "partner_id": _MGL_PARTNER, "partnerid": _MGL_PARTNER,
+        "promoter_id": _MGL_PROMOTER, "promoterid": _MGL_PROMOTER,
+        "utm_campaign": _MGL_PROMOTER, "c": _MGL_PROMOTER, "tag": _MGL_PROMOTER
     }
-    params_finais.update(meus_ids)
+    for chave, novo_valor in substituicoes.items():
+        query_params[chave] = [novo_valor]
 
-    # 5. Montagem da URL de Destino (Onde a mágica acontece)
-    url_destino = urlunparse(p._replace(
-        netloc=netloc,
-        path=path, 
-        query=urlencode(params_finais, doseq=True), 
-        fragment=""
-    ))
-    
-    # 6. Parâmetro Obrigatório deep_link_value
-    params_finais["deep_link_value"] = url_destino
-    
-    return urlunparse(p._replace(
-        netloc=netloc,
-        path=path, 
-        query=urlencode(params_finais, doseq=True), 
-        fragment=""
-    ))
+    if "deep_link_value" in query_params:
+        url_interna = query_params["deep_link_value"][0]
+        pi = urlparse(url_interna)
+        qi = parse_qs(pi.query, keep_blank_values=True)
+        for k, v in substituicoes.items(): qi[k] = [v]
+        nova_interna = urlunparse(pi._replace(query=urlencode(qi, doseq=True)))
+        query_params["deep_link_value"] = [nova_interna]
+
+    return urlunparse(p._replace(path=path, query=urlencode(query_params, doseq=True)))
 
 async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> str:
-    """Encurtador persistente com 3 tentativas."""
-    if "/r/" in url or url.endswith(".br/"): # Prevenção extra
-        return url
-
+    """Encurtador com alta prioridade para Magalu."""
     url_enc = quote(url, safe="")
     api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={url_enc}"
-    
+    # 3 tentativas para garantir que o link não saia gigante
     for t in range(1, 4):
         try:
-            async with _SEM_HTTP:
-                async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=15)) as r:
-                    if r.status == 200:
-                        data = await r.json(content_type=None)
-                        u = data.get("url", {})
-                        if u.get("status") in (7, 2):
-                            return u.get("shortLink") or u.get("short_link") or url
-            await asyncio.sleep(2)
+            async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                if r.status == 200:
+                    data = await r.json(content_type=None)
+                    u = data.get("url", {})
+                    if u.get("status") in (7, 2):
+                        return u.get("shortLink") or u.get("short_link") or url
+            await asyncio.sleep(1.5 * t)
         except Exception: pass
     return url
 
 async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
-    log_mgl.debug(f"🔗 Magalu Raw: {url[:50]}")
-    
-    # 🚩 O SEGREDO: Força o desencurtamento profundo para fugir do /r/
     exp = await desencurtar_ultra(url, sessao)
-    
-    if classificar(exp) != "magalu": return None
-    
-    # Se ainda estiver no /r/, tenta desencurtar mais uma vez por garantia
-    if "/r/" in exp:
-        exp = await desencurtar_ultra(exp, sessao)
-
-    url_c = _construir_url_magalu(exp)
-    
-    # Se a URL convertida ficou "vazia", não posta
-    if url_c.endswith("/r/") or url_c.endswith(".br/"):
-        log_mgl.error(f"❌ Abortando: Link Magalu quebrado gerado.")
+    if "magazineluiza.com.br" not in exp and "magazinevoce.com.br" not in exp:
         return None
+    url_convertida = _construir_url_magalu(exp)
+    return await _cuttly(url_convertida, sessao)
 
-    return await _cuttly(url_c, sessao)
+# ══════════════════════════════════════════════════════════════════════════════
+# MÓDULO 11 ▸ PIPELINE DE CONVERSÃO MASSIVA (CAPACIDADE: 100 LINKS)
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def _converter_um(url: str, sessao: aiohttp.ClientSession) -> tuple:
+    plat = classificar(url)
+    if plat == "amazon":
+        r = await motor_amazon(url, sessao)
+        return (r, "amazon") if r else (None, None)
+    if plat == "shopee":
+        r = await motor_shopee(url, sessao)
+        return (r, "shopee") if r else (None, None)
+    if plat == "magalu":
+        r = await motor_magalu(url, sessao)
+        return (r, "magalu") if r else (None, None)
+    if plat == "expandir":
+        exp = await desencurtar_ultra(url, sessao)
+        p2 = classificar(exp)
+        if p2 == "amazon": return (await motor_amazon(exp, sessao), "amazon")
+        if p2 == "shopee": return (await motor_shopee(exp, sessao), "shopee")
+        if p2 == "magalu": return (await motor_magalu(exp, sessao), "magalu")
+    return None, None
+
+async def converter_links(links: list) -> tuple:
+    """Converte até 100 links em paralelo. Garante que todos sejam encurtados."""
+    if not links: return {}, "amazon"
+    
+    log_lnk.info(f"🚀 Iniciando conversão de {len(links[:100])} link(s)...")
+    
+    # Aumentamos o limite do conector para 100 para suportar o volume
+    conn = aiohttp.TCPConnector(limit=100, ttl_dns_cache=300, ssl=False)
+    
+    async with aiohttp.ClientSession(
+        connector=conn,
+        timeout=aiohttp.ClientTimeout(total=60, connect=10), # Mais tempo para listas longas
+        headers={"User-Agent": random.choice(USER_AGENTS)},
+    ) as sessao:
+        # Processa até os 100 primeiros links encontrados
+        resultados = await asyncio.gather(
+            *[_converter_um(l, sessao) for l in links[:100]],
+            return_exceptions=True,
+        )
+
+    mapa, plats = {}, []
+    for i, res in enumerate(resultados):
+        if isinstance(res, Exception): continue
+        novo, plat = res
+        if novo and plat:
+            mapa[links[i]] = novo
+            plats.append(plat)
+
+    plat_p = max(set(plats), key=plats.count) if plats else "amazon"
+    log_lnk.info(f"✅ {len(mapa)} links processados com sucesso.")
+    return mapa, plat_p
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
