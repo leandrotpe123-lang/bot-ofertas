@@ -484,112 +484,105 @@ async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 9 ▸ MOTOR MAGALU (ISOLADO)
-# Desencurta qualquer link Magalu (maga.lu, cutt.ly, bit.ly apontando p/ MGL).
-# SEMPRE sobrescreve parâmetros com os do sistema.
-# Somente _MGL_* e _CUTTLY_KEY são usados aqui.
+# MÓDULO 9 ▸ MOTOR MAGALU (ISOLADO E CALIBRADO PARA PRODUTOS E LISTAS)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _construir_url_magalu(url_exp: str) -> str:
     """
-    Constrói URL Magalu com parâmetros do sistema.
-    PASSO 1: limpa TODOS os parâmetros da URL original (remove restos de outros afiliados).
-    PASSO 2: reconstrói com parâmetros de comissão 100% do sistema.
-    NUNCA herda parâmetros externos — URL de saída é sempre limpa.
+    Constrói URL Magalu preservando o DNA do produto ou da lista.
+    Substitui o slug da loja e injeta parâmetros de comissão.
     """
-    p    = urlparse(url_exp)
+    p = urlparse(url_exp)
     path = p.path
+    query_orig = parse_qs(p.query, keep_blank_values=False)
 
-    # Substitui slug se for vitrine/categoria
+    # 1. Ajuste de Path e Slug (Substitui loja de origem pela sua)
     if _eh_vitrine_magalu(url_exp):
         path = re.sub(r'(/(?:lojas|magazinevoce)/)[^/]+', rf'\1{_MGL_SLUG}', path)
-        log_mgl.debug(f"  Slug vitrine → {path}")
+    
+    # Se for link mobile (m.), converte para www. para garantir compatibilidade
+    netloc = p.netloc.replace("m.magazineluiza.com.br", "www.magazineluiza.com.br")
 
-    # URL base absolutamente limpa (zero params do original)
-    base = urlunparse(p._replace(path=path, query="", fragment=""))
+    # 2. Whitelist de parâmetros vitais (DNA do Produto/Lista)
+    params_finais = {}
+    whitelist_mgl = {'f', 'l', 'id', 'p', 'sku', 'node', 'item_id', 'categoria'}
+    for k, v in query_orig.items():
+        if k.lower() in whitelist_mgl:
+            params_finais[k] = v
 
-    # deeplink também usa a URL base limpa
-    deeplink = (f"{base}?utm_source=divulgador&utm_medium=magalu"
-                f"&partnerid={_MGL_PARTNER}&promoterid={_MGL_PROMOTER}"
-                f"&utm_campaign={_MGL_PROMOTER}")
-
-    params = {
-        "utm_source":      "divulgador",
-        "utm_medium":      "magalu",
-        "partnerid":       _MGL_PARTNER,
-        "promoterid":      _MGL_PROMOTER,
-        "utm_campaign":    _MGL_PROMOTER,
+    # 3. Injeta seus parâmetros de Afiliado
+    params_finais.update({
+        "utm_source": "divulgador",
+        "utm_medium": "magalu",
+        "partnerid": _MGL_PARTNER,
+        "promoterid": _MGL_PROMOTER,
+        "utm_campaign": _MGL_PROMOTER,
         "afforcedeeplink": "true",
-        "isretargeting":   "true",
-        "pid":             _MGL_PID,
-        "c":               _MGL_PROMOTER,
-        "deeplinkvalue":   deeplink,
-    }
-    return urlunparse(p._replace(path=path, query=urlencode(params), fragment=""))
+        "isretargeting": "true",
+        "pid": _MGL_PID,
+        "c": _MGL_PROMOTER
+    })
 
+    # Monta a URL base limpa de outros afiliados mas com o DNA do produto
+    url_base_limpa = urlunparse(p._replace(
+        netloc=netloc,
+        path=path, 
+        query=urlencode(params_finais, doseq=True), 
+        fragment=""
+    ))
+    
+    # Injeta o deeplinkvalue (URL final completa codificada)
+    params_finais["deeplinkvalue"] = url_base_limpa
+    
+    final_url = urlunparse(p._replace(
+        netloc=netloc,
+        path=path, 
+        query=urlencode(params_finais, doseq=True), 
+        fragment=""
+    ))
+    return final_url
 
 async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> str:
-    """
-    Encurta via Cuttly com encoding correto e tratamento de erro detalhado.
-    A URL é double-encoded para evitar falha em URLs com caracteres especiais.
-    Retorna a URL original se Cuttly falhar (fail-safe).
-    """
-    url_encoded = quote(url, safe="")
-    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={url_encoded}"
+    """Encurtador robusto: aceita links novos (7) e já existentes (2)."""
+    url_enc = quote(url, safe="")
+    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={url_enc}"
     try:
         async with _SEM_HTTP:
             async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=12)) as r:
-                if r.status != 200:
-                    log_mgl.warning(f"  ⚠️ Cuttly HTTP {r.status}")
-                    return url
-                try:
+                if r.status == 200:
                     data = await r.json(content_type=None)
-                except Exception:
-                    raw = await r.text()
-                    log_mgl.warning(f"  ⚠️ Cuttly JSON inválido: {raw[:80]}")
-                    return url
-
-                status = data.get("url", {}).get("status")
-                # Status 7 = sucesso
-                if status == 7:
-                    short = data["url"]["shortLink"]
-                    log_mgl.info(f"  ✂️ Cuttly: {short}")
-                    return short
-                # Status 2 = URL já encurtada (retorna o link existente)
-                if status == 2:
-                    existing = data["url"].get("shortLink", url)
-                    log_mgl.info(f"  ✂️ Cuttly (existente): {existing}")
-                    return existing
-                log_mgl.warning(f"  ⚠️ Cuttly status={status} | url={url[:60]}")
-    except asyncio.TimeoutError:
-        log_mgl.warning(f"  ⏱ Cuttly timeout | url={url[:60]}")
+                    status = data.get("url", {}).get("status")
+                    # 7 = Sucesso (Novo), 2 = Sucesso (Já existia)
+                    if status in (7, 2):
+                        short = data["url"]["shortLink"]
+                        log_mgl.info(f"  ✂️ Cuttly: {short}")
+                        return short
+                    log_mgl.warning(f"  ⚠️ Cuttly status {status}")
+                else:
+                    log_mgl.warning(f"  ⚠️ Cuttly HTTP {r.status}")
     except Exception as e:
-        log_mgl.error(f"  ❌ Cuttly erro: {e} | url={url[:60]}")
-    return url  # fail-safe: retorna URL sem encurtar
-
+        log_mgl.warning(f"  ⚠️ Erro Cuttly: {e}")
+    return url # Fallback: se der erro, manda o link grande para não perder a venda
 
 async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
-    """Motor exclusivo Magalu. Desencurta qualquer variante."""
-    log_mgl.debug(f"🔗 {url[:80]}")
-
-    # SEMPRE desencurta — garante chegar no domínio final
+    """Motor exclusivo Magalu com Debug detalhado."""
+    log_mgl.debug(f"🔗 Processando Magalu: {url[:60]}...")
     nl = _netloc(url)
-    precisa = "maga.lu" in nl or nl in _ENCURTADORES
-    if precisa or classificar(url) == "expandir":
-        async with _SEM_HTTP:
-            exp = await desencurtar_ultra(url, sessao)
-        log_mgl.debug(f"  📦 {exp[:80]}")
+    
+    # Expande se for encurtador ou o domínio curto da Magalu
+    if "maga.lu" in nl or nl in _ENCURTADORES:
+        exp = await desencurtar_ultra(url, sessao)
+        log_mgl.debug(f"  📦 Expandido: {exp[:60]}")
     else:
         exp = url
 
     if classificar(exp) != "magalu":
-        log_mgl.warning(f"  ⚠️ Não-Magalu: {exp[:60]}")
+        log_mgl.warning(f"  🗑 Link ignorado (Não é Magalu): {exp[:60]}")
         return None
 
-    url_c = _construir_url_magalu(exp)
-    final = await _cuttly(url_c, sessao)
-    log_mgl.info(f"  ✅ {final}")
-    return final
+    url_convertida = _construir_url_magalu(exp)
+    return await _cuttly(url_convertida, sessao)
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
