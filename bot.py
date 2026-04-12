@@ -522,141 +522,117 @@ async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 9 ▸ MOTOR MAGALU (ISOLADO)
-# Desencurta qualquer link Magalu (maga.lu, cutt.ly, bit.ly apontando p/ MGL).
-# SEMPRE sobrescreve parâmetros com os do sistema.
-# Somente _MGL_* e _CUTTLY_KEY são usados aqui.
+# MÓDULO 9 ▸ MOTOR MAGALU (VERSÃO FINAL DE ELITE v82.0)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _construir_url_magalu(url_exp: str) -> str:
     """
-    SUBSTITUIÇÃO de parâmetros — NUNCA zera o path.
-
-    REGRA DE OURO:
-    • O path original (/produto/p/ID/, /l/lista/, /selecao/) é PRESERVADO intacto.
-    • Só o slug de loja antiga é substituído pelo _MGL_SLUG em vitrines.
-    • Todos os query params do original são descartados.
-    • Injetados os params oficiais com underscore: partner_id, promoter_id,
-      af_force_deeplink, deep_link_value (formato API Magazine Você).
-
-    Caminhos preservados:
-      /produto-xyz/p/225470800/me/refg/  → produto direto
-      /l/lista-de-ofertas/               → lista curada
-      /selecao/ofertas-do-dia/           → seleção
-      /lojas/slug-antigo/                → vitrine (slug substituído)
+    Substituição pura de IDs Magalu. Preserva DNA do produto.
+    IDs usados: partner_id e promoter_id (conforme API Magazine Você).
     """
-    p    = urlparse(url_exp)
-    path = p.path  # ← DNA: NUNCA zerado
+    p = urlparse(url_exp)
+    path = p.path
+    netloc = p.netloc.lower()
 
-    # Vitrine/categoria: substitui slug da loja antiga → meu slug
-    if _eh_vitrine_magalu(url_exp):
-        path = re.sub(r'(/(?:lojas|magazinevoce)/)[^/]+', rf'\1{_MGL_SLUG}', path)
-        log_mgl.debug(f"  Slug vitrine → {path}")
+    # 1. Segurança: Se não tem produto (/p/) nem lista (/l/), interrompe
+    if path in ["", "/", "/r", "/r/"] and not p.query:
+        log_mgl.warning(f"⚠️ Link incompleto ({path}), mantendo original.")
+        return url_exp
 
-    # Base limpa = mesmo domínio + path preservado, zero query antiga
-    base = urlunparse(p._replace(path=path, query="", fragment=""))
+    # 2. Padronização: Mobile (m.) vira www. para estabilidade
+    if netloc.startswith("m."):
+        netloc = netloc.replace("m.", "www.", 1)
+    
+    # 3. Troca de Identidade da Loja (Slug)
+    if "magazinevoce.com.br" in netloc:
+        # Substitui apenas o nome da loja antiga pelo seu _MGL_SLUG (ex: magazineleo12)
+        path = re.sub(r'^/([^/]+)', f'/{_MGL_SLUG}', path)
 
-    # deep_link_value aponta para o produto com UTMs mínimos
-    deep_link = (
-        f"{base}"
-        f"?utm_source=divulgador&utm_medium=magalu"
-        f"&partner_id={_MGL_PARTNER}&promoter_id={_MGL_PROMOTER}"
-        f"&utm_campaign={_MGL_PROMOTER}"
-    )
+    # 4. Limpeza e Preservação de Identificadores de Oferta
+    query_orig = parse_qs(p.query, keep_blank_values=False)
+    params_finais = {}
+    
+    # Mantém apenas o que é essencial para o Magalu achar o produto/lista
+    whitelist_mgl = {'f', 'l', 'id', 'p', 'sku', 'node', 'item_id', 'categoria'}
+    for k, v in query_orig.items():
+        if k.lower() in whitelist_mgl:
+            params_finais[k] = v
 
-    # Parâmetros oficiais com underscore (formato Magazine Você)
-    params = {
-        "utm_source":       "divulgador",
-        "utm_medium":       "magalu",
-        "partner_id":       _MGL_PARTNER,
-        "promoter_id":      _MGL_PROMOTER,
-        "utm_campaign":     _MGL_PROMOTER,
-        "pid":              _MGL_PID,
-        "c":                _MGL_PROMOTER,
-        "af_force_deeplink": "true",       # ← nome oficial com underscore
-        "deep_link_value":  deep_link,     # ← nome oficial com underscore
+    # 5. Injeção dos seus IDs de Afiliado (Nomes Oficiais Magalu)
+    meus_dados = {
+        "utm_source": "divulgador",
+        "utm_medium": "magalu",
+        "partner_id": _MGL_PARTNER,   # Seu Partner ID do Railway
+        "promoter_id": _MGL_PROMOTER, # Seu Promoter ID do Railway
+        "utm_campaign": _MGL_PROMOTER,
+        "af_force_deeplink": "true",
+        "is_retargeting": "true",
+        "pid": _MGL_PID,
+        "c": _MGL_PROMOTER
     }
-    url_final = urlunparse(p._replace(path=path, query=urlencode(params), fragment=""))
-    log_mgl.debug(f"  🏷 {url_final[:100]}")
-    return url_final
+    params_finais.update(meus_dados)
+
+    # 6. URL de Destino para o deep_link_value
+    url_base = urlunparse(p._replace(
+        netloc=netloc,
+        path=path, 
+        query=urlencode(params_finais, doseq=True), 
+        fragment=""
+    ))
+    
+    # Injeta o valor do Deeplink (Obrigatório para processar a comissão)
+    params_finais["deep_link_value"] = url_base
+    
+    return urlunparse(p._replace(
+        netloc=netloc,
+        path=path, 
+        query=urlencode(params_finais, doseq=True), 
+        fragment=""
+    ))
 
 
 async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> str:
-    """
-    Encurta via Cuttly com 3 tentativas e timeout de 15s.
-    Prioridade: NENHUM link Magalu pode sair gigante.
-    Só retorna a URL longa se todas as 3 tentativas falharem.
-    """
-    url_encoded = quote(url, safe="")
-    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={url_encoded}"
-
-    for tentativa in range(1, 4):
+    """Encurtador robusto: aceita status 7 (novo) e 2 (existente)."""
+    if "/r/" in url or url.endswith(".br/"): return url
+    
+    url_enc = quote(url, safe="")
+    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={url_enc}"
+    
+    for t in range(1, 4):
         try:
             async with _SEM_HTTP:
-                async with sessao.get(
-                    api,
-                    timeout=aiohttp.ClientTimeout(total=15)   # ← 15s (era 12s)
-                ) as r:
-                    if r.status != 200:
-                        log_mgl.warning(f"  ⚠️ Cuttly HTTP {r.status} | t={tentativa}/3")
-                        await asyncio.sleep(2 ** tentativa)
-                        continue
-                    try:
+                async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                    if r.status == 200:
                         data = await r.json(content_type=None)
-                    except Exception:
-                        raw = await r.text()
-                        log_mgl.warning(f"  ⚠️ Cuttly JSON inválido t={tentativa}: {raw[:80]}")
-                        await asyncio.sleep(2 ** tentativa)
-                        continue
-
-                    status = data.get("url", {}).get("status")
-
-                    if status == 7:
-                        short = data["url"]["shortLink"]
-                        log_mgl.info(f"  ✂️ Cuttly t={tentativa}: {short}")
-                        return short
-
-                    if status == 2:
-                        existing = data["url"].get("shortLink", url)
-                        log_mgl.info(f"  ✂️ Cuttly existente t={tentativa}: {existing}")
-                        return existing
-
-                    log_mgl.warning(f"  ⚠️ Cuttly status={status} | t={tentativa}/3")
-                    await asyncio.sleep(2 ** tentativa)
-
-        except asyncio.TimeoutError:
-            log_mgl.warning(f"  ⏱ Cuttly timeout t={tentativa}/3 | {url[:60]}")
-            await asyncio.sleep(2 ** tentativa)
-        except Exception as e:
-            log_mgl.error(f"  ❌ Cuttly t={tentativa}: {e} | {url[:60]}")
-            await asyncio.sleep(2 ** tentativa)
-
-    log_mgl.error(f"  ❌ Cuttly falhou 3x — link saiu longo | {url[:80]}")
-    return url  # fail-safe: melhor longo do que quebrado
+                        u = data.get("url", {})
+                        if u.get("status") in (7, 2):
+                            return u.get("shortLink") or u.get("short_link") or url
+            await asyncio.sleep(2)
+        except Exception: pass
+    return url
 
 
 async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
-    """Motor exclusivo Magalu. Desencurta qualquer variante."""
-    log_mgl.debug(f"🔗 {url[:80]}")
+    """Motor Magalu v82.0 - 100% focado em IDs de Divulgador."""
+    log_mgl.debug(f"🔗 Iniciando Magalu: {url[:50]}")
 
-    # SEMPRE desencurta — garante chegar no domínio final
-    nl = _netloc(url)
-    precisa = "maga.lu" in nl or nl in _ENCURTADORES
-    if precisa or classificar(url) == "expandir":
-        async with _SEM_HTTP:
-            exp = await desencurtar_ultra(url, sessao)
-        log_mgl.debug(f"  📦 {exp[:80]}")
-    else:
-        exp = url
+    # Abre o link até o destino final para não converter link de redirecionamento
+    exp = await desencurtar_ultra(url, sessao)
+    
+    # Se ainda estiver no /r/, tenta mais um salto para achar o produto
+    if "/r/" in exp or "/r" == urlparse(exp).path:
+        exp = await desencurtar_ultra(exp, sessao)
 
-    if classificar(exp) != "magalu":
-        log_mgl.warning(f"  ⚠️ Não-Magalu: {exp[:60]}")
+    if classificar(exp) != "magalu": return None
+
+    # Se for link vazio (home), descarta para evitar erro no canal
+    if urlparse(exp).path in ["", "/", "/r", "/r/"]:
+        log_mgl.error("❌ Abortando: Link sem identificador de produto.")
         return None
 
     url_c = _construir_url_magalu(exp)
-    final = await _cuttly(url_c, sessao)
-    log_mgl.info(f"  ✅ {final}")
-    return final
+    log_mgl.info(f"✅ Magalu Finalizado: {url_c[:60]}...")
+    return await _cuttly(url_c, sessao)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
