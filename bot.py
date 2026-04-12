@@ -483,95 +483,116 @@ async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
     return url  # URL original Shopee ainda é válida
 
 
-
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 9 ▸ MOTOR MAGALU (CALIBRAÇÃO DE ELITE - v72.0)
+# MÓDULO 9 ▸ MOTOR MAGALU (CIRURGIA FINAL - PRESERVAÇÃO DE DNA - v73.0)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _construir_url_magalu(url_exp: str) -> str:
     """
-    Constrói URL Magalu com precisão cirúrgica de parâmetros.
-    Respeita os nomes exatos (com underline) para garantir o redirecionamento.
+    Constrói URL Magalu preservando o caminho (path) original do produto.
+    Substitui identidades de outros afiliados pelas minhas.
     """
     p = urlparse(url_exp)
     path = p.path
+    netloc = p.netloc.lower()
+
+    # 1. Padronização de Host: Mata o 'm.' mobile e usa 'www.'
+    if netloc.startswith("m."):
+        netloc = netloc.replace("m.", "www.", 1)
+
+    # 2. Substituição de Slug (Troca loja de origem pela sua)
+    # Se for magazinevoce.com.br/LOJA_DE_OUTRO/...
+    if "magazinevoce.com.br" in netloc:
+        # Regex captura o slug logo após a primeira barra
+        path = re.sub(r'^/([^/]+)', f'/{_MGL_SLUG}', path)
+
+    # 3. Filtragem de Parâmetros Originais ( DNA vs Lixo )
     query_orig = parse_qs(p.query, keep_blank_values=False)
-
-    # 1. Ajuste de Slug (Troca loja antiga pela sua se for magazinevoce)
-    if "magazinevoce.com.br" in p.netloc:
-        path = re.sub(r'(/(?:lojas|magazinevoce)/)[^/]+', rf'\1{_MGL_SLUG}', path)
-    
-    # 2. Padronização de Host (Mata o 'm.' mobile e mantém o resto)
-    netloc = p.netloc.replace("m.magazineluiza.com.br", "www.magazineluiza.com.br")
-
-    # 3. Whitelist de DNA (Parâmetros que identificam o produto)
     params_finais = {}
+    
+    # Whitelist: Mantém apenas o que identifica o produto ou a lista
     whitelist = {'f', 'l', 'id', 'p', 'sku', 'node', 'item_id', 'categoria'}
     for k, v in query_orig.items():
         if k.lower() in whitelist:
             params_finais[k] = v
 
-    # 4. Injeção de Parâmetros com Underline (O segredo da comissão)
-    # Magalu exige partner_id e promoter_id para links de produto
-    meus_params = {
+    # 4. Injeção de Parâmetros de Comissão (Underlines Oficiais)
+    meus_ids = {
         "utm_source": "divulgador",
         "utm_medium": "magalu",
-        "partner_id": _MGL_PARTNER,
-        "promoter_id": _MGL_PROMOTER,
+        "partner_id": _MGL_PARTNER,   # Ex: 3440
+        "promoter_id": _MGL_PROMOTER, # Seu ID
         "utm_campaign": _MGL_PROMOTER,
         "af_force_deeplink": "true",
         "is_retargeting": "true",
         "pid": _MGL_PID,
         "c": _MGL_PROMOTER
     }
-    params_finais.update(meus_params)
+    params_finais.update(meus_ids)
 
-    # 5. Montagem da URL de Destino (Base do Deeplink)
-    url_base = urlunparse(p._replace(
+    # 5. Construção da URL de Destino (Onde o cliente vai cair)
+    # Aqui o PATH é mantido intacto!
+    url_destino = urlunparse(p._replace(
         netloc=netloc,
         path=path, 
         query=urlencode(params_finais, doseq=True), 
         fragment=""
     ))
     
-    # 6. Injeção do Deeplink Final (Nome exato: deep_link_value)
-    params_finais["deep_link_value"] = url_base
+    # 6. Criação do Link Final de Afiliado com deep_link_value
+    # O Magalu exige que a URL final esteja dentro deste parâmetro
+    params_finais["deep_link_value"] = url_destino
     
-    return urlunparse(p._replace(
+    final_url = urlunparse(p._replace(
         netloc=netloc,
         path=path, 
         query=urlencode(params_finais, doseq=True), 
         fragment=""
     ))
+    
+    return final_url
 
 async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> str:
+    """Encurtador robusto: envia URL codificada e aceita status 7 e 2."""
     url_enc = quote(url, safe="")
     api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={url_enc}"
     try:
         async with _SEM_HTTP:
-            async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=12)) as r:
+            async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=15)) as r:
                 if r.status == 200:
                     data = await r.json(content_type=None)
-                    status = data.get("url", {}).get("status")
-                    if status in (7, 2):
-                        return data["url"]["short_link"] if "short_link" in data["url"] else data["url"]["shortLink"]
+                    u = data.get("url", {})
+                    if u.get("status") in (7, 2):
+                        # Tenta pegar a versão curta disponível
+                        return u.get("shortLink") or u.get("short_link") or url
+                    log_mgl.warning(f"  ⚠️ Cuttly Status {u.get('status')}")
     except Exception as e:
-        log_mgl.warning(f"⚠️ Cuttly: {e}")
+        log_mgl.warning(f"  ⚠️ Falha Cuttly: {e}")
     return url
 
 async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
-    log_mgl.debug(f"🔗 Magalu Raw: {url[:50]}")
+    """Motor Magalu v73.0 - Foco em Integridade de Link."""
+    log_mgl.debug(f"🔗 Magalu Entrada: {url[:60]}...")
     nl = _netloc(url)
+    
+    # Desencurta apenas se for link curto conhecido
     if "maga.lu" in nl or nl in _ENCURTADORES:
         exp = await desencurtar_ultra(url, sessao)
+        log_mgl.debug(f"  📦 Expandido: {exp[:60]}")
     else:
         exp = url
 
-    if classificar(exp) != "magalu": return None
+    if classificar(exp) != "magalu":
+        log_mgl.warning("  🗑 Descartado: Link pós-expansão não é Magalu")
+        return None
+
+    url_convertida = _construir_url_magalu(exp)
     
-    url_c = _construir_url_magalu(exp)
-    log_mgl.info(f"✅ Magalu Final: {url_c[:60]}...")
-    return await _cuttly(url_c, sessao)
+    # Debug para você ver se o código do produto está lá
+    log_mgl.info(f"✅ Magalu Finalizado: {url_convertida[:70]}...")
+    
+    return await _cuttly(url_convertida, sessao)
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
