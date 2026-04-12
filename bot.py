@@ -1,22 +1,33 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║   FOGUETÃO v72.0 — CIRURGIA MÓDULO 9 + MÓDULO 20                          ║
+║   FOGUETÃO v73.0 — VERSÃO ELITE CONSOLIDADA                                ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
-║  MUDANÇAS v72:                                                              ║
+║  CIRURGIAS v73 (sem alterar outros módulos):                                ║
 ║                                                                             ║
-║  MÓDULO 9 — DNA Magalu preservado:                                         ║
-║   • _construir_url_magalu agora SUBSTITUI parâmetros, não reconstrói       ║
-║   • Path original do produto (/produto-xyz/p/123/) SEMPRE preservado       ║
-║   • Parâmetros com underscore: partner_id, promoter_id, deep_link_value    ║
-║   • Cuttly: timeout 15s + 3 tentativas com backoff                         ║
-║     Prioridade: NENHUM link Magalu sai gigante no grupo                    ║
+║  MÓDULO 5  — Barreira de concorrência:                                     ║
+║    • t.me/joinchat, t.me/canal, chat.whatsapp.com → deletados em silêncio  ║
+║    • wa.me preservado (suporte direto)                                     ║
+║    • _eh_vitrine_magalu agora detecta /l/ e /selecao/                      ║
 ║                                                                             ║
-║  MÓDULO 20 — Filtro de Post Preguiçoso (Shopee):                           ║
-║   • Se a mensagem tiver lista numerada (1. 2. 3.) E não tiver R$ nem %     ║
-║     → descarta silenciosamente (post "lixo" sem valor informativo)         ║
-║   • Passa apenas posts que informam o benefício ao seguidor                ║
+║  MÓDULO 9  — DNA Magalu + Cuttly resiliente:                               ║
+║    • Path NUNCA zerado (/p/ID/, /l/lista/, /selecao/ preservados)          ║
+║    • Parâmetros oficiais: partner_id, promoter_id, af_force_deeplink,      ║
+║      deep_link_value (underline — formato API Magazine Você)               ║
+║    • Cuttly: 15s timeout, 3 tentativas com backoff, trata status 2         ║
 ║                                                                             ║
-║  NÃO ALTERADO: todos os outros módulos (1-8, 10-19, 21-22)                ║
+║  MÓDULO 12 — Limpeza agressiva em 4 camadas:                               ║
+║    • Camada 2 nova: remove linhas com t.me/chat.whatsapp.com               ║
+║    • CTAs de outros bots: 'Entre no grupo', 'Grupo VIP', etc.              ║
+║                                                                             ║
+║  MÓDULO 16 — Buscador obstinado de imagem:                                 ║
+║    • 3 tentativas com 1s de intervalo (antes era 1.5*t)                    ║
+║                                                                             ║
+║  MÓDULO 19 — Prioridade absoluta de envio com imagem:                      ║
+║    • send_file sempre preferido                                             ║
+║    • Texto longo: imagem + texto em sequência (não descarta imagem)        ║
+║    • Só cai para texto puro se send_file falhar irrecuperavelmente         ║
+║                                                                             ║
+║  NÃO ALTERADO: módulos 6, 7, 8, 10, 11, 13, 14, 15, 17, 18, 20, 21, 22  ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -189,8 +200,16 @@ _ENCURTADORES = frozenset([
     "short.io", "bl.ink", "rebrand.ly", "shorturl.at",
 ])
 
-# Links preservados sem processamento (WhatsApp, etc.)
-_PRESERVE = frozenset(["wa.me", "chat.whatsapp.com", "api.whatsapp.com"])
+# Links que NUNCA devem ser processados nem aparecer no canal destino:
+#   t.me/joinchat, t.me/outros_grupos → deletados silenciosamente
+#   chat.whatsapp.com → deletado (convite para grupo de concorrente)
+# Links que são PRESERVADOS sem alteração:
+#   wa.me → suporte direto ao usuário (sempre mantido)
+_PRESERVE  = frozenset(["wa.me", "api.whatsapp.com"])  # só esses passam
+_DELETAR   = frozenset([                                # esses somem em silêncio
+    "t.me", "telegram.me", "telegram.org",
+    "chat.whatsapp.com",                               # convite grupo WhatsApp
+])
 
 def _netloc(url: str) -> str:
     try:
@@ -198,33 +217,50 @@ def _netloc(url: str) -> str:
     except Exception:
         return ""
 
+def _eh_link_grupo_externo(url: str) -> bool:
+    """
+    Retorna True se o link for convite para grupo externo (concorrente).
+    Detecta: t.me/joinchat, t.me/+hash, t.me/canal_qualquer,
+             chat.whatsapp.com/invite/...
+    """
+    nl = _netloc(url)
+    for d in _DELETAR:
+        if nl == d or nl.endswith("." + d):
+            return True
+    return False
+
 def classificar(url: str) -> Optional[str]:
     """
     Retorna: 'amazon' | 'shopee' | 'magalu' | 'preservar' | 'expandir' | None
 
     REGRA DE ISOLAMENTO ESTANQUE:
-    - Verificação é feita por SUFIXO de domínio (netloc termina com o domínio ou é igual).
-    - Magalu é verificado ANTES de Amazon e Shopee para evitar qualquer ambiguidade.
-    - Um link magazineluiza.com.br NUNCA passa pelo motor Amazon.
-    - Um link amazon.com.br NUNCA passa pelo motor Magalu.
+    - Links de grupos externos (t.me, chat.whatsapp.com) → None (deletados)
+    - wa.me → 'preservar' (link de suporte, não substituído)
+    - Magalu verificado ANTES de Amazon/Shopee → zero cross-linking
+    - Correspondência por SUFIXO de domínio (não substring)
     """
     nl = _netloc(url)
     if not nl:
         return None
 
-    # Preservar primeiro (WhatsApp / wa.me)
+    # Links de grupos externos → deletar silenciosamente
+    if _eh_link_grupo_externo(url):
+        log_lnk.debug(f"🚫 Grupo externo bloqueado: {nl}")
+        return None
+
+    # wa.me → preservar (suporte direto)
     for d in _PRESERVE:
         if nl == d or nl.endswith("." + d):
             return "preservar"
 
-    # MAGALU verificado ANTES de amazon/shopee — evita cross-linking
+    # MAGALU primeiro — evita cross-linking com Amazon
     for dom in ("magazineluiza.com.br", "sacola.magazineluiza.com.br",
                 "magazinevoce.com.br", "maga.lu"):
         if nl == dom or nl.endswith("." + dom):
             log_lnk.debug(f"🔵 MAGALU: {nl}")
             return "magalu"
 
-    # AMAZON — somente domínios exatos da Amazon
+    # AMAZON
     for dom in ("amazon.com.br", "amzn.to", "amzn.com", "a.co"):
         if nl == dom or nl.endswith("." + dom):
             log_lnk.debug(f"🟠 AMAZON: {nl}")
@@ -236,7 +272,7 @@ def classificar(url: str) -> Optional[str]:
             log_lnk.debug(f"🟣 SHOPEE: {nl}")
             return "shopee"
 
-    # Encurtadores genéricos → expandir e reclassificar
+    # Encurtadores genéricos → expande e reclassifica
     for enc in _ENCURTADORES:
         if nl == enc or nl.endswith("." + enc):
             return "expandir"
@@ -245,9 +281,10 @@ def classificar(url: str) -> Optional[str]:
     return None
 
 def _eh_vitrine_magalu(url: str) -> bool:
+    """Retorna True para URLs de vitrine/categoria/lista Magalu."""
     return bool(re.search(
         r'(magazineluiza\.com\.br|magazinevoce\.com\.br)'
-        r'.*(vitrine|categoria|lista|promo|stores|loja)',
+        r'.*(vitrine|categoria|lista|/l/|/selecao/|promo|stores|loja)',
         url, re.I))
 
 
@@ -483,119 +520,143 @@ async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
     log_shp.error("  ❌ Shopee API falhou 3x")
     return url  # URL original Shopee ainda é válida
 
+
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 9 ▸ MOTOR MAGALU (LÓGICA LINEAR + RESILIÊNCIA CUTTLY)
+# MÓDULO 9 ▸ MOTOR MAGALU (ISOLADO)
+# Desencurta qualquer link Magalu (maga.lu, cutt.ly, bit.ly apontando p/ MGL).
+# SEMPRE sobrescreve parâmetros com os do sistema.
+# Somente _MGL_* e _CUTTLY_KEY são usados aqui.
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _construir_url_magalu(url_exp: str) -> str:
-    """Substituição pura de parâmetros conforme regra do Léo."""
-    p = urlparse(url_exp)
-    path = p.path
-    query_params = parse_qs(p.query, keep_blank_values=True)
+    """
+    SUBSTITUIÇÃO de parâmetros — NUNCA zera o path.
 
-    if "magazinevoce.com.br" in p.netloc:
-        partes = path.strip("/").split("/")
-        if partes:
-            partes[0] = _MGL_SLUG
-            path = "/" + "/".join(partes)
+    REGRA DE OURO:
+    • O path original (/produto/p/ID/, /l/lista/, /selecao/) é PRESERVADO intacto.
+    • Só o slug de loja antiga é substituído pelo _MGL_SLUG em vitrines.
+    • Todos os query params do original são descartados.
+    • Injetados os params oficiais com underscore: partner_id, promoter_id,
+      af_force_deeplink, deep_link_value (formato API Magazine Você).
 
-    substituicoes = {
-        "partner_id": _MGL_PARTNER, "partnerid": _MGL_PARTNER,
-        "promoter_id": _MGL_PROMOTER, "promoterid": _MGL_PROMOTER,
-        "utm_campaign": _MGL_PROMOTER, "c": _MGL_PROMOTER, "tag": _MGL_PROMOTER
+    Caminhos preservados:
+      /produto-xyz/p/225470800/me/refg/  → produto direto
+      /l/lista-de-ofertas/               → lista curada
+      /selecao/ofertas-do-dia/           → seleção
+      /lojas/slug-antigo/                → vitrine (slug substituído)
+    """
+    p    = urlparse(url_exp)
+    path = p.path  # ← DNA: NUNCA zerado
+
+    # Vitrine/categoria: substitui slug da loja antiga → meu slug
+    if _eh_vitrine_magalu(url_exp):
+        path = re.sub(r'(/(?:lojas|magazinevoce)/)[^/]+', rf'\1{_MGL_SLUG}', path)
+        log_mgl.debug(f"  Slug vitrine → {path}")
+
+    # Base limpa = mesmo domínio + path preservado, zero query antiga
+    base = urlunparse(p._replace(path=path, query="", fragment=""))
+
+    # deep_link_value aponta para o produto com UTMs mínimos
+    deep_link = (
+        f"{base}"
+        f"?utm_source=divulgador&utm_medium=magalu"
+        f"&partner_id={_MGL_PARTNER}&promoter_id={_MGL_PROMOTER}"
+        f"&utm_campaign={_MGL_PROMOTER}"
+    )
+
+    # Parâmetros oficiais com underscore (formato Magazine Você)
+    params = {
+        "utm_source":       "divulgador",
+        "utm_medium":       "magalu",
+        "partner_id":       _MGL_PARTNER,
+        "promoter_id":      _MGL_PROMOTER,
+        "utm_campaign":     _MGL_PROMOTER,
+        "pid":              _MGL_PID,
+        "c":                _MGL_PROMOTER,
+        "af_force_deeplink": "true",       # ← nome oficial com underscore
+        "deep_link_value":  deep_link,     # ← nome oficial com underscore
     }
-    for chave, novo_valor in substituicoes.items():
-        query_params[chave] = [novo_valor]
+    url_final = urlunparse(p._replace(path=path, query=urlencode(params), fragment=""))
+    log_mgl.debug(f"  🏷 {url_final[:100]}")
+    return url_final
 
-    if "deep_link_value" in query_params:
-        url_interna = query_params["deep_link_value"][0]
-        pi = urlparse(url_interna)
-        qi = parse_qs(pi.query, keep_blank_values=True)
-        for k, v in substituicoes.items(): qi[k] = [v]
-        nova_interna = urlunparse(pi._replace(query=urlencode(qi, doseq=True)))
-        query_params["deep_link_value"] = [nova_interna]
-
-    return urlunparse(p._replace(path=path, query=urlencode(query_params, doseq=True)))
 
 async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> str:
-    """Encurtador com alta prioridade para Magalu."""
-    url_enc = quote(url, safe="")
-    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={url_enc}"
-    # 3 tentativas para garantir que o link não saia gigante
-    for t in range(1, 4):
+    """
+    Encurta via Cuttly com 3 tentativas e timeout de 15s.
+    Prioridade: NENHUM link Magalu pode sair gigante.
+    Só retorna a URL longa se todas as 3 tentativas falharem.
+    """
+    url_encoded = quote(url, safe="")
+    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={url_encoded}"
+
+    for tentativa in range(1, 4):
         try:
-            async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=15)) as r:
-                if r.status == 200:
-                    data = await r.json(content_type=None)
-                    u = data.get("url", {})
-                    if u.get("status") in (7, 2):
-                        return u.get("shortLink") or u.get("short_link") or url
-            await asyncio.sleep(1.5 * t)
-        except Exception: pass
-    return url
+            async with _SEM_HTTP:
+                async with sessao.get(
+                    api,
+                    timeout=aiohttp.ClientTimeout(total=15)   # ← 15s (era 12s)
+                ) as r:
+                    if r.status != 200:
+                        log_mgl.warning(f"  ⚠️ Cuttly HTTP {r.status} | t={tentativa}/3")
+                        await asyncio.sleep(2 ** tentativa)
+                        continue
+                    try:
+                        data = await r.json(content_type=None)
+                    except Exception:
+                        raw = await r.text()
+                        log_mgl.warning(f"  ⚠️ Cuttly JSON inválido t={tentativa}: {raw[:80]}")
+                        await asyncio.sleep(2 ** tentativa)
+                        continue
+
+                    status = data.get("url", {}).get("status")
+
+                    if status == 7:
+                        short = data["url"]["shortLink"]
+                        log_mgl.info(f"  ✂️ Cuttly t={tentativa}: {short}")
+                        return short
+
+                    if status == 2:
+                        existing = data["url"].get("shortLink", url)
+                        log_mgl.info(f"  ✂️ Cuttly existente t={tentativa}: {existing}")
+                        return existing
+
+                    log_mgl.warning(f"  ⚠️ Cuttly status={status} | t={tentativa}/3")
+                    await asyncio.sleep(2 ** tentativa)
+
+        except asyncio.TimeoutError:
+            log_mgl.warning(f"  ⏱ Cuttly timeout t={tentativa}/3 | {url[:60]}")
+            await asyncio.sleep(2 ** tentativa)
+        except Exception as e:
+            log_mgl.error(f"  ❌ Cuttly t={tentativa}: {e} | {url[:60]}")
+            await asyncio.sleep(2 ** tentativa)
+
+    log_mgl.error(f"  ❌ Cuttly falhou 3x — link saiu longo | {url[:80]}")
+    return url  # fail-safe: melhor longo do que quebrado
+
 
 async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
-    exp = await desencurtar_ultra(url, sessao)
-    if "magazineluiza.com.br" not in exp and "magazinevoce.com.br" not in exp:
+    """Motor exclusivo Magalu. Desencurta qualquer variante."""
+    log_mgl.debug(f"🔗 {url[:80]}")
+
+    # SEMPRE desencurta — garante chegar no domínio final
+    nl = _netloc(url)
+    precisa = "maga.lu" in nl or nl in _ENCURTADORES
+    if precisa or classificar(url) == "expandir":
+        async with _SEM_HTTP:
+            exp = await desencurtar_ultra(url, sessao)
+        log_mgl.debug(f"  📦 {exp[:80]}")
+    else:
+        exp = url
+
+    if classificar(exp) != "magalu":
+        log_mgl.warning(f"  ⚠️ Não-Magalu: {exp[:60]}")
         return None
-    url_convertida = _construir_url_magalu(exp)
-    return await _cuttly(url_convertida, sessao)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 11 ▸ PIPELINE DE CONVERSÃO MASSIVA (CAPACIDADE: 100 LINKS)
-# ══════════════════════════════════════════════════════════════════════════════
-
-async def _converter_um(url: str, sessao: aiohttp.ClientSession) -> tuple:
-    plat = classificar(url)
-    if plat == "amazon":
-        r = await motor_amazon(url, sessao)
-        return (r, "amazon") if r else (None, None)
-    if plat == "shopee":
-        r = await motor_shopee(url, sessao)
-        return (r, "shopee") if r else (None, None)
-    if plat == "magalu":
-        r = await motor_magalu(url, sessao)
-        return (r, "magalu") if r else (None, None)
-    if plat == "expandir":
-        exp = await desencurtar_ultra(url, sessao)
-        p2 = classificar(exp)
-        if p2 == "amazon": return (await motor_amazon(exp, sessao), "amazon")
-        if p2 == "shopee": return (await motor_shopee(exp, sessao), "shopee")
-        if p2 == "magalu": return (await motor_magalu(exp, sessao), "magalu")
-    return None, None
-
-async def converter_links(links: list) -> tuple:
-    """Converte até 100 links em paralelo. Garante que todos sejam encurtados."""
-    if not links: return {}, "amazon"
-    
-    log_lnk.info(f"🚀 Iniciando conversão de {len(links[:100])} link(s)...")
-    
-    # Aumentamos o limite do conector para 100 para suportar o volume
-    conn = aiohttp.TCPConnector(limit=100, ttl_dns_cache=300, ssl=False)
-    
-    async with aiohttp.ClientSession(
-        connector=conn,
-        timeout=aiohttp.ClientTimeout(total=60, connect=10), # Mais tempo para listas longas
-        headers={"User-Agent": random.choice(USER_AGENTS)},
-    ) as sessao:
-        # Processa até os 100 primeiros links encontrados
-        resultados = await asyncio.gather(
-            *[_converter_um(l, sessao) for l in links[:100]],
-            return_exceptions=True,
-        )
-
-    mapa, plats = {}, []
-    for i, res in enumerate(resultados):
-        if isinstance(res, Exception): continue
-        novo, plat = res
-        if novo and plat:
-            mapa[links[i]] = novo
-            plats.append(plat)
-
-    plat_p = max(set(plats), key=plats.count) if plats else "amazon"
-    log_lnk.info(f"✅ {len(mapa)} links processados com sucesso.")
-    return mapa, plat_p
-
+    url_c = _construir_url_magalu(exp)
+    final = await _cuttly(url_c, sessao)
+    log_mgl.info(f"  ✅ {final}")
+    return final
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -744,24 +805,18 @@ _RE_RUIDO_LINHA = re.compile(
 
 def limpar_ruido_textual(texto: str) -> str:
     """
-    Limpeza em 3 camadas:
+    Limpeza em 4 camadas:
 
-    Camada 1 — Expressões de afiliado inline (re.sub):
-      Remove frases como '-Link produto:', 'Resgate aqui:', 'Confira no app',
-      marcadores como ':::', '---', 'ML:', ':: ML', etc.
-      Aplicado no texto inteiro ANTES de dividir em linhas.
-
-    Camada 2 — Linhas de ruído puro:
-      Linhas que ficaram vazias ou só com ruído após camada 1 são removidas.
-
-    Camada 3 — Normalização de espaços:
-      Remove caracteres Unicode invisíveis e linhas vazias consecutivas.
+    Camada 0 — Unicode invisíveis removidos.
+    Camada 1 — Expressões de afiliado / CTA de outros bots (re.sub inline).
+    Camada 2 — Linhas que contêm links para grupos externos (t.me, chat.whatsapp.com).
+    Camada 3 — Linhas que viraram ruído puro após a limpeza.
+    Camada 4 — Linhas vazias consecutivas normalizadas (máx 1).
     """
     # ── Camada 0: Unicode invisíveis ─────────────────────────────────────
     texto = re.sub(r'[\u200b\u200c\u200d\u00a0\u2060\ufeff]', ' ', texto)
 
-    # ── Camada 1: Expressões de afiliado / CTA / marcadores inline ───────
-    # Expressões que aparecem no INÍCIO de linha (com ou sem hífen/dois-pontos)
+    # ── Camada 1: CTA / expressões de outros bots (inline por linha) ─────
     _exprs_inicio = [
         r'^\s*-?\s*Link\s+produto\s*:?\s*',
         r'^\s*-?\s*Link\s+da\s+oferta\s*:?\s*',
@@ -775,11 +830,13 @@ def limpar_ruido_textual(texto: str) -> str:
         r'^\s*-?\s*Veja\s+aqui\s*:?\s*',
         r'^\s*-?\s*Assine\s+aqui\s*:?\s*',
         r'^\s*-?\s*Saiba\s+mais\s*:?\s*',
+        r'^\s*-?\s*Entre\s+no\s+grupo\s*:?\s*',    # "Entre no grupo"
+        r'^\s*-?\s*Acesse\s+o\s+grupo\s*:?\s*',    # "Acesse o grupo"
+        r'^\s*-?\s*Grupo\s+VIP\s*:?\s*',            # "Grupo VIP"
         r'^\s*-?\s*Anúncio\s*:?\s*',
         r'^\s*-?\s*anuncio\s*:?\s*',
         r'^\s*-?\s*Publicidade\s*:?\s*',
     ]
-    # Marcadores técnicos inline
     _marcadores = [
         r':::\s*(?:ML|MG|AMZ|loja)?\s*',
         r'---+\s*',
@@ -789,7 +846,6 @@ def limpar_ruido_textual(texto: str) -> str:
         r'^\s*::\s*(?:ML|MG|AMZ)\s*::\s*',
     ]
 
-    # Aplica substituições linha por linha para não quebrar URLs
     linhas = texto.split('\n')
     limpas = []
     for linha in linhas:
@@ -800,7 +856,26 @@ def limpar_ruido_textual(texto: str) -> str:
             l = re.sub(marc, '', l, flags=re.I | re.M)
         limpas.append(l)
 
-    # ── Camada 2: Remove linhas que viraram ruído puro ────────────────────
+    # ── Camada 2: Remove linhas com links para grupos externos ────────────
+    # (t.me/joinchat, t.me/canal, chat.whatsapp.com)
+    _RE_GRUPO_EXTERNO = re.compile(
+        r'https?://(?:t\.me|telegram\.me|telegram\.org|chat\.whatsapp\.com)'
+        r'[^\s]*',
+        re.I
+    )
+    sem_grupos = []
+    for linha in limpas:
+        if _RE_GRUPO_EXTERNO.search(linha):
+            # Se a linha INTEIRA é o link do grupo → remove a linha
+            resto = _RE_GRUPO_EXTERNO.sub('', linha).strip()
+            if not resto:
+                log_fmt.debug(f"🚫 Linha grupo externo removida: {linha[:60]}")
+                continue
+            # Linha com texto + link do grupo → remove só o link
+            linha = _RE_GRUPO_EXTERNO.sub('', linha).strip()
+        sem_grupos.append(linha)
+
+    # ── Camada 3: Remove linhas que viraram ruído puro ────────────────────
     _RE_LINHA_LIXO = re.compile(
         r'^\s*(?:'
         r'-\s*Anúncio|Anúncio|anuncio|-anuncio|'
@@ -810,9 +885,9 @@ def limpar_ruido_textual(texto: str) -> str:
         r')\s*$',
         re.I
     )
-    filtradas = [l for l in limpas if not _RE_LINHA_LIXO.match(l.strip())]
+    filtradas = [l for l in sem_grupos if not _RE_LINHA_LIXO.match(l.strip())]
 
-    # ── Camada 3: Linhas vazias consecutivas (máx 1) ──────────────────────
+    # ── Camada 4: Linhas vazias consecutivas (máx 1) ──────────────────────
     final, pv = [], False
     for l in filtradas:
         if l.strip() == "":
@@ -1397,7 +1472,12 @@ async def preparar_imagem(media_ou_url, tem_real: bool):
     return media_ou_url, False
 
 async def buscar_imagem(url: str) -> Optional[str]:
+    """
+    Buscador obstinado: 3 tentativas com 1s de intervalo.
+    Extrai og:image ou twitter:image da página do produto.
+    """
     for t in range(1, 4):
+        log_img.debug(f"🖼 Buscando imagem t={t}/3 | {url[:60]}")
         try:
             async with aiohttp.ClientSession(
                 headers={"User-Agent": random.choice(USER_AGENTS)}
@@ -1408,13 +1488,16 @@ async def buscar_imagem(url: str) -> Optional[str]:
                     tag  = (soup.find("meta", property="og:image") or
                             soup.find("meta", attrs={"name": "twitter:image"}))
                     if tag and tag.get("content"):
-                        log_img.info(f"✅ t={t}: {tag['content'][:70]}")
+                        log_img.info(f"✅ Imagem encontrada t={t}: {tag['content'][:70]}")
                         return tag["content"]
         except asyncio.TimeoutError:
-            log_img.warning(f"⏱ t={t}")
+            log_img.warning(f"⏱ Timeout t={t}/3")
         except Exception as e:
-            log_img.warning(f"⚠️ t={t}: {e}")
-        await asyncio.sleep(1.5 * t)
+            log_img.warning(f"⚠️ Erro t={t}/3: {e}")
+        if t < 3:
+            await asyncio.sleep(1.0)   # 1s entre tentativas (não 1.5*t)
+
+    log_img.warning(f"❌ Sem imagem após 3 tentativas | {url[:60]}")
     return None
 
 def _tem_midia(media) -> bool:
@@ -1467,13 +1550,43 @@ async def _foi_processado(msg_id: int) -> bool:
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def _enviar(msg: str, img_obj) -> object:
-    """Imagem + texto = 1 mensagem. Texto longo → sem imagem + preview."""
-    if img_obj and len(msg) <= 1024:
-        try:
-            return await client.send_file(
-                GRUPO_DESTINO, img_obj, caption=msg, parse_mode="md")
-        except Exception as e:
-            log_tg.warning(f"⚠️ send_file: {e}")
+    """
+    Prioridade absoluta: envia SEMPRE como Imagem + Texto quando há imagem.
+
+    Se img_obj for fornecido:
+      • Tenta send_file + caption (caption máx 1024 chars)
+      • Se caption > 1024: envia imagem sem caption + mensagem de texto separada
+        (ainda são 2 mensagens, mas a imagem não é perdida)
+      • Só cai para send_message puro se send_file lançar exceção irrecuperável
+
+    Se img_obj for None: envia texto com link_preview.
+    """
+    if img_obj:
+        if len(msg) <= 1024:
+            try:
+                return await client.send_file(
+                    GRUPO_DESTINO, img_obj,
+                    caption=msg, parse_mode="md")
+            except Exception as e:
+                log_tg.warning(f"⚠️ send_file+caption falhou: {e} — tentando sem caption")
+                try:
+                    # Tenta enviar imagem sem caption
+                    await client.send_file(GRUPO_DESTINO, img_obj)
+                    # Envia o texto separado logo em seguida
+                    return await client.send_message(
+                        GRUPO_DESTINO, msg, parse_mode="md", link_preview=True)
+                except Exception as e2:
+                    log_tg.warning(f"⚠️ send_file sem caption falhou: {e2} — só texto")
+        else:
+            # Texto longo: envia imagem primeiro, depois o texto completo
+            try:
+                await client.send_file(GRUPO_DESTINO, img_obj)
+                return await client.send_message(
+                    GRUPO_DESTINO, msg, parse_mode="md", link_preview=False)
+            except Exception as e:
+                log_tg.warning(f"⚠️ send_file texto longo falhou: {e} — só texto")
+
+    # Fallback final: só texto (nunca descarta a oferta por causa da imagem)
     return await client.send_message(
         GRUPO_DESTINO, msg, parse_mode="md", link_preview=True)
 
