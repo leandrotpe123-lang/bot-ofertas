@@ -520,119 +520,155 @@ async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
     log_shp.error("  ❌ Shopee API falhou 3x")
     return url  # URL original Shopee ainda é válida
 
-
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 9 ▸ MOTOR MAGALU (VERSÃO FINAL DE ELITE v82.0)
+# MÓDULO 9 ▸ MOTOR MAGALU (ISOLADO)
+#
+# PRINCÍPIO: SUBSTITUIÇÃO PURA de IDs — nunca reconstrói, nunca zera path.
+#
+# Fluxo:
+#   1. desencurtar_ultra → URL final real da Magalu
+#   2. _substituir_ids_magalu → troca SOMENTE os IDs de afiliado na URL viva
+#   3. _cuttly → encurta (3 tentativas, 15s, status 2 aceito)
+#
+# Regras de ouro:
+#   • path NUNCA é zerado (/p/ID/, /l/lista/, /selecao/ preservados)
+#   • scheme + host NUNCA alterados (não força sacola.)
+#   • tag=leo21073-20 NUNCA entra num link Magalu
+#   • Slug substituído APENAS em domínio magazinevoce.com.br
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _construir_url_magalu(url_exp: str) -> str:
+def _substituir_ids_magalu(url_exp: str) -> str:
     """
-    Substituição pura de IDs Magalu. Preserva DNA do produto.
-    IDs usados: partner_id e promoter_id (conforme API Magazine Você).
+    Substitui SOMENTE os IDs de afiliado na URL já expandida.
+    Preserva integralmente: scheme, host, path, e todos os outros params.
+    Remove: qualquer tag Amazon que possa ter vazado.
+    Slug: só troca em magazinevoce.com.br/lojas/ ou /magazinevoce/.
     """
-    p = urlparse(url_exp)
+    p    = urlparse(url_exp)
     path = p.path
-    netloc = p.netloc.lower()
+    host = p.netloc.lower()
 
-    # 1. Segurança: Se não tem produto (/p/) nem lista (/l/), interrompe
-    if path in ["", "/", "/r", "/r/"] and not p.query:
-        log_mgl.warning(f"⚠️ Link incompleto ({path}), mantendo original.")
-        return url_exp
+    # Slug: SOMENTE em magazinevoce.com.br — nunca em magazineluiza.com.br
+    if "magazinevoce.com.br" in host:
+        path = re.sub(
+            r'(/(?:lojas|magazinevoce)/)[^/?#]+',
+            rf'\1{_MGL_SLUG}',
+            path
+        )
+        log_mgl.debug(f"  Slug vitrine → {path}")
 
-    # 2. Padronização: Mobile (m.) vira www. para estabilidade
-    if netloc.startswith("m."):
-        netloc = netloc.replace("m.", "www.", 1)
-    
-    # 3. Troca de Identidade da Loja (Slug)
-    if "magazinevoce.com.br" in netloc:
-        # Substitui apenas o nome da loja antiga pelo seu _MGL_SLUG (ex: magazineleo12)
-        path = re.sub(r'^/([^/]+)', f'/{_MGL_SLUG}', path)
+    # Lê params originais (preserva todos)
+    params_orig = parse_qs(p.query, keep_blank_values=True)
+    params_new  = {k: v[0] for k, v in params_orig.items()}
 
-    # 4. Limpeza e Preservação de Identificadores de Oferta
-    query_orig = parse_qs(p.query, keep_blank_values=False)
-    params_finais = {}
-    
-    # Mantém apenas o que é essencial para o Magalu achar o produto/lista
-    whitelist_mgl = {'f', 'l', 'id', 'p', 'sku', 'node', 'item_id', 'categoria'}
-    for k, v in query_orig.items():
-        if k.lower() in whitelist_mgl:
-            params_finais[k] = v
+    # Remove tag Amazon se tiver vazado (NUNCA pode estar num link Magalu)
+    params_new.pop("tag", None)
 
-    # 5. Injeção dos seus IDs de Afiliado (Nomes Oficiais Magalu)
-    meus_dados = {
-        "utm_source": "divulgador",
-        "utm_medium": "magalu",
-        "partner_id": _MGL_PARTNER,   # Seu Partner ID do Railway
-        "promoter_id": _MGL_PROMOTER, # Seu Promoter ID do Railway
-        "utm_campaign": _MGL_PROMOTER,
-        "af_force_deeplink": "true",
-        "is_retargeting": "true",
-        "pid": _MGL_PID,
-        "c": _MGL_PROMOTER
-    }
-    params_finais.update(meus_dados)
+    # Substitui/injeta SOMENTE os IDs de comissão (preserva o resto)
+    params_new["partner_id"]        = _MGL_PARTNER
+    params_new["promoter_id"]       = _MGL_PROMOTER
+    params_new["utm_source"]        = "divulgador"
+    params_new["utm_medium"]        = "magalu"
+    params_new["utm_campaign"]      = _MGL_PROMOTER
+    params_new["pid"]               = _MGL_PID
+    params_new["c"]                 = _MGL_PROMOTER
+    params_new["af_force_deeplink"] = "true"
 
-    # 6. URL de Destino para o deep_link_value
-    url_base = urlunparse(p._replace(
-        netloc=netloc,
-        path=path, 
-        query=urlencode(params_finais, doseq=True), 
-        fragment=""
-    ))
-    
-    # Injeta o valor do Deeplink (Obrigatório para processar a comissão)
-    params_finais["deep_link_value"] = url_base
-    
-    return urlunparse(p._replace(
-        netloc=netloc,
-        path=path, 
-        query=urlencode(params_finais, doseq=True), 
-        fragment=""
-    ))
+    # Remove variantes antigas com nome errado (sem underscore)
+    for k_antigo in ["partnerid", "promoterid", "deeplinkvalue",
+                     "afforcedeeplink", "isretargeting"]:
+        params_new.pop(k_antigo, None)
+
+    # deep_link_value aponta para a URL base do produto (path preservado)
+    base = urlunparse(p._replace(path=path, query="", fragment=""))
+    params_new["deep_link_value"] = (
+        f"{base}?utm_source=divulgador&utm_medium=magalu"
+        f"&partner_id={_MGL_PARTNER}&promoter_id={_MGL_PROMOTER}"
+        f"&utm_campaign={_MGL_PROMOTER}"
+    )
+
+    query     = urlencode(params_new)
+    url_final = urlunparse(p._replace(path=path, query=query, fragment=""))
+    log_mgl.debug(f"  🏷 {url_final[:100]}")
+    return url_final
 
 
 async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> str:
-    """Encurtador robusto: aceita status 7 (novo) e 2 (existente)."""
-    if "/r/" in url or url.endswith(".br/"): return url
-    
-    url_enc = quote(url, safe="")
-    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={url_enc}"
-    
+    """Encurta via Cuttly. 3 tentativas, 15s, trata status 2. Fail-safe."""
+    url_encoded = quote(url, safe="")
+    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={url_encoded}"
+
     for t in range(1, 4):
         try:
             async with _SEM_HTTP:
-                async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=15)) as r:
-                    if r.status == 200:
+                async with sessao.get(
+                    api, timeout=aiohttp.ClientTimeout(total=15)
+                ) as r:
+                    if r.status != 200:
+                        log_mgl.warning(f"  ⚠️ Cuttly HTTP {r.status} t={t}/3")
+                        await asyncio.sleep(2 ** t)
+                        continue
+                    try:
                         data = await r.json(content_type=None)
-                        u = data.get("url", {})
-                        if u.get("status") in (7, 2):
-                            return u.get("shortLink") or u.get("short_link") or url
-            await asyncio.sleep(2)
-        except Exception: pass
+                    except Exception:
+                        raw = await r.text()
+                        log_mgl.warning(f"  ⚠️ Cuttly JSON inválido t={t}: {raw[:80]}")
+                        await asyncio.sleep(2 ** t)
+                        continue
+
+                    status = data.get("url", {}).get("status")
+                    if status == 7:
+                        short = data["url"]["shortLink"]
+                        log_mgl.info(f"  ✂️ t={t}: {short}")
+                        return short
+                    if status == 2:
+                        existing = data["url"].get("shortLink", url)
+                        log_mgl.info(f"  ✂️ existente t={t}: {existing}")
+                        return existing
+                    log_mgl.warning(f"  ⚠️ Cuttly status={status} t={t}/3")
+                    await asyncio.sleep(2 ** t)
+
+        except asyncio.TimeoutError:
+            log_mgl.warning(f"  ⏱ Timeout t={t}/3 | {url[:60]}")
+            await asyncio.sleep(2 ** t)
+        except Exception as e:
+            log_mgl.error(f"  ❌ Cuttly t={t}: {e}")
+            await asyncio.sleep(2 ** t)
+
+    log_mgl.error(f"  ❌ Cuttly 3x falhou — link longo | {url[:80]}")
     return url
 
 
 async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
-    """Motor Magalu v82.0 - 100% focado em IDs de Divulgador."""
-    log_mgl.debug(f"🔗 Iniciando Magalu: {url[:50]}")
+    """
+    Motor exclusivo Magalu.
+    Etapa 1: desencurtar_ultra → URL real do produto
+    Etapa 2: _substituir_ids_magalu → troca só os IDs, preserva path
+    Etapa 3: _cuttly → encurta
+    """
+    log_mgl.debug(f"🔗 {url[:80]}")
 
-    # Abre o link até o destino final para não converter link de redirecionamento
-    exp = await desencurtar_ultra(url, sessao)
-    
-    # Se ainda estiver no /r/, tenta mais um salto para achar o produto
-    if "/r/" in exp or "/r" == urlparse(exp).path:
-        exp = await desencurtar_ultra(exp, sessao)
+    # Etapa 1: sempre desencurta (maga.lu, cutt.ly, encurtadores genéricos)
+    nl = _netloc(url)
+    if "maga.lu" in nl or nl in _ENCURTADORES or classificar(url) == "expandir":
+        async with _SEM_HTTP:
+            exp = await desencurtar_ultra(url, sessao)
+        log_mgl.debug(f"  📦 {exp[:80]}")
+    else:
+        exp = url
 
-    if classificar(exp) != "magalu": return None
-
-    # Se for link vazio (home), descarta para evitar erro no canal
-    if urlparse(exp).path in ["", "/", "/r", "/r/"]:
-        log_mgl.error("❌ Abortando: Link sem identificador de produto.")
+    # Confirma Magalu
+    if classificar(exp) != "magalu":
+        log_mgl.warning(f"  ⚠️ Não-Magalu: {exp[:60]}")
         return None
 
-    url_c = _construir_url_magalu(exp)
-    log_mgl.info(f"✅ Magalu Finalizado: {url_c[:60]}...")
-    return await _cuttly(url_c, sessao)
+    # Etapa 2: substituição pura de IDs
+    url_com_ids = _substituir_ids_magalu(exp)
+
+    # Etapa 3: encurta
+    final = await _cuttly(url_com_ids, sessao)
+    log_mgl.info(f"  ✅ {final}")
+    return final
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1225,85 +1261,124 @@ def renderizar(texto: str, mapa_links: dict,
     log_fmt.debug(f"✅ Renderizado [{plat.upper()}] {len(resultado)} chars")
     return resultado
 
-
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 15 ▸ DEDUPLICAÇÃO SEMÂNTICA — POR MUDANÇA REAL
+# MÓDULO 15 ▸ DEDUPLICAÇÃO SEMÂNTICA — OLHA PARA A ALMA, IGNORA O LINK
 #
-# CHAVE: plataforma + cupom + campanha detectada
-# PREÇO e LINK não são critérios de bloqueio
+# PRINCÍPIO FUNDAMENTAL: o link nunca é critério. Apenas texto e cupom importam.
 #
-# BLOQUEIA quando:
-#  • hash exato (cupom + campanha + texto = idêntico)
-#  • cupom igual + texto >= 92% similar (mesma janela de 30 min)
-#  • campanha igual + texto >= 78% similar (mesma janela de 30 min)
+# CHAVE DE IDENTIDADE DE UMA OFERTA:
+#   plataforma + conjunto de cupons + alma do texto normalizado
 #
-# PERMITE quando:
-#  • cupom mudou
-#  • campanha mudou
-#  • texto mudou significativamente
+# CAMADAS DE BLOQUEIO:
+#   C1 — Hash exato da alma → bloqueia (mesmo texto, mesmos cupons)
+#   C2 — Cupom idêntico + alma similar >= 0.72 nos últimos 10 min → bloqueia
+#         (mesmo cupom chegando de grupos diferentes com texto ligeiramente diferente)
+#   C3 — Campanha igual + alma similar >= 0.80 nos últimos 10 min → bloqueia
+#   C4 — Alma muito similar >= 0.90 nos últimos 10 min → bloqueia
+#         (mesmo post sem cupom, só texto parecido)
+#   C5 — Evento (Quiz/Roleta/Missão): cupom igual → bloqueia por 24h
+#
+# EXCEÇÕES (SEMPRE PASSA):
+#   • Texto contém "Voltando", "Normalizou", "Estoque Renovado" → reenvio permitido
+#   • Cupom diferente → sempre passa (nova oferta real)
+#   • Plataformas diferentes nunca se bloqueiam entre si
 # ══════════════════════════════════════════════════════════════════════════════
 
-_TTL_CACHE       = 120 * 60   # 120 min de memória geral
-_TTL_EVENTO      = 24 * 60 * 60  # 24h para eventos recorrentes (Quiz, Roleta)
-_SIM_CUP         = 0.92       # cupom igual + texto similar → bloqueia
-_SIM_CAMP        = 0.78       # campanha igual + texto similar → bloqueia
-_SIM_EVENTO      = 0.95       # Quiz/Roleta/Missão → sensibilidade máxima
-_JANELA          = 30 * 60    # janela padrão de 30 min
-_JANELA_EVENTO   = 24 * 60 * 60  # janela de 24h para eventos
+_TTL_CACHE     = 120 * 60        # memória geral: 120 min
+_TTL_EVENTO    = 24 * 60 * 60   # eventos: 24h
+_JANELA_CURTA  = 10 * 60        # janela principal: 10 min (grupos simultâneos)
+_JANELA_EVENTO = 24 * 60 * 60   # janela evento: 24h
+
+# Limiares de similaridade da alma do texto
+_SIM_CUPOM     = 0.72   # C2: cupom igual → baixo limiar (difícil escapar)
+_SIM_CAMPANHA  = 0.80   # C3: mesma campanha
+_SIM_TEXTO     = 0.90   # C4: texto quase idêntico (sem cupom)
+_SIM_EVENTO    = 0.60   # C5: evento → qualquer parecença bloqueia por 24h
 
 _RUIDO_NORM = {
     "promo","promocao","promoção","oferta","desconto","cupom","corre",
     "aproveita","urgente","gratis","grátis","frete","hoje","agora",
-    "relampago","relâmpago","click","clique","veja","confira","app",
+    "imperdivel","imperdível","exclusivo","limitado","corra","ative",
+    "use","saiu","vazou","resgate","acesse","confira","link","clique",
+    "app","relampago","relâmpago","click","veja","agora","novo","nova",
 }
 
-# Palavras-chave de eventos recorrentes — sensibilidade máxima (SIM_EVENTO)
-_KW_EVENTO = frozenset([
-    "quiz","roleta","missão","missao","arena","girar","gire",
-    "roda","jogar","jogue","desafio","desafio diário","daily",
-])
+_KW_EVENTO  = frozenset(["quiz","roleta","missão","missao","arena",
+                          "girar","gire","roda","jogar","jogue","desafio"])
+_KW_STATUS  = frozenset(["voltando","voltou","normalizou","renovado",
+                          "estoque renovado","voltou","regularizou"])
+_KW_CAMPANHA = {
+    "amazon_app":   ["amazon app","app amazon","aplicativo amazon"],
+    "mastercard":   ["mastercard","master card"],
+    "frete_gratis": ["frete gratis","frete grátis","entrega gratis"],
+    "prime":        ["prime","amazon prime"],
+    "shopee_frete": ["frete shopee","shopee frete"],
+    "magalu_app":   ["magalu app","app magalu"],
+}
+
+_RE_EMOJI_STRIP = re.compile(
+    r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF]+",
+    flags=re.UNICODE)
+
 
 def _rm_ac(t: str) -> str:
     return ''.join(c for c in unicodedata.normalize('NFD', t)
                    if unicodedata.category(c) != 'Mn')
 
-def _normalizar(texto: str) -> str:
-    t = _rm_ac(texto.lower())
-    t = re.sub(r"http\S+|www\S+", " ", t)
-    t = re.sub(r"[^\w\s]", " ", t)
-    t = re.sub(r"\s+", " ", t).strip()
-    return " ".join(sorted(w for w in t.split() if w not in _RUIDO_NORM))
 
-def _eh_evento(texto: str) -> bool:
-    """Retorna True se o texto descreve um evento recorrente (Quiz, Roleta, etc.)"""
-    tl = texto.lower()
-    return any(kw in tl for kw in _KW_EVENTO)
+def _extrair_todos_cupons(texto: str) -> frozenset:
+    """Extrai TODOS os códigos de cupom do texto (não só o primeiro)."""
+    return frozenset(re.findall(r'\b([A-Z][A-Z0-9_-]{3,19})\b', texto))
+
+
+def _normalizar_alma(texto: str) -> str:
+    """
+    Extrai a 'alma' do texto removendo todo ruído:
+    links, emojis, símbolos, palavras de reclame, pontuação.
+    Normaliza valores: R$10 → PRECO, 15% → PCT
+    """
+    t = _rm_ac(texto.lower())
+    t = re.sub(r'https?://\S+', ' ', t)           # remove URLs
+    t = _RE_EMOJI_STRIP.sub(' ', t)               # remove emojis
+    t = re.sub(r'r\$\s*[\d.,]+', ' PRECO ', t)   # normaliza preços
+    t = re.sub(r'\b\d+\s*%', ' PCT ', t)          # normaliza %
+    t = re.sub(r'\b\d+\b', ' NUM ', t)            # normaliza números
+    t = re.sub(r'[^\w\s]', ' ', t)               # remove pontuação
+    t = re.sub(r'\s+', ' ', t).strip()
+    palavras = [w for w in t.split() if w not in _RUIDO_NORM and len(w) > 1]
+    return ' '.join(sorted(palavras))
+
 
 def _detectar_campanha(texto: str) -> str:
+    """Detecta tokens de campanha no texto para identificação semântica."""
     tl = texto.lower()
     tokens = []
-    if "amazon app" in tl or "app amazon" in tl:
-        tokens.append("amazon_app")
-    if "mastercard" in tl:
-        tokens.append("mastercard")
-    if "frete" in tl and ("grátis" in tl or "gratis" in tl):
-        tokens.append("frete_gratis")
-    if "prime" in tl:
-        tokens.append("prime")
-    if "black friday" in tl or "blackfriday" in tl:
-        tokens.append("blackfriday")
-    if "shopee" in tl and "frete" in tl:
-        tokens.append("shopee_frete")
-    # Tokens de evento
+    for camp, kws in _KW_CAMPANHA.items():
+        if any(kw in tl for kw in kws):
+            tokens.append(camp)
     for kw in _KW_EVENTO:
         if kw in tl:
             tokens.append(f"evento_{kw}")
             break
     return "|".join(sorted(tokens)) if tokens else "geral"
 
+
+def _eh_evento(texto: str) -> bool:
+    tl = texto.lower()
+    return any(kw in tl for kw in _KW_EVENTO)
+
+
+def _eh_mudanca_status(texto: str) -> bool:
+    """Retorna True se o texto indica mudança de status real (Voltando, Normalizou...)."""
+    tl = texto.lower()
+    return any(kw in tl for kw in _KW_STATUS)
+
+
 def _extrair_cupom(texto: str) -> str:
+    """Compatibilidade: retorna o primeiro cupom (usado pelo pipeline)."""
     m = re.search(r'\b([A-Z][A-Z0-9_-]{3,19})\b', texto)
     return m.group(1) if m else ""
+
 
 def _extrair_prod_id(mapa: dict) -> str:
     if not mapa:
@@ -1316,75 +1391,104 @@ def _extrair_prod_id(mapa: dict) -> str:
             return m.group(1)
     return p[-20:]
 
+
 def deve_enviar(plat: str, prod: str, cupom: str, texto: str) -> bool:
     """
-    Deduplicação semântica inteligente.
-
-    REGRA ESPECIAL PARA EVENTOS (Quiz, Roleta, Missão):
-    - Sensibilidade sobe para 0.95 (SIM_EVENTO)
-    - Janela de bloqueio aumenta para 24h
-    - Qualquer variação pequena no texto é bloqueada
-
-    REGRA GERAL:
-    - C1: hash exato → bloqueia
-    - C2: cupom igual + texto >= 92% → bloqueia
-    - C3: campanha igual + texto >= 78% → bloqueia
-    - Plataformas diferentes nunca se bloqueiam
+    Decide se a oferta deve ser enviada.
+    Olha para a ALMA (texto normalizado + cupons) — NUNCA para o link.
     """
-    cache = ler_cache()
-    agora = time.time()
-    cache = {k: v for k, v in cache.items() if agora - v.get("ts", 0) < max(_TTL_CACHE, _TTL_EVENTO)}
+    # ── Exceção imediata: mudança de status sempre passa ─────────────────
+    if _eh_mudanca_status(texto):
+        log_dedup.info(f"✅ Mudança de status detectada — passa direto")
+        # Registra mas não bloqueia
+        _registrar_cache(plat, prod, cupom, texto)
+        return True
 
-    tnorm    = _normalizar(texto)
-    cnorm    = cupom.strip().upper()
+    cache    = ler_cache()
+    agora    = time.time()
+    ttl_max  = max(_TTL_CACHE, _TTL_EVENTO)
+    cache    = {k: v for k, v in cache.items()
+                if agora - v.get("ts", 0) < ttl_max}
+
+    alma     = _normalizar_alma(texto)
+    cupons   = _extrair_todos_cupons(texto)     # TODOS os cupons do texto
     campanha = _detectar_campanha(texto)
     eh_evt   = _eh_evento(texto)
 
-    # Ajusta parâmetros se for evento recorrente
-    sim_camp_usar  = _SIM_EVENTO if eh_evt else _SIM_CAMP
-    janela_usar    = _JANELA_EVENTO if eh_evt else _JANELA
-    ttl_usar       = _TTL_EVENTO if eh_evt else _TTL_CACHE
+    # Hash da identidade da oferta
+    cupons_str = "|".join(sorted(cupons))
+    h = hashlib.sha256(f"{plat}|{cupons_str}|{alma}".encode()).hexdigest()
 
-    if eh_evt:
-        log_dedup.debug(f"⚠️ EVENTO detectado — sensibilidade={sim_camp_usar} janela=24h")
-
-    h = hashlib.sha256(f"{plat}|{cnorm}|{campanha}|{tnorm}".encode()).hexdigest()
-
-    # C1: hash exato
+    # C1: hash exato da alma → bloqueia
     if h in cache:
-        log_dedup.info(f"🔁 [C1] | plat={plat} cupom={cnorm} camp={campanha}")
+        log_dedup.info(f"🔁 [C1] Idêntico | plat={plat} cupons={cupons_str}")
         return False
 
+    janela = _JANELA_EVENTO if eh_evt else _JANELA_CURTA
+
     for entrada in cache.values():
-        if agora - entrada.get("ts", 0) >= janela_usar:
+        if agora - entrada.get("ts", 0) >= janela:
             continue
         if entrada.get("plat") != plat:
-            continue
-        sim        = SequenceMatcher(None, tnorm, entrada.get("txt", "")).ratio()
-        c_igual    = entrada.get("cupom", "") == cnorm.lower()
-        camp_igual = entrada.get("camp", "") == campanha
+            continue  # plataformas nunca bloqueiam entre si
 
-        # C2: cupom igual + texto muito parecido
-        if c_igual and sim >= _SIM_CUP:
-            log_dedup.info(f"🔁 [C2] cupom={cnorm} sim={sim:.2f}")
-            return False
+        alma_cache   = entrada.get("alma", "")
+        cupons_cache = frozenset(entrada.get("cupons", []))
+        camp_cache   = entrada.get("camp", "")
+        sim          = SequenceMatcher(None, alma, alma_cache).ratio()
+        cupom_igual  = bool(cupons & cupons_cache) if cupons else False
 
-        # C3: campanha igual + texto parecido (sensibilidade varia por tipo)
-        if camp_igual and campanha != "geral" and sim >= sim_camp_usar:
+        # C2: mesmo cupom + alma parecida (grupos simultâneos)
+        if cupom_igual and sim >= _SIM_CUPOM:
             log_dedup.info(
-                f"🔁 [C3{'_EVENTO' if eh_evt else ''}] "
-                f"camp={campanha} sim={sim:.2f} limiar={sim_camp_usar}")
+                f"🔁 [C2] Cupom igual + similar | "
+                f"cupons={cupons & cupons_cache} sim={sim:.2f}")
             return False
 
+        # C3: mesma campanha + alma similar
+        if campanha == camp_cache and campanha != "geral" and sim >= _SIM_CAMPANHA:
+            log_dedup.info(
+                f"🔁 [C3] Campanha igual + similar | "
+                f"camp={campanha} sim={sim:.2f}")
+            return False
+
+        # C4: texto muito similar mesmo sem cupom
+        if sim >= _SIM_TEXTO:
+            log_dedup.info(f"🔁 [C4] Alma muito similar | sim={sim:.2f}")
+            return False
+
+        # C5: evento recorrente — bloqueio por 24h mesmo com sim baixo
+        if eh_evt and cupom_igual and sim >= _SIM_EVENTO:
+            log_dedup.info(
+                f"🔁 [C5-EVENTO] | cupons={cupons & cupons_cache} sim={sim:.2f}")
+            return False
+
+    # Nova oferta — registra
+    _registrar_cache(plat, prod, cupom, texto)
+    log_dedup.debug(f"✅ Nova | plat={plat} cupons={cupons_str} camp={campanha}")
+    return True
+
+
+def _registrar_cache(plat: str, prod: str, cupom: str, texto: str):
+    """Registra a oferta no cache. Chamado tanto por deve_enviar quanto pela exceção de status."""
+    cache    = ler_cache()
+    agora    = time.time()
+    alma     = _normalizar_alma(texto)
+    cupons   = _extrair_todos_cupons(texto)
+    campanha = _detectar_campanha(texto)
+    cupons_str = "|".join(sorted(cupons))
+    h = hashlib.sha256(f"{plat}|{cupons_str}|{alma}".encode()).hexdigest()
     cache[h] = {
-        "plat": plat, "prod": str(prod),
-        "cupom": cnorm.lower(), "camp": campanha,
-        "txt": tnorm, "ts": agora,
-        "evento": eh_evt,
+        "plat":   plat,
+        "prod":   str(prod),
+        "cupom":  cupom.upper(),
+        "cupons": list(cupons),
+        "camp":   campanha,
+        "alma":   alma,
+        "ts":     agora,
     }
     salvar_cache(cache)
-    log_dedup.debug(f"✅ Nova | plat={plat} cupom={cnorm} camp={campanha} evento={eh_evt}")
-    return True
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
