@@ -1630,7 +1630,7 @@ async def buscar_imagem(url: str) -> Optional[str]:
                                     if isinstance(candidate, dict):
                                         u = candidate.get("url", "")
                                         if u.startswith("http"):
-                                            log_img.info(f"✅ JSON-LD{} t={t}: {u[:70]}")
+                                            log_img.info(f"✅ JSON-LD t={t}: {u[:70]}")
                                             return u
                         except Exception:
                             pass
