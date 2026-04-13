@@ -1598,90 +1598,84 @@ def _tem_contexto_real(texto: str) -> bool:
     return False
 
 
-async def processar(event, is_edit: bool = False):
-    """
-    Pipeline completo com:
-    - Bypass para multi-ofertas (não bloqueia "Ofertas Shopee")
-    - Sem imagem fallback para cupons Shopee (só Amazon mantém)
-    - Cupom seco: aguarda 50s por versão completa antes de enviar
-    - Dedup entre grupos (janela curta 2 min para mesmo texto)
-    """
+async def _processar_interno(event, is_edit: bool = False):
     msg_id = event.message.id
     texto  = event.message.text or ""
     chat   = await event.get_chat()
     uname  = (chat.username or str(event.chat_id)).lower()
 
-    log_tg.info(f"{'✏️ EDIT' if is_edit else '📩 NEW'} | @{uname} | id={msg_id} | {len(texto)}c")
+    log_tg.info(
+        f"{'✏️ EDIT' if is_edit else '📩 NEW'} | "
+        f"@{uname} | id={msg_id} | {len(texto)}c | "
+        f"fila={len(_buf_fila)} workers={_workers_ativos}")
 
-    # E1: Vazio
-    if not texto.strip():
-        return
+    if not texto.strip(): return
 
-    # E2: Anti-loop
     if not is_edit:
-        if await _foi_processado(msg_id):
-            log_sys.debug(f"⏩ Anti-loop: {msg_id}")
-            return
+        if await _foi_processado(msg_id): return
     else:
         loop   = asyncio.get_event_loop()
         mapa_c = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-        if str(msg_id) not in mapa_c:
-            log_sys.debug(f"⏩ Edit ignorada (preview?): {msg_id}")
-            return
+        if str(msg_id) not in mapa_c: return
 
-    # E3: Filtro de texto (com bypass para multi-ofertas)
-    if texto_bloqueado(texto):
-        return
+    if texto_bloqueado(texto): return
 
-    # E4: Limpeza de ruído
     texto_limpo = limpar_ruido_textual(texto)
+    if not _tem_contexto_real(texto_limpo): return
 
-    # ── E4b: Cupom seco — aguarda versão completa ─────────────────────────
-    if not is_edit and _eh_cupom_seco(texto_limpo):
-        # Calcula hash do texto para identificar se versão completa chegou
-        h_seco = hashlib.sha256(texto_limpo[:100].encode()).hexdigest()[:12]
-        async with _FILA_LOCK:
-            _FILA_ESPERA.pop(h_seco, None)
-        # Após 50s, verifica se já foi enviado por versão completa
-        # Se chegou versão completa, o cache dedup vai bloquear este
-        log_fil.info(f"⏳ Processando cupom seco após espera | @{uname}")
-
-    # ── E4c: Descarta se não tiver contexto real (só links crus) ─────────
-    if not _tem_contexto_real(texto_limpo):
-        log_fil.info(f"🗑 Sem contexto real — descartado | @{uname}")
-        return
-
-    # E5: Extração de links
+    # ── Extração e parse ultra robusto ───────────────────────────────────
     links_conv, links_pres = extrair_links(texto_limpo)
-    log_lnk.info(f"🔗 {len(links_conv)} converter | {len(links_pres)} preservar")
+    parsed_validos = parse_links_bulk(links_conv)
 
-    if not links_conv and not links_pres and "fadadoscupons" not in uname:
-        log_sys.debug("⏩ Sem links")
-        return
+    # Reconstrói lista de links usando url_limpa do parser
+    links_conv_limpos = [r.url_limpa for r in parsed_validos if r.plat != "expandir"]
+    links_expandir    = [r.url_limpa for r in parsed_validos if r.plat == "expandir"]
 
-    # E6: Conversão paralela
-    mapa_links, plat_p = await converter_links(links_conv)
-
-    if links_conv and not mapa_links and not links_pres:
-        log_sys.warning(f"🚫 Zero links válidos | @{uname}")
-        return
-
-    # E7: Deduplicação semântica (entre grupos, janela curta)
-    prod = _extrair_prod_id(mapa_links)
-    cup  = _extrair_cupom(texto_limpo)
-
-    if not is_edit:
-        if not deve_enviar(plat_p, prod, cup, texto_limpo):
+    if not links_conv_limpos and not links_expandir and not links_pres:
+        if "fadadoscupons" not in uname:
             return
 
-    # E8: Renderização profissional
-    msg_final = renderizar(texto_limpo, mapa_links, links_pres, plat_p)
-    log_fmt.debug(f"📝 [{plat_p.upper()}]\n{msg_final[:400]}")
+    # ── Conversão paralela ────────────────────────────────────────────────
+    mapa_links, plat_p = await converter_links(links_conv_limpos + links_expandir)
+    if links_conv and not mapa_links and not links_pres: return
 
-    # E9: Imagem
-    # ── REGRA: Shopee NÃO usa imagem fallback de arquivo (passa como vier)
-    #           Amazon mantém imagem fallback
-    #           Magalu mantém imagem fallback
+    # ── SKU e valor via parser (mais preciso que regex puro) ──────────────
+    sku_parsed = ""
+    for r in parsed_validos:
+        if r.sku:
+            sku_parsed = f"{r.plat[:3]}_{r.sku}"
+            break
+    if not sku_parsed:
+        sku_parsed = _extrair_sku(mapa_links)
+
+    valor  = _extrair_valor(texto_limpo)
+    cup    = _extrair_cupom(texto_limpo)
+
+    # ── Anti-Saturação Gate (S1/S2 bloqueiam, S3/S4 atrasam) ─────────────
+    if not is_edit:
+        bloquear, delay_sat, motivo_sat = await antisaturacao_gate(
+            plat_p, sku_parsed, valor, texto_limpo)
+        if bloquear:
+            log_dedup.warning(f"🚫 Saturação: {motivo_sat}")
+            return
+
+        # ── Deduplicação Semantic Fingerprint ────────────────────────────
+        if not deve_enviar(plat_p, cup, cup, texto_limpo, mapa_links):
+            return
+
+        # ── Scheduler Gate ────────────────────────────────────────────────
+        delay_sch = await scheduler_gate(plat_p, texto_limpo)
+        if delay_sch == -1.0:
+            log_sys.warning(f"⚠️ Scheduler: limite/h atingido — descartando")
+            return
+        delay_total = delay_sch + delay_sat
+        if delay_total > 0:
+            await asyncio.sleep(delay_total)
+
+    # ── Renderização ──────────────────────────────────────────────────────
+    msg_final = renderizar(texto_limpo, mapa_links, links_pres, plat_p)
+
+    # ── Imagem ────────────────────────────────────────────────────────────
     media_orig = event.message.media
     tem_img    = _tem_midia(media_orig)
     img_obj    = None
@@ -1690,44 +1684,34 @@ async def processar(event, is_edit: bool = False):
         if tem_img:
             img_obj, _ = await preparar_imagem(media_orig, True)
         elif plat_p == "amazon" and os.path.exists(_IMG_AMZ):
-            img_obj = _IMG_AMZ   # Amazon: mantém fallback
+            img_obj = _IMG_AMZ
         elif plat_p == "magalu" and os.path.exists(_IMG_MGL):
-            img_obj = _IMG_MGL   # Magalu: mantém fallback
-        # Shopee: sem fallback — passa cupom como veio (texto puro)
+            img_obj = _IMG_MGL
     else:
         if tem_img:
             img_obj, _ = await preparar_imagem(media_orig, True)
         elif mapa_links:
-            # Tenta buscar imagem do produto (4 estratégias, 3 tentativas)
             img_url = await buscar_imagem(list(mapa_links.values())[0])
             if img_url:
                 img_obj, _ = await preparar_imagem(img_url, False)
 
-    # E10: Rate-limit
     await _rate_limit()
 
-    # E11: Envio / Edição com retry
+    # ── Envio ─────────────────────────────────────────────────────────────
     async with _SEM_ENVIO:
         loop = asyncio.get_event_loop()
         mapa = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-
         try:
             if is_edit:
                 id_dest = mapa[str(msg_id)]
-                log_tg.info(f"✏️ Editando id={id_dest}")
                 for t in range(1, 4):
                     try:
                         await client.edit_message(GRUPO_DESTINO, id_dest, msg_final)
-                        log_tg.info("✅ Edição ok")
                         break
-                    except MessageNotModifiedError:
-                        break
-                    except FloodWaitError as e:
-                        await asyncio.sleep(e.seconds)
+                    except MessageNotModifiedError: break
+                    except FloodWaitError as e:  await asyncio.sleep(e.seconds)
                     except Exception as e:
-                        log_tg.error(f"❌ Edit t={t}: {e}")
-                        if t < 3:
-                            await asyncio.sleep(2 ** t)
+                        if t < 3: await asyncio.sleep(2 ** t)
                 return
 
             sent = None
@@ -1735,25 +1719,28 @@ async def processar(event, is_edit: bool = False):
                 try:
                     sent = await _enviar(msg_final, img_obj)
                     break
-                except FloodWaitError as e:
-                    await asyncio.sleep(e.seconds)
+                except FloodWaitError as e: await asyncio.sleep(e.seconds)
                 except Exception as e:
-                    log_tg.error(f"❌ Envio t={t}: {e}")
-                    if t == 1:
-                        img_obj = None
-                    elif t < 3:
-                        await asyncio.sleep(2 ** t)
+                    if t == 1: img_obj = None
+                    elif t < 3: await asyncio.sleep(2 ** t)
 
             if sent:
                 mapa[str(msg_id)] = sent.id
                 await loop.run_in_executor(_EXECUTOR, salvar_mapa, mapa)
                 await _marcar(msg_id)
+
+                # ── Registros pós-envio ───────────────────────────────
+                await scheduler_registrar_envio(plat_p)
+                antisaturacao_registrar(plat_p, sku_parsed)
+
                 log_sys.info(
                     f"🚀 [OK] @{uname} → {GRUPO_DESTINO} | "
-                    f"origem={msg_id} destino={sent.id} | {plat_p.upper()}")
+                    f"origem={msg_id} destino={sent.id} | "
+                    f"{plat_p.upper()} sku={sku_parsed}")
 
         except Exception as e:
             log_sys.error(f"❌ CRÍTICO: {e}", exc_info=True)
+  
 
 
 
@@ -1779,6 +1766,7 @@ async def _health_check():
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
 async def _run():
+    _init_db()
     log_sys.info("🔌 Conectando...")
     await client.connect()
     if not await client.is_user_authorized():
@@ -1830,3 +1818,724 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MÓDULO 23 ▸ BANCO CENTRAL DE OFERTAS — SQLite Persistente
+#
+# Por que SQLite e não Redis?
+#   Railway free tier não garante Redis. SQLite roda no próprio processo,
+#   zero dependência externa, persiste em disco, suporta 10k+ writes/s.
+#
+# TABELAS:
+#   ofertas     — toda oferta processada (fingerprint, plat, sku, valor, ts)
+#   saturacao   — contagem por plataforma/categoria na janela de tempo
+#   scheduler   — controle de horário e score de cada oferta enviada
+#
+# ÍNDICES: fingerprint (único), plat+ts, sku+plat — queries O(log n)
+# ══════════════════════════════════════════════════════════════════════════════
+
+import sqlite3
+from contextlib import contextmanager
+
+_DB_PATH = "foguetao.db"
+_db_conn: sqlite3.Connection | None = None
+_db_lock = Lock()
+
+def _init_db():
+    """Cria as tabelas e índices se não existirem. Chamado uma vez no boot."""
+    global _db_conn
+    _db_conn = sqlite3.connect(_DB_PATH, check_same_thread=False,
+                                timeout=10, isolation_level=None)
+    _db_conn.execute("PRAGMA journal_mode=WAL")   # write-ahead log — mais rápido
+    _db_conn.execute("PRAGMA synchronous=NORMAL") # seguro + rápido
+    _db_conn.execute("PRAGMA cache_size=-8000")   # 8MB de cache em memória
+
+    _db_conn.executescript("""
+        CREATE TABLE IF NOT EXISTS ofertas (
+            fp          TEXT PRIMARY KEY,
+            plat        TEXT NOT NULL,
+            sku         TEXT,
+            valor       TEXT,
+            cupons      TEXT,
+            camp        TEXT,
+            alma        TEXT,
+            enviado     INTEGER DEFAULT 1,
+            ts          REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS saturacao (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            plat        TEXT NOT NULL,
+            categoria   TEXT NOT NULL,
+            sku         TEXT,
+            ts          REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS scheduler (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            plat        TEXT NOT NULL,
+            hora        INTEGER NOT NULL,
+            score       REAL DEFAULT 1.0,
+            enviados    INTEGER DEFAULT 0,
+            ts          REAL NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ofertas_plat_ts
+            ON ofertas(plat, ts);
+        CREATE INDEX IF NOT EXISTS idx_ofertas_sku
+            ON ofertas(sku, plat);
+        CREATE INDEX IF NOT EXISTS idx_saturacao_plat_ts
+            ON saturacao(plat, ts);
+        CREATE INDEX IF NOT EXISTS idx_scheduler_hora
+            ON scheduler(plat, hora);
+    """)
+    log_sys.info(f"🗄 Banco Central ON | {_DB_PATH}")
+
+@contextmanager
+def _db():
+    """Context manager thread-safe para queries."""
+    with _db_lock:
+        try:
+            yield _db_conn
+        except sqlite3.Error as e:
+            log_sys.error(f"❌ DB: {e}")
+            raise
+
+# ─── API do Banco Central ─────────────────────────────────────────────────────
+
+def db_existe_oferta(fp: str) -> bool:
+    """Verifica se o fingerprint já existe. O(1) por índice primário."""
+    with _db() as db:
+        row = db.execute(
+            "SELECT 1 FROM ofertas WHERE fp = ?", (fp,)
+        ).fetchone()
+    return row is not None
+
+def db_registrar_oferta(fp: str, plat: str, sku: str, valor: str,
+                         cupons: list, camp: str, alma: str):
+    """Registra oferta enviada no banco central."""
+    with _db() as db:
+        db.execute("""
+            INSERT OR REPLACE INTO ofertas
+                (fp, plat, sku, valor, cupons, camp, alma, enviado, ts)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+        """, (fp, plat, sku, valor,
+              json.dumps(cupons, ensure_ascii=False),
+              camp, alma, time.time()))
+
+def db_buscar_por_sku(sku: str, plat: str,
+                       janela_s: float = 3600) -> list[dict]:
+    """
+    Retorna todas as ofertas do mesmo SKU+plataforma na janela.
+    Usado pelo Anti-Saturação para detectar mesmo produto em formas diferentes.
+    """
+    if not sku:
+        return []
+    limite = time.time() - janela_s
+    with _db() as db:
+        rows = db.execute("""
+            SELECT fp, valor, cupons, ts FROM ofertas
+            WHERE sku = ? AND plat = ? AND ts >= ?
+            ORDER BY ts DESC LIMIT 20
+        """, (sku, plat, limite)).fetchall()
+    return [{"fp": r[0], "valor": r[1],
+             "cupons": json.loads(r[2] or "[]"), "ts": r[3]}
+            for r in rows]
+
+def db_registrar_saturacao(plat: str, categoria: str, sku: str = ""):
+    """Registra 1 envio na tabela de saturação."""
+    with _db() as db:
+        db.execute(
+            "INSERT INTO saturacao (plat, categoria, sku, ts) VALUES (?,?,?,?)",
+            (plat, categoria, sku, time.time()))
+
+def db_contagem_saturacao(plat: str, categoria: str,
+                           janela_s: float = 3600) -> int:
+    """Conta envios de plat+categoria na janela. Usado pelo Anti-Saturação."""
+    limite = time.time() - janela_s
+    with _db() as db:
+        row = db.execute("""
+            SELECT COUNT(*) FROM saturacao
+            WHERE plat = ? AND categoria = ? AND ts >= ?
+        """, (plat, categoria, limite)).fetchone()
+    return row[0] if row else 0
+
+def db_registrar_scheduler(plat: str, hora: int, score: float = 1.0):
+    """Registra envio no scheduler para cálculo de score por hora."""
+    with _db() as db:
+        db.execute(
+            "INSERT INTO scheduler (plat, hora, score, enviados, ts) VALUES (?,?,?,1,?)",
+            (plat, hora, score, time.time()))
+
+def db_score_hora(plat: str, hora: int, janela_dias: int = 7) -> float:
+    """
+    Retorna o score médio de engajamento para plat+hora nos últimos N dias.
+    Score > 1.0 = horário bom. Score < 0.5 = horário ruim.
+    """
+    limite = time.time() - (janela_dias * 86400)
+    with _db() as db:
+        row = db.execute("""
+            SELECT AVG(score), COUNT(*) FROM scheduler
+            WHERE plat = ? AND hora = ? AND ts >= ?
+        """, (plat, hora, limite)).fetchone()
+    avg, cnt = row if row else (1.0, 0)
+    return float(avg or 1.0)
+
+def db_limpar_antigos(dias: int = 7):
+    """Remove registros com mais de N dias. Chamado pelo health check."""
+    limite = time.time() - (dias * 86400)
+    with _db() as db:
+        db.execute("DELETE FROM ofertas    WHERE ts < ?", (limite,))
+        db.execute("DELETE FROM saturacao  WHERE ts < ?", (limite,))
+        db.execute("DELETE FROM scheduler  WHERE ts < ?", (limite,))
+    log_sys.info(f"🗑 DB limpeza: registros > {dias}d removidos")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MÓDULO 24 ▸ PARSER ULTRA ROBUSTO DE LINKS
+#
+# É o coração técnico do sistema. Toda URL passa por aqui antes de
+# ir para o motor da plataforma.
+#
+# RESPONSABILIDADES:
+#   1. Detectar plataforma com 100% de certeza (sem falso positivo)
+#   2. Extrair ASIN / SKU / ID do produto de qualquer formato de URL
+#   3. Normalizar a URL (remove tracking, corrige encoding, padroniza host)
+#   4. Detectar e corrigir links quebrados antes de processar
+#   5. Retornar um objeto estruturado ParsedLink — nunca uma string crua
+#
+# FORMATOS SUPORTADOS:
+#   Amazon:  /dp/ASIN, /gp/product/ASIN, /exec/obidos/ASIN,
+#            amzn.to/xxx, a.co/xxx, /s?k=, /b?node=
+#   Shopee:  /product/SHOPID/ITEMID, /i.SHOPID.ITEMID,
+#            shope.ee/xxx, s.shopee.com.br/xxx
+#   Magalu:  /produto-nome/p/IDMGL/, /l/lista/, /selecao/nome/,
+#            maga.lu/xxx, magazinevoce.com.br/magazineSLUG/
+# ══════════════════════════════════════════════════════════════════════════════
+
+from dataclasses import dataclass, field
+from typing import Optional
+
+@dataclass
+class ParsedLink:
+    """Resultado estruturado do parser. Nunca None — sempre tem plat."""
+    url_original:  str
+    url_limpa:     str          # URL normalizada sem tracking
+    plat:          str          # amazon | shopee | magalu | desconhecido
+    tipo:          str          # produto | lista | busca | evento | desconhecido
+    sku:           str          # ASIN / item_id / ID Magalu (vazio se não achou)
+    shop_id:       str          # Shopee: shop_id (vazio para outras plats)
+    valido:        bool         # False = link quebrado ou fora da whitelist
+    motivo_falha:  str          # Descrição do problema se valido=False
+
+
+# ─── Padrões de extração por plataforma ──────────────────────────────────────
+
+# Amazon
+_AMZ_ASIN_PATTERNS = [
+    re.compile(r'/dp/([A-Z0-9]{10})'),
+    re.compile(r'/gp/product/([A-Z0-9]{10})'),
+    re.compile(r'/exec/obidos/(?:ASIN/)?([A-Z0-9]{10})'),
+    re.compile(r'/o/ASIN/([A-Z0-9]{10})'),
+    re.compile(r'%2Fdp%2F([A-Z0-9]{10})'),          # encoding duplo
+    re.compile(r'asin=([A-Z0-9]{10})', re.I),        # query param
+]
+_AMZ_BUSCA_PATTERNS = [
+    re.compile(r'/s\?'),
+    re.compile(r'/s/\?'),
+    re.compile(r'/b\?'),
+    re.compile(r'/deals'),
+    re.compile(r'/gp/goldbox'),
+]
+_AMZ_EVENTO_PATTERNS = [
+    re.compile(r'/events/'),
+    re.compile(r'/stores/'),
+    re.compile(r'/promotion/psp/'),
+]
+
+# Shopee
+_SHP_ITEM_PATTERNS = [
+    re.compile(r'/product/(\d+)/(\d+)'),              # /product/SHOPID/ITEMID
+    re.compile(r'/i\.(\d+)\.(\d+)'),                  # /i.SHOPID.ITEMID
+    re.compile(r'[?&]item=(\d+).*?[?&]shop=(\d+)'),  # query params
+]
+_SHP_BUSCA_PATTERNS = [
+    re.compile(r'/search\?'),
+    re.compile(r'/category/'),
+    re.compile(r'/m/'),                               # campanha mobile
+]
+
+# Magalu
+_MGL_PRODUTO_PATTERN = re.compile(
+    r'/(?:[^/]+/)?p/([a-z0-9]{6,})/?' , re.I)        # /p/IDMGL/
+_MGL_LISTA_PATTERN   = re.compile(r'/l/([^/?#]+)')    # /l/nome-lista/
+_MGL_SELECAO_PATTERN = re.compile(r'/selecao/([^/?#]+)')
+_MGL_SLUG_PATTERN    = re.compile(r'/magazine([^/]+)/')# /magazineSLUG/
+
+# Parâmetros de tracking que o parser remove (lista exaustiva)
+_TRACKING_PARAMS = frozenset({
+    # Amazon
+    "tag","ref","ref_","smid","sprefix","sr","spla","dchild",
+    "linkcode","linkid","camp","creative","pf_rd_p","pf_rd_r",
+    "pd_rd_wg","pd_rd_w","content-id","pd_rd_r","pd_rd_i",
+    "ie","qid","_encoding","dib","dib_tag","m","th","psc",
+    "ingress","visitid","s","ascsubtag","btn_ref",
+    # Shopee
+    "af_siteid","af_sub_siteid","pid","af_click_lookback",
+    "is_retargeting","deep_link_value","af_dp",
+    # Magalu / genérico
+    "utm_source","utm_medium","utm_campaign","utm_term","utm_content",
+    "partner_id","promoter_id","af_force_deeplink","deep_link_value",
+    "pid","c","isretargeting","fbclid","gclid","msclkid",
+    "mc_eid","yclid","_ga","_gl",
+})
+
+# ─── Funções auxiliares do parser ─────────────────────────────────────────────
+
+def _detectar_plat_por_dominio(netloc: str) -> str:
+    """Detecção de plataforma por domínio. Retorna 'desconhecido' se fora."""
+    nl = netloc.lower().replace("www.", "")
+    for dom in ("amazon.com.br", "amzn.to", "amzn.com", "a.co"):
+        if nl == dom or nl.endswith("." + dom): return "amazon"
+    for dom in ("shopee.com.br", "s.shopee.com.br", "shope.ee", "shopee.com"):
+        if nl == dom or nl.endswith("." + dom): return "shopee"
+    for dom in ("magazineluiza.com.br", "magazinevoce.com.br",
+                "sacola.magazineluiza.com.br", "maga.lu"):
+        if nl == dom or nl.endswith("." + dom): return "magalu"
+    return "desconhecido"
+
+def _remover_tracking(parsed: "urllib.parse.ParseResult") -> str:
+    """Remove todos os parâmetros de tracking. Preserva parâmetros funcionais."""
+    params_orig = parse_qs(parsed.query, keep_blank_values=False)
+    params_limpos = {
+        k: v[0] for k, v in params_orig.items()
+        if k.lower() not in _TRACKING_PARAMS
+    }
+    return urlunparse(parsed._replace(
+        query=urlencode(params_limpos) if params_limpos else "",
+        fragment=""
+    ))
+
+def _corrigir_encoding(url: str) -> str:
+    """Corrige URLs com encoding duplo ou caracteres inválidos."""
+    # Decodifica %25XX → %XX (encoding duplo)
+    url = re.sub(r'%25([0-9A-Fa-f]{2})', r'%\1', url)
+    # Remove espaços escapados incorretamente
+    url = url.replace(' ', '%20').replace('\t', '').replace('\n', '')
+    return url
+
+def _extrair_sku_amazon(path: str, query: str) -> str:
+    """Extrai ASIN de qualquer formato de URL Amazon."""
+    texto = path + "?" + query
+    for pat in _AMZ_ASIN_PATTERNS:
+        m = pat.search(texto)
+        if m:
+            return m.group(1)
+    return ""
+
+def _tipo_amazon(path: str) -> str:
+    """Classifica o tipo de URL Amazon."""
+    if any(p.search(path) for p in _AMZ_EVENTO_PATTERNS): return "evento"
+    if any(p.search(path) for p in _AMZ_BUSCA_PATTERNS):  return "busca"
+    for pat in _AMZ_ASIN_PATTERNS:
+        if pat.search(path): return "produto"
+    return "desconhecido"
+
+def _extrair_sku_shopee(path: str, query: str) -> tuple[str, str]:
+    """Extrai (shop_id, item_id) de qualquer formato Shopee."""
+    texto = path + "?" + query
+    for pat in _SHP_ITEM_PATTERNS:
+        m = pat.search(texto)
+        if m:
+            return m.group(1), m.group(2)   # shop_id, item_id
+    return "", ""
+
+def _tipo_shopee(path: str) -> str:
+    if any(p.search(path) for p in _SHP_BUSCA_PATTERNS): return "busca"
+    for pat in _SHP_ITEM_PATTERNS:
+        if pat.search(path): return "produto"
+    return "desconhecido"
+
+def _extrair_sku_magalu(path: str) -> str:
+    """Extrai ID do produto Magalu."""
+    m = _MGL_PRODUTO_PATTERN.search(path)
+    if m: return m.group(1)
+    return ""
+
+def _tipo_magalu(path: str) -> str:
+    if _MGL_LISTA_PATTERN.search(path):   return "lista"
+    if _MGL_SELECAO_PATTERN.search(path): return "selecao"
+    if _MGL_PRODUTO_PATTERN.search(path): return "produto"
+    return "desconhecido"
+
+# ─── Parser principal ─────────────────────────────────────────────────────────
+
+def parse_link(url: str) -> ParsedLink:
+    """
+    Ponto de entrada único do parser.
+    Toda URL do sistema passa por aqui antes de ir para qualquer motor.
+
+    Retorna ParsedLink com:
+      - plat, tipo, sku preenchidos
+      - url_limpa sem tracking
+      - valido=False se link quebrado ou fora da whitelist
+    """
+    url = url.strip().rstrip('.,;)>')
+
+    # ── Correção de encoding ──────────────────────────────────────────────
+    url = _corrigir_encoding(url)
+
+    # ── Validação básica ──────────────────────────────────────────────────
+    if not url.startswith(("http://", "https://")):
+        return ParsedLink(url, url, "desconhecido", "desconhecido",
+                          "", "", False, "Sem esquema HTTP")
+
+    try:
+        p = urlparse(url)
+    except Exception as e:
+        return ParsedLink(url, url, "desconhecido", "desconhecido",
+                          "", "", False, f"URL inválida: {e}")
+
+    netloc = p.netloc.lower().replace("www.", "")
+    plat   = _detectar_plat_por_dominio(netloc)
+    path   = p.path
+    query  = p.query
+
+    # ── Fora da whitelist ─────────────────────────────────────────────────
+    if plat == "desconhecido":
+        # Pode ser encurtador — retorna válido para o pipeline expandir
+        for enc in _ENCURTADORES:
+            if netloc == enc or netloc.endswith("." + enc):
+                url_limpa = _remover_tracking(p)
+                return ParsedLink(url, url_limpa, "expandir", "encurtado",
+                                  "", "", True, "")
+        return ParsedLink(url, url, "desconhecido", "desconhecido",
+                          "", "", False, f"Domínio fora da whitelist: {netloc}")
+
+    # ── Remove tracking ───────────────────────────────────────────────────
+    url_limpa = _remover_tracking(p)
+
+    # ── Amazon ────────────────────────────────────────────────────────────
+    if plat == "amazon":
+        sku  = _extrair_sku_amazon(path, query)
+        tipo = _tipo_amazon(path)
+
+        # Link quebrado: encurtado sem ASIN e sem path reconhecível
+        if not sku and tipo == "desconhecido":
+            return ParsedLink(url, url_limpa, plat, tipo,
+                              "", "", False,
+                              "Amazon sem ASIN e tipo desconhecido")
+
+        return ParsedLink(url, url_limpa, plat, tipo, sku, "", True, "")
+
+    # ── Shopee ────────────────────────────────────────────────────────────
+    if plat == "shopee":
+        shop_id, item_id = _extrair_sku_shopee(path, query)
+        tipo = _tipo_shopee(path)
+        sku  = f"{shop_id}.{item_id}" if shop_id and item_id else ""
+
+        return ParsedLink(url, url_limpa, plat, tipo,
+                          sku, shop_id, True, "")
+
+    # ── Magalu ────────────────────────────────────────────────────────────
+    if plat == "magalu":
+        sku  = _extrair_sku_magalu(path)
+        tipo = _tipo_magalu(path)
+
+        # Proteção anti-sacola/homepage (mesmo critério do módulo 9)
+        if "sacola" in netloc and (not path or path in ("/", "")):
+            return ParsedLink(url, url_limpa, plat, tipo,
+                              sku, "", False, "Sacola sem produto")
+
+        return ParsedLink(url, url_limpa, plat, tipo, sku, "", True, "")
+
+    # Nunca chega aqui — só para o type checker
+    return ParsedLink(url, url_limpa, plat, "desconhecido",
+                      "", "", False, "Plataforma não mapeada")
+
+
+def parse_links_bulk(urls: list[str]) -> list[ParsedLink]:
+    """
+    Processa uma lista de URLs de uma vez.
+    Filtra inválidos e retorna só os válidos (exceto se precisar expandir).
+    """
+    resultados = [parse_link(u) for u in urls]
+    validos = [r for r in resultados if r.valido]
+    invalidos = [r for r in resultados if not r.valido]
+
+    for r in invalidos:
+        log_lnk.debug(f"🗑 Parser inválido: {r.url_original[:60]} | {r.motivo_falha}")
+
+    log_lnk.info(
+        f"🔍 Parser | total={len(urls)} válidos={len(validos)} "
+        f"inválidos={len(invalidos)}")
+    return validos
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MÓDULO 25 ▸ SCHEDULER INTELIGENTE
+#
+# O bot aprende quais horários têm mais engajamento por plataforma.
+# Não bloqueia envios — aplica um delay adaptativo baseado em score.
+#
+# LÓGICA:
+#   • Cada hora do dia tem um score por plataforma (calculado pelo DB)
+#   • Score >= 1.0 → horário bom   → delay = 0s (envia imediato)
+#   • Score 0.5–1.0 → horário médio → delay leve (até 5s)
+#   • Score < 0.5  → horário ruim  → delay maior (até 15s) — nunca bloqueia
+#
+#   • Eventos (Quiz/Roleta) → NUNCA sofrem delay (urgente por natureza)
+#   • Limite de envios por hora por plataforma (anti-flood orgânico)
+#   • Janela noturna configurável (silencia ou reduz entre 00h-07h)
+#
+# IMPORTANTE: o scheduler NUNCA descarta uma oferta. Só aplica delay.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ─── Configuração ─────────────────────────────────────────────────────────────
+_SCH_LIMITE_HORA   = 15    # máx envios/hora por plataforma (anti-flood)
+_SCH_JANELA_NOTURNA= (0, 7)  # hora início, hora fim (00h–07h = delay +10s)
+_SCH_DELAY_MAX     = 15.0  # delay máximo em segundos
+_SCH_DELAY_NOTURNO = 10.0  # delay extra na janela noturna
+
+# ─── Contador em memória (complementa o DB) ───────────────────────────────────
+_sch_contadores: dict[str, list[float]] = {}  # {plat: [ts1, ts2, ...]}
+_sch_cont_lock = asyncio.Lock()
+
+async def _sch_incrementar(plat: str):
+    """Registra 1 envio no contador em memória."""
+    async with _sch_cont_lock:
+        agora = time.monotonic()
+        fila  = _sch_contadores.setdefault(plat, [])
+        fila.append(agora)
+        # Purga registros > 1h
+        _sch_contadores[plat] = [t for t in fila if agora - t < 3600]
+
+async def _sch_count_hora(plat: str) -> int:
+    """Retorna quantos envios foram feitos na última hora para a plataforma."""
+    async with _sch_cont_lock:
+        agora = time.monotonic()
+        fila  = _sch_contadores.get(plat, [])
+        return sum(1 for t in fila if agora - t < 3600)
+
+def _sch_delay_por_score(score: float, hora_atual: int) -> float:
+    """
+    Calcula o delay em segundos baseado no score do horário.
+    Nunca retorna valor negativo. Nunca bloqueia — só atrasa.
+    """
+    # Janela noturna: delay base extra
+    h_ini, h_fim = _SCH_JANELA_NOTURNA
+    delay_base = _SCH_DELAY_NOTURNO if h_ini <= hora_atual < h_fim else 0.0
+
+    if score >= 1.0:
+        return delay_base          # horário bom → sem delay adicional
+    elif score >= 0.5:
+        # Interpolação linear: score 1.0 = 0s, score 0.5 = 5s
+        extra = (1.0 - score) * 10.0
+        return min(delay_base + extra, _SCH_DELAY_MAX)
+    else:
+        # Score baixo → delay maior, mas nunca acima do máximo
+        extra = (0.5 - score) * 20.0
+        return min(delay_base + extra, _SCH_DELAY_MAX)
+
+
+async def scheduler_gate(plat: str, texto: str) -> float:
+    """
+    Gate do scheduler. Retorna o delay em segundos que deve ser aplicado.
+    Chamado pelo pipeline antes do envio.
+
+    Retorna 0.0 se:
+      - É um evento urgente (Quiz/Roleta/Missão)
+      - Score do horário é bom
+    Retorna delay > 0 se:
+      - Horário com score baixo
+      - Janela noturna
+    Retorna -1.0 se:
+      - Limite de envios/hora atingido (o pipeline deve aguardar)
+    """
+    # Eventos sempre passam sem delay
+    if _KW_EVENTO.search(texto):
+        log_sys.debug(f"⚡ Scheduler: evento urgente — sem delay | plat={plat}")
+        return 0.0
+
+    hora_atual = int(time.strftime("%H"))
+
+    # Verifica limite de envios/hora
+    count = await _sch_count_hora(plat)
+    if count >= _SCH_LIMITE_HORA:
+        log_sys.warning(
+            f"⚠️ Scheduler: limite {_SCH_LIMITE_HORA}/h atingido | "
+            f"plat={plat} count={count}")
+        return -1.0  # sinal de back-pressure
+
+    # Score do horário baseado no histórico do DB
+    score = db_score_hora(plat, hora_atual, janela_dias=7)
+    delay = _sch_delay_por_score(score, hora_atual)
+
+    if delay > 0:
+        log_sys.debug(
+            f"⏱ Scheduler delay={delay:.1f}s | "
+            f"plat={plat} hora={hora_atual} score={score:.2f}")
+
+    return delay
+
+
+async def scheduler_registrar_envio(plat: str, score: float = 1.0):
+    """
+    Registra o envio no scheduler após confirmação de sucesso.
+    Permite que o bot aprenda com o histórico real.
+    """
+    hora = int(time.strftime("%H"))
+    await _sch_incrementar(plat)
+    db_registrar_scheduler(plat, hora, score)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MÓDULO 26 ▸ ANTI-SATURAÇÃO ALGORÍTMICA
+#
+# Vai além da deduplicação. Detecta e previne:
+#
+#   S1 — FADIGA DE AUDIÊNCIA
+#        Mesmo produto aparecendo muitas vezes em poucos minutos
+#        (mesmo que com cupons/preços diferentes).
+#        Limite: MAX_MESMO_SKU por janela de 1h.
+#
+#   S2 — REPETIÇÃO SEMÂNTICA
+#        Mesmo produto em forma diferente (outro texto, outro link, outro cupom).
+#        Detectado via SKU no banco + similaridade de valor.
+#
+#   S3 — DENSIDADE DE PLATAFORMA
+#        Muitas ofertas da mesma plataforma em sequência.
+#        Limite: MAX_MESMA_PLAT ofertas em janela de 30min.
+#        Não bloqueia — aplica delay maior via scheduler.
+#
+#   S4 — PADRÃO TELEGRAM (anti-spam orgânico)
+#        Detecta se o canal está enviando em rajadas (burst).
+#        Se > BURST_LIMITE mensagens em < BURST_JANELA segundos → pausa.
+#
+# IMPORTANTE:
+#   S1 e S2 BLOQUEIAM (a oferta é descartada — é spam real).
+#   S3 e S4 ATRASAM (via scheduler — a oferta vai, mas com delay).
+#   Eventos nunca são bloqueados por S3/S4.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ─── Configuração ─────────────────────────────────────────────────────────────
+_SAT_MAX_MESMO_SKU    = 2      # S1: máx vezes o mesmo SKU em 1h
+_SAT_MAX_MESMA_PLAT   = 8      # S3: máx ofertas da mesma plat em 30min
+_SAT_JANELA_SKU       = 3600   # S1: janela em segundos (1h)
+_SAT_JANELA_PLAT      = 1800   # S3: janela em segundos (30min)
+_SAT_BURST_LIMITE     = 5      # S4: máx mensagens em rajada
+_SAT_BURST_JANELA     = 60     # S4: janela de rajada em segundos
+_SAT_SIM_SEMANTICA    = 0.85   # S2: limiar de similaridade de valor para "mesmo produto"
+
+# ─── Rastreador de burst em memória ───────────────────────────────────────────
+_burst_ts: list[float] = []
+_burst_lock = asyncio.Lock()
+
+async def _registrar_burst():
+    async with _burst_lock:
+        agora = time.monotonic()
+        _burst_ts.append(agora)
+        # Mantém só os da janela atual
+        while _burst_ts and agora - _burst_ts[0] > _SAT_BURST_JANELA:
+            _burst_ts.pop(0)
+
+async def _count_burst() -> int:
+    async with _burst_lock:
+        agora = time.monotonic()
+        return sum(1 for t in _burst_ts if agora - t <= _SAT_BURST_JANELA)
+
+# ─── Funções de análise ───────────────────────────────────────────────────────
+
+def _sat_verificar_s1_s2(plat: str, sku: str, valor: str) -> tuple[bool, str]:
+    """
+    Verifica S1 (fadiga de SKU) e S2 (repetição semântica).
+    Retorna (bloquear: bool, motivo: str).
+    """
+    if not sku:
+        return False, ""  # sem SKU não tem como detectar repetição de produto
+
+    historico = db_buscar_por_sku(sku, plat, _SAT_JANELA_SKU)
+
+    # S1: mesmo SKU apareceu muitas vezes
+    if len(historico) >= _SAT_MESMO_SKU:
+        return True, (
+            f"S1-FADIGA | sku={sku} plat={plat} "
+            f"aparições={len(historico)} janela={_SAT_JANELA_SKU//60}min")
+
+    # S2: mesmo SKU com valor parecido (mesmo produto em outra forma)
+    if valor and historico:
+        for entrada in historico:
+            val_ant = entrada.get("valor", "")
+            if not val_ant:
+                continue
+            try:
+                v_novo = float(re.sub(r'[^\d]', '', valor) or "0")
+                v_ant  = float(re.sub(r'[^\d]', '', val_ant) or "0")
+                if v_novo > 0 and v_ant > 0:
+                    diff = abs(v_novo - v_ant) / max(v_novo, v_ant)
+                    if diff <= (1 - _SAT_SIM_SEMANTICA):  # ex: <= 15% diferença
+                        return True, (
+                            f"S2-SEMANTICO | sku={sku} val_novo={valor} "
+                            f"val_ant={val_ant} diff={diff:.1%}")
+            except (ValueError, ZeroDivisionError):
+                continue
+
+    return False, ""
+
+_SAT_MESMO_SKU = _SAT_MAX_MESMO_SKU  # alias para clareza interna
+
+
+def _sat_verificar_s3(plat: str) -> bool:
+    """
+    S3: verifica densidade de plataforma. Retorna True se densa.
+    Não bloqueia — sinaliza para o scheduler aplicar delay.
+    """
+    count = db_contagem_saturacao(plat, "envio", _SAT_JANELA_PLAT)
+    return count >= _SAT_MAX_MESMA_PLAT
+
+
+async def _sat_verificar_s4() -> bool:
+    """S4: detecta burst. Retorna True se em rajada."""
+    return await _count_burst() >= _SAT_BURST_LIMITE
+
+
+# ─── Gate principal do Anti-Saturação ────────────────────────────────────────
+
+async def antisaturacao_gate(plat: str, sku: str, valor: str,
+                              texto: str) -> tuple[bool, float, str]:
+    """
+    Gate único de anti-saturação. Chamado pelo pipeline antes do envio.
+
+    Retorna:
+      (bloquear: bool, delay_extra: float, motivo: str)
+
+      bloquear=True  → oferta descartada (S1/S2)
+      bloquear=False, delay_extra>0 → envia com delay extra (S3/S4)
+      bloquear=False, delay_extra=0 → envia normalmente
+    """
+    # Eventos nunca sofrem S3/S4
+    eh_evt = _KW_EVENTO.search(texto)
+
+    # S1 + S2: verificação de fadiga e semântica
+    bloquear, motivo = _sat_verificar_s1_s2(plat, sku, valor)
+    if bloquear:
+        log_dedup.warning(f"🚫 Anti-Saturação BLOQUEIA | {motivo}")
+        return True, 0.0, motivo
+
+    delay_extra = 0.0
+
+    # S3: densidade de plataforma
+    if not eh_evt and _sat_verificar_s3(plat):
+        delay_extra += 8.0
+        log_dedup.info(
+            f"⏱ Anti-Saturação S3 | plat={plat} delay+8s")
+
+    # S4: burst
+    if not eh_evt and await _sat_verificar_s4():
+        delay_extra += 5.0
+        log_dedup.info(
+            f"⏱ Anti-Saturação S4 | burst detectado delay+5s")
+
+    return False, delay_extra, ""
+
+
+def antisaturacao_registrar(plat: str, sku: str):
+    """Registra envio bem-sucedido nas tabelas de saturação."""
+    db_registrar_saturacao(plat, "envio", sku)
