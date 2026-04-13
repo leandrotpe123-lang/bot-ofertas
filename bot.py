@@ -968,136 +968,57 @@ def limpar_ruido_textual(texto: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 13 ▸ EMOJIS SEMÂNTICOS POR CATEGORIA E PLATAFORMA
-# Emojis fixos e determinísticos — não aleatórios.
-# Cada plataforma tem seu conjunto. Produto detectado no título ganha emoji.
+# MÓDULO 13 ▸ EMOJIS FIXOS (PADRÃO PROFISSIONAL)
 # ══════════════════════════════════════════════════════════════════════════════
 
-_EMOJI_PLAT = {
-    "amazon": {"titulo": "🔥", "preco": "✅", "cupom": "🎟️",
-               "frete": "🚚", "anuncio": "📢", "estoque": "📦"},
-    "shopee": {"titulo": "🛒", "preco": "💰", "cupom": "🎁",
-               "frete": "🚚", "anuncio": "📢", "estoque": "📦"},
-    "magalu": {"titulo": "🔵", "preco": "✅", "cupom": "🏷️",
-               "frete": "🚚", "anuncio": "📢", "estoque": "🛍️"},
+# Sua tabela oficial de emojis fixos
+_EMJ = {
+    "titulo_oferta":    "🔥",
+    "titulo_cupom":     "🚨",
+    "titulo_evento":    "⚠️",
+    "preco":            "💵",
+    "cupom_cod":        "🎟",
+    "instrucao":        "⭐️",
+    "resgate":          "✅",
+    "info":             "ℹ️",
+    "lista_item":       "🔹",
+    "frete":            "🚚",
+    "carrinho":         "🛒",
 }
-
-# ── Hierarquia de categorias com PESO (maior = maior prioridade) ─────────────
-# Cada entrada: (peso, palavras_chave, emoji)
-# Quando há conflito (ex: "frango" em ração de pet), a categoria de maior peso vence.
-# PET (peso 100) > BEBÊ (95) > ELETRÔNICOS (90) > ALIMENTOS HUMANOS (20)
-
-_CATS_HIERARQUIA = [
-    # ── Peso 100 — Alta especificidade (nunca confundir) ─────────────────────
-    (100, ["ração","ração gato","ração cachorro","coleira","antipulgas",
-           "arranhador","aquário","comedouro","bebedouro pet"], "🐾"),
-    (100, ["fraldas","mamadeira","chupeta","berço","carrinho de bebê",
-           "enxoval bebê","body bebê"], "👶"),
-
-    # ── Peso 90 — Eletrônicos ─────────────────────────────────────────────────
-    (90,  ["celular","smartphone","iphone","galaxy","xiaomi","motorola",
-           "redmi","android"], "📱"),
-    (90,  ["notebook","laptop","pc gamer","computador","desktop"], "💻"),
-    (90,  ["smart tv","televisão","tv 4k","tv 55","soundbar","projetor",
-           "home theater"], "📺"),
-    (90,  ["monitor gamer","tela gamer","display gamer"], "🎮"),
-    (90,  ["ps5","xbox","nintendo","playstation","controle gamer",
-           "headset gamer"], "🎮"),
-
-    # ── Peso 80 — Categoria bem definida ─────────────────────────────────────
-    (80,  ["whey","proteína","proteina","creatina","bcaa","suplemento",
-           "pre-treino","pré-treino","termogênico"], "💪"),
-    (80,  ["tênis","tenis","sapato","sandália","sandalia","sapatênis",
-           "chinelo","bota calçado"], "👟"),
-    (80,  ["meia","meias","soquete"], "🧦"),
-    (80,  ["álbum","album","figurinha","panini","pokemon","sticker card"], "📚"),
-    (80,  ["shampoo","condicionador","creme facial","sérum","perfume",
-           "hidratante corporal","maquiagem","batom"], "💄"),
-    (80,  ["furadeira","parafusadeira","ferramenta","alicate","chave inglesa",
-           "kit ferramentas"], "🔧"),
-    (80,  ["livro","e-book","mangá","literatura","romance"], "📖"),
-    (80,  ["brinquedo","boneca","lego","pelúcia","quebra-cabeça"], "🧸"),
-    (80,  ["camiseta","camisa","calça","vestido","moletom","jaqueta",
-           "blusa","bermuda","cueca","roupa"], "👕"),
-
-    # ── Peso 70 — Eletrodomésticos ───────────────────────────────────────────
-    (70,  ["geladeira","fogão","micro-ondas","microondas","lavadora",
-           "lava-roupas","máquina de lavar","ar-condicionado"], "🏠"),
-    (70,  ["aspirador","purificador","fritadeira","airfryer","cafeteira",
-           "liquidificador","batedeira"], "🏠"),
-
-    # ── Peso 50 — Genérico ───────────────────────────────────────────────────
-    (50,  ["colágeno","vitamina","omega","suplemento alimentar"], "💊"),
-
-    # ── Peso 20 — Alimentos humanos (baixo peso — perde para pet/bebê) ───────
-    (20,  ["cerveja","refrigerante","suco","energético","whisky","vinho",
-           "água mineral"], "🥤"),
-    (20,  ["chocolate","biscoito","café","açúcar","arroz","leite",
-           "queijo","frango","carne","feijão","macarrão"], "🍫"),
-]
-
-# Palavras-chave que ANULAM categorias de peso menor
-# Ex: se "ração" estiver no título, ignora "frango" como alimento humano
-_DOMINADORES = {
-    "🐾": ["ração","petshop","pet shop","veterinário","antipulgas"],
-    "👶": ["fraldas","mamadeira","enxoval bebê","berço"],
-}
-
-
-def _emoji_produto(titulo: str) -> Optional[str]:
-    """
-    Detecção de emoji com hierarquia de prioridades.
-    Verifica dominadores primeiro para evitar falso-positivo (ração→🍫).
-    Depois percorre categorias em ordem decrescente de peso.
-    """
-    tl = titulo.lower()
-
-    # Verifica dominadores — se detectado, retorna diretamente
-    for emoji_dom, kws in _DOMINADORES.items():
-        if any(kw in tl for kw in kws):
-            log_fmt.debug(f"  Dominador ativo: {emoji_dom} via {[k for k in kws if k in tl]}")
-            return emoji_dom
-
-    # Percorre por peso decrescente
-    candidatos = []
-    for peso, palavras, emoji in _CATS_HIERARQUIA:
-        if any(p in tl for p in palavras):
-            candidatos.append((peso, emoji))
-
-    if not candidatos:
-        return None
-
-    # Retorna o de maior peso
-    candidatos.sort(key=lambda x: x[0], reverse=True)
-    escolhido = candidatos[0][1]
-    log_fmt.debug(f"  Emoji produto: {escolhido} (peso={candidatos[0][0]})")
-    return escolhido
-
 
 def _emoji_de_linha(linha: str, plat: str, eh_titulo: bool) -> Optional[str]:
-    """Retorna emoji correto por contexto. Determinístico."""
-    ep = _EMOJI_PLAT.get(plat, _EMOJI_PLAT["amazon"])
-    ll = linha.lower()
-
+    """
+    Retorna emojis fixos baseados apenas no tipo da linha.
+    NÃO tenta adivinhar o produto para não colocar emojis errados.
+    """
+    ls = linha.lower()
+    
+    # Se for a primeira linha (Título)
     if eh_titulo:
-        ep_prod = _emoji_produto(linha)
-        return ep_prod if ep_prod else ep["titulo"]
+        if any(x in ls for x in ["cupom", "código", "resgate"]):
+            return _EMJ["titulo_cupom"]
+        if any(x in ls for x in ["quiz", "roleta", "missão", "arena"]):
+            return _EMJ["titulo_evento"]
+        return _EMJ["titulo_oferta"]
 
-    if any(x in ll for x in ["frete grátis","frete gratis","entrega grátis",
-                               "entrega gratis","sem frete","frete free"]):
-        return ep["frete"]
-    if any(x in ll for x in ["cupom","cupon","código","codigo","off",
-                               "resgate","desconto","coupon"]):
-        return ep["cupom"]
-    if _RE_PRECO.search(linha):
-        return ep["preco"]
-    if any(x in ll for x in ["anúncio","anuncio","publicidade"]):
-        return ep["anuncio"]
+    # Demais linhas por palavra-chave fixa
+    if any(x in ls for x in ["frete grátis", "entrega grátis", "sem frete"]):
+        return _EMJ["frete"]
+    if any(x in ls for x in ["cupom", "código", "off"]):
+        return _EMJ["cupom_cod"]
+    if "r$" in ls:
+        return _EMJ["preco"]
+    if any(x in ls for x in ["resgate", "clique", "acesse"]):
+        return _EMJ["resgate"]
+    if "carrinho" in ls:
+        return _EMJ["carrinho"]
+        
     return None
 
-
 def _tem_emoji(s: str) -> bool:
-    return bool(_RE_EMOJI.search(s))
+    """Verifica se a linha já veio com emoji do grupo original."""
+    return bool(re.search(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF]", s))
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1386,10 +1307,9 @@ _RUIDO_NORM = {
     "app","relampago","relâmpago","click","veja","agora","novo","nova",
 }
 
-_KW_EVENTO  = frozenset(["quiz","roleta","missão","missao","arena",
-                          "girar","gire","roda","jogar","jogue","desafio"])
-_KW_STATUS  = frozenset(["voltando","voltou","normalizou","renovado",
-                          "estoque renovado","voltou","regularizou"])
+# Transformamos as listas em Radares (Regex) para o comando .search() funcionar
+_KW_EVENTO = re.compile(r'(?i)\b(quiz|roleta|missão|missao|arena|girar|gire|roda|jogar|jogue|desafio)\b')
+_KW_STATUS = re.compile(r'(?i)\b(voltando|voltou|normalizou|renovado|estoque\s+renovado|regularizou)\b')
 _KW_CAMPANHA = {
     "amazon_app":   ["amazon app","app amazon","aplicativo amazon"],
     "mastercard":   ["mastercard","master card"],
