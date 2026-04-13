@@ -968,302 +968,140 @@ def limpar_ruido_textual(texto: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 13 ▸ EMOJIS FIXOS (PADRÃO PROFISSIONAL)
+# MÓDULO 13 ▸ EMOJIS DINÂMICOS (VARIEDADE PROFISSIONAL)
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Sua tabela oficial de emojis fixos
+# Sua tabela com listas de opções (O bot vai escolher uma de cada lista)
 _EMJ = {
-    "titulo_oferta":    "🔥",
-    "titulo_cupom":     "🚨",
-    "titulo_evento":    "⚠️",
-    "preco":            "💵",
-    "cupom_cod":        "🎟",
-    "instrucao":        "⭐️",
-    "resgate":          "✅",
-    "info":             "ℹ️",
-    "lista_item":       "🔹",
-    "frete":            "🚚",
-    "carrinho":         "🛒",
+    "titulo_oferta":    ["🔥", "💥", "⚡️", "🚀"],
+    "titulo_cupom":     ["🚨", "🔔", "📢"],
+    "titulo_evento":    ["⚠️", "🎯", "🎰"],
+    "preco":            ["💵", "💰", "🤑", "💸"],
+    "cupom_cod":        ["🎟", "🎫", "🏷"],
+    "resgate":          ["✅", "🎯", "🔗"],
+    "carrinho":         ["🛒", "🛍"],
+    "frete":            ["🚚", "📦", "✈️"],
 }
 
+def _classificar_mensagem(texto: str) -> str:
+    """Decide a intenção da mensagem."""
+    if _KW_EVENTO.search(texto): return "evento"
+    if _KW_CUPOM.search(texto): return "cupom_puro"
+    return "oferta_produto"
+
+def _emoji_topo(tipo: str) -> str:
+    """Escolhe um emoji aleatório para o topo conforme o tipo."""
+    if tipo == "evento": return random.choice(_EMJ["titulo_evento"])
+    if tipo == "cupom_puro": return random.choice(_EMJ["titulo_cupom"])
+    return random.choice(_EMJ["titulo_oferta"])
+
 def _emoji_de_linha(linha: str, plat: str, eh_titulo: bool) -> Optional[str]:
-    """
-    Retorna emojis fixos baseados apenas no tipo da linha.
-    NÃO tenta adivinhar o produto para não colocar emojis errados.
-    """
+    """Retorna um emoji aleatório dentro da categoria da linha."""
     ls = linha.lower()
     
-    # Se for a primeira linha (Título)
     if eh_titulo:
-        if any(x in ls for x in ["cupom", "código", "resgate"]):
-            return _EMJ["titulo_cupom"]
-        if any(x in ls for x in ["quiz", "roleta", "missão", "arena"]):
-            return _EMJ["titulo_evento"]
-        return _EMJ["titulo_oferta"]
+        tipo = _classificar_mensagem(linha)
+        return _emoji_topo(tipo)
 
-    # Demais linhas por palavra-chave fixa
+    # O bot escolhe aleatoriamente um dos emojis da categoria
     if any(x in ls for x in ["frete grátis", "entrega grátis", "sem frete"]):
-        return _EMJ["frete"]
+        return random.choice(_EMJ["frete"])
+    
     if any(x in ls for x in ["cupom", "código", "off"]):
-        return _EMJ["cupom_cod"]
+        return random.choice(_EMJ["cupom_cod"])
+    
     if "r$" in ls:
-        return _EMJ["preco"]
+        return random.choice(_EMJ["preco"])
+    
     if any(x in ls for x in ["resgate", "clique", "acesse"]):
-        return _EMJ["resgate"]
+        return random.choice(_EMJ["resgate"])
+    
     if "carrinho" in ls:
-        return _EMJ["carrinho"]
+        return random.choice(_EMJ["carrinho"])
         
     return None
 
 def _tem_emoji(s: str) -> bool:
-    """Verifica se a linha já veio com emoji do grupo original."""
     return bool(re.search(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF]", s))
 
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 14 ▸ RENDERIZADOR PROFISSIONAL — EMOJIS POR INTENÇÃO
-#
-# Classifica a mensagem antes de formatar:
-#   oferta_produto | cupom_puro | evento | aviso | lista_multi
-#
-# Emojis fixos por função:
-#   🔥 topo de oferta/produto      🚨 cupom urgente / retorno
-#   ⚠️ instrução importante        💵 preço
-#   🎟 cupom/código                ✅ resgate / link produto
-#   ⭐️ instrução / verificação     ℹ️ informação adicional
-#   🔹 item de lista               🚚 frete
-#   🛒 carrinho
-#
-# Links ficam SEMPRE sem emoji (limpos, clicáveis).
+# MÓDULO 14 ▸ RENDERIZADOR LINEAR (COM CLIQUE E COPIE)
 # ══════════════════════════════════════════════════════════════════════════════
 
-_RE_LIXO_PREFIXO = re.compile(
-    r'^\s*(?:::?\s*ML|[-–]\s*ML|ML\s*:|[-:•|]\s*(?:ML|MG|AMZ)\s*[-:•]?)\s*',
-    re.I)
-_RE_ANUNCIO_LINHA = re.compile(
-    r'^\s*[-#]?\s*(?:anúncio|anuncio|publicidade|patrocinado|sponsored)\s*$', re.I)
-_RE_LINHA_APENAS_LIXO = re.compile(
-    r'^\s*(?:[-–—]{2,}|===+|:::\s*$|(?:ML|MG|AMZ)\s*:\s*$|::\s*(?:ML|MG|AMZ)\s*::\s*$)\s*$', re.I)
+def _aplicar_crases_no_codigo(linha: str) -> str:
+    """Procura um código de cupom na linha e coloca crases se não houver."""
+    # Regex que procura palavras em maiúsculo com números (Ex: HOJEPODE, GANHE10)
+    # Ignora palavras que já tenham crases ou que sejam links
+    if "http" in linha: return linha
+    
+    def _substituir(match):
+        codigo = match.group(0)
+        # Se o código for muito curto (tipo 'R$') ou já tiver crase, não mexe
+        if len(codigo) < 4 or "`" in linha:
+            return codigo
+        return f"`{codigo}`"
 
-# Emojis fixos por tipo de linha — padrão profissional dos grandes grupos
-_EMJ = {
-    "titulo_oferta":    "🔥",
-    "titulo_cupom":     "🚨",
-    "titulo_evento":    "⚠️",
-    "preco":            "💵",
-    "cupom_cod":        "🎟",
-    "instrucao":        "⭐️",
-    "resgate":          "✅",
-    "info":             "ℹ️",
-    "lista_item":       "🔹",
-    "frete":            "🚚",
-    "carrinho":         "🛒",
-}
+    # Procura padrões de 4 a 20 caracteres maiúsculos/números
+    return re.sub(r'\b[A-Z0-9_-]{4,20}\b', _substituir, linha)
 
-# Palavras que indicam cada tipo de linha
-_KW_PRECO     = re.compile(r'R\$\s?[\d.,]+', re.I)
-_KW_CUPOM     = re.compile(r'\b(?:cupom|cupon|código|codigo|coupon|off\s+em\s+r\$)\b', re.I)
-_KW_FRETE     = re.compile(r'\b(?:frete\s+grát|frete\s+grat|entrega\s+grát|sem\s+frete)\b', re.I)
-_KW_INSTRUCAO = re.compile(
-    r'\b(?:resgate|acesse|clique|ative|use\s+o\s+cupom|após|depois|selecione|'
-    r'escolha|adicione|coloque|insira|abra\s+o\s+app|no\s+app|no\s+aplicativo|'
-    r'verifique|confira|link\s+produto|link\s+carrinho|carrinho)\b', re.I)
-_KW_INFO      = re.compile(
-    r'\b(?:obs|observação|atenção|válido|valido|limite|limitado|disponível|'
-    r'disponivel|condição|condicao|termos|exclusivo|somente)\b', re.I)
-_KW_EVENTO    = re.compile(
-    r'\b(?:quiz|roleta|missão|missao|live|evento|promoção\s+relâmpago|'
-    r'flash\s+sale|sorteio|desafio)\b', re.I)
-_KW_LISTA_NUM = re.compile(r'^\s*\d+[\.\)]\s+\S', re.M)
-
-
-def _classificar_mensagem(texto: str) -> str:
-    """
-    Classifica a intenção da mensagem para escolher o emoji de topo correto.
-    Retorna: 'lista_multi' | 'evento' | 'cupom_puro' | 'oferta_produto' | 'aviso'
-    """
-    tl = texto.lower()
-
-    # Lista multi-produto (muitas linhas, múltiplos links ou numeração)
-    n_links = len(re.findall(r'https?://', texto))
-    if n_links >= 3 or _KW_LISTA_NUM.search(texto):
-        return "lista_multi"
-
-    # Evento (Quiz, Roleta, Live, Missão)
-    if _KW_EVENTO.search(texto):
-        return "evento"
-
-    # Cupom puro (sem produto claro, só código de desconto)
-    tem_cupom = bool(_KW_CUPOM.search(texto))
-    tem_prod  = bool(re.search(r'/dp/[A-Z0-9]{10}|/p/[a-z0-9]+/', texto, re.I))
-    if tem_cupom and not tem_prod:
-        return "cupom_puro"
-
-    return "oferta_produto"
-
-
-def _emoji_topo(tipo: str) -> str:
-    mapa = {
-        "lista_multi":    _EMJ["titulo_oferta"],
-        "evento":         _EMJ["titulo_evento"],
-        "cupom_puro":     _EMJ["titulo_cupom"],
-        "oferta_produto": _EMJ["titulo_oferta"],
-        "aviso":          _EMJ["titulo_evento"],
-    }
-    return mapa.get(tipo, _EMJ["titulo_oferta"])
-
-
-def _emoji_linha_contextual(linha: str) -> Optional[str]:
-    """Retorna o emoji correto para uma linha de texto com base no conteúdo."""
-    ls = linha.strip()
-    if not ls:
-        return None
-
-    if _KW_FRETE.search(ls):
-        return _EMJ["frete"]
-    if _KW_CUPOM.search(ls):
-        return _EMJ["cupom_cod"]
-    if _KW_PRECO.search(ls):
-        return _EMJ["preco"]
-    if _KW_INSTRUCAO.search(ls):
-        # Diferencia "resgate" de "instrução"
-        ll = ls.lower()
-        if any(x in ll for x in ["resgate", "link produto", "link carrinho",
-                                  r"link\s+do\s+produto", r"acesse\s+aqui"]):
-            return _EMJ["resgate"]
-        if "carrinho" in ll:
-            return _EMJ["carrinho"]
-        return _EMJ["instrucao"]
-    if _KW_INFO.search(ls):
-        return _EMJ["info"]
-    # Linha de lista (começa com número)
-    if re.match(r'^\d+[\.\)]\s', ls):
-        return _EMJ["lista_item"]
-
-    return None  # linha de texto simples → sem emoji adicional
-
-
-def _aplicar_crases(linha: str) -> str:
-    """Coloca crases em torno do código do cupom se ainda não tiver."""
-    def _sub(m):
-        cod, ini, fim = m.group(1), m.start(1), m.end(1)
-        s = m.string
-        antes  = s[ini - 1] if ini > 0 else ""
-        depois = s[fim]     if fim < len(s) else ""
-        if antes == "`" or depois == "`":
-            return cod
-        return f"`{cod}`"
-    return _RE_COD_CUPOM.sub(_sub, linha)
-
-
-def renderizar(texto: str, mapa_links: dict,
-               links_preservar: list, plat: str) -> str:
-    """
-    Renderizador profissional linear.
-
-    1. Classifica a mensagem (intenção) → define emoji de topo
-    2. Processa linha por linha na ordem original
-    3. Links ficam LIMPOS sem emoji (padrão dos grandes grupos)
-    4. Texto recebe emoji por função (preço, cupom, instrução, etc.)
-    5. Anúncio removido da posição → 1 único #anúncio no final
-    """
-    tipo_mensagem = _classificar_mensagem(texto)
-
+def renderizar(texto: str, mapa_links: dict, links_preservar: list, plat: str) -> str:
+    """Processa linha por linha e garante o clique-e-copie no cupom."""
     mapa_total = dict(mapa_links)
-    for url in links_preservar:
-        mapa_total[url] = url
+    for url in links_preservar: mapa_total[url] = url
 
-    linhas          = texto.split('\n')
-    saida           = []
-    tem_anuncio     = False
-    eh_primeira_txt = True   # próxima linha de texto = título
+    linhas = texto.split('\n')
+    saida = []
+    eh_primeira_texto = True 
 
     for linha in linhas:
         ls = linha.strip()
-
         if not ls:
             saida.append("")
             continue
 
-        # Ruído puro → remove
-        if _RE_LINHA_APENAS_LIXO.match(ls):
-            continue
-
-        # Anúncio → remove da posição, coloca no final
         if _RE_ANUNCIO_LINHA.match(ls):
-            tem_anuncio = True
+            saida.append(ls)
             continue
 
-        # Limpa prefixos técnicos
         ls = _RE_LIXO_PREFIXO.sub("", ls).strip()
-        if not ls:
-            continue
+        if not ls: continue
 
-        # Extrai URLs da linha
-        urls_raw  = _RE_URL.findall(ls)
-        sem_links = _RE_URL.sub("", ls).strip()
+        # --- PROCESSAMENTO DE LINKS ---
+        urls_na_linha = _RE_URL.findall(ls)
+        sem_urls = _RE_URL.sub("", ls).strip()
 
-        # ── Linha só de link(s) ──────────────────────────────────────────
-        if urls_raw and not sem_links:
-            for u in urls_raw:
+        if urls_na_linha and not sem_urls:
+            for u in urls_na_linha:
                 uc = u.rstrip('.,;)>')
-                if uc in mapa_total:
-                    # Links ficam SEM emoji — limpos e clicáveis
-                    saida.append(mapa_total[uc])
-                # Link inválido → removido
+                if uc in mapa_total: saida.append(mapa_total[uc])
             continue
 
-        # ── Linha com texto (pode ter link inline) ───────────────────────
-        def _sub_inline(m):
+        def _sub_link(m):
             uc = m.group(0).rstrip('.,;)>')
             return mapa_total.get(uc, "")
+        
+        nova_linha = _RE_URL.sub(_sub_link, ls).strip()
+        if not nova_linha: continue
 
-        nova = _RE_URL.sub(_sub_inline, ls).strip()
-        if not nova:
-            continue
+        # --- REGRA DA CRASE (CLIQUE E COPIE) ---
+        # Se a linha fala de cupom ou código, a gente tenta aplicar a crase
+        if any(x in nova_linha.lower() for x in ["cupom", "código", "use", "cod"]):
+            nova_linha = _aplicar_crases_no_codigo(nova_linha)
 
-        # Crases nos códigos de cupom
-        if _RE_CUPOM_KW.search(nova) or _RE_COD_CUPOM.search(nova):
-            nova = _aplicar_crases(nova)
+        # --- EMOJIS (Módulo 13) ---
+        if not _tem_emoji(nova_linha):
+            emoji = _emoji_de_linha(nova_linha, plat, eh_titulo=eh_primeira_texto)
+            if emoji: nova_linha = f"{emoji} {nova_linha}"
+        
+        # Regra do Carrinho
+        if plat in ["shopee", "magalu"] and "carrinho" in nova_linha.lower():
+            if "🛒" not in nova_linha: nova_linha = "🛒 " + nova_linha
 
-        # ── Aplica emoji por função ───────────────────────────────────────
-        if not _tem_emoji(nova):
-            if eh_primeira_txt:
-                # Primeira linha de texto = título
-                emoji_tit = _emoji_produto(nova) or _emoji_topo(tipo_mensagem)
-                nova = f"{emoji_tit} {nova}"
-                eh_primeira_txt = False
-            else:
-                ec = _emoji_linha_contextual(nova)
-                if ec:
-                    nova = f"{ec} {nova}"
-        elif _tem_emoji(nova) and eh_primeira_txt:
-            eh_primeira_txt = False
+        if eh_primeira_texto: eh_primeira_texto = False
+        saida.append(nova_linha)
 
-        saida.append(nova)
+    return "\n".join(saida).strip()
 
-    # Normaliza linhas vazias consecutivas
-    final, pv = [], False
-    for l in saida:
-        if l.strip() == "":
-            if not pv:
-                final.append("")
-            pv = True
-        else:
-            pv = False
-            final.append(l)
-
-    while final and final[0].strip() == "":
-        final.pop(0)
-    while final and final[-1].strip() == "":
-        final.pop()
-
-    if tem_anuncio:
-        final.append("")
-        final.append("#anúncio")
-
-    return "\n".join(final).strip()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 15 ▸ DEDUPLICAÇÃO SEMÂNTICA — OLHA PARA A ALMA, IGNORA O LINK
@@ -1353,16 +1191,20 @@ def _normalizar_alma(texto: str) -> str:
 
 
 def _detectar_campanha(texto: str) -> str:
-    """Detecta tokens de campanha no texto para identificação semântica."""
+    """Detecta a alma da oferta para o bot não repetir posts."""
     tl = texto.lower()
     tokens = []
-    for camp, kws in _KW_CAMPANHA.items():
-        if any(kw in tl for kw in kws):
-            tokens.append(camp)
-    for kw in _KW_EVENTO:
-        if kw in tl:
-            tokens.append(f"evento_{kw}")
-            break
+    
+    # Procura por palavras de evento usando o Radar
+    match_evento = _KW_EVENTO.search(texto)
+    if match_evento:
+        tokens.append(f"evento_{match_evento.group(0).lower().strip()}")
+    
+    # Outras detecções simples
+    if "amazon app" in tl: tokens.append("amazon_app")
+    if "mastercard" in tl: tokens.append("mastercard")
+    if "prime" in tl:      tokens.append("prime")
+
     return "|".join(sorted(tokens)) if tokens else "geral"
 
 
