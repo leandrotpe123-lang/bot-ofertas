@@ -1209,7 +1209,7 @@ def _emoji_linha_contextual(linha: str) -> Optional[str]:
         # Diferencia "resgate" de "instrução"
         ll = ls.lower()
         if any(x in ll for x in ["resgate", "link produto", "link carrinho",
-                                  "link\s+do\s+produto", "acesse\s+aqui"]):
+                                  r"link\s+do\s+produto", "acesse\s+aqui"]):
             return _EMJ["resgate"]
         if "carrinho" in ll:
             return _EMJ["carrinho"]
