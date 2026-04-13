@@ -1028,6 +1028,11 @@ def _tem_emoji(s: str) -> bool:
 # MÓDULO 14 ▸ RENDERIZADOR LINEAR (COM CLIQUE E COPIE)
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ─── FERRAMENTAS DE BUSCA DO MÓDULO 14 (OBRIGATÓRIO) ───────────────────────
+_RE_LIXO_PREFIXO = re.compile(r'^\s*(?:::?\s*ML|[-–]\s*ML|ML\s*:|[-:•|]\s*(?:ML|MG|AMZ)\s*[-:•]?)\s*', re.I)
+_RE_ANUNCIO_LINHA = re.compile(r'^\s*[-#]?\s*(?:anúncio|anuncio|publicidade|patrocinado|sponsored)\s*$', re.I)
+_RE_URL = re.compile(r'https?://[^\s\)\]>,"\'<\u200b\u200c]+')
+
 def _aplicar_crases_no_codigo(linha: str) -> str:
     """Procura um código de cupom na linha e coloca crases se não houver."""
     # Regex que procura palavras em maiúsculo com números (Ex: HOJEPODE, GANHE10)
