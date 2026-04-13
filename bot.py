@@ -1367,14 +1367,15 @@ def _detectar_campanha(texto: str) -> str:
 
 
 def _eh_evento(texto: str) -> bool:
-    tl = texto.lower()
-    return any(kw in tl for kw in _KW_EVENTO)
+    """Retorna True se o texto descreve um evento recorrente (Quiz, Roleta...)."""
+    # Mesma lógica: usamos o radar .search()
+    return bool(_KW_EVENTO.search(texto))
 
 
 def _eh_mudanca_status(texto: str) -> bool:
     """Retorna True se o texto indica mudança de status real (Voltando, Normalizou...)."""
-    tl = texto.lower()
-    return any(kw in tl for kw in _KW_STATUS)
+    # Usamos o radar .search() em vez de tentar percorrer como se fosse uma lista
+    return bool(_KW_STATUS.search(texto))
 
 
 def _extrair_cupom(texto: str) -> str:
