@@ -1439,6 +1439,16 @@ async def buscar_imagem(url: str) -> Optional[str]:
     log_img.warning(f"❌ Sem imagem após 3 tentativas | {url[:60]}")
     return None
 
+# ─── FUNÇÕES DE APOIO AO ENVIO (ESSENCIAIS) ───────────────────────────────
+
+def _tem_midia(media) -> bool:
+    """Verifica se a mensagem tem uma imagem real (ignora o preview de link)."""
+    return media is not None and not isinstance(media, MessageMediaWebPage)
+
+def _eh_cupom(texto: str) -> bool:
+    """Verifica se o texto é um cupom usando o Radar de Cupom."""
+    return bool(_KW_CUPOM.search(texto))
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
