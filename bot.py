@@ -1174,7 +1174,7 @@ def _classificar_mensagem(texto: str) -> str:
     if _KW_EVENTO.search(texto):
         return "evento"
 
-if _KW_EVENTO.search(texto):
+    if _KW_EVENTO.search(texto):
     return "evento"
 
     # Cupom puro (sem produto claro, só código de desconto)
