@@ -1174,9 +1174,6 @@ def _classificar_mensagem(texto: str) -> str:
     if _KW_EVENTO.search(texto):
         return "evento"
 
-    if _KW_EVENTO.search(texto):
-    return "evento"
-
     # Cupom puro (sem produto claro, só código de desconto)
     tem_cupom = bool(_KW_CUPOM.search(texto))
     tem_prod  = bool(re.search(r'/dp/[A-Z0-9]{10}|/p/[a-z0-9]+/', texto, re.I))
