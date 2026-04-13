@@ -966,32 +966,18 @@ def limpar_ruido_textual(texto: str) -> str:
 
     return "\n".join(final).strip()
 
-
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 13 ▸ EMOJIS DINÂMICOS (VARIEDADE PROFISSIONAL)
+# MÓDULO 13 ▸ EMOJIS DINÂMICOS E RADARES DE BUSCA
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ─── RADARES DE BUSCA (ESSENCIAIS PARA EMOJIS E CLASSIFICA para que todas as funções do bot consigam enxergá-los.
-
-**Copie este bloco e cole no topo do seu script (abaixo dos imports):**
-
-```python
-# ══════════════════════════════════════════════════════════════════════════════
-# RADARES DE BUSCA (FERRAMENTAS ESSENCIAIS)
-# ══════════════════════════════════════════════════════════════════════════════
+# Radares de Busca (Regex) - Essenciais para o funcionamento do bot
 _KW_PRECO  = re.compile(r'R\$\s?[\d.,]+', re.I)
-_KWÇÃO) ──────────────
-_KW_PRECO = re.compile(r'R\$\s?[\d.,]+', re.I)
-_KW_CUPOM = re.compile(r'\b(?:cupom|cupon|código|codigo|coupon|off|ganhe|🏷)\b', re.I)
-_KW_FRETE = re.compile(r'\b(?:frete\s+grát|frete\s+grat_CUPOM  = re.compile(r'\b(cupom|cupon|código|codigo|coupon|off|resgate|cod)\b', re.I)
+_KW_CUPOM  = re.compile(r'\b(cupom|cupon|código|codigo|coupon|off|resgate|cod)\b', re.I)
 _KW_FRETE  = re.compile(r'\b(frete\s+grát|frete\s+grat|entrega\s+grát|sem\s+frete)\b', re.I)
-_KW_EVENTO = re.compile(r'(?i)quiz|roleta|missão|missao|arena|girar|gire|roda|jogar|jogue|desafio')
-_KW_STATUS = re.compile(r'(?i)volt|entrega\s+grát|sem\s+frete)\b', re.I)
 _KW_EVENTO = re.compile(r'(?i)\b(quiz|roleta|missão|missao|arena|girar|gire|roda|jogar|jogue|desafio)\b')
-_KW_STATUS = re.compile(r'(?i)\b(voltando|voltou|normalizou|renovado|estoque\s+renovadoando|voltou|normalizou|renovado|estoque\s+renovado|regularizou')
-# ══════════════════════════════════════════════════════════════════════════════
+_KW_STATUS = re.compile(r'(?i)\b(voltando|voltou|normalizou|renovado|estoque\s+renovado|regularizou)\b')
 
-# Sua tabela com listas de opções (O bot vai escolher uma de cada lista)
+# Tabela de Emojis Dinâmicos
 _EMJ = {
     "titulo_oferta":    ["🔥", "💥", "⚡️", "🚀"],
     "titulo_cupom":     ["🚨", "🔔", "📢"],
@@ -1002,6 +988,7 @@ _EMJ = {
     "carrinho":         ["🛒", "🛍"],
     "frete":            ["🚚", "📦", "✈️"],
 }
+
 
 def _classificar_mensagem(texto: str) -> str:
     """Decide a intenção da mensagem."""
