@@ -1170,7 +1170,9 @@ def _classificar_mensagem(texto: str) -> str:
         return "lista_multi"
 
     # Evento (Quiz, Roleta, Live, Missão)
-print("DEBUG _KW_EVENTO:", type(_KW_EVENTO), _KW_EVENTO)
+    print("DEBUG _KW_EVENTO:", type(_KW_EVENTO), _KW_EVENTO)
+    if _KW_EVENTO.search(texto):
+        return "evento"
 
 if _KW_EVENTO.search(texto):
     return "evento"
