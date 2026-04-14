@@ -524,6 +524,9 @@ elif nl in ("amazon.com.br", "www.amazon.com.br", "amazon.com", "www.amazon.com"
 ✔ Proteção total de comissão
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ═════════════════════════════════════════════════════════════
+# MOTOR SHOPEE (API DIRETA)
+# ═════════════════════════════════════════════════════════════
 async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
     """Motor exclusivo Shopee com retry interno seguro."""
     log_shp.debug(f"🔗 {url[:80]}")
@@ -867,85 +870,97 @@ def extrair_links(texto: str) -> Tuple[List[str], List[str]]:
 # MÓDULO 11 ▸ PIPELINE DE CONVERSÃO PARALELA
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ═════════════════════════════════════════════════════════════
+# CONVERSOR UNITÁRIO (ROTEAMENTO ESTANQUE)
+# ═════════════════════════════════════════════════════════════
 async def _converter_um(url: str, sessao: aiohttp.ClientSession) -> tuple:
-    """
-    Converte 1 link. Roteamento ESTANQUE por plataforma.
-    GUARD ANTI-CROSS-LINKING: cada URL só pode entrar no motor da sua plataforma.
-    """
     plat = classificar(url)
 
-    # ── Rotas diretas ─────────────────────────────────────────────────────────
+    async def _rota(u: str, motor, nome: str):
+        r = await motor(u, sessao)
+        return (r, nome) if r else (None, None)
+
+    # ── Rotas diretas ─────────────────────────────────────────
     if plat == "amazon":
-        # Só passa pelo motor Amazon. NUNCA pelo motor Magalu ou Shopee.
-        r = await motor_amazon(url, sessao)
-        return (r, "amazon") if r else (None, None)
+        return await _rota(url, motor_amazon, "amazon")
 
     if plat == "shopee":
-        # Só passa pelo motor Shopee. NUNCA pelo motor Amazon ou Magalu.
-        r = await motor_shopee(url, sessao)
-        return (r, "shopee") if r else (None, None)
+        return await _rota(url, motor_shopee, "shopee")
 
     if plat == "magalu":
-        # Só passa pelo motor Magalu. NUNCA pelo motor Amazon ou Shopee.
-        r = await motor_magalu(url, sessao)
-        return (r, "magalu") if r else (None, None)
+        return await _rota(url, motor_magalu, "magalu")
 
-    # ── Encurtador genérico → expande → reclassifica → roteamento estanque ───
+    # ── Expansão segura ───────────────────────────────────────
     if plat == "expandir":
-        log_lnk.debug(f"🔄 Expandindo: {url[:70]}")
-        async with _SEM_HTTP:
-            exp = await desencurtar_ultra(url, sessao)
+        log_lnk.debug(f"🔄 expand: {url[:60]}")
+
+        try:
+            async with _SEM_HTTP:
+                exp = await desencurtar_ultra(url, sessao)
+        except Exception:
+            return None, None
+
         p2 = classificar(exp)
-        log_lnk.debug(f"  Reclassificado como: {p2} | {exp[:60]}")
 
-        if p2 == "amazon":
-            r = await motor_amazon(exp, sessao)
-            return (r, "amazon") if r else (None, None)
-        if p2 == "shopee":
-            r = await motor_shopee(exp, sessao)
-            return (r, "shopee") if r else (None, None)
-        if p2 == "magalu":
-            r = await motor_magalu(exp, sessao)
-            return (r, "magalu") if r else (None, None)
+        if p2 in ("amazon", "shopee", "magalu"):
+            return await _converter_um(exp, sessao)
 
-        log_lnk.info(f"🗑 Não na whitelist após expansão: {exp[:70]}")
+        log_lnk.debug(f"🗑 descartado pós-expand: {exp[:60]}")
         return None, None
 
-    # Fora da whitelist → descarta
-    log_lnk.debug(f"🗑 Descartado: {url[:70]}")
     return None, None
 
 
-async def converter_links(links: list) -> tuple:
-    """Converte até 50 links em paralelo. Retorna (mapa, plataforma_principal)."""
+# ═════════════════════════════════════════════════════════════
+# PIPELINE PARALELO
+# ═════════════════════════════════════════════════════════════
+async def converter_links(links: list) -> Tuple[Dict[str, str], str]:
+
     if not links:
         return {}, "amazon"
-    log_lnk.info(f"🚀 {len(links)} link(s)")
+
+    log_lnk.info(f"🚀 convertendo {len(links)} links")
+
     conn = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300, ssl=False)
+
     async with aiohttp.ClientSession(
         connector=conn,
         timeout=aiohttp.ClientTimeout(total=40, connect=8),
         headers={"User-Agent": random.choice(USER_AGENTS)},
     ) as sessao:
-        resultados = await asyncio.gather(
-            *[_converter_um(l, sessao) for l in links[:50]],
-            return_exceptions=True,
-        )
 
-    mapa, plats = {}, []
+        tarefas = [
+            _converter_um(l, sessao)
+            for l in links[:50]
+        ]
+
+        resultados = await asyncio.gather(*tarefas, return_exceptions=True)
+
+    mapa: Dict[str, str] = {}
+    plats = []
+
     for i, res in enumerate(resultados):
+
         if isinstance(res, Exception):
-            log_lnk.error(f"  ❌ [{i}]: {res}")
+            log_lnk.error(f"❌ erro idx={i}: {res}")
             continue
+
         novo, plat = res
+
         if novo and plat:
             mapa[links[i]] = novo
             plats.append(plat)
-            log_lnk.debug(f"  [{plat.upper()}] → {novo[:50]}")
 
-    plat_p = max(set(plats), key=plats.count) if plats else "amazon"
-    log_lnk.info(f"✅ {len(mapa)}/{len(links)} | plat={plat_p}")
-    return mapa, plat_p
+            log_lnk.debug(f"[{plat.upper()}] {novo[:60]}")
+
+    plataforma_principal = (
+        max(set(plats), key=plats.count)
+        if plats else "amazon"
+    )
+
+    log_lnk.info(f"✅ {len(mapa)}/{len(links)} | main={plataforma_principal}")
+
+    return mapa, plataforma_principal
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -954,122 +969,117 @@ async def converter_links(links: list) -> tuple:
 # Chamada ANTES da formatação final.
 # ══════════════════════════════════════════════════════════════════════════════
 
-_RE_PRECO    = re.compile(r'R\$\s?[\d.,]+')
-_RE_CUPOM_KW = re.compile(
-    r'\b(?:cupom|cupon|off|resgate|codigo|coupon|desconto|assine)\b', re.I)
-_RE_EMOJI    = re.compile(
-    r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF"
-    r"\U0001F900-\U0001F9FF\u2B50\u2B55\u231A\u231B\u25A0-\u25FF]",
-    flags=re.UNICODE,
+# ═════════════════════════════════════════════════════════════
+# PRÉ-COMPILAÇÃO (performance + consistência)
+# ═════════════════════════════════════════════════════════════
+_RE_INVISIVEIS = re.compile(r'[\u200b\u200c\u200d\u00a0\u2060\ufeff]')
+_RE_GRUPO_EXTERNO = re.compile(
+    r'https?://(?:t\.me|telegram\.me|telegram\.org|chat\.whatsapp\.com)[^\s]*',
+    re.I
 )
-_RE_COD_CUPOM = re.compile(r'(?<![`"\'])\b([A-Z][A-Z0-9_-]{3,19})\b(?![`"\'"])')
 
-# Padrões de ruído técnico/visual para remover
-_RE_RUIDO_LINHA = re.compile(
+_RE_LINHA_RUIDO = re.compile(
     r'^\s*(?:'
-    r':::?\s*ML|[-–]\s*ML|ML\s*:|'
-    r'[-:•|]\s*(?:ML|MG|AMZ)\s*[-:•]?|'
-    r'-Anúncio$|^Anúncio$|^anuncio$|^-anuncio$|^- Anúncio$'
+    r'-\s*Anúncio|Anúncio|anuncio|'
+    r'-\s*Publicidade|Publicidade|'
+    r':::+|---+|===+|'
+    r'[-–—]\s*(?:ML|MG|AMZ)|'
+    r'(?:ML|MG|AMZ)\s*:'
     r')\s*$',
     re.I
 )
 
+_RE_CTA_RUIDO = re.compile(
+    r'^\s*(?:'
+    r'link\s+(?:do\s+)?produto|'
+    r'link\s+da\s+oferta|'
+    r'resgate\s+aqui|'
+    r'clique\s+aqui|'
+    r'acesse\s+aqui|'
+    r'compre\s+aqui|'
+    r'veja\s+aqui|'
+    r'assine\s+aqui|'
+    r'grupo\s+vip|'
+    r'entrar\s+no\s+grupo|'
+    r'acessar\s+grupo'
+    r')\s*:?\s*',
+    re.I
+)
+
+
+# ═════════════════════════════════════════════════════════════
+# NORMALIZAÇÃO BASE
+# ═════════════════════════════════════════════════════════════
+def _normalizar(texto: str) -> str:
+    # remove invisíveis
+    texto = _RE_INVISIVEIS.sub(" ", texto)
+
+    # normaliza quebras
+    texto = texto.replace("\r\n", "\n").replace("\r", "\n")
+
+    return texto
+
+
+# ═════════════════════════════════════════════════════════════
+# LIMPEZA PRINCIPAL (PIPELINE)
+# ═════════════════════════════════════════════════════════════
 def limpar_ruido_textual(texto: str) -> str:
     """
-    Limpeza em 4 camadas:
+    Pipeline de limpeza:
 
-    Camada 0 — Unicode invisíveis removidos.
-    Camada 1 — Expressões de afiliado / CTA de outros bots (re.sub inline).
-    Camada 2 — Linhas que contêm links para grupos externos (t.me, chat.whatsapp.com).
-    Camada 3 — Linhas que viraram ruído puro após a limpeza.
-    Camada 4 — Linhas vazias consecutivas normalizadas (máx 1).
+    1. normaliza unicode
+    2. remove CTAs ruins
+    3. remove links de grupo externo
+    4. remove linhas lixo estruturais
+    5. normaliza linhas vazias
     """
-    # ── Camada 0: Unicode invisíveis ─────────────────────────────────────
-    texto = re.sub(r'[\u200b\u200c\u200d\u00a0\u2060\ufeff]', ' ', texto)
 
-    # ── Camada 1: CTA / expressões de outros bots (inline por linha) ─────
-    _exprs_inicio = [
-        r'^\s*-?\s*Link\s+produto\s*:?\s*',
-        r'^\s*-?\s*Link\s+da\s+oferta\s*:?\s*',
-        r'^\s*-?\s*Resgate\s+aqui\s*:?\s*',
-        r'^\s*-?\s*Resgate\s+no\s+app\s*:?\s*',
-        r'^\s*-?\s*Confira\s+no\s+app\s*:?\s*',
-        r'^\s*-?\s*Link\s+no\s+comentário\s*:?\s*',
-        r'^\s*-?\s*Compre\s+aqui\s*:?\s*',
-        r'^\s*-?\s*Acesse\s+aqui\s*:?\s*',
-        r'^\s*-?\s*Clique\s+aqui\s*:?\s*',
-        r'^\s*-?\s*Veja\s+aqui\s*:?\s*',
-        r'^\s*-?\s*Assine\s+aqui\s*:?\s*',
-        r'^\s*-?\s*Saiba\s+mais\s*:?\s*',
-        r'^\s*-?\s*Entre\s+no\s+grupo\s*:?\s*',    # "Entre no grupo"
-        r'^\s*-?\s*Acesse\s+o\s+grupo\s*:?\s*',    # "Acesse o grupo"
-        r'^\s*-?\s*Grupo\s+VIP\s*:?\s*',            # "Grupo VIP"
-        r'^\s*-?\s*Anúncio\s*:?\s*',
-        r'^\s*-?\s*anuncio\s*:?\s*',
-        r'^\s*-?\s*Publicidade\s*:?\s*',
-    ]
-    _marcadores = [
-        r':::\s*(?:ML|MG|AMZ|loja)?\s*',
-        r'---+\s*',
-        r'===+\s*',
-        r'^\s*[-–—]+\s*(?:ML|MG|AMZ)\s*[-–—]*\s*',
-        r'^\s*(?:ML|MG|AMZ)\s*:\s*',
-        r'^\s*::\s*(?:ML|MG|AMZ)\s*::\s*',
-    ]
+    texto = _normalizar(texto)
 
-    linhas = texto.split('\n')
-    limpas = []
+    linhas = texto.split("\n")
+
+    resultado = []
+    vazio = False
+
     for linha in linhas:
-        l = linha
-        for expr in _exprs_inicio:
-            l = re.sub(expr, '', l, flags=re.I | re.M)
-        for marc in _marcadores:
-            l = re.sub(marc, '', l, flags=re.I | re.M)
-        limpas.append(l)
+        l = linha.strip()
 
-    # ── Camada 2: Remove linhas com links para grupos externos ────────────
-    # (t.me/joinchat, t.me/canal, chat.whatsapp.com)
-    _RE_GRUPO_EXTERNO = re.compile(
-        r'https?://(?:t\.me|telegram\.me|telegram\.org|chat\.whatsapp\.com)'
-        r'[^\s]*',
-        re.I
-    )
-    sem_grupos = []
-    for linha in limpas:
-        if _RE_GRUPO_EXTERNO.search(linha):
-            # Se a linha INTEIRA é o link do grupo → remove a linha
-            resto = _RE_GRUPO_EXTERNO.sub('', linha).strip()
-            if not resto:
-                log_fmt.debug(f"🚫 Linha grupo externo removida: {linha[:60]}")
+        # ─────────────────────────────
+        # mantém estrutura de quebra
+        # ─────────────────────────────
+        if not l:
+            if not vazio:
+                resultado.append("")
+            vazio = True
+            continue
+
+        vazio = False
+
+        # ─────────────────────────────
+        # remove CTAs de baixo valor
+        # ─────────────────────────────
+        if _RE_CTA_RUIDO.match(l):
+            continue
+
+        # ─────────────────────────────
+        # remove links de grupos externos
+        # ─────────────────────────────
+        if _RE_GRUPO_EXTERNO.search(l):
+            l = _RE_GRUPO_EXTERNO.sub("", l).strip()
+            if not l:
                 continue
-            # Linha com texto + link do grupo → remove só o link
-            linha = _RE_GRUPO_EXTERNO.sub('', linha).strip()
-        sem_grupos.append(linha)
 
-    # ── Camada 3: Remove linhas que viraram ruído puro ────────────────────
-    _RE_LINHA_LIXO = re.compile(
-        r'^\s*(?:'
-        r'-\s*Anúncio|Anúncio|anuncio|-anuncio|'
-        r'- Anúncio|-Publicidade|Publicidade|'
-        r':::\s*|---+|===+|'
-        r'[-–]\s*(?:ML|MG|AMZ)|(?:ML|MG|AMZ)\s*:'
-        r')\s*$',
-        re.I
-    )
-    filtradas = [l for l in sem_grupos if not _RE_LINHA_LIXO.match(l.strip())]
+        # ─────────────────────────────
+        # remove linhas puramente estruturais
+        # ─────────────────────────────
+        if _RE_LINHA_RUIDO.match(l):
+            continue
 
-    # ── Camada 4: Linhas vazias consecutivas (máx 1) ──────────────────────
-    final, pv = [], False
-    for l in filtradas:
-        if l.strip() == "":
-            if not pv:
-                final.append("")
-            pv = True
-        else:
-            pv = False
-            final.append(l)
+        resultado.append(l)
 
-    return "\n".join(final).strip()
+    return "\n".join(resultado).strip()
+    
+        
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 13 ▸ EMOJIS DINÂMICOS E RADARES DE BUSCA
