@@ -31,7 +31,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
-from typing import List, Optional
+from typing import List, Tuple, Optional, Dict, Any
 import os, re, time, json, asyncio, aiohttp, hashlib, random, io
 import unicodedata, logging, concurrent.futures
 from typing import Optional
