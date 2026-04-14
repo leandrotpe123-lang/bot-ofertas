@@ -1801,6 +1801,12 @@ async def _run():
     log_sys.info(f"🖼  Pillow: {'OK' if _PIL_OK else 'pip install Pillow'}")
     log_sys.info("🚀 FOGUETÃO v69.0 — IA DE OFERTAS — ONLINE!")
 
+    async def processar(event, is_edit=False):
+    texto = event.raw_text if hasattr(event, "raw_text") else ""
+
+    log_sys.info(f"📩 Mensagem recebida | edit={is_edit}")
+    log_sys.info(f"📝 Texto: {texto}")
+
     @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
     async def on_new(event):
         try:
