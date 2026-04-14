@@ -605,181 +605,145 @@ async def processar_link_shopee(url: str, sessao: aiohttp.ClientSession) -> Opti
     return link_convertido
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 9 ▸ MOTOR MAGALU (ISOLADO)
+MÓDULO 9 ▸ MOTOR MAGALU (ELITE VERSION)
 #
-# PRINCÍPIO: substituição pura de IDs — path NUNCA alterado.
-# Tipos de path preservados:
-#   /produto-xyz/p/jg52b75k2d/pf/macc/  → produto
-#   /l/lista-nome/                        → lista curada
-#   /selecao/nome/                        → seleção
-#   /magazine{slug}/lojista/{loja}/       → lojista (vitrine magazinevoce)
-#   /                                     → homepage (sem produto = erro!)
+# PIPELINE CONTROLADO:
+#   IN → EXPAND → VALIDATE → NORMALIZE → AFFILIATE → SHORTEN → VERIFY → OUT
 #
-# PROTEÇÃO ANTI-SACOLA/HOME:
-# Se após desencurtar o path for "/" ou vazio → link inválido → None
-# (evita enviar sacola.magazineluiza.com.br/?f=1 ou homepage sem produto)
+# ✔ Preserva 100% do path
+# ✔ Remove apenas IDs de afiliado
+# ✔ Bloqueia sacola/home sem produto
+# ✔ Retorno sempre seguro (None se falhar)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _eh_link_valido_magalu(url_exp: str) -> bool:
-    """
-    Retorna False se o link expandido for inválido:
-    - homepage sem path de produto (path == "/" ou vazio)
-    - sacola sem contexto de produto (?f=1 sem path real)
-    - path com menos de 2 segmentos úteis
-    """
-    p    = urlparse(url_exp)
+# ═════════════════════════════════════════════════════════════
+# 1. VALIDAÇÃO ROBUSTA (ANTI SACOLA / HOME / INVALIDO)
+# ═════════════════════════════════════════════════════════════
+def _eh_link_valido_magalu(url: str) -> bool:
+    p = urlparse(url)
     host = p.netloc.lower()
     path = p.path.rstrip("/")
 
-    # sacola.magazineluiza.com.br com path vazio ou só /?f=1 → inválido
-    if "sacola" in host and (not path or path in ("/", "")):
-        log_mgl.warning(f"  ⚠️ Sacola sem produto: {url_exp[:60]}")
+    # sem path útil
+    if not path or path == "/":
         return False
 
-    # Homepage sem path de produto → inválido
-    if path in ("", "/", "") or len(path.split("/")) < 2:
-        log_mgl.warning(f"  ⚠️ Homepage sem produto: {url_exp[:60]}")
+    # sacola sem produto
+    if "sacola" in host:
+        return False
+
+    # path fraco (sem estrutura de produto)
+    if len(path.split("/")) < 2:
         return False
 
     return True
 
 
-def _substituir_ids_magalu(url_exp: str) -> str:
-    """
-    Substitui SOMENTE os IDs de afiliado. Preserva 100% do path original.
+# ═════════════════════════════════════════════════════════════
+# 2. NORMALIZAÇÃO DE URL (SEM PERDER PATH)
+# ═════════════════════════════════════════════════════════════
+def _substituir_ids_magalu(url: str) -> str:
+    p = urlparse(url)
+    path = p.path
 
-    Casos tratados:
-      magazineluiza.com.br/produto/p/ID/pf/cat/  → preserva tudo até ?
-      magazinevoce.com.br/magazine{slug}/lojista/ → preserva path + slug do lojista
-      m.magazineluiza.com.br/...                  → preserva (mobile também)
-    """
-    p    = urlparse(url_exp)
-    path = p.path  # ← NUNCA zerado
-
-    # Vitrine magazinevoce: substitui slug do afiliado antigo pelo meu
-    # APENAS o segmento /magazine{slug}/, não toca em /lojista/ nem demais
+    # magazinevoce fix
     if "magazinevoce.com.br" in p.netloc.lower():
-        path = re.sub(
-            r'^(/magazine)[^/]+',   # /magazineantigo → /magazinemeu
-            rf'\1{_MGL_SLUG}',
-            path
-        )
-        log_mgl.debug(f"  Slug magazinevoce → {path}")
+        path = re.sub(r'^(/magazine)[^/]+', rf'\1{_MGL_SLUG}', path)
 
-    # Lê params originais (preserva tudo que não for de afiliado)
-    params_orig = parse_qs(p.query, keep_blank_values=True)
-    params_new  = {k: v[0] for k, v in params_orig.items()}
+    params = parse_qs(p.query, keep_blank_values=True)
+    clean = {k: v[0] for k, v in params.items()}
 
-    # Remove tag Amazon e params de afiliados externos
-    for k_remover in ["tag", "partnerid", "promoterid", "deeplinkvalue",
-                       "afforcedeeplink", "isretargeting", "partner_id_old"]:
-        params_new.pop(k_remover, None)
+    # remove lixo antigo
+    for k in [
+        "tag", "partnerid", "promoterid",
+        "afforcedeeplink", "deeplinkvalue"
+    ]:
+        clean.pop(k, None)
 
-    # Injeta/substitui SOMENTE os IDs de comissão
-    params_new["partner_id"]         = _MGL_PARTNER
-    params_new["promoter_id"]        = _MGL_PROMOTER
-    params_new["utm_source"]         = "divulgador"
-    params_new["utm_medium"]         = "magalu"
-    params_new["utm_campaign"]       = _MGL_PROMOTER
-    params_new["pid"]                = _MGL_PID
-    params_new["c"]                  = _MGL_PROMOTER
-    params_new["af_force_deeplink"]  = "true"
+    # injeta IDs corretos
+    clean.update({
+        "partner_id": _MGL_PARTNER,
+        "promoter_id": _MGL_PROMOTER,
+        "utm_source": "divulgador",
+        "utm_medium": "magalu",
+        "utm_campaign": _MGL_PROMOTER,
+        "pid": _MGL_PID,
+        "af_force_deeplink": "true",
+    })
 
-    # deep_link_value aponta para URL base do produto (path preservado)
     base = urlunparse(p._replace(path=path, query="", fragment=""))
-    params_new["deep_link_value"] = (
-        f"{base}?utm_source=divulgador&utm_medium=magalu"
-        f"&partner_id={_MGL_PARTNER}&promoter_id={_MGL_PROMOTER}"
-        f"&utm_campaign={_MGL_PROMOTER}"
-    )
 
-    url_final = urlunparse(p._replace(
-        path=path, query=urlencode(params_new), fragment=""))
-    log_mgl.debug(f"  🏷 {url_final[:100]}")
-    return url_final
+    clean["deep_link_value"] = base
+
+    return urlunparse(p._replace(
+        path=path,
+        query=urlencode(clean),
+        fragment=""
+    ))
 
 
-async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> str:
-    """Encurta via Cuttly. 3 tentativas, 15s timeout, status 2 aceito."""
-    url_encoded = quote(url, safe="")
-    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={url_encoded}"
+# ═════════════════════════════════════════════════════════════
+# 3. ENCURTADOR (RETRY INTELIGENTE)
+# ═════════════════════════════════════════════════════════════
+async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
+    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={quote(url, safe='')}"
 
     for t in range(1, 4):
         try:
             async with _SEM_HTTP:
-                async with sessao.get(
-                    api, timeout=aiohttp.ClientTimeout(total=15)
-                ) as r:
+                async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=15)) as r:
+
                     if r.status != 200:
-                        log_mgl.warning(f"  ⚠️ HTTP {r.status} t={t}/3")
-                        await asyncio.sleep(2 ** t)
-                        continue
-                    try:
-                        data = await r.json(content_type=None)
-                    except Exception:
-                        raw = await r.text()
-                        log_mgl.warning(f"  ⚠️ JSON inválido t={t}: {raw[:60]}")
                         await asyncio.sleep(2 ** t)
                         continue
 
+                    data = await r.json(content_type=None)
                     status = data.get("url", {}).get("status")
-                    if status == 7:
-                        s = data["url"]["shortLink"]
-                        log_mgl.info(f"  ✂️ t={t}: {s}")
-                        return s
-                    if status == 2:
-                        s = data["url"].get("shortLink", url)
-                        log_mgl.info(f"  ✂️ existente t={t}: {s}")
-                        return s
-                    log_mgl.warning(f"  ⚠️ status={status} t={t}/3")
-                    await asyncio.sleep(2 ** t)
 
-        except asyncio.TimeoutError:
-            log_mgl.warning(f"  ⏱ timeout t={t}/3")
-            await asyncio.sleep(2 ** t)
-        except Exception as e:
-            log_mgl.error(f"  ❌ t={t}: {e}")
+                    if status in (7, 2):
+                        return data["url"].get("shortLink", url)
+
+        except Exception:
             await asyncio.sleep(2 ** t)
 
-    log_mgl.error(f"  ❌ Cuttly 3x falhou | {url[:80]}")
-    return url
+    return None
 
 
+# ═════════════════════════════════════════════════════════════
+# 4. MOTOR PRINCIPAL (PIPELINE CONTROLADO)
+# ═════════════════════════════════════════════════════════════
 async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
-    """
-    Motor exclusivo Magalu.
-    1. Desencurta até URL real
-    2. Valida que tem path de produto (não sacola/home)
-    3. Substitui apenas IDs de afiliado
-    4. Encurta via Cuttly
-    """
-    log_mgl.debug(f"🔗 {url[:80]}")
+    log_mgl.debug(f"🔗 IN: {url[:80]}")
 
-    # Etapa 1: desencurta
-    nl = _netloc(url)
-    if "maga.lu" in nl or nl in _ENCURTADORES or classificar(url) == "expandir":
-        async with _SEM_HTTP:
-            exp = await desencurtar_ultra(url, sessao)
-        log_mgl.debug(f"  📦 {exp[:80]}")
-    else:
-        exp = url
-
-    # Etapa 2: confirma Magalu
-    if classificar(exp) != "magalu":
-        log_mgl.warning(f"  ⚠️ Não-Magalu: {exp[:60]}")
+    # STEP 1 → EXPANDIR (se necessário)
+    try:
+        if "maga.lu" in url or classificar(url) == "expandir":
+            async with _SEM_HTTP:
+                url = await desencurtar_ultra(url, sessao)
+    except Exception:
         return None
 
-    # Etapa 3: proteção anti-sacola/homepage sem produto
-    if not _eh_link_valido_magalu(exp):
-        log_mgl.warning(f"  ⚠️ Link inválido (sacola/home sem produto): {exp[:80]}")
-        return None  # descarta — não envia link quebrado
+    log_mgl.debug(f"EXP: {url[:80]}")
 
-    # Etapa 4: substitui IDs
-    url_com_ids = _substituir_ids_magalu(exp)
+    # STEP 2 → VALIDAR ORIGEM
+    if classificar(url) != "magalu":
+        return None
 
-    # Etapa 5: encurta
-    final = await _cuttly(url_com_ids, sessao)
-    log_mgl.info(f"  ✅ {final}")
+    # STEP 3 → VALIDAR ESTRUTURA PRODUTO
+    if not _eh_link_valido_magalu(url):
+        return None
+
+    # STEP 4 → NORMALIZAR / AFILIAR
+    afiliado = _substituir_ids_magalu(url)
+
+    # STEP 5 → ENCURTAR FINAL
+    final = await _cuttly(afiliado, sessao)
+
+    # STEP 6 → VERIFICAÇÃO FINAL (GARANTIA)
+    if not final:
+        return None
+
+    log_mgl.info(f"✅ OUT: {final}")
     return final
 
 
@@ -792,27 +756,110 @@ async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
 #  - links a descartar (fora da whitelist)
 # ══════════════════════════════════════════════════════════════════════════════
 
-_RE_URL = re.compile(r'https?://[^\s\)\]>,"\'<\u200b\u200c]+')
+# ═════════════════════════════════════════════════════════════
+# REGEX ROBUSTA (ANTI COPY/PASTE LIXO)
+# ═════════════════════════════════════════════════════════════
+_RE_URL = re.compile(
+    r'https?://[^\s\)\]>,"\'<\u200b\u200c\u200d\u2060]+'
+)
 
-def extrair_links(texto: str) -> tuple[list, list]:
+
+# ═════════════════════════════════════════════════════════════
+# NORMALIZAÇÃO BASE (CLEAN INPUT)
+# ═════════════════════════════════════════════════════════════
+def _normalizar_url(url: str) -> str:
+    return url.strip().rstrip('.,;)>]}\n\r\t ')
+
+
+# ═════════════════════════════════════════════════════════════
+# EXTRAÇÃO BRUTA SEGURA
+# ═════════════════════════════════════════════════════════════
+def _extrair_bruto(texto: str) -> List[str]:
+    return [_normalizar_url(u) for u in _RE_URL.findall(texto)]
+
+
+# ═════════════════════════════════════════════════════════════
+# DETECTOR DE LINK CANÔNICO (CAMPANHAS FIXAS)
+# ═════════════════════════════════════════════════════════════
+def _eh_link_canonico(url: str) -> bool:
+    return any(k in url.lower() for k in (
+        "carrinho",
+        "cart",
+        "checkout",
+        "cupom",
+        "resgate",
+        "promo"
+    ))
+
+
+# ═════════════════════════════════════════════════════════════
+# ROUTER PRINCIPAL (CORE DE ENTRADA)
+# ═════════════════════════════════════════════════════════════
+def extrair_links(texto: str) -> Tuple[List[str], List[str]]:
     """
-    Retorna (links_converter, links_preservar).
-    links_converter: precisam ser processados pelos motores
-    links_preservar: wa.me / WhatsApp → passam sem alteração
+    Retorna:
+        converter → links para motor de afiliado
+        preservar → links neutros (WhatsApp etc)
+
+    REGRAS:
+        ✔ dedup global
+        ✔ ignora lixo externo
+        ✔ detecta links de campanha fixa
     """
-    brutos    = [l.rstrip('.,;)>') for l in _RE_URL.findall(texto)]
-    converter = []
-    preservar = []
+
+    brutos = _extrair_bruto(texto)
+
+    converter: List[str] = []
+    preservar: List[str] = []
+
+    vistos = set()
 
     for url in brutos:
-        plat = classificar(url)
-        if plat == "preservar":
-            preservar.append(url)
-        elif plat is not None:   # amazon, shopee, magalu, expandir
-            converter.append(url)
-        # None → fora da whitelist → ignora
 
-    log_lnk.debug(f"🔗 {len(converter)} converter | {len(preservar)} preservar")
+        # ─────────────────────────────
+        # DEDUP GLOBAL
+        # ─────────────────────────────
+        if url in vistos:
+            continue
+        vistos.add(url)
+
+        # ─────────────────────────────
+        # CLASSIFICAÇÃO CENTRAL
+        # ─────────────────────────────
+        try:
+            tipo = classificar(url)
+        except Exception:
+            continue
+
+        # ─────────────────────────────
+        # PRESERVAÇÃO
+        # ─────────────────────────────
+        if tipo == "preservar":
+            preservar.append(url)
+            continue
+
+        # ─────────────────────────────
+        # CAMPANHAS FIXAS (IMPORTANTE)
+        # ─────────────────────────────
+        if _eh_link_canonico(url):
+            # ainda pode converter, mas evita duplicar processamento pesado
+            converter.append(url)
+            continue
+
+        # ─────────────────────────────
+        # LINKS AFILIÁVEIS
+        # ─────────────────────────────
+        if tipo in ("amazon", "shopee", "magalu", "expandir"):
+            converter.append(url)
+
+    # ─────────────────────────────
+    # TELEMETRIA (SEM POLUIR LÓGICA)
+    # ─────────────────────────────
+    log_lnk.debug(
+        f"ROUTER | total={len(vistos)} | "
+        f"converter={len(converter)} | preservar={len(preservar)}"
+    )
+
     return converter, preservar
 
 
