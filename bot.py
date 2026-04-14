@@ -1765,6 +1765,24 @@ async def _health_check():
 
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
+import sqlite3
+
+def _init_db():
+    conn = sqlite3.connect("ofertas.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ofertas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            link TEXT UNIQUE,
+            plataforma TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
 async def _run():
     _init_db()
     log_sys.info("🔌 Conectando...")
