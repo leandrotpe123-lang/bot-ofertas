@@ -483,41 +483,44 @@ def _limpar_url_amazon(url_bruta: str) -> str:
     params["tag"] = [_AMZ_TAG]
     return urlunparse(p._replace(query=urlencode(params, doseq=True), fragment=""))
 
-
 async def motor_amazon(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
     """Motor exclusivo Amazon. Nenhuma var de Shopee ou Magalu é usada aqui."""
     nl = _netloc(url)
 
+    # ── 1) Links encurtados Amazon ─────────────────────────────
     if nl in ("amzn.to", "a.co", "amzn.com"):
         log_amz.debug(f"🔗 Expandindo: {url[:80]}")
 
         async with _SEM_HTTP:
             exp = await desencurtar_ultra(url, sessao)
 
-        return exp
-
-elif nl in ("amazon.com.br", "www.amazon.com.br", "amazon.com", "www.amazon.com"):
-    log_amz.debug(f"🔗 Direta: {url[:80]}")
-    exp = url
-        # Encurtado → DESENCURTA primeiro
-        log_amz.debug(f"🔗 Expandindo: {url[:80]}")
-        async with _SEM_HTTP:
-            exp = await desencurtar_ultra(url, sessao)
-        log_amz.debug(f"  📦 {exp[:80]}")
         if classificar(exp) != "amazon":
             log_amz.warning(f"  ⚠️ Não é Amazon: {exp[:60]}")
             return None
+
         final = _limpar_url_amazon(exp)
-    elif any(d in nl for d in ("amazon.com.br", "amazon.com")):
-        # URL direta → limpa direto sem desencurtar
+
+    # ── 2) Links Amazon diretos ─────────────────────────────
+    elif nl in ("amazon.com.br", "www.amazon.com.br", "amazon.com", "www.amazon.com"):
         log_amz.debug(f"🔗 Direta: {url[:80]}")
-        final = _limpar_url_amazon(url)
+
+        async with _SEM_HTTP:
+            exp = await desencurtar_ultra(url, sessao)
+
+        if classificar(exp) != "amazon":
+            log_amz.warning(f"  ⚠️ Não é Amazon: {exp[:60]}")
+            return None
+
+        final = _limpar_url_amazon(exp)
+
+    # ── 3) Fallback seguro ─────────────────────────────
     else:
         log_amz.warning(f"  ⚠️ Domínio inválido: {nl}")
         return None
 
     log_amz.info(f"  ✅ {final}")
     return final
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
