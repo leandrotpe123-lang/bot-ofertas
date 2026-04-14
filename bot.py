@@ -1804,8 +1804,8 @@ async def _run():
     async def processar(event, is_edit=False):
     texto = event.raw_text if hasattr(event, "raw_text") else ""
 
-    log_sys.info(f"📩 Mensagem recebida | edit={is_edit}")
-    log_sys.info(f"📝 Texto: {texto}")
+            log_sys.info(f"📩 Mensagem recebida | edit={is_edit}")
+            log_sys.info(f"📝 Texto: {texto}")
 
     @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
     async def on_new(event):
