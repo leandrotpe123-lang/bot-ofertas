@@ -519,9 +519,6 @@ elif nl in ("amazon.com.br", "www.amazon.com.br", "amazon.com", "www.amazon.com"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 8 ▸ MOTOR SHOPEE (ISOLADO - VERSÃO PROFISSIONAL)
-✔ Retry interno (API robusta)
-✔ Nunca retorna URL original
-✔ Proteção total de comissão
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ═════════════════════════════════════════════════════════════
