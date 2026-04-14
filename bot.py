@@ -1813,7 +1813,7 @@ async def _run():
 
         texto = texto.strip()
 
-        emoji = _emoji_de_linha()
+        emoji = _emoji_de_linha(texto, "geral", False)
         texto_final = f"{emoji} {texto}"
 
         log_sys.info(f"📩 Mensagem recebida | edit={is_edit}")
