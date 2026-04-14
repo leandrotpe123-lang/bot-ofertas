@@ -609,18 +609,10 @@ async def processar_link_shopee(url: str, sessao: aiohttp.ClientSession) -> Opti
         return None
 
     return link_convertido
-
-# ══════════════════════════════════════════════════════════════════════════════
-MÓDULO 9  MOTOR MAGALU (ELITE VERSION)
-#
-# PIPELINE CONTROLADO:
-#   IN → EXPAND → VALIDATE → NORMALIZE → AFFILIATE → SHORTEN → VERIFY → OUT
-#
-# ✔ Preserva 100% do path
-# ✔ Remove apenas IDs de afiliado
-# ✔ Bloqueia sacola/home sem produto
-# ✔ Retorno sempre seguro (None se falhar)
-# ══════════════════════════════════════════════════════════════════════════════
+    
+# ─────────────────────────────────────────────
+# MÓDULO 9  MOTOR MAGALU (ELITE VERSION)
+# ─────────────────────────────────────────────
 
 # ═════════════════════════════════════════════════════════════
 # 1. VALIDAÇÃO ROBUSTA (ANTI SACOLA / HOME / INVALIDO)
