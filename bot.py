@@ -205,6 +205,51 @@ def texto_bloqueado(texto: str) -> bool:
             return True
     return False
 
+# ─────────────────────────────────────────────
+# MÓDULO FILTRO MARKETPLACE (ELITE GUARD)
+# ─────────────────────────────────────────────
+
+from urllib.parse import urlparse
+
+# Lojas permitidas (SÓ essas podem ir pro grupo)
+_DOMINIOS_PERMITIDOS = (
+    "amazon.",
+    "amzn.",
+    "shopee.",
+    "magazineluiza.",
+)
+
+# Domínios conhecidos de afiliados/redirects que DEVEM ser bloqueados
+_DOMINIOS_BLOQUEADOS = (
+    "promotom.com.br",
+    "bit.ly",
+    "tinyurl.com",
+    "t.co",
+    "linktr.ee",
+    "cutt.ly",
+    "link",
+)
+
+def normalizar_host(url: str) -> str:
+    try:
+        return urlparse(url).netloc.lower()
+    except Exception:
+        return ""
+
+def pode_enviar_url(url: str) -> bool:
+    host = normalizar_host(url)
+
+    # inválido
+    if not host:
+        return False
+
+    # bloqueio duro (nunca deixa passar)
+    if any(b in host for b in _DOMINIOS_BLOQUEADOS):
+        return False
+
+    # whitelist (só essas lojas passam)
+    return any(d in host for d in _DOMINIOS_PERMITIDOS)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 5 ▸ WHITELIST + CLASSIFICAÇÃO
