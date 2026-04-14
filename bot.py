@@ -95,15 +95,14 @@ GRUPO_DESTINO  = '@ofertap'
 # ─── Credenciais ISOLADAS por plataforma — NUNCA misturar ────────────────────
 _AMZ_TAG    = os.environ.get("AMAZON_TAG",    "leo21073-20")   # só para amazon.com.br
 _SHP_APP_ID = os.environ.get("SHOPEE_APP_ID", "18348480261")
-_SHP_SECRET = os.environ.get("SHOPEE_SECRET", "SGC7FQQQ4R5QCFULPXIBCANATLP272B3")
+_SHP_SECRET = os.environ.get("SHOPEE_SECRET", "")
 _MGL_PARTNER  = os.environ.get("MAGALU_PARTNER_ID",  "3440")
 _MGL_PROMOTER = os.environ.get("MAGALU_PROMOTER_ID", "5479317")
 _MGL_PID      = os.environ.get("MAGALU_PID",         "magazinevoce")
 _MGL_SLUG     = os.environ.get("MAGALU_SLUG",        "magazineleo12")
-_CUTTLY_KEY   = os.environ.get("CUTTLY_API_KEY",     "8d2afd3c7f72869f42d23cf0d849c72172509")
+_CUTTLY_KEY = os.environ.get("CUTTLY_API_KEY", "")
 
 _IMG_AMZ = "cupom-amazon.jpg"
-_IMG_SHP = "IMG_20260404_180150.jpg"
 _IMG_MGL = "magalu_promo.jpg"
 
 ARQUIVO_CACHE      = "cache_dedup.json"
@@ -307,11 +306,13 @@ def classificar(url: str) -> Optional[str]:
     return None
 
 def _eh_vitrine_magalu(url: str) -> bool:
-    """Retorna True para URLs de vitrine/categoria/lista Magalu."""
     return bool(re.search(
         r'(magazineluiza\.com\.br|magazinevoce\.com\.br)'
-        r'.*(vitrine|categoria|lista|/l/|/selecao/|promo|stores|loja)',
-        url, re.I))
+        r'.*(vitrine|categoria|lista|/l/|/selecao/|/p/|'
+        r'promo|stores|loja|busca|ofertas|cupom|produto|departamento)',
+        url,
+        re.I
+    ))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -487,7 +488,14 @@ async def motor_amazon(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
     """Motor exclusivo Amazon. Nenhuma var de Shopee ou Magalu é usada aqui."""
     nl = _netloc(url)
 
-    if any(d in nl for d in ("amzn.to", "a.co", "amzn.com")):
+    if nl in ("amzn.to", "a.co", "amzn.com"):
+    log_amz.debug(f"🔗 Expandindo: {url[:80]}")
+    async with _SEM_HTTP:
+        exp = await desencurtar_ultra(url, sessao)
+
+elif nl in ("amazon.com.br", "www.amazon.com.br", "amazon.com", "www.amazon.com"):
+    log_amz.debug(f"🔗 Direta: {url[:80]}")
+    exp = url
         # Encurtado → DESENCURTA primeiro
         log_amz.debug(f"🔗 Expandindo: {url[:80]}")
         async with _SEM_HTTP:
@@ -510,41 +518,91 @@ async def motor_amazon(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 8 ▸ MOTOR SHOPEE (ISOLADO)
-# Shopee chega pronta. NUNCA chama desencurtar_ultra().
-# API direta com retry 3x. Somente _SHP_APP_ID / _SHP_SECRET.
+# MÓDULO 8 ▸ MOTOR SHOPEE (ISOLADO - VERSÃO PROFISSIONAL)
+✔ Retry interno (API robusta)
+✔ Nunca retorna URL original
+✔ Proteção total de comissão
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
-    """Motor exclusivo Shopee. Não usa nenhuma var de Amazon nem Magalu."""
+    """Motor exclusivo Shopee com retry interno seguro."""
     log_shp.debug(f"🔗 {url[:80]}")
-    ts      = str(int(time.time()))
-    payload = json.dumps(
-        {"query": f'mutation {{ generateShortLink(input: {{ originUrl: "{url}" }}) '
-                  f'{{ shortLink }} }}'},
-        separators=(",", ":")
-    )
-    sig  = hashlib.sha256(f"{_SHP_APP_ID}{ts}{payload}{_SHP_SECRET}".encode()).hexdigest()
-    hdrs = {
-        "Authorization": f"SHA256 Credential={_SHP_APP_ID},Timestamp={ts},Signature={sig}",
-        "Content-Type": "application/json",
-    }
-    for t in range(1, 4):
+
+    for tentativa in range(1, 4):
         try:
+            ts = str(int(time.time()))
+
+            payload = json.dumps(
+                {
+                    "query": (
+                        f'mutation {{ generateShortLink(input: '
+                        f'{{ originUrl: "{url}" }}) {{ shortLink }} }}'
+                    )
+                },
+                separators=(",", ":")
+            )
+
+            sig = hashlib.sha256(
+                f"{_SHP_APP_ID}{ts}{payload}{_SHP_SECRET}".encode()
+            ).hexdigest()
+
+            headers = {
+                "Authorization": (
+                    f"SHA256 Credential={_SHP_APP_ID},"
+                    f"Timestamp={ts},Signature={sig}"
+                ),
+                "Content-Type": "application/json",
+            }
+
             async with _SEM_HTTP:
                 async with sessao.post(
                     "https://open-api.affiliate.shopee.com.br/graphql",
-                    data=payload, headers=hdrs,
-                    timeout=aiohttp.ClientTimeout(total=12)) as r:
-                    res  = await r.json()
-                    link = res["data"]["generateShortLink"]["shortLink"]
-                    log_shp.info(f"  ✅ {link}")
-                    return link
+                    data=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=12)
+                ) as r:
+
+                    res = await r.json()
+
+                    link = (
+                        res.get("data", {})
+                        .get("generateShortLink", {})
+                        .get("shortLink")
+                    )
+
+                    if link:
+                        log_shp.info(f"✅ Shopee OK: {link}")
+                        return link
+
+                    raise Exception("shortLink vazio")
+
         except Exception as e:
-            log_shp.warning(f"  ⚠️ t={t}/3: {e}")
-            await asyncio.sleep(2 ** t)
-    log_shp.error("  ❌ Shopee API falhou 3x")
-    return url  # URL original Shopee ainda é válida
+            log_shp.warning(f"⚠️ tentativa {tentativa}/3: {e}")
+            await asyncio.sleep(2 ** tentativa)
+
+    log_shp.error("❌ Shopee API falhou após 3 tentativas")
+    return None
+
+
+# ═════════════════════════════════════════════════════════════
+# CAMADA DE GARANTIA (NUNCA ENVIA LINK SEM COMISSÃO)
+# ═════════════════════════════════════════════════════════════
+async def processar_link_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
+    """Camada superior de garantia de conversão."""
+
+    link_convertido = await motor_shopee(url, sessao)
+
+    if not link_convertido:
+        log_shp.warning("⚠️ Shopee falhou, nova tentativa após delay...")
+        await asyncio.sleep(3)
+
+        link_convertido = await motor_shopee(url, sessao)
+
+    if not link_convertido:
+        log_shp.error("❌ BLOQUEIO: link sem comissão NÃO será enviado")
+        return None
+
+    return link_convertido
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 9 ▸ MOTOR MAGALU (ISOLADO)
