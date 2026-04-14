@@ -316,7 +316,7 @@ def _eh_vitrine_magalu(url: str) -> bool:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 6 ▸ DESENCURTADOR ULTRA-FORTE
+# MÓDULO 6  DESENCURTADOR ULTRA-FORTE
 # Segue 301/302/307/308, meta-refresh, JS location, e cadeia completa.
 # Suporta qualquer encurtador: cutt.ly → bit.ly → magalu → produto final.
 # ══════════════════════════════════════════════════════════════════════════════
@@ -405,7 +405,7 @@ async def desencurtar_ultra(url: str, sessao: aiohttp.ClientSession,
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 7 ▸ MOTOR AMAZON (ISOLADO)
+# MÓDULO 7  MOTOR AMAZON (ISOLADO)
 #
 # Limpeza inteligente por tipo de URL:
 #  /dp/ASIN              → amazon.com.br/dp/ASIN?tag=
@@ -518,7 +518,7 @@ elif nl in ("amazon.com.br", "www.amazon.com.br", "amazon.com", "www.amazon.com"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 8 ▸ MOTOR SHOPEE (ISOLADO - VERSÃO PROFISSIONAL)
+# MÓDULO 8  MOTOR SHOPEE (ISOLADO - VERSÃO PROFISSIONAL)
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ═════════════════════════════════════════════════════════════
@@ -605,7 +605,7 @@ async def processar_link_shopee(url: str, sessao: aiohttp.ClientSession) -> Opti
     return link_convertido
 
 # ══════════════════════════════════════════════════════════════════════════════
-MÓDULO 9 ▸ MOTOR MAGALU (ELITE VERSION)
+MÓDULO 9  MOTOR MAGALU (ELITE VERSION)
 #
 # PIPELINE CONTROLADO:
 #   IN → EXPAND → VALIDATE → NORMALIZE → AFFILIATE → SHORTEN → VERIFY → OUT
