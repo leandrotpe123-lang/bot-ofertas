@@ -1085,147 +1085,209 @@ def limpar_ruido_textual(texto: str) -> str:
 # MÓDULO 13 ▸ EMOJIS DINÂMICOS E RADARES DE BUSCA
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Radares de Busca (Regex) - Essenciais para o funcionamento do bot
-_KW_PRECO  = re.compile(r'R\$\s?[\d.,]+', re.I)
-_KW_CUPOM  = re.compile(r'\b(cupom|cupon|código|codigo|coupon|off|resgate|cod)\b', re.I)
-_KW_FRETE  = re.compile(r'\b(frete\s+grát|frete\s+grat|entrega\s+grát|sem\s+frete)\b', re.I)
-_KW_EVENTO = re.compile(r'(?i)\b(quiz|roleta|missão|missao|arena|girar|gire|roda|jogar|jogue|desafio)\b')
-_KW_STATUS = re.compile(r'(?i)\b(voltando|voltou|normalizou|renovado|estoque\s+renovado|regularizou)\b')
+# ═════════════════════════════════════════════════════════════
+# RADARES (INTENÇÃO)
+# ═════════════════════════════════════════════════════════════
+_KW_PRECO = re.compile(r'R\$\s?[\d.,]+', re.I)
 
-# Tabela de Emojis Dinâmicos
+_KW_CUPOM = re.compile(
+    r'\b(cupom|cupon|código|codigo|coupon|off|resgate|cod)\b',
+    re.I
+)
+
+_KW_FRETE = re.compile(
+    r'\b(frete\s+gráti?s|entrega\s+gráti?s|sem\s+frete)\b',
+    re.I
+)
+
+_KW_EVENTO = re.compile(
+    r'\b(quiz|roleta|miss[aã]o|arena|girar|jogar|desafio)\b',
+    re.I
+)
+
+
+# ═════════════════════════════════════════════════════════════
+# EMOJIS FIXOS (RODAM DENTRO DO GRUPO)
+# ═════════════════════════════════════════════════════════════
 _EMJ = {
-    "titulo_oferta":    ["🔥", "💥", "⚡️", "🚀"],
-    "titulo_cupom":     ["🚨", "🔔", "📢"],
-    "titulo_evento":    ["⚠️", "🎯", "🎰"],
-    "preco":            ["💵", "💰", "🤑", "💸"],
-    "cupom_cod":        ["🎟", "🎫", "🏷"],
-    "resgate":          ["✅", "🎯", "🔗"],
-    "carrinho":         ["🛒", "🛍"],
-    "frete":            ["🚚", "📦", "✈️"],
+    "oferta":   ["🔥", "💥", "⚡️", "🚀"],
+    "cupom":    ["🚨", "📢", "🔔"],
+    "evento":   ["⚠️", "🎯", "🎰"],
+    "preco":    ["💰", "💵", "🤑"],
+    "codigo":   ["🎟", "🏷", "🎫"],
+    "resgate":  ["🔗", "🎯", "✅"],
+    "carrinho": ["🛒", "🛍"],
+    "frete":    ["🚚", "📦", "✈️"],
 }
 
 
+# ═════════════════════════════════════════════════════════════
+# CLASSIFICAÇÃO DE TEXTO
+# ═════════════════════════════════════════════════════════════
 def _classificar_mensagem(texto: str) -> str:
-    """Decide a intenção da mensagem."""
-    if _KW_EVENTO.search(texto): return "evento"
-    if _KW_CUPOM.search(texto): return "cupom_puro"
-    return "oferta_produto"
+    if _KW_EVENTO.search(texto):
+        return "evento"
+    if _KW_CUPOM.search(texto):
+        return "cupom"
+    return "oferta"
 
-def _emoji_topo(tipo: str) -> str:
-    """Escolhe um emoji aleatório para o topo conforme o tipo."""
-    if tipo == "evento": return random.choice(_EMJ["titulo_evento"])
-    if tipo == "cupom_puro": return random.choice(_EMJ["titulo_cupom"])
-    return random.choice(_EMJ["titulo_oferta"])
 
-def _emoji_de_linha(linha: str, plat: str, eh_titulo: bool) -> Optional[str]:
-    """Retorna um emoji aleatório dentro da categoria da linha."""
-    ls = linha.lower()
-    
-    if eh_titulo:
-        tipo = _classificar_mensagem(linha)
-        return _emoji_topo(tipo)
-
-    # O bot escolhe aleatoriamente um dos emojis da categoria
-    if any(x in ls for x in ["frete grátis", "entrega grátis", "sem frete"]):
-        return random.choice(_EMJ["frete"])
-    
-    if any(x in ls for x in ["cupom", "código", "off"]):
-        return random.choice(_EMJ["cupom_cod"])
-    
-    if "r$" in ls:
-        return random.choice(_EMJ["preco"])
-    
-    if any(x in ls for x in ["resgate", "clique", "acesse"]):
-        return random.choice(_EMJ["resgate"])
-    
-    if "carrinho" in ls:
-        return random.choice(_EMJ["carrinho"])
-        
-    return None
-
+# ═════════════════════════════════════════════════════════════
+# DETECTA SE JÁ EXISTE EMOJI
+# ═════════════════════════════════════════════════════════════
 def _tem_emoji(s: str) -> bool:
-    return bool(re.search(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF]", s))
+    return bool(
+        re.search(r'[\U0001F300-\U0001FAFF\U00002600-\U000027BF]', s)
+    )
+
+
+# ═════════════════════════════════════════════════════════════
+# EMOJI DO TOPO (ROTAÇÃO CONTROLADA)
+# ═════════════════════════════════════════════════════════════
+def _emoji_topo(tipo: str) -> str:
+    return random.choice(_EMJ.get(tipo, _EMJ["oferta"]))
+
+
+# ═════════════════════════════════════════════════════════════
+# EMOJI DE LINHA (SEM SOBRESCREVER EXISTENTE)
+# ═════════════════════════════════════════════════════════════
+def _emoji_de_linha(linha: str, plat: str, eh_titulo: bool) -> Optional[str]:
+
+    l = linha.lower()
+
+    if eh_titulo:
+        return _emoji_topo(_classificar_mensagem(linha))
+
+    if _KW_FRETE.search(l):
+        return random.choice(_EMJ["frete"])
+
+    if _KW_CUPOM.search(l):
+        return random.choice(_EMJ["codigo"])
+
+    if _KW_PRECO.search(l):
+        return random.choice(_EMJ["preco"])
+
+    if "resgate" in l:
+        return random.choice(_EMJ["resgate"])
+
+    if "carrinho" in l:
+        return random.choice(_EMJ["carrinho"])
+
+    return None
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 14 ▸ RENDERIZADOR LINEAR (COM CLIQUE E COPIE)
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ─── FERRAMENTAS DE BUSCA DO MÓDULO 14 (OBRIGATÓRIO) ───────────────────────
-_RE_LIXO_PREFIXO = re.compile(r'^\s*(?:::?\s*ML|[-–]\s*ML|ML\s*:|[-:•|]\s*(?:ML|MG|AMZ)\s*[-:•]?)\s*', re.I)
-_RE_ANUNCIO_LINHA = re.compile(r'^\s*[-#]?\s*(?:anúncio|anuncio|publicidade|patrocinado|sponsored)\s*$', re.I)
-_RE_URL = re.compile(r'https?://[^\s\)\]>,"\'<\u200b\u200c]+')
+# ═════════════════════════════════════════════════════════════
+# REGEX DE LIMPEZA DE PREFIXO
+# ═════════════════════════════════════════════════════════════
+_RE_LIXO_PREFIXO = re.compile(
+    r'^\s*(?:::?\s*ML|[-–]\s*ML|ML\s*:|[-:•|]\s*(?:ML|MG|AMZ)\s*[-:•]?)\s*',
+    re.I
+)
 
-def _aplicar_crases_no_codigo(linha: str) -> str:
-    """Procura um código de cupom na linha e coloca crases se não houver."""
-    # Regex que procura palavras em maiúsculo com números (Ex: HOJEPODE, GANHE10)
-    # Ignora palavras que já tenham crases ou que sejam links
-    if "http" in linha: return linha
-    
-    def _substituir(match):
-        codigo = match.group(0)
-        # Se o código for muito curto (tipo 'R$') ou já tiver crase, não mexe
-        if len(codigo) < 4 or "`" in linha:
-            return codigo
-        return f"`{codigo}`"
+_RE_ANUNCIO = re.compile(
+    r'^\s*(anúncio|anuncio|publicidade|patrocinado|sponsored)\s*$',
+    re.I
+)
 
-    # Procura padrões de 4 a 20 caracteres maiúsculos/números
-    return re.sub(r'\b[A-Z0-9_-]{4,20}\b', _substituir, linha)
+_RE_URL = re.compile(
+    r'https?://[^\s\)\]>,"\'<\u200b\u200c]+'
+)
 
+
+# ═════════════════════════════════════════════════════════════
+# CRASE INTELIGENTE (SEM QUEBRAR TEXTO)
+# ═════════════════════════════════════════════════════════════
+def _aplicar_crase_codigo(linha: str) -> str:
+
+    if "http" in linha or "`" in linha:
+        return linha
+
+    def repl(m):
+        code = m.group(0)
+        if len(code) < 4:
+            return code
+        return f"`{code}`"
+
+    return re.sub(r'\b[A-Z0-9_-]{4,20}\b', repl, linha)
+
+
+# ═════════════════════════════════════════════════════════════
+# RENDER PRINCIPAL
+# ═════════════════════════════════════════════════════════════
 def renderizar(texto: str, mapa_links: dict, links_preservar: list, plat: str) -> str:
-    """Processa linha por linha e garante o clique-e-copie no cupom."""
-    mapa_total = dict(mapa_links)
-    for url in links_preservar: mapa_total[url] = url
 
-    linhas = texto.split('\n')
+    mapa = {**mapa_links}
+    for u in links_preservar:
+        mapa[u] = u
+
+    linhas = texto.split("\n")
+
     saida = []
-    eh_primeira_texto = True 
+    primeiro_texto = True
 
     for linha in linhas:
-        ls = linha.strip()
-        if not ls:
+
+        l = linha.strip()
+
+        if not l:
             saida.append("")
             continue
 
-        if _RE_ANUNCIO_LINHA.match(ls):
-            saida.append(ls)
+        if _RE_ANUNCIO.match(l):
+            saida.append(l)
             continue
 
-        ls = _RE_LIXO_PREFIXO.sub("", ls).strip()
-        if not ls: continue
-
-        # --- PROCESSAMENTO DE LINKS ---
-        urls_na_linha = _RE_URL.findall(ls)
-        sem_urls = _RE_URL.sub("", ls).strip()
-
-        if urls_na_linha and not sem_urls:
-            for u in urls_na_linha:
-                uc = u.rstrip('.,;)>')
-                if uc in mapa_total: saida.append(mapa_total[uc])
+        l = _RE_LIXO_PREFIXO.sub("", l).strip()
+        if not l:
             continue
 
-        def _sub_link(m):
-            uc = m.group(0).rstrip('.,;)>')
-            return mapa_total.get(uc, "")
-        
-        nova_linha = _RE_URL.sub(_sub_link, ls).strip()
-        if not nova_linha: continue
+        # ─────────────────────────────
+        # LINKS
+        # ─────────────────────────────
+        urls = _RE_URL.findall(l)
+        sem_url = _RE_URL.sub("", l).strip()
 
-        # --- REGRA DA CRASE (CLIQUE E COPIE) ---
-        # Se a linha fala de cupom ou código, a gente tenta aplicar a crase
-        if any(x in nova_linha.lower() for x in ["cupom", "código", "use", "cod"]):
-            nova_linha = _aplicar_crases_no_codigo(nova_linha)
+        if urls and not sem_url:
+            for u in urls:
+                u = u.rstrip('.,;)>')
+                if u in mapa:
+                    saida.append(mapa[u])
+            continue
 
-        # --- EMOJIS (Módulo 13) ---
-        if not _tem_emoji(nova_linha):
-            emoji = _emoji_de_linha(nova_linha, plat, eh_titulo=eh_primeira_texto)
-            if emoji: nova_linha = f"{emoji} {nova_linha}"
-        
-        # Regra do Carrinho
-        if plat in ["shopee", "magalu"] and "carrinho" in nova_linha.lower():
-            if "🛒" not in nova_linha: nova_linha = "🛒 " + nova_linha
+        def sub(m):
+            u = m.group(0).rstrip('.,;)>')
+            return mapa.get(u, "")
 
-        if eh_primeira_texto: eh_primeira_texto = False
-        saida.append(nova_linha)
+        l = _RE_URL.sub(sub, l).strip()
+        if not l:
+            continue
+
+        # ─────────────────────────────
+        # CRASE (CUPOM)
+        # ─────────────────────────────
+        if "cupom" in l.lower() or "código" in l.lower():
+            l = _aplicar_crase_codigo(l)
+
+        # ─────────────────────────────
+        # EMOJIS (IMPORTANTE: NÃO SOBRESCREVER EXISTENTES)
+        # ─────────────────────────────
+        if not _tem_emoji(l):
+            emoji = _emoji_de_linha(l, plat, primeiro_texto)
+            if emoji:
+                l = f"{emoji} {l}"
+
+        # ─────────────────────────────
+        # REGRA CARRINHO
+        # ─────────────────────────────
+        if plat in ("shopee", "magalu") and "carrinho" in l.lower():
+            if "🛒" not in l:
+                l = "🛒 " + l
+
+        primeiro_texto = False
+        saida.append(l)
 
     return "\n".join(saida).strip()
 
