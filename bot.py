@@ -1763,9 +1763,10 @@ async def _health_check():
 # MÓDULO 22 ▸ INICIALIZAÇÃO COM AUTO-RESTART
 # ══════════════════════════════════════════════════════════════════════════════
 
+import sqlite3
+
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
-import sqlite3
 
 def _init_db():
     conn = sqlite3.connect("ofertas.db")
@@ -1783,10 +1784,13 @@ def _init_db():
     conn.commit()
     conn.close()
 
+
 async def _run():
     _init_db()
+
     log_sys.info("🔌 Conectando...")
     await client.connect()
+
     if not await client.is_user_authorized():
         log_sys.error("❌ Sessão inválida! Verifique TELEGRAM_SESSION.")
         return False
@@ -1798,14 +1802,16 @@ async def _run():
     log_sys.info(f"🟠 Amazon: {_AMZ_TAG}")
     log_sys.info(f"🟣 Shopee: {_SHP_APP_ID}")
     log_sys.info(f"🔵 Magalu: promo={_MGL_PROMOTER} slug={_MGL_SLUG}")
-    log_sys.info(f"🖼  Pillow: {'OK' if _PIL_OK else 'pip install Pillow'}")
+    log_sys.info(f"🖼 Pillow: {'OK' if _PIL_OK else 'pip install Pillow'}")
     log_sys.info("🚀 FOGUETÃO v69.0 — IA DE OFERTAS — ONLINE!")
 
     async def processar(event, is_edit=False):
-    texto = event.raw_text if hasattr(event, "raw_text") else ""
+        texto = event.raw_text if hasattr(event, "raw_text") else ""
 
-            log_sys.info(f"📩 Mensagem recebida | edit={is_edit}")
-            log_sys.info(f"📝 Texto: {texto}")
+        log_sys.info(f"📩 Mensagem recebida | edit={is_edit}")
+        log_sys.info(f"📝 Texto: {texto}")
+
+        # lógica real entra aqui depois
 
     @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
     async def on_new(event):
@@ -1822,8 +1828,11 @@ async def _run():
             log_sys.error(f"❌ on_edit: {e}", exc_info=True)
 
     asyncio.create_task(_health_check())
+
     await client.run_until_disconnected()
+
     return True
+
 
 async def main():
     while True:
@@ -1834,14 +1843,18 @@ async def main():
             break
         except Exception as e:
             log_sys.error(f"💥 Caiu: {e} — restart em 15s...", exc_info=True)
+
             try:
                 await client.disconnect()
             except Exception:
                 pass
+
             await asyncio.sleep(15)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 23 ▸ BANCO CENTRAL DE OFERTAS — SQLite Persistente
