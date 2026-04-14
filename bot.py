@@ -490,8 +490,11 @@ async def motor_amazon(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
 
     if nl in ("amzn.to", "a.co", "amzn.com"):
     log_amz.debug(f"🔗 Expandindo: {url[:80]}")
+
     async with _SEM_HTTP:
         exp = await desencurtar_ultra(url, sessao)
+
+    return exp
 
 elif nl in ("amazon.com.br", "www.amazon.com.br", "amazon.com", "www.amazon.com"):
     log_amz.debug(f"🔗 Direta: {url[:80]}")
