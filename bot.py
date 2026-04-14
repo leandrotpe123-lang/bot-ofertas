@@ -1808,10 +1808,22 @@ async def _run():
     async def processar(event, is_edit=False):
         texto = event.raw_text if hasattr(event, "raw_text") else ""
 
-        log_sys.info(f"📩 Mensagem recebida | edit={is_edit}")
-        log_sys.info(f"📝 Texto: {texto}")
+        if not texto.strip():
+            return
 
-        # lógica real entra aqui depois
+        texto = texto.strip()
+
+        emoji = _emoji_de_linha()
+        texto_final = f"{emoji} {texto}"
+
+        log_sys.info(f"📩 Mensagem recebida | edit={is_edit}")
+        log_sys.info(f"📝 Texto: {texto_final}")
+
+        try:
+            await client.send_message(GRUPO_DESTINO, texto_final)
+            log_sys.info("✅ Oferta enviada para o grupo destino")
+        except Exception as e:
+            log_sys.error(f"❌ Erro ao enviar oferta: {e}", exc_info=True)
 
     @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
     async def on_new(event):
