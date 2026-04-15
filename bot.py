@@ -190,7 +190,8 @@ salvar_cache = lambda c: _gravar_json(ARQUIVO_CACHE, c, _CACHE_LOCK)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 4 ▸ FILTRO DE TEXTO
-# Bypass automático para posts de lista multi-produto.
+# Produto único na lista → bloqueia.
+# Múltiplos produtos na mesma mensagem → passa sempre.
 # ══════════════════════════════════════════════════════════════════════════════
 
 _FILTRO_TEXTO = [
@@ -208,13 +209,31 @@ _RE_MULTI_OFERTA = re.compile(
     re.I,
 )
 
-def texto_bloqueado(texto: str) -> bool:
+# Detecta múltiplos produtos: 3+ linhas com preço OU 3+ URLs na mesma msg
+_RE_PRECO_LINHA = re.compile(r'R\$\s?[\d.,]+')
+_RE_URL_COUNT   = re.compile(r'https?://')
+
+def _eh_multi_produto(texto: str) -> bool:
+    """Retorna True se a mensagem contém vários produtos."""
     if _RE_MULTI_OFERTA.search(texto):
+        return True
+    linhas_preco = sum(1 for l in texto.splitlines()
+                       if _RE_PRECO_LINHA.search(l))
+    urls         = len(_RE_URL_COUNT.findall(texto))
+    return linhas_preco >= 2 or urls >= 3
+
+def texto_bloqueado(texto: str) -> bool:
+    """
+    Multi-produto → nunca bloqueia.
+    Produto único → bloqueia se tiver palavra da lista.
+    """
+    if _eh_multi_produto(texto):
+        log_fil.debug("✅ Multi-produto — bypass filtro")
         return False
     tl = texto.lower()
     for p in _FILTRO_TEXTO:
         if p.lower() in tl:
-            log_fil.debug(f"🚫 Filtro: '{p}'")
+            log_fil.debug(f"🚫 Filtro bloqueou: '{p}'")
             return True
     return False
 
@@ -259,126 +278,206 @@ def classificar(url: str) -> Optional[str]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 6 ▸ DESENCURTADOR
-# HEAD rápido → GET com HTML → meta-refresh → JS location → canônico.
+# MÓDULO 6 ▸ DESENCURTADOR MÁXIMO
+# Descasca até 15 camadas. Suporta amzlink.to, bit.ly, cutt.ly e qualquer outro.
+# HEAD → GET → meta-refresh → JS location → canônico → força GET final.
 # Shopee NUNCA chama esta função.
 # ══════════════════════════════════════════════════════════════════════════════
+
+_AMZLINK_DOMAINS = frozenset([
+    "amzlink.to", "amzon.to", "amzn.to", "a.co", "amzn.com",
+])
 
 async def desencurtar(url: str, sessao: aiohttp.ClientSession,
                        depth: int = 0) -> str:
     if depth > 15:
+        log_lnk.warning(f"⚠️ Profundidade máxima atingida: {url[:60]}")
         return url
+
+    # Normaliza — remove espaços e caracteres inválidos
+    url = url.strip().rstrip('.,;)>')
+
     hdrs = {
         "User-Agent": random.choice(USER_AGENTS),
         "Accept": "text/html,application/xhtml+xml,*/*;q=0.9",
         "Accept-Language": "pt-BR,pt;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
     }
+
     try:
+        # ── Tentativa 1: HEAD rápido ──────────────────────────────────────
         try:
             async with sessao.head(
                 url, headers=hdrs, allow_redirects=True,
-                timeout=aiohttp.ClientTimeout(total=10), max_redirects=20,
+                timeout=aiohttp.ClientTimeout(total=10),
+                max_redirects=20,
             ) as r:
                 final = str(r.url)
                 if final != url:
+                    log_lnk.debug(f"  HEAD d={depth} → {final[:70]}")
                     return await desencurtar(final, sessao, depth + 1)
+                # HEAD retornou a mesma URL — pode ser que precise de GET
+                # para amzlink.to e similares que bloqueiam HEAD
+                nl = _netloc(url)
+                if nl in _AMZLINK_DOMAINS or nl.endswith(".amzlink.to"):
+                    raise Exception("amzlink — força GET")
                 return final
         except Exception:
-            pass
+            pass  # cai no GET
 
+        # ── Tentativa 2: GET completo ─────────────────────────────────────
         async with sessao.get(
             url, headers=hdrs, allow_redirects=True,
-            timeout=aiohttp.ClientTimeout(total=15), max_redirects=20,
+            timeout=aiohttp.ClientTimeout(total=15),
+            max_redirects=20,
         ) as r:
             pos  = str(r.url)
             html = await r.text(errors="ignore")
+
+            # Já chegou no destino pelo redirect HTTP
+            if pos != url:
+                log_lnk.debug(f"  GET-redirect d={depth} → {pos[:70]}")
+                return await desencurtar(pos, sessao, depth + 1)
+
             soup = BeautifulSoup(html, "html.parser")
 
-            ref = soup.find("meta", attrs={"http-equiv": re.compile("refresh", re.I)})
+            # Meta refresh
+            ref = soup.find("meta",
+                            attrs={"http-equiv": re.compile("refresh", re.I)})
             if ref and ref.get("content"):
-                m = re.search(r"url[=\s]*([^\s;\"']+)", ref["content"], re.I)
+                m = re.search(r"url[=\s]*([^\s;\"']+)",
+                              ref["content"], re.I)
                 if m:
-                    return await desencurtar(
-                        m.group(1).strip().strip("'\""), sessao, depth + 1)
+                    novo = m.group(1).strip().strip("'\"")
+                    log_lnk.debug(f"  META d={depth} → {novo[:70]}")
+                    return await desencurtar(novo, sessao, depth + 1)
 
+            # JS location (amzlink.to usa isso)
             for pat in [
-                r'window\.location(?:\.href)?\s*=\s*["\']([^"\']+)["\']',
-                r'location\.replace\(["\']([^"\']+)["\']\)',
-                r'location\.assign\(["\']([^"\']+)["\']\)',
+                r'window\.location(?:\.href)?\s*=\s*["\']([^"\']{10,})["\']',
+                r'location\.replace\s*\(\s*["\']([^"\']{10,})["\']\s*\)',
+                r'location\.assign\s*\(\s*["\']([^"\']{10,})["\']\s*\)',
+                r'var\s+url\s*=\s*["\']([^"\']{10,})["\']',
+                r'window\.open\s*\(\s*["\']([^"\']{10,})["\']',
             ]:
                 mj = re.search(pat, html)
                 if mj:
-                    return await desencurtar(mj.group(1), sessao, depth + 1)
+                    destino = mj.group(1)
+                    if destino.startswith("http"):
+                        log_lnk.debug(f"  JS d={depth} → {destino[:70]}")
+                        return await desencurtar(destino, sessao, depth + 1)
 
+            # Link canônico
             canon = soup.find("link", rel="canonical")
-            if canon and canon.get("href") and canon["href"] != url:
-                return await desencurtar(canon["href"], sessao, depth + 1)
+            if canon and canon.get("href"):
+                href = canon["href"]
+                if href.startswith("http") and href != url:
+                    log_lnk.debug(f"  CANON d={depth} → {href[:70]}")
+                    return await desencurtar(href, sessao, depth + 1)
 
-            return await desencurtar(pos, sessao, depth + 1) if pos != url else pos
+            # Último recurso: og:url
+            og = soup.find("meta", attrs={"property": "og:url"})
+            if og and og.get("content", "").startswith("http"):
+                if og["content"] != url:
+                    log_lnk.debug(f"  OG:URL d={depth} → {og['content'][:70]}")
+                    return await desencurtar(og["content"], sessao, depth + 1)
+
+            return pos
 
     except asyncio.TimeoutError:
-        log_lnk.warning(f"⏱ Timeout: {url[:70]}")
+        log_lnk.warning(f"⏱ Timeout d={depth}: {url[:70]}")
         return url
     except Exception as e:
-        log_lnk.error(f"❌ Desencurtar: {e} | {url[:60]}")
+        log_lnk.error(f"❌ Desencurtar d={depth}: {e} | {url[:60]}")
         return url
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 7 ▸ MOTOR AMAZON — ISOLADO
-# Única função que usa _AMZ_TAG. Zero contato com Shopee ou Magalu.
+# ÚNICA função que usa _AMZ_TAG.
+# Limpa a URL deixando só o necessário — nem curto demais, nem longo demais.
+# Suporta amzlink.to via desencurtador de 15 camadas.
 # ══════════════════════════════════════════════════════════════════════════════
 
 _AMZ_LIXO = frozenset({
-    "ascsubtag", "btn_ref", "ref_", "ref", "smid", "sprefix", "sr", "spla",
-    "dchild", "linkcode", "linkid", "camp", "creative", "pf_rd_p", "pf_rd_r",
-    "pd_rd_wg", "pd_rd_w", "content-id", "pd_rd_r", "pd_rd_i", "ie", "qid",
-    "_encoding", "dib", "dib_tag", "m", "marketplaceid", "ufe", "th", "psc",
-    "ingress", "visitid", "lp_context_asin", "s",
-    "redirectasin", "redirectmerchantid", "redirectasincustomeraction",
+    "ascsubtag","btn_ref","ref_","ref","smid","sprefix","spla",
+    "dchild","linkcode","linkid","camp","creative",
+    "pf_rd_p","pf_rd_r","pd_rd_wg","pd_rd_w","content-id",
+    "pd_rd_r","pd_rd_i","ie","qid","_encoding","dib","dib_tag",
+    "m","marketplaceid","ufe","th","psc","ingress","visitid",
+    "lp_context_asin","redirectasin","redirectmerchantid",
+    "redirectasincustomeraction","ds","rnid","sr",
 })
-_AMZ_MANTER = frozenset({"tag", "keywords", "node", "k", "i", "rh"})
+# Parâmetros FUNCIONAIS que devem ser mantidos em buscas/eventos
+_AMZ_MANTER = frozenset({"tag","keywords","node","k","i","rh","n","field-keywords"})
 
+# Domínios que precisam de desencurtamento
+_AMZ_ENCURTADOS = frozenset({
+    "amzlink.to","amzn.to","a.co","amzn.com",
+})
 
 def _limpar_url_amazon(url: str) -> str:
-    """Reconstrói URL Amazon do zero por tipo. ÚNICA função que usa _AMZ_TAG."""
+    """
+    Reconstrói a URL Amazon por tipo.
+    - Produto /dp/ASIN        → amazon.com.br/dp/ASIN?tag=
+    - /gp/product/ASIN        → amazon.com.br/dp/ASIN?tag=
+    - /promotion/psp/         → preserva path + tag
+    - Busca /s? /b? /deals    → preserva path + params funcionais + tag
+    - Genérico                → remove lixo + tag
+    """
     p    = urlparse(url)
     path = p.path
 
+    # Produto direto
     m = re.match(r'(/dp/[A-Z0-9]{10})', path)
     if m:
         return urlunparse(p._replace(
+            scheme="https", netloc="www.amazon.com.br",
             path=m.group(1), query=f"tag={_AMZ_TAG}", fragment=""))
 
     m = re.match(r'/gp/product/([A-Z0-9]{10})', path)
     if m:
         return urlunparse(p._replace(
+            scheme="https", netloc="www.amazon.com.br",
             path=f"/dp/{m.group(1)}", query=f"tag={_AMZ_TAG}", fragment=""))
 
+    # Campanha
     if "/promotion/psp/" in path:
-        return urlunparse(p._replace(query=f"tag={_AMZ_TAG}", fragment=""))
+        return urlunparse(p._replace(
+            query=f"tag={_AMZ_TAG}", fragment=""))
 
+    # Busca/evento — mantém só params funcionais
     params = {}
     for k, v in parse_qs(p.query, keep_blank_values=False).items():
         kl = k.lower()
         if kl in _AMZ_MANTER:
-            params[k] = v
-        elif kl not in _AMZ_LIXO and len(v[0]) < 50:
-            params[k] = v
-    params["tag"] = [_AMZ_TAG]
+            params[k] = v[0]
+        elif kl not in _AMZ_LIXO and len(v[0]) < 60:
+            params[k] = v[0]
+    params["tag"] = _AMZ_TAG
+
     return urlunparse(p._replace(
-        query=urlencode(params, doseq=True), fragment=""))
+        query=urlencode(params), fragment=""))
 
 
 async def motor_amazon(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
+    """Motor exclusivo Amazon. Debug isolado com log_amz."""
     nl = _netloc(url)
+    log_amz.debug(f"▶ IN: {url[:80]}")
+
+    # Sempre desencurta — garante URL final real antes de limpar
     async with _SEM_HTTP:
         exp = await desencurtar(url, sessao)
+
+    log_amz.debug(f"  EXP: {exp[:80]}")
+
     if classificar(exp) != "amazon":
-        log_amz.warning(f"⚠️ Não é Amazon: {exp[:60]}")
+        log_amz.warning(f"  ⚠️ Não é Amazon após expansão: {exp[:70]}")
         return None
+
     final = _limpar_url_amazon(exp)
-    log_amz.info(f"✅ {final}")
+    log_amz.info(f"  ✅ OUT: {final}")
     return final
 
 
@@ -434,48 +533,71 @@ async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 9 ▸ MOTOR MAGALU — ISOLADO
-# Path NUNCA alterado. Apenas IDs de afiliado substituídos.
+# Troca MAGALU_SLUG em qualquer formato:
+#   /magazineXXX/produto/p/ID/   → /magazineleo12/produto/p/ID/
+#   /magazineXXX/lojista/LOJA/   → /magazineleo12/lojista/LOJA/
+#   /magazineXXX/                → /magazineleo12/
+# Path NUNCA zerado. Apenas IDs substituídos.
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _validar_magalu(url: str) -> bool:
     p    = urlparse(url)
     host = p.netloc.lower()
     path = p.path.rstrip("/")
-    if "sacola" in host:
+    if "sacola" in host and path in ("", "/"):
+        log_mgl.warning(f"⚠️ Sacola sem produto: {url[:60]}")
         return False
     if not path or path == "/" or len(path.split("/")) < 2:
+        log_mgl.warning(f"⚠️ Homepage sem produto: {url[:60]}")
         return False
     return True
 
 
 def _afiliar_magalu(url: str) -> str:
+    """
+    1. Substitui qualquer /magazineXXX/ pelo slug correto.
+    2. Injeta IDs de afiliado. Preserva 100% do restante do path.
+    """
     p    = urlparse(url)
     path = p.path
+    host = p.netloc.lower()
 
-    if "magazinevoce.com.br" in p.netloc.lower():
-        path = re.sub(r'^(/magazine)[^/]+', rf'\1{_MGL_SLUG}', path)
+    # Troca slug em magazinevoce.com.br e magazineluiza.com.br
+    # Captura /magazineQUALQUERCOISA/ e substitui pelo slug configurado
+    path = re.sub(
+        r'^(/magazine)[^/]+(?=/|$)',
+        rf'\1{_MGL_SLUG}',
+        path
+    )
+    log_mgl.debug(f"  Path após slug: {path}")
 
+    # Limpa params antigos de afiliado
     params = {k: v[0] for k, v in
               parse_qs(p.query, keep_blank_values=True).items()}
-    for k in ["tag", "partnerid", "promoterid", "afforcedeeplink",
-               "deeplinkvalue", "isretargeting"]:
+    for k in ["tag","partnerid","promoterid","afforcedeeplink",
+               "deeplinkvalue","isretargeting","partner_id","promoter_id",
+               "utm_source","utm_medium","utm_campaign","pid","c",
+               "af_force_deeplink","deep_link_value"]:
         params.pop(k, None)
 
+    # Injeta IDs corretos
     params.update({
-        "partner_id":       _MGL_PARTNER,
-        "promoter_id":      _MGL_PROMOTER,
-        "utm_source":       "divulgador",
-        "utm_medium":       "magalu",
-        "utm_campaign":     _MGL_PROMOTER,
-        "pid":              _MGL_PID,
-        "c":                _MGL_PROMOTER,
-        "af_force_deeplink":"true",
+        "partner_id":        _MGL_PARTNER,
+        "promoter_id":       _MGL_PROMOTER,
+        "utm_source":        "divulgador",
+        "utm_medium":        "magalu",
+        "utm_campaign":      _MGL_PROMOTER,
+        "pid":               _MGL_PID,
+        "c":                 _MGL_PROMOTER,
+        "af_force_deeplink": "true",
     })
+
     base = urlunparse(p._replace(path=path, query="", fragment=""))
     params["deep_link_value"] = (
         f"{base}?utm_source=divulgador&utm_medium=magalu"
         f"&partner_id={_MGL_PARTNER}&promoter_id={_MGL_PROMOTER}"
     )
+
     return urlunparse(p._replace(
         path=path, query=urlencode(params), fragment=""))
 
@@ -495,28 +617,43 @@ async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
                     data   = await r.json(content_type=None)
                     status = data.get("url", {}).get("status")
                     if status in (7, 2):
-                        return data["url"].get("shortLink")
+                        short = data["url"].get("shortLink")
+                        log_mgl.debug(f"  ✂️ Cuttly t={t}: {short}")
+                        return short
+                    log_mgl.warning(f"  ⚠️ Cuttly status={status} t={t}/3")
                     await asyncio.sleep(2 ** t)
-        except Exception:
+        except Exception as e:
+            log_mgl.error(f"  ❌ Cuttly t={t}: {e}")
             await asyncio.sleep(2 ** t)
-    log_mgl.error("❌ Cuttly 3x falhou")
     return None
 
 
 async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
+    """Motor exclusivo Magalu. Debug isolado com log_mgl."""
+    log_mgl.debug(f"▶ IN: {url[:80]}")
+
     nl = _netloc(url)
     if "maga.lu" in nl or nl in _ENCURTADORES or classificar(url) == "expandir":
         async with _SEM_HTTP:
             url = await desencurtar(url, sessao)
+        log_mgl.debug(f"  EXP: {url[:80]}")
+
     if classificar(url) != "magalu":
+        log_mgl.warning(f"  ⚠️ Não é Magalu: {url[:70]}")
         return None
+
     if not _validar_magalu(url):
         return None
+
     afiliado = _afiliar_magalu(url)
-    final    = await _cuttly(afiliado, sessao)
+    log_mgl.debug(f"  AFL: {afiliado[:80]}")
+
+    final = await _cuttly(afiliado, sessao)
     if not final:
+        log_mgl.error(f"  ❌ Cuttly falhou — descartado")
         return None
-    log_mgl.info(f"✅ {final}")
+
+    log_mgl.info(f"  ✅ OUT: {final}")
     return final
 
 
@@ -548,25 +685,37 @@ def extrair_links(texto: str) -> Tuple[List[str], List[str]]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 11 ▸ PIPELINE DE CONVERSÃO PARALELA
-# Roteamento estanque: cada URL só entra no motor da sua plataforma.
+# MÓDULO 11 ▸ PIPELINE DE CONVERSÃO — COM CACHE SQLite
+# Antes de chamar a API, verifica o cache.
+# Só chama API se o link não estiver no cache.
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def _converter_um(url: str,
-                         sessao: aiohttp.ClientSession) -> Tuple[Optional[str], Optional[str]]:
+                         sessao: aiohttp.ClientSession
+                         ) -> Tuple[Optional[str], Optional[str]]:
     plat = classificar(url)
 
+    # Verifica cache SQLite antes de chamar qualquer API
+    cached = db_get_link(url)
+    if cached:
+        log_lnk.debug(f"💾 Cache: [{plat}] {cached[:50]}")
+        return cached, plat if plat in ("amazon","shopee","magalu") else "amazon"
+
+    async def _rota_com_cache(u: str, motor, nome: str):
+        r = await motor(u, sessao)
+        if r:
+            db_set_link(url, r, nome)
+            return r, nome
+        return None, None
+
     if plat == "amazon":
-        r = await motor_amazon(url, sessao)
-        return (r, "amazon") if r else (None, None)
+        return await _rota_com_cache(url, motor_amazon, "amazon")
 
     if plat == "shopee":
-        r = await motor_shopee(url, sessao)
-        return (r, "shopee") if r else (None, None)
+        return await _rota_com_cache(url, motor_shopee, "shopee")
 
     if plat == "magalu":
-        r = await motor_magalu(url, sessao)
-        return (r, "magalu") if r else (None, None)
+        return await _rota_com_cache(url, motor_magalu, "magalu")
 
     if plat == "expandir":
         try:
@@ -612,44 +761,97 @@ async def converter_links(links: List[str]) -> Tuple[Dict[str, str], str]:
     log_lnk.info(f"✅ {len(mapa)}/{len(links)} | plat={plat_p}")
     return mapa, plat_p
 
-
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 12 ▸ LIMPEZA DE RUÍDO TEXTUAL — 4 CAMADAS
+# MÓDULO 12 ▸ LIMPEZA DE RUÍDO TEXTUAL
+# Remove: CTAs de bots, links externos, lixo estrutural, blocos de redes sociais.
 # ══════════════════════════════════════════════════════════════════════════════
 
-_RE_INVISIVEIS    = re.compile(r'[\u200b\u200c\u200d\u00a0\u2060\ufeff]')
-_RE_GRUPO_EXT     = re.compile(
+_RE_INVISIVEIS = re.compile(r'[\u200b\u200c\u200d\u00a0\u2060\ufeff]')
+_RE_GRUPO_EXT  = re.compile(
     r'https?://(?:t\.me|telegram\.me|telegram\.org|chat\.whatsapp\.com)[^\s]*',
     re.I)
-_RE_LINHA_LIXO    = re.compile(
-    r'^\s*(?:-?\s*An[uú]ncio|Publicidade|:::+|---+|===+|'
-    r'[-–—]\s*(?:ML|MG|AMZ)|(?:ML|MG|AMZ)\s*:)\s*$', re.I)
-_RE_CTA_LIXO      = re.compile(
-    r'^\s*(?:link\s+(?:do\s+)?produto|link\s+da\s+oferta|'
-    r'resgate\s+aqui|clique\s+aqui|acesse\s+aqui|compre\s+aqui|'
-    r'grupo\s+vip|entrar\s+no\s+grupo|acessar\s+grupo)\s*:?\s*$', re.I)
+
+# Linhas de lixo estrutural
+_RE_LIXO_STRUCT = re.compile(
+    r'^\s*(?:'
+    r'-?\s*An[uú]ncio|Publicidade|:::+|---+|===+'
+    r'|[-–—]\s*(?:ML|MG|AMZ)|(?:ML|MG|AMZ)\s*:'
+    r')\s*$',
+    re.I)
+
+# CTAs de outros bots
+_RE_CTA = re.compile(
+    r'^\s*(?:'
+    r'link\s+(?:do\s+)?produto|link\s+da\s+oferta|'
+    r'resgate\s+aqui|clique\s+aqui|acesse\s+aqui|'
+    r'compre\s+aqui|grupo\s+vip|entrar\s+no\s+grupo|'
+    r'acessar\s+grupo|saiba\s+mais\s*:|confira\s+no\s+app'
+    r')\s*:?\s*$',
+    re.I)
+
+# Bloco de redes sociais — "Redes XXX", "-Grupo:", "-Chat:", "-Twitter:", etc.
+_RE_REDES_BLOCO = re.compile(
+    r'^\s*(?:'
+    r'redes\s+\w+|'                          # "Redes Promotom"
+    r'[-–]\s*grupo\s*(?:cupons?|promoções?|vip)?\s*:?\s*$|'
+    r'[-–]\s*(?:chat|twitter|whatsapp|instagram|tiktok|youtube)\s*:?\s*$|'
+    r'[-–]\s*link\s+(?:do\s+)?grupo\s*:?\s*$|'
+    r'acesse\s+nossas\s+redes|'
+    r'nossas\s+redes\s+sociais'
+    r')',
+    re.I)
+
+# Linhas que são só rótulo vazio (ex: "-Grupo Promoções:" sem URL)
+_RE_ROTULO_VAZIO = re.compile(
+    r'^\s*[-–•]\s*\w[\w\s]{0,30}:\s*$'
+)
+
 
 def limpar_ruido_textual(texto: str) -> str:
-    texto  = _RE_INVISIVEIS.sub(" ", texto).replace("\r\n", "\n").replace("\r", "\n")
+    texto  = _RE_INVISIVEIS.sub(" ", texto)
+    texto  = texto.replace("\r\n", "\n").replace("\r", "\n")
     linhas = texto.split("\n")
+
     saida: List[str] = []
-    vazio  = False
+    vazio = False
+    _em_bloco_redes = False
 
     for linha in linhas:
         l = linha.strip()
 
+        # Linha vazia — controla espaçamento
         if not l:
             if not vazio:
                 saida.append("")
             vazio = True
+            _em_bloco_redes = False
             continue
         vazio = False
 
-        if _RE_CTA_LIXO.match(l):
-            continue
-        if _RE_LINHA_LIXO.match(l):
+        # Detecta início de bloco de redes sociais
+        if _RE_REDES_BLOCO.match(l):
+            _em_bloco_redes = True
             continue
 
+        # Dentro do bloco de redes → descarta linhas de rótulo vazio
+        if _em_bloco_redes:
+            if _RE_ROTULO_VAZIO.match(l) or not l:
+                continue
+            # Se encontrou conteúdo real, sai do modo bloco
+            if not re.match(r'https?://', l):
+                _em_bloco_redes = False
+            else:
+                continue  # URL dentro do bloco de redes → descarta
+
+        # CTAs de outros bots
+        if _RE_CTA.match(l):
+            continue
+
+        # Lixo estrutural
+        if _RE_LIXO_STRUCT.match(l):
+            continue
+
+        # Links de grupos externos
         if _RE_GRUPO_EXT.search(l):
             l = _RE_GRUPO_EXT.sub("", l).strip()
             if not l:
@@ -662,53 +864,79 @@ def limpar_ruido_textual(texto: str) -> str:
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 13 ▸ EMOJIS FIXOS + RADARES SEMÂNTICOS
-# Rotação circular determinística por categoria — sem random.
+# Rotação circular determinística.
+# Multi-produto (≥2 itens com preço): usa 🔹 nos produtos, não emojis de dinheiro.
+# Se a linha já tiver emoji → NÃO adiciona nenhum.
 # ══════════════════════════════════════════════════════════════════════════════
 
 _EMJ: Dict[str, List[str]] = {
     "titulo_oferta": ["🔥"],
     "titulo_cupom":  ["🚨", "🔔", "📢"],
     "titulo_evento": ["⚠️"],
-    "preco":         ["💵", "💰", "🤑", "💸"],
+    "preco":         ["💵", "💰", "🤑"],
     "cupom_cod":     ["🎟", "🏷"],
-    "resgate":       ["✅", "🎯", "🔗"],
+    "resgate":       ["✅", "🔗"],
     "carrinho":      ["🛒"],
     "frete":         ["🚚", "📦"],
+    "multi_item":    ["🔹"],   # fixo para itens em lista multi-produto
 }
 _EMJ_IDX: Dict[str, int] = {k: 0 for k in _EMJ}
 
 def _prox_emoji(cat: str) -> str:
-    lista            = _EMJ[cat]
-    idx              = _EMJ_IDX[cat]
-    emoji            = lista[idx % len(lista)]
-    _EMJ_IDX[cat]    = (idx + 1) % len(lista)
+    lista         = _EMJ[cat]
+    idx           = _EMJ_IDX[cat]
+    emoji         = lista[idx % len(lista)]
+    _EMJ_IDX[cat] = (idx + 1) % len(lista)
     return emoji
 
-# Radares semânticos — compilados uma vez
 _KW_CUPOM    = re.compile(
     r'\b(?:cupom|cupon|c[oó]digo|coupon|off|resgate|cod)\b', re.I)
 _KW_PRECO    = re.compile(r'R\$\s?[\d.,]+', re.I)
 _KW_FRETE    = re.compile(
     r'\b(?:frete\s+gr[aá]t|entrega\s+gr[aá]t|sem\s+frete|frete\s+0)\b', re.I)
 _KW_EVENTO   = re.compile(
-    r'\b(?:quiz|roleta|miss[aã]o|arena|girar|gire|roda|jogar|jogue|desafio)\b', re.I)
+    r'\b(?:quiz|roleta|miss[aã]o|arena|girar|gire|roda|jogar|jogue|desafio)\b',
+    re.I)
 _KW_STATUS   = re.compile(
-    r'\b(?:voltando|voltou|normalizou|renovado|estoque\s+renovado|regularizou)\b', re.I)
+    r'\b(?:voltando|voltou|normalizou|renovado|estoque\s+renovado|regularizou)\b',
+    re.I)
 _KW_RESGATE  = re.compile(
     r'\b(?:resgate|clique|acesse|ative|use\s+o\s+cupom)\b', re.I)
 _KW_CARRINHO = re.compile(r'\b(?:carrinho|cart)\b', re.I)
 _KW_COD      = re.compile(r'\b([A-Z][A-Z0-9_-]{3,19})\b')
 
-def _tem_emoji(s: str) -> bool:
-    return bool(re.search(
-        r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF"
-        r"\U0001F900-\U0001F9FF\u2B50\u2B55]", s))
+_RE_EMOJI_CHECK = re.compile(
+    r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF"
+    r"\U0001F900-\U0001F9FF\u2B50\u2B55\u231A\u231B"
+    r"\U0001F100-\U0001F1FF]")
 
-def _emoji_de_linha(linha: str, eh_titulo: bool) -> Optional[str]:
+def _tem_emoji(s: str) -> bool:
+    return bool(_RE_EMOJI_CHECK.search(s))
+
+def _contar_produtos(texto: str) -> int:
+    """Conta linhas com preço — indica quantidade de produtos."""
+    return sum(1 for l in texto.splitlines() if _KW_PRECO.search(l))
+
+def _emoji_de_linha(linha: str, eh_titulo: bool,
+                    is_multi: bool = False) -> Optional[str]:
+    """
+    Retorna emoji para a linha.
+    Se is_multi=True e a linha tem preço → usa 🔹 (item de lista).
+    Se a linha já tem emoji → retorna None (não duplica).
+    """
+    # Já tem emoji → não adiciona
+    if _tem_emoji(linha):
+        return None
+
     if eh_titulo:
         if _KW_EVENTO.search(linha): return _prox_emoji("titulo_evento")
         if _KW_CUPOM.search(linha):  return _prox_emoji("titulo_cupom")
         return _prox_emoji("titulo_oferta")
+
+    # Multi-produto: linhas com preço recebem 🔹
+    if is_multi and _KW_PRECO.search(linha):
+        return "🔹"
+
     if _KW_FRETE.search(linha):    return _prox_emoji("frete")
     if _KW_CUPOM.search(linha):    return _prox_emoji("cupom_cod")
     if _KW_PRECO.search(linha):    return _prox_emoji("preco")
@@ -718,42 +946,69 @@ def _emoji_de_linha(linha: str, eh_titulo: bool) -> Optional[str]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 14 ▸ RENDERIZADOR — CLIQUE-E-COPIE + EMOJIS
+# MÓDULO 14 ▸ RENDERIZADOR
+# - Não duplica emojis existentes
+# - Multi-produto usa 🔹 nos itens
+# - Remove nome do canal/grupo da primeira linha
+# - Preserva espaçamento original
+# - Clique-e-copie nos cupons
 # ══════════════════════════════════════════════════════════════════════════════
 
 _RE_LIXO_PREF  = re.compile(
-    r'^\s*(?:::?\s*ML|[-–]\s*ML|ML\s*:|[-:•|]\s*(?:ML|MG|AMZ)\s*[-:•]?)\s*', re.I)
+    r'^\s*(?:::?\s*ML|[-–]\s*ML|ML\s*:|[-:•|]\s*(?:ML|MG|AMZ)\s*[-:•]?)\s*',
+    re.I)
 _RE_ANUNCIO    = re.compile(
     r'^\s*[-#]?\s*(?:an[uú]ncio|publicidade|patrocinado)\s*$', re.I)
 _RE_URL_RENDER = re.compile(r'https?://[^\s\)\]>,"\'<\u200b\u200c]+')
+
+# Remove "Nome do Canal 🔥" ou "Nome do Bot:" da primeira linha de texto
+# Detecta padrões: "Redes PromoTom", "PromoTom Ofertas", "Canal XYZ"
+_RE_NOME_CANAL = re.compile(
+    r'^\s*(?:redes\s+)?\w[\w\s]{2,30}'
+    r'(?:\s+(?:ofertas?|promos?|cupons?|indica|bot|canal|grupo))?\s*[:\-]?\s*$',
+    re.I)
 
 _FALSO_CUPOM = frozenset({
     "FRETE","GRÁTIS","GRATIS","AMAZON","SHOPEE","MAGALU","LINK",
     "CLIQUE","ACESSE","CONFIRA","HOJE","AGORA","PROMO","OFF",
     "BLACK","SUPER","MEGA","ULTRA","VIP","NOVO","NOVA","NUM","PRECO","PCT",
+    "PS5","PS4","XBOX","USB","ATX","RGB","LED","HD","SSD","RAM",
+    "APP","BOT","API","URL","HTTP","HTTPS",
 })
 
 def _crases(linha: str) -> str:
+    """Coloca crases em códigos de cupom para clique-e-copie no Telegram."""
     if "http" in linha or "`" in linha:
         return linha
     if not (_KW_CUPOM.search(linha) or _KW_COD.search(linha)):
         return linha
+
     def _sub(m: re.Match) -> str:
         c = m.group(0)
         return c if (c in _FALSO_CUPOM or len(c) < 4) else f"`{c}`"
+
     return re.sub(r'\b([A-Z][A-Z0-9_-]{4,20})\b', _sub, linha)
+
 
 def renderizar(texto: str, mapa_links: Dict[str, str],
                links_preservar: List[str], plat: str) -> str:
-    mapa  = {**mapa_links, **{u: u for u in links_preservar}}
-    saida = []
-    primeiro = True
+    mapa     = {**mapa_links, **{u: u for u in links_preservar}}
+    is_multi = _contar_produtos(texto) >= 2
 
-    for linha in texto.split("\n"):
+    linhas   = texto.split("\n")
+    saida: List[str] = []
+    primeiro = True
+    idx_linha = 0
+
+    for linha in linhas:
         l = linha.strip()
+        idx_linha += 1
+
         if not l:
             saida.append("")
             continue
+
+        # Remove linha de anúncio explícito (preserva como texto simples)
         if _RE_ANUNCIO.match(l):
             saida.append(l)
             continue
@@ -762,33 +1017,42 @@ def renderizar(texto: str, mapa_links: Dict[str, str],
         if not l:
             continue
 
+        # ── Substitui URLs ────────────────────────────────────────────────
         urls_na_linha = _RE_URL_RENDER.findall(l)
         sem_urls      = _RE_URL_RENDER.sub("", l).strip()
 
         if urls_na_linha and not sem_urls:
+            # Linha só de link
             for u in urls_na_linha:
                 uc = u.rstrip('.,;)>')
-                if uc in mapa:
-                    saida.append(mapa[uc])
+                convertido = mapa.get(uc)
+                if convertido:
+                    saida.append(convertido)
             continue
 
         l = _RE_URL_RENDER.sub(
-            lambda m: mapa.get(m.group(0).rstrip('.,;)>'), ""), l
-        ).strip()
+            lambda m: mapa.get(m.group(0).rstrip('.,;)>'), ""),
+            l).strip()
         if not l:
             continue
 
+        # ── Clique-e-copie ────────────────────────────────────────────────
         l = _crases(l)
 
+        # ── Emoji ─────────────────────────────────────────────────────────
+        # Regra 1: se já tem emoji, não adiciona nenhum
         if not _tem_emoji(l):
-            e = _emoji_de_linha(l, eh_titulo=primeiro)
-            if e:
-                l = f"{e} {l}"
+            emoji = _emoji_de_linha(l, eh_titulo=primeiro, is_multi=is_multi)
+            if emoji:
+                l = f"{emoji} {l}"
 
-        primeiro = False
+        if primeiro:
+            primeiro = False
+
         saida.append(l)
 
     return "\n".join(saida).strip()
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -975,30 +1239,56 @@ def deve_enviar(plat: str, cupom: str, texto: str) -> bool:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 16 ▸ BUSCADOR DE IMAGEM — 3 TENTATIVAS, 4 ESTRATÉGIAS
+# MÓDULO 16 ▸ IMAGEM — BUSCA 4K + preparar_imagem
+# Busca a maior imagem disponível (og:image, JSON-LD, img tag).
+# preparar_imagem: baixa URL ou usa media do Telegram.
 # ══════════════════════════════════════════════════════════════════════════════
 
+_IMG_SHP = "shopee_promo.jpg"   # imagem fallback Shopee
+
 async def buscar_imagem(url: str) -> Optional[str]:
-    hdrs = {"User-Agent": random.choice(USER_AGENTS),
-            "Accept-Language": "pt-BR,pt;q=0.9"}
+    """
+    Busca a melhor imagem do produto.
+    Prioridade: og:image > JSON-LD > maior <img> na página.
+    Prefere imagens grandes (4K quando disponível).
+    """
+    hdrs = {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept-Language": "pt-BR,pt;q=0.9",
+    }
     for t in range(1, 4):
         try:
             async with aiohttp.ClientSession(headers=hdrs) as s:
-                async with s.get(url, allow_redirects=True,
-                                  timeout=aiohttp.ClientTimeout(total=12)) as r:
-                    if "image" in r.headers.get("content-type", ""):
+                async with s.get(
+                    url, allow_redirects=True,
+                    timeout=aiohttp.ClientTimeout(total=12)
+                ) as r:
+                    ct = r.headers.get("content-type", "")
+                    if "image" in ct:
                         return str(r.url)
+
                     html = await r.text(errors="ignore")
                     soup = BeautifulSoup(html, "html.parser")
 
-                    for attr in [{"property": "og:image"},
-                                  {"name": "twitter:image"},
-                                  {"property": "og:image:secure_url"}]:
+                    # og:image (geralmente alta resolução)
+                    for attr in [
+                        {"property": "og:image"},
+                        {"property": "og:image:secure_url"},
+                        {"name": "twitter:image"},
+                    ]:
                         tag = soup.find("meta", attrs=attr)
                         if tag and tag.get("content", "").startswith("http"):
-                            return tag["content"]
+                            img_url = tag["content"]
+                            # Remove parâmetros de resize para pegar original
+                            img_url = re.sub(
+                                r'[?&](?:width|height|w|h|size|resize)=\d+',
+                                '', img_url)
+                            log_img.info(f"✅ og:image t={t}: {img_url[:70]}")
+                            return img_url
 
-                    for scr in soup.find_all("script", type="application/ld+json"):
+                    # JSON-LD
+                    for scr in soup.find_all("script",
+                                              type="application/ld+json"):
                         try:
                             data  = json.loads(scr.string or "")
                             items = data if isinstance(data, list) else [data]
@@ -1015,25 +1305,69 @@ async def buscar_imagem(url: str) -> Optional[str]:
                         except Exception:
                             pass
 
+                    # Maior <img> na página
+                    melhor_src   = None
+                    melhor_area  = 0
                     for img_tag in soup.find_all("img", src=True):
                         src = img_tag.get("src", "")
-                        if not src.startswith("http"): continue
+                        if not src.startswith("http"):
+                            continue
                         try:
                             w = int(img_tag.get("width",  0))
                             h = int(img_tag.get("height", 0))
-                            if w >= 200 or h >= 200:
-                                return src
+                            area = w * h
+                            if area > melhor_area:
+                                melhor_area = area
+                                melhor_src  = src
                         except (ValueError, TypeError):
                             if any(x in src.lower() for x in
-                                   ["product","produto","item","image","foto"]):
-                                return src
+                                   ["product","produto","item","image","foto",
+                                    "_zoom","large","big","xl","hd"]):
+                                if not melhor_src:
+                                    melhor_src = src
+                    if melhor_src:
+                        log_img.info(f"✅ <img> t={t}: {melhor_src[:70]}")
+                        return melhor_src
+
         except asyncio.TimeoutError:
-            log_img.warning(f"⏱ t={t}/3")
+            log_img.warning(f"⏱ Timeout imagem t={t}/3")
         except Exception as e:
-            log_img.warning(f"⚠️ t={t}/3: {e}")
+            log_img.warning(f"⚠️ Imagem t={t}/3: {e}")
         if t < 3:
             await asyncio.sleep(1.0)
+
+    log_img.warning(f"❌ Sem imagem: {url[:60]}")
     return None
+
+
+async def preparar_imagem(fonte, eh_midia_telegram: bool) -> tuple:
+    """
+    Retorna (objeto_para_send_file, None).
+    Se for media do Telegram: retorna direto (Telethon sabe baixar).
+    Se for URL: baixa os bytes para memória (evita salvar em disco).
+    """
+    if eh_midia_telegram:
+        # Telethon aceita o objeto media diretamente no send_file
+        return fonte, None
+
+    if isinstance(fonte, str) and fonte.startswith("http"):
+        try:
+            hdrs = {"User-Agent": random.choice(USER_AGENTS)}
+            async with aiohttp.ClientSession(headers=hdrs) as s:
+                async with s.get(
+                    fonte, timeout=aiohttp.ClientTimeout(total=15)
+                ) as r:
+                    if r.status == 200:
+                        data = await r.read()
+                        buf  = io.BytesIO(data)
+                        buf.name = "produto.jpg"
+                        return buf, None
+        except Exception as e:
+            log_img.warning(f"⚠️ Download imagem: {e}")
+        return None, None
+
+    # Caminho de arquivo local
+    return fonte, None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1226,6 +1560,7 @@ async def _enviar(msg: str, img_obj, message=None) -> object:
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 20 ▸ BANCO CENTRAL — SQLite
+# Tabela extra: links_cache → evita chamar API para o mesmo link original.
 # ══════════════════════════════════════════════════════════════════════════════
 
 _DB_PATH = "foguetao.db"
@@ -1241,29 +1576,36 @@ def _init_db():
     _db_conn.execute("PRAGMA cache_size=-8000")
     _db_conn.executescript("""
         CREATE TABLE IF NOT EXISTS ofertas (
-            fp       TEXT PRIMARY KEY,
-            plat     TEXT NOT NULL,
-            cupons   TEXT,
-            camp     TEXT,
-            alma     TEXT,
-            ts       REAL NOT NULL
+            fp     TEXT PRIMARY KEY,
+            plat   TEXT NOT NULL,
+            cupons TEXT,
+            camp   TEXT,
+            alma   TEXT,
+            ts     REAL NOT NULL
         );
         CREATE TABLE IF NOT EXISTS saturacao (
-            id       INTEGER PRIMARY KEY AUTOINCREMENT,
-            plat     TEXT NOT NULL,
-            sku      TEXT,
-            ts       REAL NOT NULL
+            id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            plat TEXT NOT NULL,
+            sku  TEXT,
+            ts   REAL NOT NULL
         );
         CREATE TABLE IF NOT EXISTS scheduler (
-            id       INTEGER PRIMARY KEY AUTOINCREMENT,
-            plat     TEXT NOT NULL,
-            hora     INTEGER NOT NULL,
-            score    REAL DEFAULT 1.0,
-            ts       REAL NOT NULL
+            id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            plat  TEXT NOT NULL,
+            hora  INTEGER NOT NULL,
+            score REAL DEFAULT 1.0,
+            ts    REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS links_cache (
+            url_orig  TEXT PRIMARY KEY,
+            url_conv  TEXT NOT NULL,
+            plat      TEXT NOT NULL,
+            ts        REAL NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_of_plat ON ofertas(plat, ts);
         CREATE INDEX IF NOT EXISTS idx_sat     ON saturacao(plat, ts);
         CREATE INDEX IF NOT EXISTS idx_sch     ON scheduler(plat, hora);
+        CREATE INDEX IF NOT EXISTS idx_lc_ts   ON links_cache(ts);
     """)
     log_sys.info(f"🗄 DB ON | {_DB_PATH}")
 
@@ -1275,6 +1617,30 @@ def _db():
         except sqlite3.Error as e:
             log_sys.error(f"❌ DB: {e}")
             raise
+
+# ── Links cache ───────────────────────────────────────────────────────────────
+
+_LINK_CACHE_TTL = 6 * 3600  # 6 horas
+
+def db_get_link(url_orig: str) -> Optional[str]:
+    """Retorna link convertido do cache se existir e não tiver expirado."""
+    limite = time.time() - _LINK_CACHE_TTL
+    with _db() as db:
+        row = db.execute(
+            "SELECT url_conv FROM links_cache WHERE url_orig=? AND ts>=?",
+            (url_orig, limite)
+        ).fetchone()
+    if row:
+        log_lnk.debug(f"💾 Cache hit: {url_orig[:50]}")
+        return row[0]
+    return None
+
+def db_set_link(url_orig: str, url_conv: str, plat: str):
+    """Salva link convertido no cache."""
+    with _db() as db:
+        db.execute(
+            "INSERT OR REPLACE INTO links_cache (url_orig,url_conv,plat,ts) VALUES(?,?,?,?)",
+            (url_orig, url_conv, plat, time.time()))
 
 def db_registrar_sat(plat: str, sku: str = ""):
     with _db() as db:
@@ -1291,8 +1657,9 @@ def db_count_sat(plat: str, janela: float = 1800) -> int:
 
 def db_registrar_sch(plat: str, hora: int, score: float = 1.0):
     with _db() as db:
-        db.execute("INSERT INTO scheduler (plat,hora,score,ts) VALUES(?,?,?,?)",
-                   (plat, hora, score, time.time()))
+        db.execute(
+            "INSERT INTO scheduler (plat,hora,score,ts) VALUES(?,?,?,?)",
+            (plat, hora, score, time.time()))
 
 def db_score_hora(plat: str, hora: int, dias: int = 7) -> float:
     limite = time.time() - dias * 86400
@@ -1305,9 +1672,10 @@ def db_score_hora(plat: str, hora: int, dias: int = 7) -> float:
 def db_limpar(dias: int = 7):
     limite = time.time() - dias * 86400
     with _db() as db:
-        db.execute("DELETE FROM ofertas   WHERE ts<?", (limite,))
-        db.execute("DELETE FROM saturacao WHERE ts<?", (limite,))
-        db.execute("DELETE FROM scheduler WHERE ts<?", (limite,))
+        db.execute("DELETE FROM ofertas       WHERE ts<?", (limite,))
+        db.execute("DELETE FROM saturacao     WHERE ts<?", (limite,))
+        db.execute("DELETE FROM scheduler     WHERE ts<?", (limite,))
+        db.execute("DELETE FROM links_cache   WHERE ts<?", (limite,))
     log_sys.info(f"🗑 DB limpeza >{dias}d")
 
 
@@ -1673,26 +2041,43 @@ async def _pipeline(event, is_edit: bool = False):
     # Renderização
     msg_final = renderizar(tc, mapa, links_p, plat)
 
-    # Imagem
-    media  = event.message.media
-    img    = None
-    if _tem_midia(media):
+    # ── Imagem ────────────────────────────────────────────────────────────
+    media_orig = event.message.media
+    tem_img    = _tem_midia(media_orig)
+    img        = None
+    eh_cup     = _eh_cupom_texto(tc)
+
+    if tem_img:
         try:
-            img, _ = await preparar_imagem(media, True)
-        except Exception:
-            pass
-    elif not img and _eh_cupom_texto(tc):
-        if plat == "amazon" and os.path.exists(_IMG_AMZ):
-            img = _IMG_AMZ
-        elif plat == "magalu" and os.path.exists(_IMG_MGL):
-            img = _IMG_MGL
-    elif not img and mapa:
-        img_url = await buscar_imagem(list(mapa.values())[0])
-        if img_url:
-            try:
-                img, _ = await preparar_imagem(img_url, False)
-            except Exception:
-                pass
+            img, _ = await preparar_imagem(media_orig, True)
+            log_img.debug("✅ Imagem da mensagem original")
+        except Exception as e:
+            log_img.warning(f"⚠️ Imagem original falhou: {e}")
+
+    if img is None:
+        if eh_cup:
+            if plat == "shopee" and os.path.exists(_IMG_SHP):
+                img = _IMG_SHP
+                log_img.debug("🟣 Fallback Shopee cupom")
+            elif plat == "amazon" and os.path.exists(_IMG_AMZ):
+                img = _IMG_AMZ
+                log_img.debug("🟠 Fallback Amazon cupom")
+            elif plat == "magalu" and os.path.exists(_IMG_MGL):
+                img = _IMG_MGL
+                log_img.debug("🔵 Fallback Magalu cupom")
+        elif mapa:
+            img_url = await buscar_imagem(list(mapa.values())[0])
+            if img_url:
+                try:
+                    img, _ = await preparar_imagem(img_url, False)
+                    log_img.debug(f"✅ Imagem produto: {img_url[:60]}")
+                except Exception as e:
+                    log_img.warning(f"⚠️ Preparar imagem produto: {e}")
+
+    # ── Rate-limit adaptativo ─────────────────────────────────────────────
+    hora_atual = int(time.strftime("%H"))
+    global _INTERVALO_MIN
+    _INTERVALO_MIN = 0.8 if 8 <= hora_atual < 22 else 1.5
 
     await _rate_limit()
 
