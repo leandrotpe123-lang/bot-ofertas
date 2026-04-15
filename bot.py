@@ -666,14 +666,14 @@ def limpar_ruido_textual(texto: str) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 
 _EMJ: Dict[str, List[str]] = {
-    "titulo_oferta": ["🔥", "💥", "⚡️", "🚀"],
+    "titulo_oferta": ["🔥"],
     "titulo_cupom":  ["🚨", "🔔", "📢"],
-    "titulo_evento": ["⚠️", "🎯", "🎰"],
+    "titulo_evento": ["⚠️"],
     "preco":         ["💵", "💰", "🤑", "💸"],
-    "cupom_cod":     ["🎟", "🎫", "🏷"],
+    "cupom_cod":     ["🎟", "🏷"],
     "resgate":       ["✅", "🎯", "🔗"],
-    "carrinho":      ["🛒", "🛍"],
-    "frete":         ["🚚", "📦", "✈️"],
+    "carrinho":      ["🛒"],
+    "frete":         ["🚚", "📦"],
 }
 _EMJ_IDX: Dict[str, int] = {k: 0 for k in _EMJ}
 
@@ -1171,6 +1171,12 @@ async def obter_imagem(message, client):
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 19 ▸ ENVIO — PRIORIDADE ABSOLUTA À IMAGEM
 # ══════════════════════════════════════════════════════════════════════════════
+
+def _tem_midia(media) -> bool:
+    return media is not None and not isinstance(media, MessageMediaWebPage)
+
+def _eh_cupom_texto(texto: str) -> bool:
+    return bool(_KW_CUPOM.search(texto))
 
 async def _enviar(msg: str, img_obj, message=None) -> object:
     # prioridade absoluta: tentar capturar imagem automaticamente
