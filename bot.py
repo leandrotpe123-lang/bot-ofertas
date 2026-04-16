@@ -111,7 +111,7 @@ API_ID         = int(os.environ.get("API_ID", 0))
 API_HASH       = os.environ.get("API_HASH", "")
 SESSION_STRING = os.environ.get("TELEGRAM_SESSION", "")
 
-GRUPOS_ORIGEM  = ["promotom", "fumotom", "botofera", "fadadoscupons"]
+GRUPOS_ORIGEM  = ["promotom", "fadapromos", "SamuelF3lipePromo", "paraseubaby", "fumotom", "botofera", "fadadoscupons"]
 GRUPO_DESTINO  = "@ofertap"
 
 # Credenciais isoladas — NUNCA misturar entre plataformas
@@ -124,6 +124,7 @@ _MGL_PID      = os.environ.get("MAGALU_PID",         "magazinevoce")
 _MGL_SLUG     = os.environ.get("MAGALU_SLUG",        "magazineleo12")
 _CUTTLY_KEY   = os.environ.get("CUTTLY_API_KEY",     "")
 
+_IMG_SHP = "cupom-shopee.jpg"
 _IMG_AMZ = "cupom-amazon.jpg"
 _IMG_MGL = "magalu_promo.jpg"
 
@@ -195,7 +196,7 @@ salvar_cache = lambda c: _gravar_json(ARQUIVO_CACHE, c, _CACHE_LOCK)
 # ══════════════════════════════════════════════════════════════════════════════
 
 _FILTRO_TEXTO = [
-    "Monitor Samsung", "Fonte Mancer", "Placa de video", "Monitor LG",
+    "Monitor Samsung", "Computador Home Essential", "Monitor gamer", "Fonte Mancer", "Placa de video", "Monitor LG",
     "PC home Essential", "Suporte articulado", "Gabinetes em oferta",
     "VHAGAR", "Superframe", "AM5", "AM4", "GTX", "DDR5", "DDR4",
     "Dram", "Monitor Safe", "Monitor Redragon", "CL18", "CL16", "CL32",
