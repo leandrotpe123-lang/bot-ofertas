@@ -196,7 +196,7 @@ salvar_cache = lambda c: _gravar_json(ARQUIVO_CACHE, c, _CACHE_LOCK)
 # ══════════════════════════════════════════════════════════════════════════════
 
 _FILTRO_TEXTO = [
-    "Monitor Samsung", "Computador Home Essential", "Monitor gamer", "Fonte Mancer", "Placa de video", "Monitor LG",
+    "Monitor Samsung", "Computador Home Essential", "Monitor gamer","Roleta Shopee Flamengo", "Fonte Mancer", "Placa de video", "Monitor LG",
     "PC home Essential", "Suporte articulado", "Gabinetes em oferta",
     "VHAGAR", "Superframe", "AM5", "AM4", "GTX", "DDR5", "DDR4",
     "Dram", "Monitor Safe", "Monitor Redragon", "CL18", "CL16", "CL32",
