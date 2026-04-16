@@ -2286,7 +2286,7 @@ async def _pipeline(event, is_edit: bool = False):
     if not _tem_contexto(tc): return
 
     # Extração + parser robusto
-    links_c, links_p = extrair_links(tc)
+    links_c, links_p = extrair_links(texto)
     parsed           = parse_links_bulk(links_c)
     diretos          = [r.url_limpa for r in parsed if r.plat != "expandir"]
     expandir         = [r.url_limpa for r in parsed if r.plat == "expandir"]
