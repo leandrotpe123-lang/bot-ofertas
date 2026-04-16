@@ -2320,10 +2320,53 @@ async def _pipeline(event, is_edit: bool = False):
         if total > 0:
             await asyncio.sleep(total)
 
+    # ── Imagem ────────────────────────────────────────────────────────────
+    media_orig = event.message.media
+    tem_img    = _tem_midia(media_orig)
+    img        = None
+    eh_cup     = _eh_cupom_texto(tc)
+
+    # 1. Prioridade máxima: imagem que veio na mensagem original
+    if tem_img:
+        try:
+            img, _ = await preparar_imagem(media_orig, True)
+            if img:
+                log_img.debug("✅ Imagem original da mensagem")
+        except Exception as e:
+            log_img.warning(f"⚠️ Imagem original: {e}")
+            img = None
+
+    # 2. Sem imagem original → busca por contexto
+    if img is None:
+        if eh_cup:
+            if plat == "shopee":
+                if os.path.exists(_IMG_SHP):
+                    img = _IMG_SHP
+                    log_img.debug("🟣 Fallback Shopee")
+
+            elif plat == "amazon":
+                if os.path.exists(_IMG_AMZ):
+                    img = _IMG_AMZ
+                    log_img.debug("🟠 Fallback Amazon cupom")
+
+            elif plat == "magalu":
+                if os.path.exists(_IMG_MGL):
+                    img = _IMG_MGL
+                    log_img.debug("🔵 Fallback Magalu")
+
+        elif mapa:
+            img_url = await buscar_imagem(list(mapa.values())[0])
+            if img_url:
+                try:
+                    img, _ = await preparar_imagem(img_url, False)
+                    log_img.debug("✅ Imagem produto 4K")
+                except Exception as e:
+                    log_img.warning(f"⚠️ Preparar imagem produto: {e}")
+                    img = None
+
     # Renderização
     msg_final = renderizar(tc, mapa, links_p, plat)
 
-    
 
     # ── Rate-limit adaptativo ─────────────────────────────────────────────
     hora_atual = int(time.strftime("%H"))
@@ -2379,50 +2422,6 @@ async def _iniciar_orchestrator():
     log_sys.info(f"🎛 Orchestrator | workers={_WORKERS_MAX} fila={_FILA_MAX}")
     asyncio.create_task(_worker_loop())
 
-# ── Imagem ────────────────────────────────────────────────────────────
-    media_orig = event.message.media
-    tem_img    = _tem_midia(media_orig)
-    img        = None
-    eh_cup     = _eh_cupom_texto(tc)
-
-    # 1. Prioridade máxima: imagem que veio na mensagem original
-    if tem_img:
-        try:
-            img, _ = await preparar_imagem(media_orig, True)
-            if img:
-                log_img.debug("✅ Imagem original da mensagem")
-        except Exception as e:
-            log_img.warning(f"⚠️ Imagem original: {e}")
-            img = None
-
-    # 2. Sem imagem original → busca por contexto
-    if img is None:
-        if eh_cup:
-            # Cupom → fallback da plataforma
-            if plat == "shopee":
-                if os.path.exists(_IMG_SHP):
-                    img = _IMG_SHP
-                    log_img.debug("🟣 Fallback Shopee")
-            elif plat == "amazon":
-                # Amazon: SOMENTE cupom Amazon usa _IMG_AMZ
-                if os.path.exists(_IMG_AMZ):
-                    img = _IMG_AMZ
-                    log_img.debug("🟠 Fallback Amazon cupom")
-            elif plat == "magalu":
-                if os.path.exists(_IMG_MGL):
-                    img = _IMG_MGL
-                    log_img.debug("🔵 Fallback Magalu")
-            # Outras plataformas: sem fallback
-        elif mapa:
-            # Produto → busca imagem real 4K
-            img_url = await buscar_imagem(list(mapa.values())[0])
-            if img_url:
-                try:
-                    img, _ = await preparar_imagem(img_url, False)
-                    log_img.debug(f"✅ Imagem produto 4K")
-                except Exception as e:
-                    log_img.warning(f"⚠️ Preparar imagem produto: {e}")
-                    img = None
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 25 ▸ HEALTH CHECK
