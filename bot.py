@@ -734,7 +734,7 @@ async def _converter_um(url: str,
 
 async def converter_links(links: List[str]) -> Tuple[Dict[str, str], str]:
     if not links:
-        return {}, "amazon"
+        return {}, "desconhecido"
 
     conn = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300, ssl=False)
     async with aiohttp.ClientSession(
@@ -758,7 +758,9 @@ async def converter_links(links: List[str]) -> Tuple[Dict[str, str], str]:
             mapa[links[i]] = novo
             plats.append(plat)
 
-    plat_p = max(set(plats), key=plats.count) if plats else "amazon"
+    plat_p = max(set(plats), key=plats.count) if plats else (
+    classificar(links[0]) if links else "desconhecido"
+    )
     log_lnk.info(f"✅ {len(mapa)}/{len(links)} | plat={plat_p}")
     return mapa, plat_p
 
