@@ -279,24 +279,29 @@ def classificar(url: str) -> Optional[str]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 6 ▸ DESENCURTADOR MÁXIMO
-# Descasca até 15 camadas. Suporta amzlink.to, bit.ly, cutt.ly e qualquer outro.
-# HEAD → GET → meta-refresh → JS location → canônico → força GET final.
-# Shopee NUNCA chama esta função.
+# MÓDULO 6 ▸ DESENCURTADOR — 15 CAMADAS
+# Suporta amzlink.to, amzn.to, bit.ly e qualquer outro.
+# HEAD → GET completo → meta-refresh → JS → og:url → canônico
 # ══════════════════════════════════════════════════════════════════════════════
 
-_AMZLINK_DOMAINS = frozenset([
-    "amzlink.to", "amzon.to", "amzn.to", "a.co", "amzn.com",
-])
+# Domínios que SEMPRE precisam de GET (bloqueiam HEAD)
+_FORCA_GET = frozenset({
+    "amzlink.to", "amzn.to", "a.co", "amzn.com",
+    "bit.ly", "tinyurl.com", "rb.gy", "is.gd",
+    "cutt.ly", "ow.ly", "buff.ly",
+})
 
 async def desencurtar(url: str, sessao: aiohttp.ClientSession,
                        depth: int = 0) -> str:
     if depth > 15:
-        log_lnk.warning(f"⚠️ Profundidade máxima atingida: {url[:60]}")
+        log_lnk.warning(f"⚠️ Profundidade máx atingida d={depth}: {url[:60]}")
         return url
 
-    # Normaliza — remove espaços e caracteres inválidos
     url = url.strip().rstrip('.,;)>')
+    if not url.startswith(("http://", "https://")):
+        return url
+
+    nl = _netloc(url)
 
     hdrs = {
         "User-Agent": random.choice(USER_AGENTS),
@@ -307,27 +312,27 @@ async def desencurtar(url: str, sessao: aiohttp.ClientSession,
     }
 
     try:
-        # ── Tentativa 1: HEAD rápido ──────────────────────────────────────
-        try:
-            async with sessao.head(
-                url, headers=hdrs, allow_redirects=True,
-                timeout=aiohttp.ClientTimeout(total=10),
-                max_redirects=20,
-            ) as r:
-                final = str(r.url)
-                if final != url:
-                    log_lnk.debug(f"  HEAD d={depth} → {final[:70]}")
-                    return await desencurtar(final, sessao, depth + 1)
-                # HEAD retornou a mesma URL — pode ser que precise de GET
-                # para amzlink.to e similares que bloqueiam HEAD
-                nl = _netloc(url)
-                if nl in _AMZLINK_DOMAINS or nl.endswith(".amzlink.to"):
-                    raise Exception("amzlink — força GET")
-                return final
-        except Exception:
-            pass  # cai no GET
+        # HEAD só para domínios que aceitam
+        usar_head = nl not in _FORCA_GET and not any(
+            nl.endswith("." + d) for d in _FORCA_GET)
 
-        # ── Tentativa 2: GET completo ─────────────────────────────────────
+        if usar_head:
+            try:
+                async with sessao.head(
+                    url, headers=hdrs, allow_redirects=True,
+                    timeout=aiohttp.ClientTimeout(total=8),
+                    max_redirects=20,
+                ) as r:
+                    final = str(r.url)
+                    if final != url:
+                        log_lnk.debug(f"  HEAD d={depth} → {final[:70]}")
+                        return await desencurtar(final, sessao, depth + 1)
+                    # HEAD retornou mesma URL mas pode ter JS redirect
+                    # não retorna ainda, cai no GET
+            except Exception:
+                pass
+
+        # GET completo — lê HTML para detectar qualquer tipo de redirect
         async with sessao.get(
             url, headers=hdrs, allow_redirects=True,
             timeout=aiohttp.ClientTimeout(total=15),
@@ -336,31 +341,32 @@ async def desencurtar(url: str, sessao: aiohttp.ClientSession,
             pos  = str(r.url)
             html = await r.text(errors="ignore")
 
-            # Já chegou no destino pelo redirect HTTP
+            # Redirect HTTP já resolvido
             if pos != url:
-                log_lnk.debug(f"  GET-redirect d={depth} → {pos[:70]}")
+                log_lnk.debug(f"  GET-redir d={depth} → {pos[:70]}")
                 return await desencurtar(pos, sessao, depth + 1)
 
             soup = BeautifulSoup(html, "html.parser")
 
             # Meta refresh
-            ref = soup.find("meta",
-                            attrs={"http-equiv": re.compile("refresh", re.I)})
+            ref = soup.find(
+                "meta", attrs={"http-equiv": re.compile("refresh", re.I)})
             if ref and ref.get("content"):
                 m = re.search(r"url[=\s]*([^\s;\"']+)",
                               ref["content"], re.I)
                 if m:
                     novo = m.group(1).strip().strip("'\"")
-                    log_lnk.debug(f"  META d={depth} → {novo[:70]}")
-                    return await desencurtar(novo, sessao, depth + 1)
+                    if novo.startswith("http"):
+                        log_lnk.debug(f"  META d={depth} → {novo[:70]}")
+                        return await desencurtar(novo, sessao, depth + 1)
 
-            # JS location (amzlink.to usa isso)
+            # JS location — amzlink.to usa window.location
             for pat in [
-                r'window\.location(?:\.href)?\s*=\s*["\']([^"\']{10,})["\']',
-                r'location\.replace\s*\(\s*["\']([^"\']{10,})["\']\s*\)',
-                r'location\.assign\s*\(\s*["\']([^"\']{10,})["\']\s*\)',
-                r'var\s+url\s*=\s*["\']([^"\']{10,})["\']',
-                r'window\.open\s*\(\s*["\']([^"\']{10,})["\']',
+                r'window\.location(?:\.href)?\s*=\s*["\']([^"\']{15,})["\']',
+                r'location\.replace\s*\(\s*["\']([^"\']{15,})["\']\s*\)',
+                r'location\.assign\s*\(\s*["\']([^"\']{15,})["\']\s*\)',
+                r'(?:var|let|const)\s+\w*[Uu]rl\w*\s*=\s*["\']([^"\']{15,})["\']',
+                r'window\.open\s*\(\s*["\']([^"\']{15,})["\']',
             ]:
                 mj = re.search(pat, html)
                 if mj:
@@ -369,37 +375,42 @@ async def desencurtar(url: str, sessao: aiohttp.ClientSession,
                         log_lnk.debug(f"  JS d={depth} → {destino[:70]}")
                         return await desencurtar(destino, sessao, depth + 1)
 
-            # Link canônico
-            canon = soup.find("link", rel="canonical")
-            if canon and canon.get("href"):
-                href = canon["href"]
-                if href.startswith("http") and href != url:
-                    log_lnk.debug(f"  CANON d={depth} → {href[:70]}")
-                    return await desencurtar(href, sessao, depth + 1)
-
-            # Último recurso: og:url
+            # og:url como fallback
             og = soup.find("meta", attrs={"property": "og:url"})
             if og and og.get("content", "").startswith("http"):
                 if og["content"] != url:
                     log_lnk.debug(f"  OG:URL d={depth} → {og['content'][:70]}")
                     return await desencurtar(og["content"], sessao, depth + 1)
 
+            # Link canônico
+            canon = soup.find("link", rel="canonical")
+            if canon and canon.get("href", "").startswith("http"):
+                if canon["href"] != url:
+                    log_lnk.debug(f"  CANON d={depth} → {canon['href'][:70]}")
+                    return await desencurtar(canon["href"], sessao, depth + 1)
+
+            log_lnk.debug(f"  FIM d={depth}: {pos[:70]}")
             return pos
 
     except asyncio.TimeoutError:
-        log_lnk.warning(f"⏱ Timeout d={depth}: {url[:70]}")
+        log_lnk.warning(f"⏱ Timeout d={depth}: {url[:60]}")
         return url
     except Exception as e:
-        log_lnk.error(f"❌ Desencurtar d={depth}: {e} | {url[:60]}")
+        log_lnk.error(f"❌ Desencurtar d={depth}: {e} | {url[:50]}")
         return url
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 7 ▸ MOTOR AMAZON — ISOLADO
-# ÚNICA função que usa _AMZ_TAG.
-# Limpa a URL deixando só o necessário — nem curto demais, nem longo demais.
-# Suporta amzlink.to via desencurtador de 15 camadas.
+# Suporta amzlink.to + todos os formatos Amazon.
+# Link limpo: só o necessário, nem curto demais nem longo demais.
+# Debug isolado com log_amz.
 # ══════════════════════════════════════════════════════════════════════════════
+
+# Domínios Amazon que precisam de desencurtamento
+_AMZ_ENCURTADOS = frozenset({
+    "amzlink.to", "amzn.to", "a.co", "amzn.com",
+})
 
 _AMZ_LIXO = frozenset({
     "ascsubtag","btn_ref","ref_","ref","smid","sprefix","spla",
@@ -410,46 +421,50 @@ _AMZ_LIXO = frozenset({
     "lp_context_asin","redirectasin","redirectmerchantid",
     "redirectasincustomeraction","ds","rnid","sr",
 })
-# Parâmetros FUNCIONAIS que devem ser mantidos em buscas/eventos
-_AMZ_MANTER = frozenset({"tag","keywords","node","k","i","rh","n","field-keywords"})
-
-# Domínios que precisam de desencurtamento
-_AMZ_ENCURTADOS = frozenset({
-    "amzlink.to","amzn.to","a.co","amzn.com",
+_AMZ_MANTER = frozenset({
+    "tag","keywords","node","k","i","rh","n","field-keywords",
 })
+
 
 def _limpar_url_amazon(url: str) -> str:
     """
-    Reconstrói a URL Amazon por tipo.
-    - Produto /dp/ASIN        → amazon.com.br/dp/ASIN?tag=
-    - /gp/product/ASIN        → amazon.com.br/dp/ASIN?tag=
-    - /promotion/psp/         → preserva path + tag
-    - Busca /s? /b? /deals    → preserva path + params funcionais + tag
-    - Genérico                → remove lixo + tag
+    Reconstrói URL Amazon do zero por tipo.
+    Produto   → amazon.com.br/dp/ASIN?tag=
+    Campanha  → path + tag
+    Busca     → path + params funcionais + tag
     """
     p    = urlparse(url)
     path = p.path
 
-    # Produto direto
+    # /dp/ASIN
     m = re.match(r'(/dp/[A-Z0-9]{10})', path)
     if m:
         return urlunparse(p._replace(
-            scheme="https", netloc="www.amazon.com.br",
-            path=m.group(1), query=f"tag={_AMZ_TAG}", fragment=""))
+            scheme="https",
+            netloc="www.amazon.com.br",
+            path=m.group(1),
+            query=f"tag={_AMZ_TAG}",
+            fragment=""))
 
+    # /gp/product/ASIN → normaliza para /dp/ASIN
     m = re.match(r'/gp/product/([A-Z0-9]{10})', path)
     if m:
         return urlunparse(p._replace(
-            scheme="https", netloc="www.amazon.com.br",
-            path=f"/dp/{m.group(1)}", query=f"tag={_AMZ_TAG}", fragment=""))
+            scheme="https",
+            netloc="www.amazon.com.br",
+            path=f"/dp/{m.group(1)}",
+            query=f"tag={_AMZ_TAG}",
+            fragment=""))
 
-    # Campanha
+    # Campanha /promotion/psp/
     if "/promotion/psp/" in path:
         return urlunparse(p._replace(
-            query=f"tag={_AMZ_TAG}", fragment=""))
+            query=f"tag={_AMZ_TAG}",
+            fragment=""))
 
-    # Busca/evento — mantém só params funcionais
-    params = {}
+    # Busca, eventos, landing pages
+    # Mantém params funcionais, remove rastreamento
+    params: dict = {}
     for k, v in parse_qs(p.query, keep_blank_values=False).items():
         kl = k.lower()
         if kl in _AMZ_MANTER:
@@ -459,17 +474,26 @@ def _limpar_url_amazon(url: str) -> str:
     params["tag"] = _AMZ_TAG
 
     return urlunparse(p._replace(
-        query=urlencode(params), fragment=""))
+        query=urlencode(params),
+        fragment=""))
 
 
-async def motor_amazon(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
-    """Motor exclusivo Amazon. Debug isolado com log_amz."""
-    nl = _netloc(url)
+async def motor_amazon(url: str,
+                        sessao: aiohttp.ClientSession) -> Optional[str]:
+    """
+    Motor exclusivo Amazon.
+    Sempre desencurta antes de limpar — garante URL real.
+    Suporta amzlink.to, amzn.to, a.co e URL direta.
+    """
     log_amz.debug(f"▶ IN: {url[:80]}")
 
-    # Sempre desencurta — garante URL final real antes de limpar
-    async with _SEM_HTTP:
-        exp = await desencurtar(url, sessao)
+    # Sempre desencurta — captura amzlink.to e redirects silenciosos
+    try:
+        async with _SEM_HTTP:
+            exp = await desencurtar(url, sessao)
+    except Exception as e:
+        log_amz.error(f"❌ Desencurtar falhou: {e} | {url[:60]}")
+        return None
 
     log_amz.debug(f"  EXP: {exp[:80]}")
 
@@ -533,12 +557,16 @@ async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 9 ▸ MOTOR MAGALU — ISOLADO
+# MÓDULO 9 ▸ MOTOR MAGALU — CUTTLY COM FALLBACK + EDIÇÃO
+#
+# Se Cuttly falhar:
+#   1. Envia com link longo (já afiliado) imediatamente
+#   2. Continua tentando encurtar em background
+#   3. Quando encurtar, edita a mensagem com link curto
+#
 # Troca MAGALU_SLUG em qualquer formato:
-#   /magazineXXX/produto/p/ID/   → /magazineleo12/produto/p/ID/
-#   /magazineXXX/lojista/LOJA/   → /magazineleo12/lojista/LOJA/
-#   /magazineXXX/                → /magazineleo12/
-# Path NUNCA zerado. Apenas IDs substituídos.
+#   /magazineXXX/produto/...  → /magazineleo12/produto/...
+#   /magazineXXX/lojista/...  → /magazineleo12/lojista/...
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _validar_magalu(url: str) -> bool:
@@ -556,32 +584,32 @@ def _validar_magalu(url: str) -> bool:
 
 def _afiliar_magalu(url: str) -> str:
     """
-    1. Substitui qualquer /magazineXXX/ pelo slug correto.
-    2. Injeta IDs de afiliado. Preserva 100% do restante do path.
+    Substitui slug do afiliado em qualquer formato.
+    Preserva 100% do restante do path.
     """
     p    = urlparse(url)
     path = p.path
-    host = p.netloc.lower()
 
-    # Troca slug em magazinevoce.com.br e magazineluiza.com.br
-    # Captura /magazineQUALQUERCOISA/ e substitui pelo slug configurado
+    # Troca /magazineQUALQUERCOISA/ pelo slug configurado
     path = re.sub(
-        r'^(/magazine)[^/]+(?=/|$)',
+        r'^(/magazine)[^/]+',
         rf'\1{_MGL_SLUG}',
-        path
+        path,
     )
-    log_mgl.debug(f"  Path após slug: {path}")
+    log_mgl.debug(f"  Slug: {path[:60]}")
 
-    # Limpa params antigos de afiliado
     params = {k: v[0] for k, v in
               parse_qs(p.query, keep_blank_values=True).items()}
-    for k in ["tag","partnerid","promoterid","afforcedeeplink",
-               "deeplinkvalue","isretargeting","partner_id","promoter_id",
-               "utm_source","utm_medium","utm_campaign","pid","c",
-               "af_force_deeplink","deep_link_value"]:
+
+    # Remove params antigos de afiliado
+    for k in [
+        "tag","partnerid","promoterid","afforcedeeplink",
+        "deeplinkvalue","isretargeting","partner_id","promoter_id",
+        "utm_source","utm_medium","utm_campaign","pid","c",
+        "af_force_deeplink","deep_link_value",
+    ]:
         params.pop(k, None)
 
-    # Injeta IDs corretos
     params.update({
         "partner_id":        _MGL_PARTNER,
         "promoter_id":       _MGL_PROMOTER,
@@ -603,7 +631,12 @@ def _afiliar_magalu(url: str) -> str:
         path=path, query=urlencode(params), fragment=""))
 
 
-async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
+async def _cuttly_tentar(url: str,
+                          sessao: aiohttp.ClientSession) -> Optional[str]:
+    """
+    Tenta encurtar via Cuttly.
+    Retorna None se falhar — sem lançar exceção.
+    """
     api = (f"https://cutt.ly/api/api.php"
            f"?key={_CUTTLY_KEY}&short={quote(url, safe='')}")
     for t in range(1, 4):
@@ -613,31 +646,86 @@ async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
                     api, timeout=aiohttp.ClientTimeout(total=15)
                 ) as r:
                     if r.status != 200:
+                        log_mgl.warning(f"  ⚠️ Cuttly HTTP {r.status} t={t}/3")
                         await asyncio.sleep(2 ** t)
                         continue
                     data   = await r.json(content_type=None)
                     status = data.get("url", {}).get("status")
                     if status in (7, 2):
                         short = data["url"].get("shortLink")
-                        log_mgl.debug(f"  ✂️ Cuttly t={t}: {short}")
+                        log_mgl.info(f"  ✂️ Cuttly OK t={t}: {short}")
                         return short
-                    log_mgl.warning(f"  ⚠️ Cuttly status={status} t={t}/3")
+                    log_mgl.warning(
+                        f"  ⚠️ Cuttly status={status} t={t}/3")
                     await asyncio.sleep(2 ** t)
+        except asyncio.TimeoutError:
+            log_mgl.warning(f"  ⏱ Cuttly timeout t={t}/3")
+            await asyncio.sleep(2 ** t)
         except Exception as e:
             log_mgl.error(f"  ❌ Cuttly t={t}: {e}")
             await asyncio.sleep(2 ** t)
     return None
 
 
-async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
-    """Motor exclusivo Magalu. Debug isolado com log_mgl."""
+async def _cuttly_background(url_longo: str, msg_id_destino: int):
+    """
+    Tenta encurtar em background por até 5 minutos.
+    Quando conseguir, edita a mensagem no canal destino.
+    """
+    log_mgl.info(f"  🔄 Background encurtador | msg={msg_id_destino}")
+
+    conn = aiohttp.TCPConnector(ssl=False)
+    async with aiohttp.ClientSession(connector=conn) as sessao:
+        for tentativa in range(10):    # tenta por ~5 min
+            await asyncio.sleep(30)   # espera 30s entre tentativas
+            try:
+                short = await _cuttly_tentar(url_longo, sessao)
+                if short:
+                    # Edita a mensagem trocando link longo pelo encurtado
+                    loop  = asyncio.get_event_loop()
+                    mapa  = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+                    id_dest = mapa.get(str(msg_id_destino))
+                    if id_dest:
+                        try:
+                            msg_atual = await client.get_messages(
+                                GRUPO_DESTINO, ids=id_dest)
+                            if msg_atual and msg_atual.text:
+                                novo_texto = msg_atual.text.replace(
+                                    url_longo, short)
+                                if novo_texto != msg_atual.text:
+                                    await client.edit_message(
+                                        GRUPO_DESTINO, id_dest, novo_texto)
+                                    log_mgl.info(
+                                        f"  ✅ Editado com link curto | "
+                                        f"msg={id_dest}")
+                        except Exception as e:
+                            log_mgl.warning(f"  ⚠️ Edição background: {e}")
+                    return
+            except Exception as e:
+                log_mgl.warning(
+                    f"  ⚠️ Background t={tentativa}/10: {e}")
+
+    log_mgl.warning(f"  ❌ Background encurtador esgotou tentativas")
+
+
+async def motor_magalu(url: str,
+                        sessao: aiohttp.ClientSession) -> Optional[str]:
+    """
+    Motor exclusivo Magalu.
+    Se Cuttly falhar: retorna link longo afiliado e agenda background.
+    Debug isolado com log_mgl.
+    """
     log_mgl.debug(f"▶ IN: {url[:80]}")
 
     nl = _netloc(url)
     if "maga.lu" in nl or nl in _ENCURTADORES or classificar(url) == "expandir":
-        async with _SEM_HTTP:
-            url = await desencurtar(url, sessao)
-        log_mgl.debug(f"  EXP: {url[:80]}")
+        try:
+            async with _SEM_HTTP:
+                url = await desencurtar(url, sessao)
+            log_mgl.debug(f"  EXP: {url[:80]}")
+        except Exception as e:
+            log_mgl.error(f"  ❌ Desencurtar: {e}")
+            return None
 
     if classificar(url) != "magalu":
         log_mgl.warning(f"  ⚠️ Não é Magalu: {url[:70]}")
@@ -649,13 +737,27 @@ async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
     afiliado = _afiliar_magalu(url)
     log_mgl.debug(f"  AFL: {afiliado[:80]}")
 
-    final = await _cuttly(afiliado, sessao)
-    if not final:
-        log_mgl.error(f"  ❌ Cuttly falhou — descartado")
-        return None
+    # Tenta encurtar
+    short = await _cuttly_tentar(afiliado, sessao)
 
-    log_mgl.info(f"  ✅ OUT: {final}")
-    return final
+    if short:
+        # Cache o link encurtado
+        db_set_link(url, short, "magalu")
+        log_mgl.info(f"  ✅ OUT (curto): {short}")
+        return short
+
+    # Cuttly falhou → retorna link longo e agenda background
+    log_mgl.warning(f"  ⚠️ Cuttly falhou — enviando link longo, editará depois")
+    # Retorna o link longo afiliado para envio imediato
+    # O pipeline vai salvar o msg_id e o background vai editar
+    return afiliado
+
+
+# Função chamada pelo pipeline após envio bem-sucedido com link longo
+async def _agendar_edicao_magalu(url_longo: str, msg_id_origem: int):
+    """Agenda a substituição do link longo pelo encurtado após envio."""
+    asyncio.create_task(
+        _cuttly_background(url_longo, msg_id_origem))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1058,25 +1160,21 @@ def renderizar(texto: str, mapa_links: Dict[str, str],
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 15 ▸ DEDUPLICAÇÃO ELITE — MULTI-GRUPOS
+# MÓDULO 15 ▸ DEDUPLICAÇÃO — BLOQUEIA SÓ PRODUTO IGUAL
 #
-# Amazon  → ASIN como chave primária (extrai antes de comparar)
-# Magalu  → ID do produto no path
-# Shopee  → cupom + hash semântico (link não é confiável)
+# REGRA CENTRAL:
+#   Produto diferente → SEMPRE envia, mesmo que chegue ao mesmo tempo
+#   Produto igual     → bloqueia se já enviado na janela
 #
-# JANELAS:
-#   JANELA_RAPIDA  = 600s  (10 min)  → anti-flood imediato entre grupos
-#   TTL_DEDUPE     = 24h             → memória semântica histórica
-#
-# REATIVAÇÃO: "voltou", "ativo", "liberado" → sempre reenvia
-#
-# DECISÃO BASEADA EM: cupom + ASIN/ID + contexto semântico
-# NUNCA em: link encurtado, emoji, formatação, encurtador
+# Amazon  → chave = ASIN
+# Magalu  → chave = ID do produto
+# Shopee  → chave = cupom + hash semântico
+# Outros  → chave = alma do texto
 # ══════════════════════════════════════════════════════════════════════════════
 
-_SIM_FORTE   = 0.88   # alma muito similar → bloqueia
-_SIM_MEDIO   = 0.78   # com cupom igual → bloqueia
-_SIM_EVENTO  = 0.60   # evento + cupom → bloqueia 24h
+_SIM_FORTE  = 0.88
+_SIM_MEDIO  = 0.78
+_SIM_EVENTO = 0.60
 
 _RUIDO_NORM = frozenset({
     "promo","promocao","promoção","oferta","desconto","cupom","corre",
@@ -1095,22 +1193,19 @@ _FALSO_CUPOM = frozenset({
     "CLIQUE","ACESSE","CONFIRA","HOJE","AGORA","PROMO","OFF",
     "BLACK","SUPER","MEGA","ULTRA","VIP","NOVO","NOVA","NUM","PRECO","PCT",
     "PS5","PS4","XBOX","USB","ATX","RGB","LED","HD","SSD","RAM",
-    "APP","BOT","API","URL","HTTP","HTTPS",
+    "APP","BOT","API","URL",
 })
-
-# ── Extratores ────────────────────────────────────────────────────────────────
 
 def _rm_ac(t: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", t)
                    if unicodedata.category(c) != "Mn")
 
 def _extrair_todos_cupons(texto: str) -> frozenset:
-    return frozenset(re.findall(r'\b([A-Z][A-Z0-9_-]{3,19})\b', texto)
-                     ) - _FALSO_CUPOM
+    return frozenset(re.findall(
+        r'\b([A-Z][A-Z0-9_-]{3,19})\b', texto)) - _FALSO_CUPOM
 
 def _extrair_cupom(texto: str) -> str:
-    cupons = _extrair_todos_cupons(texto)
-    return next(iter(sorted(cupons)), "")
+    return next(iter(sorted(_extrair_todos_cupons(texto))), "")
 
 def _extrair_valor(texto: str) -> str:
     m = _KW_PRECO.search(texto)
@@ -1118,23 +1213,20 @@ def _extrair_valor(texto: str) -> str:
     return re.sub(r'[R$\s.,]', '', m.group(0))
 
 def _extrair_asin(texto: str, mapa: dict) -> str:
-    """Extrai ASIN de URLs Amazon convertidas ou do texto."""
-    for url in list(mapa.values()) + [texto]:
-        m = re.search(r'/dp/([A-Z0-9]{10})', url)
-        if m: return m.group(1)
-        m = re.search(r'/gp/product/([A-Z0-9]{10})', url)
-        if m: return m.group(1)
+    for url in list(mapa.values()) + re.findall(r'https?://\S+', texto):
+        for pat in [r'/dp/([A-Z0-9]{10})',
+                    r'/gp/product/([A-Z0-9]{10})']:
+            m = re.search(pat, url)
+            if m: return m.group(1)
     return ""
 
 def _extrair_id_magalu(texto: str, mapa: dict) -> str:
-    """Extrai ID do produto Magalu do path."""
-    for url in list(mapa.values()) + [texto]:
+    for url in list(mapa.values()) + re.findall(r'https?://\S+', texto):
         m = re.search(r'/p/([a-z0-9]{6,})/?', url, re.I)
         if m: return m.group(1)
     return ""
 
 def _extrair_sku(mapa: dict) -> str:
-    """Compatibilidade — retorna identificador do produto."""
     asin = _extrair_asin("", mapa)
     if asin: return f"amz_{asin}"
     id_m = _extrair_id_magalu("", mapa)
@@ -1145,10 +1237,6 @@ def _extrair_sku(mapa: dict) -> str:
     return ""
 
 def _normalizar_alma(texto: str) -> str:
-    """
-    Extrai essência semântica. Remove tudo que é ruído visual.
-    Resultado: palavras-chave ordenadas — base do hash semântico.
-    """
     t = _rm_ac(texto.lower())
     t = re.sub(r'https?://\S+', ' ', t)
     t = _RE_EMJ_STRIP.sub(' ', t)
@@ -1158,7 +1246,8 @@ def _normalizar_alma(texto: str) -> str:
     t = re.sub(r'[^\w\s]', ' ', t)
     t = re.sub(r'\s+', ' ', t).strip()
     return ' '.join(sorted(
-        w for w in t.split() if w not in _RUIDO_NORM and len(w) > 1))
+        w for w in t.split()
+        if w not in _RUIDO_NORM and len(w) > 1))
 
 def _detectar_campanha(texto: str) -> str:
     tl     = texto.lower()
@@ -1172,155 +1261,156 @@ def _detectar_campanha(texto: str) -> str:
     return "|".join(sorted(tokens)) if tokens else "geral"
 
 def _eh_reativacao(texto: str) -> bool:
-    """Reativação legítima — sempre reenvia."""
     return bool(re.search(
         r'\b(?:voltou|voltando|ativo\s+novamente|liberado\s+novamente|'
         r'normalizou|renovado|estoque\s+renovado|regularizou|'
-        r'ainda\s+ativo|oferta\s+ativa|reativado|voltei)\b',
+        r'ainda\s+ativo|oferta\s+ativa|reativado)\b',
         texto, re.I))
 
-def _gerar_fp_amazon(asin: str, plat: str) -> str:
-    """Amazon: fingerprint baseado no ASIN."""
+# Fingerprints específicos por plataforma
+def _fp_amazon(asin: str) -> str:
     return hashlib.sha256(f"amz|{asin}".encode()).hexdigest()
 
-def _gerar_fp_magalu(id_prod: str, plat: str) -> str:
-    """Magalu: fingerprint baseado no ID do produto."""
+def _fp_magalu(id_prod: str) -> str:
     return hashlib.sha256(f"mgl|{id_prod}".encode()).hexdigest()
 
-def _gerar_fp_shopee(cupons: frozenset, alma: str) -> str:
-    """Shopee: fingerprint semântico (cupom + alma do texto)."""
-    raw = f"shp|{'|'.join(sorted(cupons))}|{alma}"
-    return hashlib.sha256(raw.encode()).hexdigest()
+def _fp_shopee(cupons: frozenset, alma: str) -> str:
+    return hashlib.sha256(
+        f"shp|{'|'.join(sorted(cupons))}|{alma}".encode()).hexdigest()
 
-def _gerar_fp_generico(plat: str, cupons: frozenset, alma: str) -> str:
-    raw = f"{plat}|{'|'.join(sorted(cupons))}|{alma}"
-    return hashlib.sha256(raw.encode()).hexdigest()
+def _fp_generico(plat: str, cupons: frozenset, alma: str) -> str:
+    return hashlib.sha256(
+        f"{plat}|{'|'.join(sorted(cupons))}|{alma}".encode()).hexdigest()
 
-# ── Decisor principal ─────────────────────────────────────────────────────────
 
 def deve_enviar(plat: str, cupom: str, texto: str,
                 mapa_links: dict = None) -> bool:
     """
-    Motor de deduplicação elite para múltiplos grupos.
-
-    Amazon  → chave = ASIN
-    Magalu  → chave = ID do produto
-    Shopee  → chave = cupom + hash semântico
-    Outros  → chave = cupom + alma
-
-    Janela rápida (10 min): anti-flood entre grupos simultâneos.
-    Janela histórica (24h): memória semântica para repostes tardios.
-    Reativação ("voltou", "ativo") → sempre reenvia.
+    Bloqueia SOMENTE produto igual na janela temporal.
+    Produtos diferentes do mesmo grupo → SEMPRE passa.
     """
     mapa_links = mapa_links or {}
 
-    # Reativação legítima → passa sempre
+    # Reativação → sempre reenvia
     if _eh_reativacao(texto):
-        log_dedup.info("✅ Reativação detectada — reenvia")
+        log_dedup.info("✅ Reativação — reenvia")
         _registrar_dedupe(plat, cupom, texto, mapa_links)
         return True
 
-    cupons  = _extrair_todos_cupons(texto)
-    alma    = _normalizar_alma(texto)
+    cupons   = _extrair_todos_cupons(texto)
+    alma     = _normalizar_alma(texto)
     campanha = _detectar_campanha(texto)
-    eh_evt  = bool(_KW_EVENTO.search(texto))
-    asin    = _extrair_asin(texto, mapa_links)
-    id_mgl  = _extrair_id_magalu(texto, mapa_links)
+    eh_evt   = bool(_KW_EVENTO.search(texto))
+    asin     = _extrair_asin(texto, mapa_links)
+    id_mgl   = _extrair_id_magalu(texto, mapa_links)
 
-    # ── AMAZON: dedupe por ASIN ───────────────────────────────────────────
-    if plat == "amazon" and asin:
-        fp = _gerar_fp_amazon(asin, plat)
-        if db_get_dedupe(fp):
-            log_dedup.info(f"🔁 [AMZ-ASIN] Bloqueado | ASIN={asin}")
-            return False
-
-        # Janela rápida: mesmo ASIN em 10 min
-        entradas = db_buscar_dedupe_por_asin(asin, plat)
-        rapidas  = [e for e in entradas
-                    if time.time() - e["ts"] < JANELA_RAPIDA]
-        if rapidas:
-            log_dedup.info(
-                f"🔁 [AMZ-ASIN-RAPIDA] ASIN={asin} | "
-                f"{len(rapidas)} grupos nos últimos 10min")
-            return False
-
-        _registrar_dedupe(plat, cupom, texto, mapa_links)
-        log_dedup.debug(f"✅ Amazon nova | ASIN={asin}")
-        return True
-
-    # ── MAGALU: dedupe por ID do produto ──────────────────────────────────
-    if plat == "magalu" and id_mgl:
-        fp = _gerar_fp_magalu(id_mgl, plat)
-        if db_get_dedupe(fp):
-            log_dedup.info(f"🔁 [MGL-ID] Bloqueado | ID={id_mgl}")
-            return False
-
-        entradas = db_buscar_dedupe_por_id(id_mgl, plat)
-        rapidas  = [e for e in entradas
-                    if time.time() - e["ts"] < JANELA_RAPIDA]
-        if rapidas:
-            log_dedup.info(
-                f"🔁 [MGL-ID-RAPIDA] ID={id_mgl} | "
-                f"{len(rapidas)} grupos nos últimos 10min")
-            return False
-
-        _registrar_dedupe(plat, cupom, texto, mapa_links)
-        log_dedup.debug(f"✅ Magalu nova | ID={id_mgl}")
-        return True
-
-    # ── SHOPEE: dedupe semântico ──────────────────────────────────────────
-    if plat == "shopee":
-        # Camada 1: cupom exato
-        if cupons:
-            fp_cup = _gerar_fp_shopee(cupons, "")
-            if db_get_dedupe(fp_cup):
+    # ── AMAZON: bloqueia por ASIN ─────────────────────────────────────────
+    if plat == "amazon":
+        if asin:
+            fp = _fp_amazon(asin)
+            # Checa janela rápida (10 min)
+            entradas = db_buscar_dedupe_por_asin(asin, plat)
+            rapidas  = [e for e in entradas
+                        if time.time() - e["ts"] < JANELA_RAPIDA]
+            if rapidas:
                 log_dedup.info(
-                    f"🔁 [SHP-CUPOM] Bloqueado | cupons={sorted(cupons)}")
+                    f"🔁 [AMZ] ASIN={asin} já enviado "
+                    f"({len(rapidas)}x nos últimos 10min)")
+                return False
+            # Checa histórico 24h
+            if db_get_dedupe(fp):
+                log_dedup.info(f"🔁 [AMZ-24H] ASIN={asin}")
+                return False
+        else:
+            # Sem ASIN: usa alma como fallback
+            fp = _fp_generico(plat, cupons, alma)
+            if db_get_dedupe(fp):
+                log_dedup.info(f"🔁 [AMZ-ALMA] sem ASIN, alma repetida")
                 return False
 
-        # Camada 2: hash semântico completo
-        fp_sem = _gerar_fp_shopee(cupons, alma)
+        _registrar_dedupe(plat, cupom, texto, mapa_links)
+        log_dedup.debug(f"✅ Amazon nova | ASIN={asin or 'N/A'}")
+        return True
+
+    # ── MAGALU: bloqueia por ID do produto ────────────────────────────────
+    if plat == "magalu":
+        if id_mgl:
+            entradas = db_buscar_dedupe_por_id(id_mgl, plat)
+            rapidas  = [e for e in entradas
+                        if time.time() - e["ts"] < JANELA_RAPIDA]
+            if rapidas:
+                log_dedup.info(
+                    f"🔁 [MGL] ID={id_mgl} já enviado "
+                    f"({len(rapidas)}x nos últimos 10min)")
+                return False
+            fp = _fp_magalu(id_mgl)
+            if db_get_dedupe(fp):
+                log_dedup.info(f"🔁 [MGL-24H] ID={id_mgl}")
+                return False
+        else:
+            fp = _fp_generico(plat, cupons, alma)
+            if db_get_dedupe(fp):
+                log_dedup.info(f"🔁 [MGL-ALMA] sem ID, alma repetida")
+                return False
+
+        _registrar_dedupe(plat, cupom, texto, mapa_links)
+        log_dedup.debug(f"✅ Magalu nova | ID={id_mgl or 'N/A'}")
+        return True
+
+    # ── SHOPEE: bloqueia por cupom + semântica ────────────────────────────
+    if plat == "shopee":
+        # Cupom exato → bloqueia direto
+        if cupons:
+            fp_cup = _fp_shopee(cupons, "")
+            if db_get_dedupe(fp_cup):
+                log_dedup.info(
+                    f"🔁 [SHP-CUPOM] cupons={sorted(cupons)}")
+                return False
+
+        # Hash semântico completo
+        fp_sem = _fp_shopee(cupons, alma)
         if db_get_dedupe(fp_sem):
-            log_dedup.info(f"🔁 [SHP-SEM] Bloqueado")
+            log_dedup.info(f"🔁 [SHP-SEM]")
             return False
 
-        # Camada 3: janela rápida — alma similar
+        # Janela rápida — alma similar
         rapidas = db_buscar_dedupe_janela_rapida(plat)
-        for entrada in rapidas:
-            cupons_c    = frozenset(entrada.get("cupons", []))
+        for e in rapidas:
+            cupons_c    = frozenset(e.get("cupons", []))
             cupom_igual = bool(cupons & cupons_c) if cupons else False
-            alma_c      = entrada.get("alma", "")
-            sim         = SequenceMatcher(None, alma, alma_c).ratio() if alma_c else 0.0
+            alma_c      = e.get("alma", "")
+            sim         = SequenceMatcher(
+                None, alma, alma_c).ratio() if alma_c else 0.0
 
             if cupom_igual and sim >= _SIM_MEDIO:
                 log_dedup.info(
-                    f"🔁 [SHP-JANELA] cupom={cupons & cupons_c} sim={sim:.2f}")
+                    f"🔁 [SHP-JANELA] cupom={cupons & cupons_c} "
+                    f"sim={sim:.2f}")
                 return False
-
             if sim >= _SIM_FORTE:
-                log_dedup.info(f"🔁 [SHP-SIM] alma={sim:.2f}")
+                log_dedup.info(f"🔁 [SHP-SIM] sim={sim:.2f}")
                 return False
-
             if eh_evt and cupom_igual:
-                log_dedup.info(f"🔁 [SHP-EVT] evento repetido 24h")
+                log_dedup.info(f"🔁 [SHP-EVT]")
                 return False
 
         _registrar_dedupe(plat, cupom, texto, mapa_links)
         log_dedup.debug(f"✅ Shopee nova | cupons={sorted(cupons)}")
         return True
 
-    # ── GENÉRICO (outras plataformas) ─────────────────────────────────────
-    fp = _gerar_fp_generico(plat, cupons, alma)
+    # ── GENÉRICO ──────────────────────────────────────────────────────────
+    fp = _fp_generico(plat, cupons, alma)
     if db_get_dedupe(fp):
-        log_dedup.info(f"🔁 [GEN] Bloqueado | plat={plat}")
+        log_dedup.info(f"🔁 [GEN] plat={plat}")
         return False
 
     rapidas = db_buscar_dedupe_janela_rapida(plat)
-    for entrada in rapidas:
-        cupons_c    = frozenset(entrada.get("cupons", []))
+    for e in rapidas:
+        cupons_c    = frozenset(e.get("cupons", []))
         cupom_igual = bool(cupons & cupons_c) if cupons else False
-        alma_c      = entrada.get("alma", "")
-        sim         = SequenceMatcher(None, alma, alma_c).ratio() if alma_c else 0.0
+        alma_c      = e.get("alma", "")
+        sim         = SequenceMatcher(
+            None, alma, alma_c).ratio() if alma_c else 0.0
         if cupom_igual and sim >= _SIM_MEDIO:
             log_dedup.info(f"🔁 [GEN-CUPOM] sim={sim:.2f}")
             return False
@@ -1335,27 +1425,25 @@ def deve_enviar(plat: str, cupom: str, texto: str,
 
 def _registrar_dedupe(plat: str, cupom: str, texto: str,
                        mapa_links: dict = None):
-    """Salva no banco SQLite — base da memória inteligente."""
     mapa_links = mapa_links or {}
-    cupons  = _extrair_todos_cupons(texto)
-    alma    = _normalizar_alma(texto)
-    camp    = _detectar_campanha(texto)
-    asin    = _extrair_asin(texto, mapa_links)
-    id_mgl  = _extrair_id_magalu(texto, mapa_links)
+    cupons     = _extrair_todos_cupons(texto)
+    alma       = _normalizar_alma(texto)
+    camp       = _detectar_campanha(texto)
+    asin       = _extrair_asin(texto, mapa_links)
+    id_mgl     = _extrair_id_magalu(texto, mapa_links)
 
-    # Gera fingerprints específicos por plataforma
     if plat == "amazon" and asin:
-        fp = _gerar_fp_amazon(asin, plat)
+        fp = _fp_amazon(asin)
     elif plat == "magalu" and id_mgl:
-        fp = _gerar_fp_magalu(id_mgl, plat)
+        fp = _fp_magalu(id_mgl)
     elif plat == "shopee":
-        fp = _gerar_fp_shopee(cupons, alma)
+        fp = _fp_shopee(cupons, alma)
     else:
-        fp = _gerar_fp_generico(plat, cupons, alma)
+        fp = _fp_generico(plat, cupons, alma)
 
     db_set_dedupe(fp, plat, list(cupons), alma, camp, asin, id_mgl)
 
-    # Compatibilidade com cache JSON legado
+    # JSON legado
     try:
         cache = ler_cache()
         cache[fp] = {
@@ -1368,36 +1456,33 @@ def _registrar_dedupe(plat: str, cupom: str, texto: str,
         pass
 
 
+
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 16 ▸ IMAGEM — preparar_imagem + buscar_imagem
-# Corrige: MessageMediaPhoto não pode ser usado com await direto
-# Telethon requer client.download_media() para baixar mídia
+# MÓDULO 16 ▸ preparar_imagem + buscar_imagem
+# Corrige: MessageMediaPhoto não aceita await direto
+# usa client.download_media() corretamente
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def preparar_imagem(fonte, eh_midia_telegram: bool) -> tuple:
     """
     Retorna (BytesIO | path_string | None, None).
 
-    Se for mídia do Telegram (MessageMediaPhoto, MessageMediaDocument):
-        → usa client.download_media() para baixar para BytesIO
-        → NUNCA faz await direto no objeto de mídia
-
-    Se for URL (string http...):
-        → baixa os bytes para BytesIO em memória
-
-    Se for caminho de arquivo local:
-        → retorna o path diretamente
+    Telegram media → client.download_media(fonte, file=BytesIO())
+    URL http      → baixa bytes para BytesIO
+    Arquivo local → retorna path direto
     """
     if eh_midia_telegram:
         try:
             buf = io.BytesIO()
+            # download_media é o método correto do Telethon para qualquer
+            # tipo de mídia: MessageMediaPhoto, MessageMediaDocument, etc.
             await client.download_media(fonte, file=buf)
             buf.seek(0)
             buf.name = "imagem.jpg"
-            log_img.debug("✅ Mídia Telegram baixada para BytesIO")
+            log_img.debug(f"✅ Mídia Telegram baixada | {buf.getbuffer().nbytes} bytes")
             return buf, None
         except Exception as e:
-            log_img.warning(f"⚠️ download_media falhou: {e}")
+            log_img.warning(f"⚠️ download_media: {e}")
             return None, None
 
     if isinstance(fonte, str):
@@ -1414,27 +1499,28 @@ async def preparar_imagem(fonte, eh_midia_telegram: bool) -> tuple:
                             data = await r.read()
                             buf  = io.BytesIO(data)
                             buf.name = "produto.jpg"
-                            log_img.debug(f"✅ Imagem URL baixada: {len(data)} bytes")
+                            log_img.debug(
+                                f"✅ Imagem URL | {len(data)} bytes | {fonte[:60]}")
                             return buf, None
-                        log_img.warning(f"⚠️ HTTP {r.status} ao baixar imagem")
+                        log_img.warning(f"⚠️ HTTP {r.status}: {fonte[:60]}")
             except Exception as e:
-                log_img.warning(f"⚠️ Download URL: {e}")
+                log_img.warning(f"⚠️ Download URL: {e} | {fonte[:60]}")
             return None, None
 
-        # Arquivo local
         if os.path.exists(fonte):
             return fonte, None
-        log_img.warning(f"⚠️ Arquivo não encontrado: {fonte}")
+        log_img.warning(f"⚠️ Arquivo não existe: {fonte}")
         return None, None
 
+    log_img.warning(f"⚠️ Fonte inválida: {type(fonte)}")
     return None, None
 
 
 async def buscar_imagem(url: str) -> Optional[str]:
     """
-    Busca a melhor URL de imagem do produto.
-    Retorna a URL — preparar_imagem() faz o download depois.
-    Prioridade: og:image > JSON-LD > maior <img> com keywords de qualidade.
+    Busca melhor URL de imagem do produto.
+    og:image > JSON-LD > maior <img>.
+    Remove parâmetros de resize para pegar resolução máxima.
     """
     hdrs = {
         "User-Agent": random.choice(USER_AGENTS),
@@ -1454,7 +1540,7 @@ async def buscar_imagem(url: str) -> Optional[str]:
                     html = await r.text(errors="ignore")
                     soup = BeautifulSoup(html, "html.parser")
 
-                    # og:image — remove parâmetros de resize para pegar original
+                    # og:image — remove resize para resolução máxima
                     for attr in [
                         {"property": "og:image"},
                         {"property": "og:image:secure_url"},
@@ -1463,16 +1549,14 @@ async def buscar_imagem(url: str) -> Optional[str]:
                         tag = soup.find("meta", attrs=attr)
                         if tag and tag.get("content", "").startswith("http"):
                             img_url = tag["content"]
-                            # Remove resize params → pega resolução máxima
                             img_url = re.sub(
-                                r'[?&](width|height|w|h|size|resize|fit|'
-                                r'quality|q|maxwidth|maxheight)=[^&]+',
-                                '', img_url)
-                            img_url = img_url.rstrip('?&')
+                                r'[?&](width|height|w|h|size|resize|'
+                                r'fit|quality|q|maxwidth|maxheight)=[^&]+',
+                                '', img_url).rstrip('?&')
                             log_img.info(f"✅ og:image t={t}: {img_url[:70]}")
                             return img_url
 
-                    # JSON-LD schema.org
+                    # JSON-LD
                     for scr in soup.find_all("script",
                                               type="application/ld+json"):
                         try:
@@ -1491,7 +1575,7 @@ async def buscar_imagem(url: str) -> Optional[str]:
                         except Exception:
                             pass
 
-                    # Maior <img> com keywords de qualidade
+                    # Maior <img>
                     melhor_src  = None
                     melhor_area = 0
                     for img_tag in soup.find_all("img", src=True):
@@ -1507,19 +1591,19 @@ async def buscar_imagem(url: str) -> Optional[str]:
                                 melhor_src  = src
                         except (ValueError, TypeError):
                             if any(x in src.lower() for x in [
-                                "product","produto","item","image","foto",
-                                "_zoom","large","big","xl","hd","original",
+                                "product","produto","item","image",
+                                "foto","zoom","large","xl","hd","original",
                             ]):
                                 if not melhor_src:
                                     melhor_src = src
                     if melhor_src:
-                        log_img.info(f"✅ <img> best t={t}: {melhor_src[:70]}")
+                        log_img.info(f"✅ <img> t={t}: {melhor_src[:70]}")
                         return melhor_src
 
         except asyncio.TimeoutError:
             log_img.warning(f"⏱ Timeout t={t}/3: {url[:60]}")
         except Exception as e:
-            log_img.warning(f"⚠️ t={t}/3: {e}")
+            log_img.warning(f"⚠️ buscar_imagem t={t}/3: {e}")
         if t < 3:
             await asyncio.sleep(1.0)
 
@@ -2161,167 +2245,9 @@ def antisaturacao_ok(plat: str, sku: str):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 24 ▸ BUFFER ORCHESTRATOR + PIPELINE PRINCIPAL
+# MÓDULO 24 ▸ BLOCO INTERNO _pipeline — substitui só os blocos marcados
+# Cole esses trechos dentro de _pipeline no lugar dos blocos equivalentes
 # ══════════════════════════════════════════════════════════════════════════════
-
-_WORKERS_MAX = 4
-_FILA_MAX    = 200
-_COALESCE_MS = 800
-
-_buf:     List               = []
-_buf_lck  = asyncio.Lock()
-_buf_evt  = asyncio.Event()
-_w_ativos = 0
-_w_lck    = asyncio.Lock()
-_coal: Dict[str, float]     = {}
-
-_RE_TITULO_GEN = re.compile(
-    r'^\s*(?:cupons?\s+(?:shopee|amazon|magalu)|novos?\s+cupons?|'
-    r'links?\s+de\s+cupom)\s*$', re.I | re.M)
-
-def _prio(texto: str) -> int:
-    tl = texto.lower()
-    if "amazon" in tl: return 1
-    if "shopee" in tl: return 2
-    if "magalu" in tl: return 3
-    return 9
-
-def _fp_r(texto: str) -> str:
-    return hashlib.sha256(
-        re.sub(r'\s+', '', texto.lower())[:80].encode()
-    ).hexdigest()[:12]
-
-def _tem_contexto(texto: str) -> bool:
-    linhas = [l.strip() for l in texto.splitlines()
-              if l.strip() and not re.match(r'https?://', l.strip())]
-    if not linhas:
-        return False
-    total = " ".join(linhas)
-    for ind in [r'off',r'%',r'r\$',r'cupom',r'desconto',r'promoção',
-                r'oferta',r'grátis',r'evento',r'live',r'relâmpago',
-                r'flash',r'volta',r'normalizou',r'a\s+partir']:
-        if re.search(ind, total, re.I):
-            return True
-    return len(total) > 20
-
-async def _enfileirar(event, is_edit: bool):
-    texto = event.message.text or ""
-    if not texto.strip():
-        return
-    fp    = _fp_r(texto)
-    agora = time.monotonic()
-    async with _buf_lck:
-        if not is_edit and agora - _coal.get(fp, 0.0) < _COALESCE_MS / 1000:
-            return
-        _coal[fp] = agora
-        if len(_buf) >= _FILA_MAX:
-            log_sys.warning(f"⚠️ Fila cheia — descartando {event.message.id}")
-            return
-        heapq.heappush(_buf, (0 if is_edit else _prio(texto), agora, event, is_edit))
-    _buf_evt.set()
-
-async def _worker_loop():
-    global _w_ativos
-    while True:
-        await _buf_evt.wait()
-        while True:
-            item = None
-            async with _buf_lck:
-                if _buf:
-                    item = heapq.heappop(_buf)
-                else:
-                    _buf_evt.clear()
-                    break
-            if item is None:
-                break
-            prio, ts, event, is_edit = item
-            async with _w_lck:
-                if _w_ativos >= _WORKERS_MAX:
-                    async with _buf_lck:
-                        heapq.heappush(_buf, item)
-                        _buf_evt.set()
-                    await asyncio.sleep(0.2)
-                    break
-                _w_ativos += 1
-            try:
-                if time.monotonic() - ts > 60:
-                    continue
-                await _pipeline(event, is_edit)
-            except Exception as e:
-                log_sys.error(f"❌ Worker: {e}", exc_info=True)
-            finally:
-                async with _w_lck:
-                    _w_ativos -= 1
-
-async def _pipeline(event, is_edit: bool = False):
-    """
-    Pipeline único de decisão.
-    Analisa: cupom + texto + contexto semântico.
-    Ignora: link, emoji, preço, formatação.
-    """
-    msg_id = event.message.id
-    texto  = event.message.text or ""
-    chat   = await event.get_chat()
-    uname  = (chat.username or str(event.chat_id)).lower()
-
-    log_tg.info(
-        f"{'✏️' if is_edit else '📩'} @{uname} | id={msg_id} | "
-        f"{len(texto)}c | fila={len(_buf)} w={_w_ativos}")
-
-    if not texto.strip(): return
-
-    # Anti-loop
-    if not is_edit:
-        if await _foi_processado(msg_id): return
-    else:
-        loop   = asyncio.get_event_loop()
-        mapa_c = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-        if str(msg_id) not in mapa_c: return
-
-    # Filtro de texto
-    if texto_bloqueado(texto): return
-
-    # Limpeza
-    tc = limpar_ruido_textual(texto)
-
-    # Contexto mínimo
-    if not _tem_contexto(tc): return
-
-    # Extração + parser robusto
-    links_c, links_p = extrair_links(texto)
-    parsed           = parse_links_bulk(links_c)
-    diretos          = [r.url_limpa for r in parsed if r.plat != "expandir"]
-    expandir         = [r.url_limpa for r in parsed if r.plat == "expandir"]
-
-    if not diretos and not expandir and not links_p:
-        if "fadadoscupons" not in uname: return
-
-    # Conversão paralela
-    mapa, plat = await converter_links(diretos + expandir)
-    if links_c and not mapa and not links_p: return
-
-    # Extrai cupom e SKU — base da decisão
-    cup = _extrair_cupom(tc)
-    sku = next((f"{r.plat[:3]}_{r.sku}" for r in parsed if r.sku), ""
-               ) or _extrair_sku(mapa)
-
-    if not is_edit:
-        # Anti-saturação (só delay, nunca bloqueia)
-        delay_sat = await antisaturacao_gate(plat, tc)
-
-        # Dedup semântica — decisão baseada em cupom + texto + contexto
-        if not deve_enviar(plat, cup, tc):
-            return
-
-        # Scheduler
-        delay_sch = await scheduler_gate(plat, tc)
-        if delay_sch == -1.0:
-            log_sys.warning("⚠️ Limite/h — descartando")
-            return
-
-        total = delay_sch + delay_sat
-        if total > 0:
-            await asyncio.sleep(total)
 
     # ── Imagem ────────────────────────────────────────────────────────────
     media_orig = event.message.media
@@ -2329,53 +2255,45 @@ async def _pipeline(event, is_edit: bool = False):
     img        = None
     eh_cup     = _eh_cupom_texto(tc)
 
-    # 1. Prioridade máxima: imagem que veio na mensagem original
+    # 1. Imagem original da mensagem (máxima prioridade)
     if tem_img:
         try:
             img, _ = await preparar_imagem(media_orig, True)
             if img:
-                log_img.debug("✅ Imagem original da mensagem")
+                log_img.debug("✅ Imagem da mensagem original")
+            else:
+                log_img.warning("⚠️ preparar_imagem retornou None")
         except Exception as e:
             log_img.warning(f"⚠️ Imagem original: {e}")
             img = None
 
-    # 2. Sem imagem original → busca por contexto
+    # 2. Sem imagem → busca ou fallback
     if img is None:
         if eh_cup:
-            if plat == "shopee":
-                if os.path.exists(_IMG_SHP):
-                    img = _IMG_SHP
-                    log_img.debug("🟣 Fallback Shopee")
-
-            elif plat == "amazon":
-                if os.path.exists(_IMG_AMZ):
-                    img = _IMG_AMZ
-                    log_img.debug("🟠 Fallback Amazon cupom")
-
-            elif plat == "magalu":
-                if os.path.exists(_IMG_MGL):
-                    img = _IMG_MGL
-                    log_img.debug("🔵 Fallback Magalu")
-
+            # Cupom sem imagem → fallback exclusivo por plataforma
+            if plat == "shopee" and os.path.exists(_IMG_SHP):
+                img = _IMG_SHP
+                log_img.debug("🟣 Fallback Shopee")
+            elif plat == "amazon" and os.path.exists(_IMG_AMZ):
+                # Amazon: _IMG_AMZ SOMENTE para cupom Amazon
+                img = _IMG_AMZ
+                log_img.debug("🟠 Fallback Amazon cupom")
+            elif plat == "magalu" and os.path.exists(_IMG_MGL):
+                img = _IMG_MGL
+                log_img.debug("🔵 Fallback Magalu")
         elif mapa:
-            img_url = await buscar_imagem(list(mapa.values())[0])
-            if img_url:
-                try:
+            # Produto sem imagem → busca na página do produto
+            try:
+                img_url = await buscar_imagem(list(mapa.values())[0])
+                if img_url:
                     img, _ = await preparar_imagem(img_url, False)
-                    log_img.debug("✅ Imagem produto 4K")
-                except Exception as e:
-                    log_img.warning(f"⚠️ Preparar imagem produto: {e}")
-                    img = None
+                    if img:
+                        log_img.debug(f"✅ Imagem produto: {img_url[:60]}")
+            except Exception as e:
+                log_img.warning(f"⚠️ Busca imagem produto: {e}")
+                img = None
 
-    # Renderização
-    msg_final = renderizar(tc, mapa, links_p, plat)
-
-
-    # ── Rate-limit adaptativo ─────────────────────────────────────────────
-    hora_atual = int(time.strftime("%H"))
-    global _INTERVALO_MIN
-    _INTERVALO_MIN = 0.8 if 8 <= hora_atual < 22 else 1.5
-
+    # ── Envio ─────────────────────────────────────────────────────────────
     await _rate_limit()
 
     async with _SEM_ENVIO:
@@ -2383,15 +2301,23 @@ async def _pipeline(event, is_edit: bool = False):
         mp   = await loop.run_in_executor(_EXECUTOR, ler_mapa)
         try:
             if is_edit:
-                id_d = mp[str(msg_id)]
+                id_d = mp.get(str(msg_id))
+                if not id_d:
+                    return
                 for t in range(1, 4):
                     try:
-                        await client.edit_message(GRUPO_DESTINO, id_d, msg_final)
+                        await client.edit_message(
+                            GRUPO_DESTINO, id_d, msg_final)
+                        log_tg.info(f"✏️ Editado | {id_d}")
                         break
-                    except MessageNotModifiedError: break
-                    except FloodWaitError as e:     await asyncio.sleep(e.seconds)
-                    except Exception:
-                        if t < 3: await asyncio.sleep(2 ** t)
+                    except MessageNotModifiedError:
+                        break
+                    except FloodWaitError as e:
+                        await asyncio.sleep(e.seconds)
+                    except Exception as e:
+                        log_tg.error(f"❌ Edit t={t}: {e}")
+                        if t < 3:
+                            await asyncio.sleep(2 ** t)
                 return
 
             sent = None
@@ -2399,10 +2325,14 @@ async def _pipeline(event, is_edit: bool = False):
                 try:
                     sent = await _enviar(msg_final, img)
                     break
-                except FloodWaitError as e: await asyncio.sleep(e.seconds)
-                except Exception:
-                    if t == 1: img = None
-                    elif t < 3: await asyncio.sleep(2 ** t)
+                except FloodWaitError as e:
+                    await asyncio.sleep(e.seconds)
+                except Exception as e:
+                    log_tg.error(f"❌ Envio t={t}: {e}")
+                    if t == 1:
+                        img = None   # tenta sem imagem
+                    elif t < 3:
+                        await asyncio.sleep(2 ** t)
 
             if sent:
                 mp[str(msg_id)] = sent.id
@@ -2411,6 +2341,14 @@ async def _pipeline(event, is_edit: bool = False):
                 await scheduler_ok(plat)
                 antisaturacao_ok(plat, sku)
                 await _burst_add()
+
+                # Se Magalu usou link longo → agenda edição quando encurtar
+                if plat == "magalu" and mapa:
+                    for url_orig, url_conv in mapa.items():
+                        # link longo = tem os params partner_id completos
+                        if "partner_id" in url_conv and "cutt.ly" not in url_conv:
+                            await _agendar_edicao_magalu(url_conv, msg_id)
+
                 log_sys.info(
                     f"🚀 [OK] @{uname} → {GRUPO_DESTINO} | "
                     f"{msg_id}→{sent.id} | {plat.upper()} sku={sku}")
@@ -2418,12 +2356,6 @@ async def _pipeline(event, is_edit: bool = False):
         except Exception as e:
             log_sys.error(f"❌ CRÍTICO: {e}", exc_info=True)
 
-async def processar(event, is_edit: bool = False):
-    await _enfileirar(event, is_edit)
-
-async def _iniciar_orchestrator():
-    log_sys.info(f"🎛 Orchestrator | workers={_WORKERS_MAX} fila={_FILA_MAX}")
-    asyncio.create_task(_worker_loop())
 
 
 # ══════════════════════════════════════════════════════════════════════════════
