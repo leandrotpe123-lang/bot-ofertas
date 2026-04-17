@@ -2820,6 +2820,32 @@ async def _health_check():
         except Exception as e:
             log_hc.error(f"❌ Health: {e}", exc_info=True)
 
+def db_limpar():
+    try:
+        with _db() as db:
+            agora = int(time.time())
+
+            # 🔹 links cache (24h)
+            db.execute(
+                "DELETE FROM links_cache WHERE ts < ?",
+                (agora - 86400,)
+            )
+
+            # 🔹 dedupe (6h)
+            db.execute(
+                "DELETE FROM dedupe_temp WHERE ts < ?",
+                (agora - 21600,)
+            )
+
+            # 🔹 saturação (12h)
+            db.execute(
+                "DELETE FROM saturacao WHERE ts < ?",
+                (agora - 43200,)
+            )
+
+    except Exception as e:
+        log_hc.error(f"[DB LIMPAR ERRO] {e}", exc_info=True)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 26 ▸ INICIALIZAÇÃO COM AUTO-RESTART
