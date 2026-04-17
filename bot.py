@@ -7,48 +7,48 @@
 # NUNCA: link, emoji, preço, formatação, encurtador
 #
 # ORDEM DOS MÓDULOS
-#  1  Logs
-#  2  Configurações
-#  3  Persistência JSON
-#  4  Filtro de texto
-#  5  Whitelist / classificação de domínio
-#  6  Desencurtador
-#  7  Motor Amazon (isolado)
-#  8  Motor Shopee  (isolado)
-#  9  Motor Magalu  (isolado)
-# 10  Extração de links
-# 11  Pipeline de conversão paralela
-# 12  Limpeza de ruído textual
-# 13  Emojis + radares semânticos
-# 14  Renderizador
-# 15  Deduplicação semântica (fingerprint DNA)
-# 16  Buscador de imagem
-# 17  Rate-limit interno
-# 18  Anti-loop de edição
-# 19  Envio (prioridade imagem)
-# 20  Banco central SQLite
-# 21  Parser ultra robusto
-# 22  Scheduler inteligente
-# 23  Anti-saturação algorítmica
-# 24  Buffer Orchestrator + pipeline principal
-# 25  Health check
-# 26  Inicialização com auto-restart
+# 1 Registros    Erro SessionPasswordNeededError,
+    Erro de mensagem não modificada,
+# 3 Persistência JSON
+# 4 Filtro de texto
+#5 Whitelist/classificação de domínio
+# 6 Descurtador
+# 7 Motor Amazon (isolado)
+# 8 Motor Shopee (isolado)
+# 9 Motor Magalu (isolado)
+# 10 Extração de links
+# 11 Pipeline de conversão paralela
+#12 Limpeza de ruído textual
+#13 Emojis + radares semânticos
+# 14 Renderizador
+# 15 Deduplicação semântica (DNA de impressão digital)
+# 16 Buscador de imagem
+# 17 Limite de taxa interno
+# 18 Anti-loop de edição
+# 19 Envio (prioridade imagem)
+# 20 Banco central SQLite
+# 21 Parser ultra robusto
+# 22 Agendador inteligente
+# 23 Anti-saturação algorítmica
+#24 Orquestrador de buffer + principal de pipeline
+# 25 Verificação de saúde
+#26 Inicialização com reinicialização automática
 
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
+importar futuros concorrentes
 import hashlib
-import heapq
-import io
-import json
-import logging
-import os
-import random
-import re
-import sqlite3
-import time
-import unicodedata
+Bretanha heapq
+importar ei io
+json
+registro de importação
+os
+”
+grega re
+sqlite3
+tempo de exportação
+importar dados unicode
 from contextlib import contextmanager
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -57,56 +57,56 @@ from typing import Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 
 import aiohttp
-from bs4 import BeautifulSoup
+Importe BeautifulSoup para bs4
 from telethon import TelegramClient, events
 
-_DB_PATH = os.getenv("DB_PATH") or "database.db"
-_db_conn = None
+_DB_PATH = os.getenv (  "  DB_PATH"  )   ou   "database.db"
+_db_conn = Nenhum
 
-if os.path.dirname(_DB_PATH):
-    os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
+se os. caminho . nome do diretório  ( _DB_PATH ) :
+    os.makedirs ( os.path.dirname ( _DB_PATH ) , exist_ok = True )​ ​  
     
-from telethon.errors import (
+from telethon.errors import   (
     AuthKeyUnregisteredError,
-    FloodWaitError,
-    MessageNotModifiedError,
-    SessionPasswordNeededError,
+    Erro de esperança de inundação,
+    Erro de mensagem não modificada,
+    Erro SessionPasswordNeededError,
 )
 from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaWebPage
 
-try:
-    from PIL import Image
-    _PIL_OK = True
-except ImportError:
-    _PIL_OK = False
+tentar :
+    Importar imagem de PIL
+    _PIL_OK = Verdadeiro
+exceto ImportError:
+    _PIL_OK = Falso
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 1 ▸ LOGS
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
+# MÓDULO 1 ▸ REGISTRO DE REGRAS
+# ════════════════════════════════════════════════════════════════════════
 
-def _mk_log(nome: str, cor: str) -> logging.Logger:
-    lg = logging.getLogger(nome)
-    if not lg.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter(
-            f'\033[{cor}m[%(name)-10s]\033[0m %(asctime)s | %(levelname)-8s | %(message)s',
-            datefmt='%H:%M:%S'))
-        lg.addHandler(h)
-        lg.setLevel(logging.DEBUG)
-    return lg
+def  _mk_log ( nome: str, cor: str ) -> logging. Logger :
+    lg = registro. getLogger ( nome )
+    se  não forem manipuladores de nível :
+        h = logging. StreamHandler ( )
+        h. setFormatter ( logging. Formatter (
+            f'\033[ { cor } m[%(name)-10s]\033[0m %(asctime)s | %(levelname)-8s | %(message)s' ,
+            datefmt= '%H:%M:%S' ) )
+        lg. adicionarManipulador ( h )
+        lg. setLevel ( logging. DEBUG )
+    retornar lg
 
-log_amz  = _mk_log('AMAZON',   '1;33')
-log_shp  = _mk_log('SHOPEE',   '1;38;5;208')
-log_mgl  = _mk_log('MAGALU',   '1;34')
-log_dedup= _mk_log('DEDUP',    '1;35')
-log_img  = _mk_log('IMAGEM',   '1;36')
-log_tg   = _mk_log('TELEGRAM', '1;32')
-log_fil  = _mk_log('FILTRO',   '1;31')
-log_lnk  = _mk_log('LINKS',    '1;38;5;51')
-log_fmt  = _mk_log('FORMAT',   '1;33')
-log_sys  = _mk_log('SISTEMA',  '1;37')
+log_amz = _mk_log ( 'AMAZON' ,    '1;33' )
+log_shp = _mk_log ( 'LOJA' ,    '1;38;5;208' )
+log_mgl = _mk_log ( 'MAGALU' ,    '1;34' )
+log_dedup= _mk_log ( 'DEDUP' ,     '1;35' )
+log_img = _mk_log ( 'IMAGEM' ,    '1;36' )
+log_tg = _mk_log ( 'TELEGRAM' , '1;32' )
+log_fil = _mk_log ( 'FILTRO' ,    '1;31' )
+log_lnk = _mk_log ( 'LINKS' ,     '1;38;5;51' )
+log_fmt = _mk_log ( 'FORMAT' ,    '1;33' )
+log_sys = _mk_log ( 'SISTEMA' ,   '1;37' )
 log_hc   = _mk_log('HEALTH',   '1;38;5;118')
 
 
@@ -2129,6 +2129,33 @@ def db_buscar_dedupe_janela_rapida(plat: str) -> list:
         "alma": r[2], "asin": r[3], "id_prod": r[4],
         "benef": json.loads(r[5] or "[]"), "ts": r[6],
     } for r in rows]
+
+def db_get_link(url_orig: str):
+    try:
+        with _db() as db:
+            row = db.execute(
+                "SELECT url_conv FROM links_cache WHERE url_orig = ?",
+                (url_orig,)
+            ).fetchone()
+
+            if row:
+                return row[0]
+    except Exception as e:
+        log_links.error(f"[DB GET ERRO] {e}", exc_info=True)
+
+    return None
+
+
+def db_set_link(url_orig: str, url_conv: str, plat: str):
+    try:
+        with _db() as db:
+            db.execute("""
+                INSERT OR REPLACE INTO links_cache
+                (url_orig, url_conv, plat, ts)
+                VALUES (?, ?, ?, ?)
+            """, (url_orig, url_conv, plat, time.time()))
+    except Exception as e:
+        log_links.error(f"[DB SET ERRO] {e}", exc_info=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
