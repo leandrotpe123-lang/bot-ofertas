@@ -43,8 +43,7 @@ Bretanha heapq
 importar ei io
 json
 registro de importação
-os
-”
+
 grega re
 sqlite3
 tempo de exportação
