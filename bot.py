@@ -8,7 +8,7 @@
 #
 # ORDEM DOS MÓDULOS
 # 1 Registros    Erro SessionPasswordNeededError,
-    Erro de mensagem não modificada,
+# Erro de mensagem não modificada,
 # 3 Persistência JSON
 # 4 Filtro de texto
 #5 Whitelist/classificação de domínio
