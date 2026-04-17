@@ -2249,6 +2249,7 @@ def antisaturacao_ok(plat: str, sku: str):
 # Cole esses trechos dentro de _pipeline no lugar dos blocos equivalentes
 # ══════════════════════════════════════════════════════════════════════════════
 
+async def _pipeline(event, plat, tc, mapa, sku, is_edit, msg_id, msg_final, uname, GRUPO_DESTINO):
     # ── Imagem ────────────────────────────────────────────────────────────
     media_orig = event.message.media
     tem_img    = _tem_midia(media_orig)
@@ -2275,7 +2276,6 @@ def antisaturacao_ok(plat: str, sku: str):
                 img = _IMG_SHP
                 log_img.debug("🟣 Fallback Shopee")
             elif plat == "amazon" and os.path.exists(_IMG_AMZ):
-                # Amazon: _IMG_AMZ SOMENTE para cupom Amazon
                 img = _IMG_AMZ
                 log_img.debug("🟠 Fallback Amazon cupom")
             elif plat == "magalu" and os.path.exists(_IMG_MGL):
@@ -2306,8 +2306,7 @@ def antisaturacao_ok(plat: str, sku: str):
                     return
                 for t in range(1, 4):
                     try:
-                        await client.edit_message(
-                            GRUPO_DESTINO, id_d, msg_final)
+                        await client.edit_message(GRUPO_DESTINO, id_d, msg_final)
                         log_tg.info(f"✏️ Editado | {id_d}")
                         break
                     except MessageNotModifiedError:
@@ -2342,16 +2341,12 @@ def antisaturacao_ok(plat: str, sku: str):
                 antisaturacao_ok(plat, sku)
                 await _burst_add()
 
-                # Se Magalu usou link longo → agenda edição quando encurtar
                 if plat == "magalu" and mapa:
                     for url_orig, url_conv in mapa.items():
-                        # link longo = tem os params partner_id completos
                         if "partner_id" in url_conv and "cutt.ly" not in url_conv:
                             await _agendar_edicao_magalu(url_conv, msg_id)
 
-                log_sys.info(
-                    f"🚀 [OK] @{uname} → {GRUPO_DESTINO} | "
-                    f"{msg_id}→{sent.id} | {plat.upper()} sku={sku}")
+                log_sys.info(f"🚀 [OK] @{uname} → {GRUPO_DESTINO} | {msg_id}→{sent.id} | {plat.upper()}")
 
         except Exception as e:
             log_sys.error(f"❌ CRÍTICO: {e}", exc_info=True)
