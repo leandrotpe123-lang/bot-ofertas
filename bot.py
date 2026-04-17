@@ -2351,7 +2351,13 @@ async def _pipeline(event, plat, tc, mapa, sku, is_edit, msg_id, msg_final, unam
         except Exception as e:
             log_sys.error(f"❌ CRÍTICO: {e}", exc_info=True)
 
+async def _iniciar_orchestrator():
+    log_sys.info("⚙️ Orchestrator iniciado")
+    pass
 
+async def _health_check():
+    while True:
+        await asyncio.sleep(3600)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 25 ▸ HEALTH CHECK
