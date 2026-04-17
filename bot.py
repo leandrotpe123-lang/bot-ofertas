@@ -59,11 +59,11 @@ import aiohttp
 Importe BeautifulSoup para bs4
 from telethon import TelegramClient, events
 
-_DB_PATH = os.getenv (  "  DB_PATH"  )   ou   "database.db"
-_db_conn = Nenhum
+_DB_PATH = os.getenv("DB_PATH") or "database.db"
+_db_conn = None
 
-se os. caminho . nome do diretório  ( _DB_PATH ) :
-    os.makedirs ( os.path.dirname ( _DB_PATH ) , exist_ok = True )​ ​  
+if os.path.dirname(_DB_PATH):
+    os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)​  
     
 from telethon.errors import   (
     AuthKeyUnregisteredError,
