@@ -59,6 +59,13 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 import aiohttp
 from bs4 import BeautifulSoup
 from telethon import TelegramClient, events
+
+_DB_PATH = os.getenv("DB_PATH") or "database.db"
+_db_conn = None
+
+if os.path.dirname(_DB_PATH):
+    os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
+    
 from telethon.errors import (
     AuthKeyUnregisteredError,
     FloodWaitError,
