@@ -2351,6 +2351,10 @@ async def _pipeline(event, plat, tc, mapa, sku, is_edit, msg_id, msg_final, unam
         except Exception as e:
             log_sys.error(f"❌ CRÍTICO: {e}", exc_info=True)
 
+_buf = []          # Lista da fila de mensagens 
+_IDS_PROC = set()  # Lista de controle anti-loop
+_w_ativos = 0      # Contador de workers ativos
+
 async def _iniciar_orchestrator():
     log_sys.info("⚙️ Orchestrator iniciado")
     pass
@@ -2365,18 +2369,16 @@ async def _health_check():
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def _health_check():
+    global _buf, _IDS_PROC, _w_ativos
     while True:
         await asyncio.sleep(300)   # a cada 5 min
         try:
             db_limpar()   # apaga só dedupe_temp + saturacao (24h) + scheduler (30d)
 
             with _db() as db:
-                n_links = db.execute(
-                    "SELECT COUNT(*) FROM links_cache").fetchone()[0]
-                n_dedup = db.execute(
-                    "SELECT COUNT(*) FROM dedupe_temp").fetchone()[0]
-                n_sat   = db.execute(
-                    "SELECT COUNT(*) FROM saturacao").fetchone()[0]
+                n_links = db.execute("SELECT COUNT(*) FROM links_cache").fetchone()[0]
+                n_dedup = db.execute("SELECT COUNT(*) FROM dedupe_temp").fetchone()[0]
+                n_sat   = db.execute("SELECT COUNT(*) FROM saturacao").fetchone()[0]
 
             log_hc.info(
                 f"💚 links_cache={n_links}(permanente) | "
