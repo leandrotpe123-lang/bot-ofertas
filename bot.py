@@ -2243,6 +2243,59 @@ async def antisaturacao_gate(plat: str, texto: str) -> float:
 def antisaturacao_ok(plat: str, sku: str):
     db_registrar_sat(plat, sku)
 
+async def processar(event, is_edit=False):
+    try:
+        msg = event.message
+        texto = msg.message or ""
+        msg_id = msg.id
+
+        # evita loop duplicado
+        if msg_id in _IDS_PROC:
+            return
+        _IDS_PROC.add(msg_id)
+
+        uname = getattr(event.chat, "username", "origem")
+
+        # normalização básica
+        tc = texto.lower()
+
+        # ── DETECÇÃO DE PLATAFORMA (ajusta se já tiver pronto) ──
+        if "shopee" in tc:
+            plat = "shopee"
+        elif "amazon" in tc:
+            plat = "amazon"
+        elif "magalu" in tc or "magazineluiza" in tc:
+            plat = "magalu"
+        else:
+            return  # ignora se não for relevante
+
+        # ── EXTRAÇÃO DE LINKS (simples, usa o seu depois se já tiver) ──
+        urls = re.findall(r'https?://\S+', texto)
+        if not urls:
+            return
+
+        mapa = {u: u for u in urls}  # aqui depois entra sua conversão real
+        sku = None  # se você usa SKU, mantém seu sistema
+
+        msg_final = texto  # aqui entra seu formatador depois
+
+        # 🔥 CHAMA O PIPELINE (AGORA EXISTE)
+        await _pipeline(
+            event,
+            plat,
+            tc,
+            mapa,
+            sku,
+            is_edit,
+            msg_id,
+            msg_final,
+            uname,
+            GRUPO_DESTINO
+        )
+
+    except Exception as e:
+        log_sys.error(f"❌ ERRO processar: {e}", exc_info=True)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 24 ▸ BLOCO INTERNO _pipeline — substitui só os blocos marcados
