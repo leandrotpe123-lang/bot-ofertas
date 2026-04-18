@@ -2022,27 +2022,46 @@ async def _enviar(msg: str, img_obj) -> object:
         GRUPO_DESTINO, msg,
         parse_mode="md", link_preview=True)
 
-
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 20 ▸ BANCO CENTRAL — SQLite
-# Adiciona coluna benef (benefícios da oferta) na dedupe_temp
+# Contém TODAS as funções de acesso ao banco usadas pelos módulos 15, 22, 23.
+# Nenhuma função pode estar faltando aqui.
 # ══════════════════════════════════════════════════════════════════════════════
+
+import sqlite3
+from contextlib import contextmanager
+
+_DB_PATH       = "foguetao.db"
+_db_conn: Optional[sqlite3.Connection] = None
+_db_lock       = Lock()
+
+TTL_DEDUPE     = 86400        # 24h — histórico semântico
+JANELA_RAPIDA  = 600          # 10min — anti-flood imediato
+TTL_SCHEDULER  = 30 * 86400   # 30 dias
+
 
 def _init_db():
     global _db_conn
     _db_conn = sqlite3.connect(
-        _DB_PATH, check_same_thread=False, timeout=10, isolation_level=None)
+        _DB_PATH,
+        check_same_thread=False,
+        timeout=10,
+        isolation_level=None,
+    )
     _db_conn.execute("PRAGMA journal_mode=WAL")
     _db_conn.execute("PRAGMA synchronous=NORMAL")
     _db_conn.execute("PRAGMA cache_size=-16000")
     _db_conn.execute("PRAGMA temp_store=MEMORY")
     _db_conn.executescript("""
+        -- Links convertidos — NUNCA apagados automaticamente
         CREATE TABLE IF NOT EXISTS links_cache (
             url_orig  TEXT PRIMARY KEY,
             url_conv  TEXT NOT NULL,
             plat      TEXT NOT NULL,
             ts        REAL NOT NULL
         );
+
+        -- Deduplicação temporária — apagada a cada 24h
         CREATE TABLE IF NOT EXISTS dedupe_temp (
             fp        TEXT PRIMARY KEY,
             plat      TEXT NOT NULL,
@@ -2054,12 +2073,16 @@ def _init_db():
             benef     TEXT,
             ts        REAL NOT NULL
         );
+
+        -- Saturação de envios — apagada a cada 24h
         CREATE TABLE IF NOT EXISTS saturacao (
             id    INTEGER PRIMARY KEY AUTOINCREMENT,
             plat  TEXT NOT NULL,
             sku   TEXT,
             ts    REAL NOT NULL
         );
+
+        -- Scheduler de horários — apagado a cada 30 dias
         CREATE TABLE IF NOT EXISTS scheduler (
             id    INTEGER PRIMARY KEY AUTOINCREMENT,
             plat  TEXT NOT NULL,
@@ -2067,109 +2090,315 @@ def _init_db():
             score REAL DEFAULT 1.0,
             ts    REAL NOT NULL
         );
+
+        -- Índices de performance
         CREATE INDEX IF NOT EXISTS idx_lc_plat  ON links_cache(plat);
         CREATE INDEX IF NOT EXISTS idx_dt_plat  ON dedupe_temp(plat, ts);
         CREATE INDEX IF NOT EXISTS idx_dt_asin  ON dedupe_temp(asin);
         CREATE INDEX IF NOT EXISTS idx_dt_id    ON dedupe_temp(id_prod);
-        CREATE INDEX IF NOT EXISTS idx_sat      ON saturacao(plat, ts);
-        CREATE INDEX IF NOT EXISTS idx_sch      ON scheduler(plat, hora);
+        CREATE INDEX IF NOT EXISTS idx_sat_plat ON saturacao(plat, ts);
+        CREATE INDEX IF NOT EXISTS idx_sch_hora ON scheduler(plat, hora);
     """)
 
-    # Migração: adiciona coluna benef se não existir (banco antigo)
-    try:
-        _db_conn.execute("ALTER TABLE dedupe_temp ADD COLUMN benef TEXT")
-        log_sys.info("🗄 Migração: coluna benef adicionada")
-    except sqlite3.OperationalError:
-        pass  # coluna já existe
+    # Migração segura: adiciona colunas novas em bancos antigos
+    _migrar_colunas()
 
     log_sys.info(f"🗄 DB ON | {_DB_PATH}")
 
-from contextlib import contextmanager
+
+def _migrar_colunas():
+    """Adiciona colunas que podem não existir em bancos criados antes."""
+    migracoes = [
+        ("dedupe_temp", "benef",   "TEXT"),
+        ("dedupe_temp", "asin",    "TEXT"),
+        ("dedupe_temp", "id_prod", "TEXT"),
+    ]
+    for tabela, coluna, tipo in migracoes:
+        try:
+            _db_conn.execute(
+                f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
+            log_sys.info(f"🗄 Migração: {tabela}.{coluna} adicionada")
+        except sqlite3.OperationalError:
+            pass  # coluna já existe — normal
+
 
 @contextmanager
 def _db():
-    try:
-        yield _db_conn
-    except Exception as e:
-        log_sys.error(f"[DB ERRO] {e}", exc_info=True)
-        raise
-
-def db_set_dedupe(fp: str, plat: str, cupons: list, alma: str,
-                   camp: str, asin: str = "", id_prod: str = "",
-                   benef: list = None):
-    """Salva entrada de dedup com benefícios."""
-    with _db() as db:
-        db.execute(
-            "INSERT OR REPLACE INTO dedupe_temp "
-            "(fp,plat,cupons,alma,camp,asin,id_prod,benef,ts) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-            (fp, plat,
-             json.dumps(cupons),
-             alma, camp, asin, id_prod,
-             json.dumps(benef or []),
-             time.time()))
+    with _db_lock:
+        try:
+            yield _db_conn
+        except sqlite3.Error as e:
+            log_sys.error(f"❌ DB erro: {e}")
+            raise
 
 
-def db_get_dedupe(fp: str) -> Optional[dict]:
-    limite = time.time() - TTL_DEDUPE
-    with _db() as db:
-        row = db.execute(
-            "SELECT plat,cupons,alma,camp,asin,id_prod,benef,ts "
-            "FROM dedupe_temp WHERE fp=? AND ts>=?",
-            (fp, limite)
-        ).fetchone()
-    if row:
-        return {
-            "plat": row[0], "cupons": json.loads(row[1] or "[]"),
-            "alma": row[2],  "camp":  row[3],
-            "asin": row[4],  "id_prod": row[5],
-            "benef": json.loads(row[6] or "[]"),
-            "ts": row[7],
-        }
-    return None
+# ══════════════════════════════════════════════════════════════════════════════
+# LINKS CACHE — permanente, nunca apagado automaticamente
+# ══════════════════════════════════════════════════════════════════════════════
 
-
-def db_buscar_dedupe_janela_rapida(plat: str) -> list:
-    limite = time.time() - JANELA_RAPIDA
-    with _db() as db:
-        rows = db.execute(
-            "SELECT fp,cupons,alma,asin,id_prod,benef,ts "
-            "FROM dedupe_temp "
-            "WHERE plat=? AND ts>=? ORDER BY ts DESC",
-            (plat, limite)
-        ).fetchall()
-    return [{
-        "fp": r[0], "cupons": json.loads(r[1] or "[]"),
-        "alma": r[2], "asin": r[3], "id_prod": r[4],
-        "benef": json.loads(r[5] or "[]"), "ts": r[6],
-    } for r in rows]
-
-def db_get_link(url_orig: str):
+def db_get_link(url_orig: str) -> Optional[str]:
+    """Retorna link convertido do cache permanente. None se não existir."""
     try:
         with _db() as db:
             row = db.execute(
-                "SELECT url_conv FROM links_cache WHERE url_orig = ?",
+                "SELECT url_conv FROM links_cache WHERE url_orig=?",
                 (url_orig,)
             ).fetchone()
-
-            if row:
-                return row[0]
+        if row:
+            log_lnk.debug(f"💾 Cache hit: {url_orig[:50]}")
+            return row[0]
     except Exception as e:
-        log_links.error(f"[DB GET ERRO] {e}", exc_info=True)
-
+        log_sys.error(f"❌ db_get_link: {e}")
     return None
 
 
 def db_set_link(url_orig: str, url_conv: str, plat: str):
+    """Salva link convertido no cache permanente."""
     try:
         with _db() as db:
-            db.execute("""
-                INSERT OR REPLACE INTO links_cache
-                (url_orig, url_conv, plat, ts)
-                VALUES (?, ?, ?, ?)
-            """, (url_orig, url_conv, plat, time.time()))
+            db.execute(
+                "INSERT OR REPLACE INTO links_cache "
+                "(url_orig, url_conv, plat, ts) VALUES (?,?,?,?)",
+                (url_orig, url_conv, plat, time.time()))
     except Exception as e:
-        log_links.error(f"[DB SET ERRO] {e}", exc_info=True)
+        log_sys.error(f"❌ db_set_link: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DEDUPE TEMP — histórico semântico 24h
+# ══════════════════════════════════════════════════════════════════════════════
+
+def db_get_dedupe(fp: str) -> Optional[dict]:
+    """Retorna entrada de dedup se existir e não tiver expirado (24h)."""
+    try:
+        limite = time.time() - TTL_DEDUPE
+        with _db() as db:
+            row = db.execute(
+                "SELECT plat,cupons,alma,camp,asin,id_prod,benef,ts "
+                "FROM dedupe_temp WHERE fp=? AND ts>=?",
+                (fp, limite)
+            ).fetchone()
+        if row:
+            return {
+                "plat":    row[0],
+                "cupons":  json.loads(row[1] or "[]"),
+                "alma":    row[2],
+                "camp":    row[3],
+                "asin":    row[4] or "",
+                "id_prod": row[5] or "",
+                "benef":   json.loads(row[6] or "[]"),
+                "ts":      row[7],
+            }
+    except Exception as e:
+        log_sys.error(f"❌ db_get_dedupe: {e}")
+    return None
+
+
+def db_set_dedupe(fp: str, plat: str, cupons: list, alma: str,
+                   camp: str, asin: str = "", id_prod: str = "",
+                   benef: list = None):
+    """Salva entrada de dedup com todos os campos."""
+    try:
+        with _db() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO dedupe_temp "
+                "(fp,plat,cupons,alma,camp,asin,id_prod,benef,ts) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (fp, plat,
+                 json.dumps(cupons or []),
+                 alma or "",
+                 camp or "geral",
+                 asin or "",
+                 id_prod or "",
+                 json.dumps(benef or []),
+                 time.time()))
+    except Exception as e:
+        log_sys.error(f"❌ db_set_dedupe: {e}")
+
+
+def db_buscar_dedupe_por_asin(asin: str, plat: str) -> list:
+    """
+    Busca todas as entradas com o mesmo ASIN na janela de 24h.
+    Usado pelo módulo 15 (Amazon dedup por ASIN).
+    """
+    if not asin:
+        return []
+    try:
+        limite = time.time() - TTL_DEDUPE
+        with _db() as db:
+            rows = db.execute(
+                "SELECT fp,cupons,alma,ts FROM dedupe_temp "
+                "WHERE asin=? AND plat=? AND ts>=? "
+                "ORDER BY ts DESC LIMIT 10",
+                (asin, plat, limite)
+            ).fetchall()
+        return [
+            {
+                "fp":     r[0],
+                "cupons": json.loads(r[1] or "[]"),
+                "alma":   r[2] or "",
+                "ts":     r[3],
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        log_sys.error(f"❌ db_buscar_dedupe_por_asin: {e}")
+        return []
+
+
+def db_buscar_dedupe_por_id(id_prod: str, plat: str) -> list:
+    """
+    Busca entradas com o mesmo ID de produto Magalu na janela de 24h.
+    Usado pelo módulo 15 (Magalu dedup por ID).
+    """
+    if not id_prod:
+        return []
+    try:
+        limite = time.time() - TTL_DEDUPE
+        with _db() as db:
+            rows = db.execute(
+                "SELECT fp,cupons,alma,ts FROM dedupe_temp "
+                "WHERE id_prod=? AND plat=? AND ts>=? "
+                "ORDER BY ts DESC LIMIT 10",
+                (id_prod, plat, limite)
+            ).fetchall()
+        return [
+            {
+                "fp":     r[0],
+                "cupons": json.loads(r[1] or "[]"),
+                "alma":   r[2] or "",
+                "ts":     r[3],
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        log_sys.error(f"❌ db_buscar_dedupe_por_id: {e}")
+        return []
+
+
+def db_buscar_dedupe_janela_rapida(plat: str) -> list:
+    """
+    Retorna entradas da janela rápida (10 min) para anti-flood.
+    Usado pelo módulo 15 (Shopee e genérico).
+    """
+    try:
+        limite = time.time() - JANELA_RAPIDA
+        with _db() as db:
+            rows = db.execute(
+                "SELECT fp,cupons,alma,asin,id_prod,benef,ts "
+                "FROM dedupe_temp "
+                "WHERE plat=? AND ts>=? ORDER BY ts DESC",
+                (plat, limite)
+            ).fetchall()
+        return [
+            {
+                "fp":      r[0],
+                "cupons":  json.loads(r[1] or "[]"),
+                "alma":    r[2] or "",
+                "asin":    r[3] or "",
+                "id_prod": r[4] or "",
+                "benef":   json.loads(r[5] or "[]"),
+                "ts":      r[6],
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        log_sys.error(f"❌ db_buscar_dedupe_janela_rapida: {e}")
+        return []
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SATURAÇÃO — controle de densidade de envios
+# ══════════════════════════════════════════════════════════════════════════════
+
+def db_registrar_sat(plat: str, sku: str = ""):
+    """Registra 1 envio na tabela de saturação."""
+    try:
+        with _db() as db:
+            db.execute(
+                "INSERT INTO saturacao (plat, sku, ts) VALUES (?,?,?)",
+                (plat, sku or "", time.time()))
+    except Exception as e:
+        log_sys.error(f"❌ db_registrar_sat: {e}")
+
+
+def db_count_sat(plat: str, janela: float = 1800) -> int:
+    """
+    Conta envios de uma plataforma na janela (padrão 30min).
+    Usado pelo módulo 23 (anti-saturação).
+    """
+    try:
+        limite = time.time() - janela
+        with _db() as db:
+            row = db.execute(
+                "SELECT COUNT(*) FROM saturacao "
+                "WHERE plat=? AND ts>=?",
+                (plat, limite)
+            ).fetchone()
+        return row[0] if row else 0
+    except Exception as e:
+        log_sys.error(f"❌ db_count_sat: {e}")
+        return 0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCHEDULER — aprendizado de horários
+# ══════════════════════════════════════════════════════════════════════════════
+
+def db_registrar_sch(plat: str, hora: int, score: float = 1.0):
+    """Registra envio no scheduler para cálculo de score por hora."""
+    try:
+        with _db() as db:
+            db.execute(
+                "INSERT INTO scheduler (plat, hora, score, ts) "
+                "VALUES (?,?,?,?)",
+                (plat, hora, score, time.time()))
+    except Exception as e:
+        log_sys.error(f"❌ db_registrar_sch: {e}")
+
+
+def db_score_hora(plat: str, hora: int, dias: int = 7) -> float:
+    """
+    Score médio de engajamento para plat+hora nos últimos N dias.
+    Score >= 1.0 = bom horário. Score < 0.5 = horário ruim.
+    """
+    try:
+        limite = time.time() - dias * 86400
+        with _db() as db:
+            row = db.execute(
+                "SELECT AVG(score) FROM scheduler "
+                "WHERE plat=? AND hora=? AND ts>=?",
+                (plat, hora, limite)
+            ).fetchone()
+        return float(row[0] or 1.0)
+    except Exception as e:
+        log_sys.error(f"❌ db_score_hora: {e}")
+        return 1.0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LIMPEZA AUTOMÁTICA — NUNCA toca links_cache
+# ══════════════════════════════════════════════════════════════════════════════
+
+def db_limpar():
+    """
+    Apaga SOMENTE dados temporários.
+    links_cache NUNCA é apagado (economiza API).
+    """
+    try:
+        agora   = time.time()
+        lim_24h = agora - TTL_DEDUPE
+        lim_30d = agora - TTL_SCHEDULER
+        with _db() as db:
+            db.execute(
+                "DELETE FROM dedupe_temp WHERE ts<?", (lim_24h,))
+            db.execute(
+                "DELETE FROM saturacao   WHERE ts<?", (lim_24h,))
+            db.execute(
+                "DELETE FROM scheduler   WHERE ts<?", (lim_30d,))
+        log_sys.debug("🗑 Limpeza temp concluída (links preservados)")
+    except Exception as e:
+        log_sys.error(f"❌ db_limpar: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
