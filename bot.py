@@ -2083,6 +2083,15 @@ def _init_db():
 
     log_sys.info(f"🗄 DB ON | {_DB_PATH}")
 
+from contextlib import contextmanager
+
+@contextmanager
+def _db():
+    try:
+        yield _db_conn
+    except Exception as e:
+        log_sys.error(f"[DB ERRO] {e}", exc_info=True)
+        raise
 
 def db_set_dedupe(fp: str, plat: str, cupons: list, alma: str,
                    camp: str, asin: str = "", id_prod: str = "",
