@@ -86,16 +86,19 @@ except ImportError:
 # MÓDULO 1 ▸ REGISTRO DE REGRAS
 # ════════════════════════════════════════════════════════════════════════
 
-def  _mk_log ( nome: str, cor: str ) -> logging. Logger :
-    lg = registro. getLogger ( nome )
-    se  não forem manipuladores de nível :
-        h = logging. StreamHandler ( )
-        h. setFormatter ( logging. Formatter (
-            f'\033[ { cor } m[%(name)-10s]\033[0m %(asctime)s | %(levelname)-8s | %(message)s' ,
-            datefmt= '%H:%M:%S' ) )
-        lg. adicionarManipulador ( h )
-        lg. setLevel ( logging. DEBUG )
-    retornar lg
+def _mk_log(nome: str, cor: str) -> logging.Logger:
+    lg = logging.getLogger(nome)
+
+    if not lg.handlers:
+        h = logging.StreamHandler()
+        h.setFormatter(logging.Formatter(
+            f'\033[{cor}m[%(name)-10s]\033[0m %(asctime)s | %(levelname)-8s | %(message)s',
+            datefmt='%H:%M:%S'
+        ))
+        lg.addHandler(h)
+        lg.setLevel(logging.DEBUG)
+
+    return lg
 
 log_amz = _mk_log ( 'AMAZON' ,    '1;33' )
 log_shp = _mk_log ( 'LOJA' ,    '1;38;5;208' )
