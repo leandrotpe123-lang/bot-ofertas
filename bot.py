@@ -1659,29 +1659,47 @@ def _atualizar_cache_json(fp: str, plat: str, cupom: str,
     except Exception:
         pass
 
-
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 16 ▸ IMAGEM
-# Corrige: SyntaxError 'await' outside async function
-# Corrige: object str can't be used in 'await' expression
-# preparar_imagem é SEMPRE async — nunca chame sem await
-# buscar_imagem retorna Optional[str] — não é coroutine, é string simples
+# MÓDULO 16 ▸ IMAGEM — CORREÇÃO DEFINITIVA
+#
+# PROBLEMA RAIZ: MessageMediaPhoto não pode ser usado com await direto.
+# Telethon exige client.download_media(mensagem_completa, file=buf)
+# não client.download_media(media_object, file=buf)
+#
+# SOLUÇÃO: passar o objeto MESSAGE inteiro para preparar_imagem,
+# não só o .media — assim o Telethon sabe como baixar corretamente.
+#
+# FLUXO DE IMAGEM POR PRIORIDADE:
+#   1. Imagem original da mensagem (download via Telethon)
+#   2. Busca na página do produto (og:image → JSON-LD → maior img)
+#   3. Fallback da plataforma (arquivo local)
+#   Amazon fallback (_IMG_AMZ): SOMENTE para cupom Amazon sem imagem
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def preparar_imagem(fonte, eh_midia_telegram: bool) -> tuple:
     """
-    SEMPRE async. Retorna (BytesIO | path_str | None, None).
-    Telegram media  → client.download_media(fonte, file=BytesIO())
-    URL http        → baixa bytes para BytesIO em memória
-    Arquivo local   → retorna path direto (string)
+    Retorna (BytesIO | path_str | None, None).
+
+    IMPORTANTE: quando eh_midia_telegram=True,
+    'fonte' deve ser o objeto MESSAGE completo (event.message),
+    NÃO o event.message.media.
+    Isso é obrigatório para Telethon funcionar com MessageMediaPhoto.
     """
     if eh_midia_telegram:
         try:
             buf = io.BytesIO()
-            await client.download_media(fonte, file=buf)
+            # Passa o objeto message inteiro — Telethon resolve o tipo internamente
+            resultado = await client.download_media(fonte, file=buf)
+            if resultado is None:
+                log_img.warning("⚠️ download_media retornou None")
+                return None, None
             buf.seek(0)
+            tamanho = buf.getbuffer().nbytes
+            if tamanho < 100:
+                log_img.warning(f"⚠️ Imagem muito pequena: {tamanho}b")
+                return None, None
             buf.name = "imagem.jpg"
-            log_img.debug(f"✅ Mídia TG baixada | {buf.getbuffer().nbytes}b")
+            log_img.debug(f"✅ Mídia TG | {tamanho:,}b")
             return buf, None
         except Exception as e:
             log_img.warning(f"⚠️ download_media: {e}")
@@ -1690,7 +1708,10 @@ async def preparar_imagem(fonte, eh_midia_telegram: bool) -> tuple:
     if isinstance(fonte, str):
         if fonte.startswith("http"):
             try:
-                hdrs = {"User-Agent": random.choice(USER_AGENTS)}
+                hdrs = {
+                    "User-Agent": random.choice(USER_AGENTS),
+                    "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+                }
                 async with aiohttp.ClientSession(headers=hdrs) as s:
                     async with s.get(
                         fonte,
@@ -1698,98 +1719,135 @@ async def preparar_imagem(fonte, eh_midia_telegram: bool) -> tuple:
                         allow_redirects=True,
                     ) as r:
                         if r.status == 200:
-                            data     = await r.read()
+                            data = await r.read()
+                            if len(data) < 1000:
+                                log_img.warning(
+                                    f"⚠️ Imagem suspeita ({len(data)}b): "
+                                    f"{fonte[:60]}")
+                                return None, None
                             buf      = io.BytesIO(data)
                             buf.name = "produto.jpg"
                             log_img.debug(
-                                f"✅ URL baixada | {len(data)}b | {fonte[:60]}")
+                                f"✅ URL | {len(data):,}b | {fonte[:60]}")
                             return buf, None
                         log_img.warning(
-                            f"⚠️ HTTP {r.status} ao baixar: {fonte[:60]}")
+                            f"⚠️ HTTP {r.status}: {fonte[:60]}")
             except Exception as e:
                 log_img.warning(f"⚠️ Download URL: {e} | {fonte[:60]}")
             return None, None
 
-        # Arquivo local
         if os.path.exists(fonte):
             return fonte, None
         log_img.warning(f"⚠️ Arquivo não existe: {fonte}")
         return None, None
 
-    log_img.warning(f"⚠️ fonte inválida: type={type(fonte)}")
+    log_img.warning(f"⚠️ Fonte inválida: {type(fonte).__name__}")
     return None, None
 
 
 async def buscar_imagem(url: str) -> Optional[str]:
     """
-    Busca URL da melhor imagem do produto.
-    Retorna Optional[str] — NUNCA é coroutine dentro de coroutine.
-    Chame assim: img_url = await buscar_imagem(url)
-    Depois:      img, _ = await preparar_imagem(img_url, False)
+    Busca a melhor URL de imagem do produto.
+    Técnica dos grupos grandes: prioriza og:image sem parâmetros de resize
+    para obter a imagem original em alta resolução.
+
+    Retorna Optional[str] — chame preparar_imagem(url, False) depois.
     """
     if not url or not url.startswith("http"):
         return None
 
     hdrs = {
-        "User-Agent": random.choice(USER_AGENTS),
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.9",
         "Accept-Language": "pt-BR,pt;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
     }
+
     for t in range(1, 4):
         try:
             async with aiohttp.ClientSession(headers=hdrs) as s:
                 async with s.get(
                     url, allow_redirects=True,
-                    timeout=aiohttp.ClientTimeout(total=12),
+                    timeout=aiohttp.ClientTimeout(total=15),
                 ) as r:
                     ct = r.headers.get("content-type", "")
+
+                    # URL já é imagem direta
                     if "image" in ct:
                         return str(r.url)
 
                     html = await r.text(errors="ignore")
                     soup = BeautifulSoup(html, "html.parser")
 
-                    # og:image — tenta pegar resolução máxima
+                    # ── Estratégia 1: og:image (melhor qualidade) ─────────
                     for attr in [
                         {"property": "og:image"},
                         {"property": "og:image:secure_url"},
-                        {"name": "twitter:image"},
+                        {"name":     "twitter:image"},
+                        {"property": "og:image:url"},
                     ]:
                         tag = soup.find("meta", attrs=attr)
-                        if tag and tag.get("content", "").startswith("http"):
-                            img_url = tag["content"]
-                            # Remove params de resize
-                            img_url = re.sub(
-                                r'[?&](width|height|w|h|size|resize|'
-                                r'fit|quality|q|maxwidth|maxheight)=[^&]+',
-                                '', img_url).rstrip('?&')
-                            log_img.info(f"✅ og:image t={t}: {img_url[:70]}")
-                            return img_url
+                        if not tag:
+                            continue
+                        img_url = tag.get("content", "")
+                        if not img_url.startswith("http"):
+                            continue
+                        # Remove TODOS os parâmetros de resize/qualidade
+                        # para obter imagem original sem compressão
+                        img_url = re.sub(
+                            r'[?&](?:width|height|w|h|size|resize|fit|'
+                            r'quality|q|maxwidth|maxheight|format|'
+                            r'auto|compress|crop|scale)=[^&]+',
+                            '', img_url)
+                        img_url = img_url.rstrip('?&')
+                        log_img.info(
+                            f"✅ og:image t={t}: {img_url[:70]}")
+                        return img_url
 
-                    # JSON-LD schema.org
-                    for scr in soup.find_all("script",
-                                              type="application/ld+json"):
+                    # ── Estratégia 2: JSON-LD schema.org ─────────────────
+                    for scr in soup.find_all(
+                        "script", type="application/ld+json"
+                    ):
                         try:
                             data  = json.loads(scr.string or "")
-                            items = data if isinstance(data, list) else [data]
+                            items = (data if isinstance(data, list)
+                                     else [data])
                             for item in items:
                                 img = item.get("image")
                                 if isinstance(img, str) and img.startswith("http"):
+                                    log_img.info(
+                                        f"✅ JSON-LD t={t}: {img[:70]}")
                                     return img
                                 if isinstance(img, list) and img:
                                     c = img[0]
-                                    if isinstance(c, str): return c
+                                    if isinstance(c, str) and c.startswith("http"):
+                                        return c
                                     if isinstance(c, dict):
                                         u = c.get("url", "")
-                                        if u.startswith("http"): return u
+                                        if u.startswith("http"):
+                                            return u
                         except Exception:
                             pass
 
-                    # Maior <img> na página
-                    melhor_src  = None
-                    melhor_area = 0
+                    # ── Estratégia 3: maior <img> na página ───────────────
+                    # Técnica dos grupos grandes: pega a de maior resolução
+                    melhor_src   = None
+                    melhor_area  = 0
+                    candidatos   = []
+
                     for img_tag in soup.find_all("img", src=True):
                         src = img_tag.get("src", "")
                         if not src.startswith("http"):
+                            continue
+                        # Ignora ícones e logos pequenos
+                        if any(x in src.lower() for x in [
+                            "icon","logo","avatar","badge",
+                            "spinner","loading","placeholder",
+                        ]):
                             continue
                         try:
                             w    = int(img_tag.get("width",  0))
@@ -1799,15 +1857,26 @@ async def buscar_imagem(url: str) -> Optional[str]:
                                 melhor_area = area
                                 melhor_src  = src
                         except (ValueError, TypeError):
-                            if any(x in src.lower() for x in [
-                                "product","produto","item","image",
-                                "foto","zoom","large","xl","hd","original",
-                            ]):
-                                if not melhor_src:
-                                    melhor_src = src
+                            # Sem dimensão explícita — filtra por keywords
+                            kws = [
+                                "product","produto","item",
+                                "image","foto","zoom","large",
+                                "xl","hd","original","principal",
+                                "high","full",
+                            ]
+                            if any(x in src.lower() for x in kws):
+                                candidatos.append(src)
+
                     if melhor_src:
-                        log_img.info(f"✅ img tag t={t}: {melhor_src[:70]}")
+                        log_img.info(
+                            f"✅ img maior t={t} "
+                            f"({melhor_area}px²): {melhor_src[:70]}")
                         return melhor_src
+
+                    if candidatos:
+                        log_img.info(
+                            f"✅ img keyword t={t}: {candidatos[0][:70]}")
+                        return candidatos[0]
 
         except asyncio.TimeoutError:
             log_img.warning(f"⏱ Timeout t={t}/3: {url[:60]}")
@@ -1817,8 +1886,9 @@ async def buscar_imagem(url: str) -> Optional[str]:
         if t < 3:
             await asyncio.sleep(1.0)
 
-    log_img.warning(f"❌ Sem imagem: {url[:60]}")
+    log_img.warning(f"❌ Sem imagem após 3t: {url[:60]}")
     return None
+    
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2650,412 +2720,84 @@ async def processar(event, is_edit=False):
         log_sys.error(f"❌ ERRO processar: {e}", exc_info=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 24 ▸ BUFFER ORCHESTRATOR + PIPELINE
-# Corrige: name 'processar' is not defined
-# Corrige: name '_iniciar_orchestrator' is not defined
-# Corrige: name '_buf' is not defined no health check
-# Todas as variáveis declaradas no escopo global ANTES dos handlers
+# MÓDULO 24 ▸ BLOCO DE IMAGEM — substitui o bloco "# ── Imagem" em _pipeline
+#
+# CORREÇÃO CRÍTICA:
+#   preparar_imagem recebe event.message (objeto completo),
+#   NÃO event.message.media
+#   Isso resolve o MessageMediaPhoto can't be used in 'await'
+#
+# REGRAS DE IMAGEM:
+#   1. Original da mensagem → sempre prioridade máxima
+#   2. Sem original → busca na página do produto (3 tentativas)
+#   3. Sem produto → fallback da plataforma
+#   _IMG_AMZ: SOMENTE cupom Amazon sem imagem original
+#   _IMG_SHP: cupom Shopee sem imagem original
+#   _IMG_MGL: cupom Magalu sem imagem original
 # ══════════════════════════════════════════════════════════════════════════════
 
-import heapq
-
-# ── Variáveis globais do orchestrator — DEVEM estar antes de qualquer uso ────
-_WORKERS_MAX: int              = 4
-_FILA_MAX:    int              = 200
-_COALESCE_MS: int              = 800
-
-_buf:          list            = []        # heap de prioridade
-_buf_lck:      asyncio.Lock    = None      # inicializado em _init_globals()
-_buf_evt:      asyncio.Event   = None      # inicializado em _init_globals()
-_w_ativos:     int             = 0
-_w_lck:        asyncio.Lock    = None      # inicializado em _init_globals()
-_coal:         dict            = {}        # {fp_rapido: ts}
-
-# Inicializa locks — chamado no início de _run() antes de qualquer task
-def _init_globals():
-    global _buf_lck, _buf_evt, _w_lck
-    _buf_lck = asyncio.Lock()
-    _buf_evt = asyncio.Event()
-    _w_lck   = asyncio.Lock()
-
-_RE_TITULO_GEN = re.compile(
-    r'^\s*(?:cupons?\s+(?:shopee|amazon|magalu)|novos?\s+cupons?|'
-    r'links?\s+de\s+cupom)\s*$',
-    re.I | re.M)
-
-
-def _prio(texto: str) -> int:
-    tl = texto.lower()
-    if "amazon" in tl: return 1
-    if "shopee" in tl: return 2
-    if "magalu" in tl: return 3
-    return 9
-
-def _fp_r(texto: str) -> str:
-    return hashlib.sha256(
-        re.sub(r'\s+', '', texto.lower())[:80].encode()
-    ).hexdigest()[:12]
-
-def _tem_contexto(texto: str) -> bool:
-    linhas = [l.strip() for l in texto.splitlines()
-              if l.strip() and not re.match(r'https?://', l.strip())]
-    if not linhas:
-        return False
-    total = " ".join(linhas)
-    for ind in [
-        r'off', r'%', r'r\$', r'cupom', r'desconto',
-        r'promoção', r'oferta', r'grátis', r'evento',
-        r'live', r'relâmpago', r'flash', r'volta',
-        r'normalizou', r'a\s+partir', r'ativo',
-    ]:
-        if re.search(ind, total, re.I):
-            return True
-    return len(total) > 20
-
-
-async def _enfileirar(event, is_edit: bool):
-    """Coloca evento na fila de prioridade com coalescência."""
-    texto = event.message.text or ""
-    if not texto.strip():
-        return
-
-    fp    = _fp_r(texto)
-    agora = time.monotonic()
-
-    async with _buf_lck:
-        if not is_edit and agora - _coal.get(fp, 0.0) < _COALESCE_MS / 1000:
-            log_sys.debug(f"⚡ Coalesce descartado fp={fp}")
-            return
-        _coal[fp] = agora
-
-        if len(_buf) >= _FILA_MAX:
-            log_sys.warning(
-                f"⚠️ Fila cheia ({_FILA_MAX}) — descartando "
-                f"id={event.message.id}")
-            return
-
-        prio = 0 if is_edit else _prio(texto)
-        heapq.heappush(_buf, (prio, agora, event, is_edit))
-        log_sys.debug(
-            f"📥 Enfileirado | prio={prio} fila={len(_buf)} "
-            f"id={event.message.id}")
-
-    _buf_evt.set()
-
-
-async def _worker_loop():
-    """Worker que consome a fila. Controla workers ativos."""
-    global _w_ativos
-    while True:
-        await _buf_evt.wait()
-        while True:
-            item = None
-            async with _buf_lck:
-                if _buf:
-                    item = heapq.heappop(_buf)
-                else:
-                    _buf_evt.clear()
-                    break
-
-            if item is None:
-                break
-
-            prio, ts, event, is_edit = item
-
-            async with _w_lck:
-                if _w_ativos >= _WORKERS_MAX:
-                    async with _buf_lck:
-                        heapq.heappush(_buf, item)
-                        _buf_evt.set()
-                    await asyncio.sleep(0.2)
-                    break
-                _w_ativos += 1
-
-            try:
-                if time.monotonic() - ts > 60:
-                    log_sys.warning(
-                        f"⏱ Item expirado (>60s) — descartando "
-                        f"id={event.message.id}")
-                    continue
-                await _pipeline(event, is_edit)
-            except Exception as e:
-                log_sys.error(f"❌ Worker erro: {e}", exc_info=True)
-            finally:
-                async with _w_lck:
-                    _w_ativos -= 1
-
-
-async def _pipeline(event, is_edit: bool = False):
-    """
-    Pipeline principal. Chamado pelo worker.
-    Trata todos os erros internamente — nunca deixa o worker crashar.
-    """
-    msg_id = event.message.id
-    texto  = event.message.text or ""
-
-    try:
-        chat  = await event.get_chat()
-        uname = (chat.username or str(event.chat_id)).lower()
-    except Exception as e:
-        log_sys.error(f"❌ get_chat: {e}")
-        return
-
-    log_tg.info(
-        f"{'✏️' if is_edit else '📩'} @{uname} | id={msg_id} | "
-        f"{len(texto)}c | fila={len(_buf)} w={_w_ativos}")
-
-    if not texto.strip():
-        return
-
-    # Anti-loop
-    try:
-        if not is_edit:
-            if await _foi_processado(msg_id):
-                log_sys.debug(f"⏩ Anti-loop: {msg_id}")
-                return
-        else:
-            loop   = asyncio.get_event_loop()
-            mapa_c = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-            if str(msg_id) not in mapa_c:
-                log_sys.debug(f"⏩ Edit ignorada (preview?): {msg_id}")
-                return
-    except Exception as e:
-        log_sys.error(f"❌ Anti-loop check: {e}")
-        return
-
-    # Filtro de texto
-    try:
-        if texto_bloqueado(texto):
-            return
-    except Exception as e:
-        log_sys.error(f"❌ texto_bloqueado: {e}")
-        return
-
-    # Limpeza
-    try:
-        tc = limpar_ruido_textual(texto)
-    except Exception as e:
-        log_sys.error(f"❌ limpar_ruido: {e}")
-        tc = texto
-
-    if not _tem_contexto(tc):
-        log_fil.debug(f"🗑 Sem contexto | @{uname}")
-        return
-
-    # Extração + parser
-    try:
-        links_c, links_p = extrair_links(tc)
-        parsed            = parse_links_bulk(links_c)
-        diretos           = [r.url_limpa for r in parsed
-                             if r.plat not in ("expandir", "desconhecido")]
-        expandir_lst      = [r.url_limpa for r in parsed
-                             if r.plat == "expandir"]
-    except Exception as e:
-        log_sys.error(f"❌ Extração links: {e}")
-        return
-
-    if not diretos and not expandir_lst and not links_p:
-        if "fadadoscupons" not in uname:
-            log_sys.debug(f"⏩ Sem links | @{uname}")
-            return
-
-    # Conversão paralela
-    try:
-        mapa, plat = await converter_links(diretos + expandir_lst)
-    except Exception as e:
-        log_sys.error(f"❌ converter_links: {e}")
-        mapa, plat = {}, "amazon"
-
-    if links_c and not mapa and not links_p:
-        log_sys.warning(f"🚫 Zero links convertidos | @{uname}")
-        return
-
-    # SKU e identificadores
-    try:
-        sku = next(
-            (f"{r.plat[:3]}_{r.sku}" for r in parsed if r.sku), ""
-        ) or _extrair_sku(mapa)
-        cup = _extrair_cupom(tc)
-    except Exception as e:
-        log_sys.error(f"❌ SKU/cupom: {e}")
-        sku, cup = "", ""
-
-    # Anti-saturação + dedup + scheduler
-    if not is_edit:
-        try:
-            delay_sat = await antisaturacao_gate(plat, tc)
-        except Exception as e:
-            log_sys.error(f"❌ antisaturacao_gate: {e}")
-            delay_sat = 0.0
-
-        try:
-            if not deve_enviar(plat, cup, tc, mapa):
-                return
-        except Exception as e:
-            log_sys.error(f"❌ deve_enviar: {e}")
-            return
-
-        try:
-            delay_sch = await scheduler_gate(plat, tc)
-            if delay_sch == -1.0:
-                log_sys.warning("⚠️ Limite/h atingido — descartando")
-                return
-        except Exception as e:
-            log_sys.error(f"❌ scheduler_gate: {e}")
-            delay_sch = 0.0
-
-        total_delay = delay_sch + delay_sat
-        if total_delay > 0:
-            log_sys.debug(f"⏱ Delay {total_delay:.1f}s | {plat}")
-            await asyncio.sleep(total_delay)
-
-    # Renderização
-    try:
-        msg_final = renderizar(tc, mapa, links_p, plat)
-    except Exception as e:
-        log_sys.error(f"❌ renderizar: {e}")
-        return
-
     # ── Imagem ────────────────────────────────────────────────────────────
-    media_orig = event.message.media
-    tem_img    = _tem_midia(media_orig)
-    img        = None
-    eh_cup     = _eh_cupom_texto(tc)
+    tem_img = _tem_midia(event.message.media)
+    img     = None
+    eh_cup  = _eh_cupom_texto(tc)
 
-    # 1. Imagem original da mensagem
+    # 1. Imagem original da mensagem (máxima prioridade)
     if tem_img:
         try:
-            img, _ = await preparar_imagem(media_orig, True)
+            # Passa event.message INTEIRO — não .media
+            img, _ = await preparar_imagem(event.message, True)
             if img:
-                log_img.debug("✅ Imagem mensagem original")
+                log_img.debug("✅ Imagem original da mensagem")
+            else:
+                log_img.warning(
+                    "⚠️ preparar_imagem retornou None — sem original")
         except Exception as e:
             log_img.warning(f"⚠️ Imagem original: {e}")
             img = None
 
-    # 2. Sem imagem → fallback ou busca
+    # 2. Sem imagem original → busca ou fallback
     if img is None:
-        if eh_cup:
-            if plat == "shopee" and os.path.exists(_IMG_SHP):
-                img = _IMG_SHP
-            elif plat == "amazon" and os.path.exists(_IMG_AMZ):
-                img = _IMG_AMZ
-            elif plat == "magalu" and os.path.exists(_IMG_MGL):
-                img = _IMG_MGL
-        elif mapa:
+        if mapa and not eh_cup:
+            # Produto sem imagem → busca na página do produto
             try:
-                img_url = await buscar_imagem(list(mapa.values())[0])
+                primeiro_link = list(mapa.values())[0]
+                img_url = await buscar_imagem(primeiro_link)
                 if img_url:
                     img, _ = await preparar_imagem(img_url, False)
+                    if img:
+                        log_img.debug(
+                            f"✅ Imagem produto: {img_url[:60]}")
+                    else:
+                        log_img.warning(
+                            "⚠️ preparar_imagem produto retornou None")
             except Exception as e:
-                log_img.warning(f"⚠️ busca imagem produto: {e}")
+                log_img.warning(f"⚠️ Busca imagem produto: {e}")
                 img = None
 
-    # Rate-limit
-    await _rate_limit()
-
-    # ── Envio / Edição ────────────────────────────────────────────────────
-    async with _SEM_ENVIO:
-        loop = asyncio.get_event_loop()
-        try:
-            mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-        except Exception as e:
-            log_sys.error(f"❌ ler_mapa: {e}")
-            mp = {}
-
-        try:
-            if is_edit:
-                id_d = mp.get(str(msg_id))
-                if not id_d:
-                    log_sys.debug(f"⏩ Edit sem destino: {msg_id}")
-                    return
-                for t in range(1, 4):
-                    try:
-                        await client.edit_message(
-                            GRUPO_DESTINO, id_d, msg_final,
-                            parse_mode="md")
-                        log_tg.info(f"✏️ Editado | dest={id_d}")
-                        break
-                    except MessageNotModifiedError:
-                        break
-                    except FloodWaitError as e:
-                        log_tg.warning(f"⏱ FloodWait edit: {e.seconds}s")
-                        await asyncio.sleep(e.seconds)
-                    except Exception as e:
-                        log_tg.error(f"❌ Edit t={t}: {e}")
-                        if t < 3:
-                            await asyncio.sleep(2 ** t)
-                return
-
-            # Novo envio
-            sent = None
-            for t in range(1, 4):
-                try:
-                    sent = await _enviar(msg_final, img)
-                    break
-                except FloodWaitError as e:
-                    log_tg.warning(f"⏱ FloodWait envio: {e.seconds}s")
-                    await asyncio.sleep(e.seconds)
-                except Exception as e:
-                    log_tg.error(f"❌ Envio t={t}: {e}")
-                    if t == 1:
-                        img = None  # tenta sem imagem
-                    elif t < 3:
-                        await asyncio.sleep(2 ** t)
-
-            if sent:
-                mp[str(msg_id)] = sent.id
-                try:
-                    await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
-                except Exception as e:
-                    log_sys.error(f"❌ salvar_mapa: {e}")
-
-                await _marcar(msg_id)
-
-                try:
-                    await scheduler_ok(plat)
-                except Exception as e:
-                    log_sys.debug(f"⚠️ scheduler_ok: {e}")
-                try:
-                    antisaturacao_ok(plat, sku)
-                except Exception as e:
-                    log_sys.debug(f"⚠️ antisaturacao_ok: {e}")
-                try:
-                    await _burst_add()
-                except Exception as e:
-                    log_sys.debug(f"⚠️ burst_add: {e}")
-
-                # Magalu com link longo → agenda encurtamento em background
-                if plat == "magalu" and mapa:
-                    for url_orig, url_conv in mapa.items():
-                        if "partner_id" in url_conv and "cutt.ly" not in url_conv:
-                            try:
-                                await _agendar_edicao_magalu(
-                                    url_conv, msg_id)
-                            except Exception as e:
-                                log_mgl.warning(f"⚠️ agendar edicao: {e}")
-
-                log_sys.info(
-                    f"🚀 [OK] @{uname} → {GRUPO_DESTINO} | "
-                    f"{msg_id}→{sent.id} | {plat.upper()} sku={sku}")
-            else:
-                log_sys.error(f"❌ Envio falhou após 3 tentativas | @{uname}")
-
-        except Exception as e:
-            log_sys.error(f"❌ CRÍTICO pipeline: {e}", exc_info=True)
-
-
-# Ponto de entrada público — chamado pelos handlers on_new e on_edit
-async def processar(event, is_edit: bool = False):
-    """Enfileira o evento no orchestrator."""
-    await _enfileirar(event, is_edit)
-
-
-async def _iniciar_orchestrator():
-    """Inicia o worker loop como task assíncrona."""
-    log_sys.info(
-        f"🎛 Orchestrator | workers={_WORKERS_MAX} "
-        f"fila_max={_FILA_MAX} coalesce={_COALESCE_MS}ms")
-    asyncio.create_task(_worker_loop())
+        if img is None and eh_cup:
+            # Cupom sem imagem → fallback exclusivo por plataforma
+            if plat == "shopee":
+                if os.path.exists(_IMG_SHP):
+                    img = _IMG_SHP
+                    log_img.debug("🟣 Fallback Shopee cupom")
+                else:
+                    log_img.warning(
+                        f"⚠️ _IMG_SHP não encontrado: {_IMG_SHP}")
+            elif plat == "amazon":
+                # SOMENTE cupom Amazon sem imagem original
+                if os.path.exists(_IMG_AMZ):
+                    img = _IMG_AMZ
+                    log_img.debug("🟠 Fallback Amazon cupom")
+                else:
+                    log_img.warning(
+                        f"⚠️ _IMG_AMZ não encontrado: {_IMG_AMZ}")
+            elif plat == "magalu":
+                if os.path.exists(_IMG_MGL):
+                    img = _IMG_MGL
+                    log_img.debug("🔵 Fallback Magalu cupom")
+                else:
+                    log_img.warning(
+                        f"⚠️ _IMG_MGL não encontrado: {_IMG_MGL}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
