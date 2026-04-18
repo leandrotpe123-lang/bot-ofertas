@@ -2720,90 +2720,428 @@ async def processar(event, is_edit=False):
         log_sys.error(f"❌ ERRO processar: {e}", exc_info=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MÓDULO 24 ▸ BLOCO DE IMAGEM — substitui o bloco "# ── Imagem" em _pipeline
+# MÓDULO 24 ▸ BUFFER ORCHESTRATOR + PIPELINE PRINCIPAL
 #
-# CORREÇÃO CRÍTICA:
-#   preparar_imagem recebe event.message (objeto completo),
-#   NÃO event.message.media
-#   Isso resolve o MessageMediaPhoto can't be used in 'await'
-#
-# REGRAS DE IMAGEM:
-#   1. Original da mensagem → sempre prioridade máxima
-#   2. Sem original → busca na página do produto (3 tentativas)
-#   3. Sem produto → fallback da plataforma
-#   _IMG_AMZ: SOMENTE cupom Amazon sem imagem original
-#   _IMG_SHP: cupom Shopee sem imagem original
-#   _IMG_MGL: cupom Magalu sem imagem original
+# _init_globals() DEVE estar aqui, no escopo global do módulo,
+# ANTES de qualquer outra função que use _buf_lck, _buf_evt, _w_lck.
+# _run() (Módulo 26) chama _init_globals() como primeira linha.
 # ══════════════════════════════════════════════════════════════════════════════
+
+import heapq
+
+# ── Constantes do orchestrator ────────────────────────────────────────────────
+_WORKERS_MAX = 4
+_FILA_MAX    = 200
+_COALESCE_MS = 800
+
+# ── Variáveis de estado — inicializadas por _init_globals() ──────────────────
+# NÃO use asyncio.Lock() aqui no nível de módulo:
+# o event loop pode não existir ainda quando o módulo é importado.
+_buf:     list               = []
+_buf_lck: asyncio.Lock       = None   # type: ignore
+_buf_evt: asyncio.Event      = None   # type: ignore
+_w_ativos: int               = 0
+_w_lck:   asyncio.Lock       = None   # type: ignore
+_coal:    dict               = {}
+
+
+def _init_globals():
+    """
+    Cria os objetos asyncio (Lock, Event) no event loop correto.
+    DEVE ser chamada como PRIMEIRA linha de _run(), antes de qualquer task.
+    Chamar fora de um event loop causa erro.
+    """
+    global _buf_lck, _buf_evt, _w_lck, _buf, _coal, _w_ativos
+    _buf      = []
+    _coal     = {}
+    _w_ativos = 0
+    _buf_lck  = asyncio.Lock()
+    _buf_evt  = asyncio.Event()
+    _w_lck    = asyncio.Lock()
+    log_sys.debug("🔧 _init_globals OK — locks inicializados")
+
+
+# ── Regex e helpers do pipeline ───────────────────────────────────────────────
+_RE_TITULO_GEN = re.compile(
+    r'^\s*(?:cupons?\s+(?:shopee|amazon|magalu)|novos?\s+cupons?|'
+    r'links?\s+de\s+cupom)\s*$',
+    re.I | re.M)
+
+
+def _prio(texto: str) -> int:
+    tl = texto.lower()
+    if "amazon" in tl: return 1
+    if "shopee" in tl: return 2
+    if "magalu" in tl: return 3
+    return 9
+
+
+def _fp_r(texto: str) -> str:
+    return hashlib.sha256(
+        re.sub(r'\s+', '', texto.lower())[:80].encode()
+    ).hexdigest()[:12]
+
+
+def _tem_contexto(texto: str) -> bool:
+    linhas = [l.strip() for l in texto.splitlines()
+              if l.strip() and not re.match(r'https?://', l.strip())]
+    if not linhas:
+        return False
+    total = " ".join(linhas)
+    for ind in [
+        r'off', r'%', r'r\$', r'cupom', r'desconto',
+        r'promoção', r'oferta', r'grátis', r'evento',
+        r'live', r'relâmpago', r'flash', r'volta',
+        r'normalizou', r'a\s+partir', r'ativo',
+    ]:
+        if re.search(ind, total, re.I):
+            return True
+    return len(total) > 20
+
+
+# ── Orchestrator ──────────────────────────────────────────────────────────────
+
+async def _enfileirar(event, is_edit: bool):
+    """Coloca evento na fila de prioridade com coalescência de rajada."""
+    texto = event.message.text or ""
+    if not texto.strip():
+        return
+
+    fp    = _fp_r(texto)
+    agora = time.monotonic()
+
+    async with _buf_lck:
+        if (not is_edit
+                and agora - _coal.get(fp, 0.0) < _COALESCE_MS / 1000):
+            log_sys.debug(f"⚡ Coalesce fp={fp}")
+            return
+        _coal[fp] = agora
+
+        if len(_buf) >= _FILA_MAX:
+            log_sys.warning(
+                f"⚠️ Fila cheia ({_FILA_MAX}) | id={event.message.id}")
+            return
+
+        prio = 0 if is_edit else _prio(texto)
+        heapq.heappush(_buf, (prio, agora, event, is_edit))
+        log_sys.debug(
+            f"📥 Enfileirado | prio={prio} fila={len(_buf)} "
+            f"id={event.message.id}")
+
+    _buf_evt.set()
+
+
+async def _worker_loop():
+    """Worker que consome a fila. Controla max workers simultâneos."""
+    global _w_ativos
+    while True:
+        await _buf_evt.wait()
+        while True:
+            item = None
+            async with _buf_lck:
+                if _buf:
+                    item = heapq.heappop(_buf)
+                else:
+                    _buf_evt.clear()
+                    break
+
+            if item is None:
+                break
+
+            prio, ts, event, is_edit = item
+
+            async with _w_lck:
+                if _w_ativos >= _WORKERS_MAX:
+                    # Devolve para a fila e aguarda
+                    async with _buf_lck:
+                        heapq.heappush(_buf, item)
+                        _buf_evt.set()
+                    await asyncio.sleep(0.2)
+                    break
+                _w_ativos += 1
+
+            try:
+                if time.monotonic() - ts > 60:
+                    log_sys.warning(
+                        f"⏱ Item expirado >60s | id={event.message.id}")
+                    continue
+                await _pipeline(event, is_edit)
+            except Exception as e:
+                log_sys.error(f"❌ Worker: {e}", exc_info=True)
+            finally:
+                async with _w_lck:
+                    _w_ativos -= 1
+
+
+async def _pipeline(event, is_edit: bool = False):
+    """Pipeline principal. Trata todos os erros internamente."""
+    msg_id = event.message.id
+    texto  = event.message.text or ""
+
+    try:
+        chat  = await event.get_chat()
+        uname = (chat.username or str(event.chat_id)).lower()
+    except Exception as e:
+        log_sys.error(f"❌ get_chat: {e}")
+        return
+
+    log_tg.info(
+        f"{'✏️' if is_edit else '📩'} @{uname} | id={msg_id} | "
+        f"{len(texto)}c | fila={len(_buf)} w={_w_ativos}")
+
+    if not texto.strip():
+        return
+
+    # Anti-loop
+    try:
+        if not is_edit:
+            if await _foi_processado(msg_id):
+                return
+        else:
+            loop   = asyncio.get_event_loop()
+            mapa_c = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+            if str(msg_id) not in mapa_c:
+                log_sys.debug(f"⏩ Edit ignorada (preview?): {msg_id}")
+                return
+    except Exception as e:
+        log_sys.error(f"❌ anti-loop: {e}")
+        return
+
+    # Filtro
+    try:
+        if texto_bloqueado(texto):
+            return
+    except Exception as e:
+        log_sys.error(f"❌ texto_bloqueado: {e}")
+        return
+
+    # Limpeza
+    try:
+        tc = limpar_ruido_textual(texto)
+    except Exception as e:
+        log_sys.error(f"❌ limpar_ruido: {e}")
+        tc = texto
+
+    if not _tem_contexto(tc):
+        log_fil.debug(f"🗑 Sem contexto | @{uname}")
+        return
+
+    # Extração + parser
+    try:
+        links_c, links_p = extrair_links(tc)
+        parsed            = parse_links_bulk(links_c)
+        diretos           = [r.url_limpa for r in parsed
+                             if r.plat not in ("expandir","desconhecido")]
+        expandir_lst      = [r.url_limpa for r in parsed
+                             if r.plat == "expandir"]
+    except Exception as e:
+        log_sys.error(f"❌ extração links: {e}")
+        return
+
+    if not diretos and not expandir_lst and not links_p:
+        if "fadadoscupons" not in uname:
+            return
+
+    # Conversão
+    try:
+        mapa, plat = await converter_links(diretos + expandir_lst)
+    except Exception as e:
+        log_sys.error(f"❌ converter_links: {e}")
+        mapa, plat = {}, "amazon"
+
+    if links_c and not mapa and not links_p:
+        log_sys.warning(f"🚫 Zero links convertidos | @{uname}")
+        return
+
+    # SKU e cupom
+    try:
+        sku = (next((f"{r.plat[:3]}_{r.sku}"
+                     for r in parsed if r.sku), "")
+               or _extrair_sku(mapa))
+        cup = _extrair_cupom(tc)
+    except Exception as e:
+        log_sys.error(f"❌ sku/cupom: {e}")
+        sku, cup = "", ""
+
+    # Dedup + scheduler (somente em novas mensagens)
+    if not is_edit:
+        try:
+            delay_sat = await antisaturacao_gate(plat, tc)
+        except Exception as e:
+            log_sys.error(f"❌ antisaturacao_gate: {e}")
+            delay_sat = 0.0
+
+        try:
+            if not deve_enviar(plat, cup, tc, mapa):
+                return
+        except Exception as e:
+            log_sys.error(f"❌ deve_enviar: {e}")
+            return
+
+        try:
+            delay_sch = await scheduler_gate(plat, tc)
+            if delay_sch == -1.0:
+                log_sys.warning("⚠️ Limite/h — descartando")
+                return
+        except Exception as e:
+            log_sys.error(f"❌ scheduler_gate: {e}")
+            delay_sch = 0.0
+
+        total_delay = delay_sch + delay_sat
+        if total_delay > 0:
+            await asyncio.sleep(total_delay)
+
+    # Renderização
+    try:
+        msg_final = renderizar(tc, mapa, links_p, plat)
+    except Exception as e:
+        log_sys.error(f"❌ renderizar: {e}")
+        return
 
     # ── Imagem ────────────────────────────────────────────────────────────
     tem_img = _tem_midia(event.message.media)
     img     = None
     eh_cup  = _eh_cupom_texto(tc)
 
-    # 1. Imagem original da mensagem (máxima prioridade)
+    # 1. Imagem original — passa event.message INTEIRO (não .media)
     if tem_img:
         try:
-            # Passa event.message INTEIRO — não .media
             img, _ = await preparar_imagem(event.message, True)
             if img:
-                log_img.debug("✅ Imagem original da mensagem")
+                log_img.debug("✅ Imagem original")
             else:
-                log_img.warning(
-                    "⚠️ preparar_imagem retornou None — sem original")
+                log_img.warning("⚠️ download_media retornou None")
         except Exception as e:
             log_img.warning(f"⚠️ Imagem original: {e}")
             img = None
 
-    # 2. Sem imagem original → busca ou fallback
+    # 2. Sem original → busca ou fallback
     if img is None:
         if mapa and not eh_cup:
-            # Produto sem imagem → busca na página do produto
             try:
-                primeiro_link = list(mapa.values())[0]
-                img_url = await buscar_imagem(primeiro_link)
+                img_url = await buscar_imagem(list(mapa.values())[0])
                 if img_url:
                     img, _ = await preparar_imagem(img_url, False)
-                    if img:
-                        log_img.debug(
-                            f"✅ Imagem produto: {img_url[:60]}")
-                    else:
-                        log_img.warning(
-                            "⚠️ preparar_imagem produto retornou None")
             except Exception as e:
-                log_img.warning(f"⚠️ Busca imagem produto: {e}")
+                log_img.warning(f"⚠️ busca imagem: {e}")
                 img = None
 
         if img is None and eh_cup:
-            # Cupom sem imagem → fallback exclusivo por plataforma
-            if plat == "shopee":
-                if os.path.exists(_IMG_SHP):
-                    img = _IMG_SHP
-                    log_img.debug("🟣 Fallback Shopee cupom")
-                else:
-                    log_img.warning(
-                        f"⚠️ _IMG_SHP não encontrado: {_IMG_SHP}")
-            elif plat == "amazon":
-                # SOMENTE cupom Amazon sem imagem original
-                if os.path.exists(_IMG_AMZ):
-                    img = _IMG_AMZ
-                    log_img.debug("🟠 Fallback Amazon cupom")
-                else:
-                    log_img.warning(
-                        f"⚠️ _IMG_AMZ não encontrado: {_IMG_AMZ}")
-            elif plat == "magalu":
-                if os.path.exists(_IMG_MGL):
-                    img = _IMG_MGL
-                    log_img.debug("🔵 Fallback Magalu cupom")
-                else:
-                    log_img.warning(
-                        f"⚠️ _IMG_MGL não encontrado: {_IMG_MGL}")
+            if plat == "shopee" and os.path.exists(_IMG_SHP):
+                img = _IMG_SHP
+            elif plat == "amazon" and os.path.exists(_IMG_AMZ):
+                img = _IMG_AMZ
+            elif plat == "magalu" and os.path.exists(_IMG_MGL):
+                img = _IMG_MGL
 
+    # Rate-limit
+    await _rate_limit()
+
+    # ── Envio / Edição ────────────────────────────────────────────────────
+    async with _SEM_ENVIO:
+        loop = asyncio.get_event_loop()
+        try:
+            mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+        except Exception as e:
+            log_sys.error(f"❌ ler_mapa: {e}")
+            mp = {}
+
+        try:
+            if is_edit:
+                id_d = mp.get(str(msg_id))
+                if not id_d:
+                    return
+                for t in range(1, 4):
+                    try:
+                        await client.edit_message(
+                            GRUPO_DESTINO, id_d,
+                            msg_final, parse_mode="md")
+                        log_tg.info(f"✏️ Editado | dest={id_d}")
+                        break
+                    except MessageNotModifiedError:
+                        break
+                    except FloodWaitError as e:
+                        await asyncio.sleep(e.seconds)
+                    except Exception as e:
+                        log_tg.error(f"❌ edit t={t}: {e}")
+                        if t < 3:
+                            await asyncio.sleep(2 ** t)
+                return
+
+            sent = None
+            for t in range(1, 4):
+                try:
+                    sent = await _enviar(msg_final, img)
+                    break
+                except FloodWaitError as e:
+                    await asyncio.sleep(e.seconds)
+                except Exception as e:
+                    log_tg.error(f"❌ envio t={t}: {e}")
+                    if t == 1:
+                        img = None
+                    elif t < 3:
+                        await asyncio.sleep(2 ** t)
+
+            if sent:
+                mp[str(msg_id)] = sent.id
+                try:
+                    await loop.run_in_executor(
+                        _EXECUTOR, salvar_mapa, mp)
+                except Exception as e:
+                    log_sys.error(f"❌ salvar_mapa: {e}")
+
+                await _marcar(msg_id)
+
+                try:
+                    await scheduler_ok(plat)
+                except Exception: pass
+                try:
+                    antisaturacao_ok(plat, sku)
+                except Exception: pass
+                try:
+                    await _burst_add()
+                except Exception: pass
+
+                # Magalu com link longo → agenda edição quando encurtar
+                if plat == "magalu" and mapa:
+                    for url_orig, url_conv in mapa.items():
+                        if ("partner_id" in url_conv
+                                and "cutt.ly" not in url_conv):
+                            try:
+                                await _agendar_edicao_magalu(
+                                    url_conv, msg_id)
+                            except Exception as e:
+                                log_mgl.warning(f"⚠️ agendar edição: {e}")
+
+                log_sys.info(
+                    f"🚀 [OK] @{uname} → {GRUPO_DESTINO} | "
+                    f"{msg_id}→{sent.id} | "
+                    f"{plat.upper()} sku={sku}")
+            else:
+                log_sys.error(
+                    f"❌ Envio falhou 3t | @{uname} id={msg_id}")
+
+        except Exception as e:
+            log_sys.error(f"❌ CRÍTICO pipeline: {e}", exc_info=True)
+
+
+# ── Ponto de entrada público ──────────────────────────────────────────────────
+
+async def processar(event, is_edit: bool = False):
+    """Enfileira o evento. Chamado pelos handlers on_new e on_edit."""
+    await _enfileirar(event, is_edit)
+
+
+async def _iniciar_orchestrator():
+    """Inicia o worker loop como task. Chamado em _run()."""
+    log_sys.info(
+        f"🎛 Orchestrator | workers={_WORKERS_MAX} "
+        f"fila={_FILA_MAX} coalesce={_COALESCE_MS}ms")
+    asyncio.create_task(_worker_loop())
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 25 ▸ HEALTH CHECK
-# Corrige: name '_buf' is not defined
-# Usa _buf diretamente (escopo global, já declarado acima)
+# Usa _buf, _w_ativos do escopo global (definidos no Módulo 24).
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def _health_check():
@@ -2815,11 +3153,14 @@ async def _health_check():
             try:
                 with _db() as db:
                     n_links = db.execute(
-                        "SELECT COUNT(*) FROM links_cache").fetchone()[0]
+                        "SELECT COUNT(*) FROM links_cache"
+                    ).fetchone()[0]
                     n_dedup = db.execute(
-                        "SELECT COUNT(*) FROM dedupe_temp").fetchone()[0]
-                    n_sat   = db.execute(
-                        "SELECT COUNT(*) FROM saturacao").fetchone()[0]
+                        "SELECT COUNT(*) FROM dedupe_temp"
+                    ).fetchone()[0]
+                    n_sat = db.execute(
+                        "SELECT COUNT(*) FROM saturacao"
+                    ).fetchone()[0]
             except Exception:
                 n_links = n_dedup = n_sat = "?"
 
@@ -2832,48 +3173,30 @@ async def _health_check():
         except Exception as e:
             log_hc.error(f"❌ Health: {e}", exc_info=True)
 
-def db_limpar():
-    try:
-        with _db() as db:
-            agora = int(time.time())
-
-            # 🔹 links cache (24h)
-            db.execute(
-                "DELETE FROM links_cache WHERE ts < ?",
-                (agora - 86400,)
-            )
-
-            # 🔹 dedupe (6h)
-            db.execute(
-                "DELETE FROM dedupe_temp WHERE ts < ?",
-                (agora - 21600,)
-            )
-
-            # 🔹 saturação (12h)
-            db.execute(
-                "DELETE FROM saturacao WHERE ts < ?",
-                (agora - 43200,)
-            )
-
-    except Exception as e:
-        log_hc.error(f"[DB LIMPAR ERRO] {e}", exc_info=True)
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 26 ▸ INICIALIZAÇÃO COM AUTO-RESTART
-# Corrige: name '_iniciar_orchestrator' is not defined
-# Corrige: name 'event' is not defined (handlers corretos)
-# _init_globals() chamado ANTES de qualquer task
+#
+# ORDEM OBRIGATÓRIA em _run():
+#   1. _init_globals()     — cria locks asyncio no event loop correto
+#   2. _init_db()          — abre conexão SQLite
+#   3. client.connect()    — conecta ao Telegram
+#   4. handlers            — registra on_new e on_edit
+#   5. _health_check task  — inicia health check
+#   6. _iniciar_orchestrator() — inicia worker loop
+#   7. run_until_disconnected()
 # ══════════════════════════════════════════════════════════════════════════════
 
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
 
 async def _run():
-    # Inicializa locks assíncronos no loop correto
-    _init_globals()
+    # ── 1. Inicializa locks asyncio ───────────────────────────────────────
+    _init_globals()   # DEVE ser primeira — cria _buf_lck, _buf_evt, _w_lck
+
+    # ── 2. Banco de dados ─────────────────────────────────────────────────
     _init_db()
 
+    # ── 3. Conexão Telegram ───────────────────────────────────────────────
     log_sys.info("🔌 Conectando...")
     await client.connect()
 
@@ -2891,7 +3214,7 @@ async def _run():
     log_sys.info(f"🖼  Pillow: {'OK' if _PIL_OK else 'pip install Pillow'}")
     log_sys.info("🚀 FOGUETÃO v74.0 — ONLINE")
 
-    # Handlers — usam processar() que está no escopo global
+    # ── 4. Handlers ───────────────────────────────────────────────────────
     @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
     async def on_new(event):
         try:
@@ -2906,10 +3229,11 @@ async def _run():
         except Exception as e:
             log_sys.error(f"❌ on_edit: {e}", exc_info=True)
 
-    # Tasks — na ordem correta
+    # ── 5 + 6. Tasks ──────────────────────────────────────────────────────
     asyncio.create_task(_health_check())
     await _iniciar_orchestrator()
 
+    # ── 7. Mantém vivo ────────────────────────────────────────────────────
     await client.run_until_disconnected()
     return True
 
@@ -2923,7 +3247,7 @@ async def main():
             break
         except Exception as e:
             log_sys.error(
-                f"💥 Caiu: {e} — restart em 15s...", exc_info=True)
+                f"💥 Caiu: {e} — restart 15s", exc_info=True)
             try:
                 await client.disconnect()
             except Exception:
@@ -2933,4 +3257,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
