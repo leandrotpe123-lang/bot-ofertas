@@ -37,17 +37,18 @@
 from __future__ import annotations
 
 import asyncio
-importar futuros concorrentes
 import hashlib
-Bretanha heapq
-importar ei io
-json
-registro de importação
+import heapq
+import io
+import json
+import logging
+import os
+import random
+import re
+import sqlite3
+import time
+import unicodedata
 
-grega re
-sqlite3
-tempo de exportação
-importar dados unicode
 from contextlib import contextmanager
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -56,30 +57,30 @@ from typing import Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 
 import aiohttp
-Importe BeautifulSoup para bs4
+from bs4 import BeautifulSoup
 from telethon import TelegramClient, events
 
 _DB_PATH = os.getenv("DB_PATH") or "database.db"
 _db_conn = None
 
 if os.path.dirname(_DB_PATH):
-    os makedirs (os.path.dirname(_DB_PATH),exist_ok=True)
-    
-from telethon.errors import   (
+    os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
+
+from telethon.errors import (
     AuthKeyUnregisteredError,
-    Erro de esperança de inundação,
-    Erro de mensagem não modificada,
-    Erro SessionPasswordNeededError,
+    FloodWaitError,
+    MessageNotModifiedError,
+    SessionPasswordNeededError,
 )
+
 from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaWebPage
 
-tentar :
-    Importar imagem de PIL
-    _PIL_OK = Verdadeiro
-exceto ImportError:
-    _PIL_OK = Falso
-
+try:
+    from PIL import Image
+    _PIL_OK = True
+except ImportError:
+    _PIL_OK = False
 
 # ════════════════════════════════════════════════════════════════════════
 # MÓDULO 1 ▸ REGISTRO DE REGRAS
