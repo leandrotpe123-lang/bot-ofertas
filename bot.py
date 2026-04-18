@@ -109,6 +109,7 @@ log_img = _mk_log ( 'IMAGEM' ,    '1;36' )
 log_tg = _mk_log ( 'TELEGRAM' , '1;32' )
 log_fil = _mk_log ( 'FILTRO' ,    '1;31' )
 log_lnk = _mk_log ( 'LINKS' ,     '1;38;5;51' )
+log_links = log_lnk
 log_fmt = _mk_log ( 'FORMAT' ,    '1;33' )
 log_sys = _mk_log ( 'SISTEMA' ,   '1;37' )
 log_hc   = _mk_log('HEALTH',   '1;38;5;118')
