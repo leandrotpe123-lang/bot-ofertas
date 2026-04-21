@@ -101,56 +101,151 @@ salvar_mapa  = lambda m: _gravar_json(ARQUIVO_MAPEAMENTO, m, _MAP_LOCK)
 ler_cache    = lambda: _ler_json(ARQUIVO_CACHE)
 salvar_cache = lambda c: _gravar_json(ARQUIVO_CACHE, c, _CACHE_LOCK)
 
-# ── MÓDULO 4: FILTRO DE TEXTO ─────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# MÓDULO 4 ▸ FILTRO DE TEXTO
+# Bloqueia: hardware, periféricos, Mercado Livre
+# Passa: multi-produto, listas de ofertas
+# ══════════════════════════════════════════════════════════════════════════════
+
 _FILTRO_TEXTO = [
-    "Monitor Samsung","Fonte Mancer","Placa de video","Monitor LG",
-    "PC home Essential","Suporte articulado","VHAGAR","Superframe",
-    "AM5","AM4","GTX","DDR5","DDR4","Dram","Monitor Safe","Monitor Redragon",
-    "CL18","CL16","CL32","MT/s","MHz","RX 580","Ryzen","Placa Mãe",
-    "Gabinete Gamer","Water Cooler","Air Cooler",
+    "Monitor Samsung", "Fonte Mancer", "Placa de video", "Monitor LG",
+    "PC home Essential", "Suporte articulado", "VHAGAR", "Superframe",
+    "AM5", "AM4", "GTX", "DDR5", "DDR4", "Dram", "Monitor Safe",
+    "Monitor Redragon", "CL18", "CL16", "CL32", "MT/s", "MHz",
+    "RX 580", "Ryzen", "Placa Mãe", "Gabinete Gamer",
+    "Water Cooler", "Air Cooler",
 ]
-_RE_MULTI_OFERTA = re.compile(r'\b(?:ofertas?|promoções?)\s+(?:na\s+|no\s+|da\s+)?(?:shopee|amazon|magalu|magazine\s*luiza)\b',re.I)
-_RE_PRECO_LINHA  = re.compile(r'R\$\s?[\d.,]+')
-_RE_URL_COUNT    = re.compile(r'https?://')
+
+# Mercado Livre — nunca passa (não é plataforma afiliada)
+_RE_MERCADO_LIVRE = re.compile(
+    r'\b(?:mercado\s*livre|mercadolivre|mercado\s*pago)\b', re.I)
+
+_RE_MULTI_OFERTA = re.compile(
+    r'\b(?:ofertas?|promoções?)\s+(?:na\s+|no\s+|da\s+)?'
+    r'(?:shopee|amazon|magalu|magazine\s*luiza)\b', re.I)
+
+_RE_PRECO_LINHA = re.compile(r'R\$\s?[\d.,]+')
+_RE_URL_COUNT   = re.compile(r'https?://')
+
 
 def _eh_multi_produto(texto: str) -> bool:
-    if _RE_MULTI_OFERTA.search(texto): return True
-    return sum(1 for l in texto.splitlines() if _RE_PRECO_LINHA.search(l)) >= 2 or len(_RE_URL_COUNT.findall(texto)) >= 3
+    if _RE_MULTI_OFERTA.search(texto):
+        return True
+    linhas_preco = sum(1 for l in texto.splitlines()
+                       if _RE_PRECO_LINHA.search(l))
+    urls = len(_RE_URL_COUNT.findall(texto))
+    return linhas_preco >= 2 or urls >= 3
+
 
 def texto_bloqueado(texto: str) -> bool:
-    if _eh_multi_produto(texto): return False
+    """
+    Retorna True se o texto deve ser bloqueado.
+    Mercado Livre: sempre bloqueado (não é plataforma afiliada).
+    Multi-produto: bypass do filtro de hardware.
+    """
+    # Mercado Livre — bloqueia sempre, antes de qualquer outra regra
+    if _RE_MERCADO_LIVRE.search(texto):
+        log_fil.debug("🚫 Mercado Livre bloqueado")
+        return True
+
+    # Multi-produto — bypass do filtro de hardware
+    if _eh_multi_produto(texto):
+        log_fil.debug("✅ Multi-produto — bypass filtro")
+        return False
+
     tl = texto.lower()
     for p in _FILTRO_TEXTO:
-        if p.lower() in tl: log_fil.debug(f"🚫 Filtro: '{p}'"); return True
+        if p.lower() in tl:
+            log_fil.debug(f"🚫 Filtro: '{p}'")
+            return True
+
     return False
 
-# ── MÓDULO 5: WHITELIST + CLASSIFICAÇÃO ──────────────────────────────────────
-_AMZ_DOMINIOS = frozenset({"amazon.com.br","amazon.com","amzn.to","amzn.com","a.co","amzlink.to","amzn.eu"})
-_SHP_DOMINIOS = frozenset({"shopee.com.br","s.shopee.com.br","shopee.com","shope.ee"})
-_MGL_DOMINIOS = frozenset({"magazineluiza.com.br","sacola.magazineluiza.com.br","magazinevoce.com.br","maga.lu"})
+# ══════════════════════════════════════════════════════════════════════════════
+# MÓDULO 5 ▸ WHITELIST + CLASSIFICAÇÃO
+# flapremios.com.br → classificado como shopee (campanha afiliada)
+# Mercado Livre → None (fora da whitelist, não processa)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_AMZ_DOMINIOS = frozenset({
+    "amazon.com.br", "amazon.com",
+    "amzn.to", "amzn.com", "a.co",
+    "amzlink.to", "amzn.eu",
+})
+_SHP_DOMINIOS = frozenset({
+    "shopee.com.br", "s.shopee.com.br",
+    "shopee.com", "shope.ee",
+    "flapremios.com.br",    # campanha afiliada Shopee
+})
+_MGL_DOMINIOS = frozenset({
+    "magazineluiza.com.br", "sacola.magazineluiza.com.br",
+    "magazinevoce.com.br", "maga.lu",
+})
+
+# Domínios bloqueados explicitamente — nunca processados
+_BLOQUEADOS = frozenset({
+    "mercadolivre.com.br", "mercadopago.com.br",
+    "mercadolivre.com", "meli.com",
+    "ml.com.br",
+})
+
 
 def _netloc(url: str) -> str:
-    try: return urlparse(url).netloc.lower().replace("www.","")
-    except Exception: return ""
+    try:
+        return urlparse(url).netloc.lower().replace("www.", "")
+    except Exception:
+        return ""
+
 
 def _eh_link_grupo_externo(url: str) -> bool:
     nl = _netloc(url)
-    return any(nl == d or nl.endswith("."+d) for d in _DELETAR)
+    return any(nl == d or nl.endswith("." + d) for d in _DELETAR)
+
 
 def classificar(url: str) -> Optional[str]:
+    """
+    Retorna: 'amazon' | 'shopee' | 'magalu' | 'preservar' | 'expandir' | None
+
+    flapremios.com.br → 'shopee'
+    Mercado Livre     → None (bloqueado)
+    """
     nl = _netloc(url)
-    if not nl: return None
-    if _eh_link_grupo_externo(url): return None
+    if not nl:
+        return None
+
+    # Domínios bloqueados explicitamente
+    for dom in _BLOQUEADOS:
+        if nl == dom or nl.endswith("." + dom):
+            log_lnk.debug(f"🚫 Domínio bloqueado: {nl}")
+            return None
+
+    if _eh_link_grupo_externo(url):
+        return None
+
     for d in _PRESERVE:
-        if nl == d or nl.endswith("."+d): return "preservar"
+        if nl == d or nl.endswith("." + d):
+            return "preservar"
+
+    # Magalu primeiro — evita cross-linking
     for dom in _MGL_DOMINIOS:
-        if nl == dom or nl.endswith("."+dom): return "magalu"
+        if nl == dom or nl.endswith("." + dom):
+            return "magalu"
+
+    # Amazon
     for dom in _AMZ_DOMINIOS:
-        if nl == dom or nl.endswith("."+dom): return "amazon"
+        if nl == dom or nl.endswith("." + dom):
+            return "amazon"
+
+    # Shopee (inclui flapremios.com.br)
     for dom in _SHP_DOMINIOS:
-        if nl == dom or nl.endswith("."+dom): return "shopee"
+        if nl == dom or nl.endswith("." + dom):
+            return "shopee"
+
+    # Encurtadores genéricos
     for enc in _ENCURTADORES:
-        if nl == enc or nl.endswith("."+enc): return "expandir"
+        if nl == enc or nl.endswith("." + enc):
+            return "expandir"
+
     return None
 
 # ── MÓDULO 6: DESENCURTADOR 15 CAMADAS ───────────────────────────────────────
@@ -235,25 +330,90 @@ async def motor_amazon(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
     log_amz.info(f"  ✅ OUT: {final}")
     db_set_link(url,final,"amazon"); return final
 
-# ── MÓDULO 8: MOTOR SHOPEE ────────────────────────────────────────────────────
-async def motor_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
+# ══════════════════════════════════════════════════════════════════════════════
+# MÓDULO 8 ▸ MOTOR SHOPEE — ISOLADO
+#
+# Aceita QUALQUER link da Shopee: produto, roleta, campanha, evento.
+# flapremios.com.br → repassa direto (campanha, não precisa converter)
+# Se API falhar → retorna URL original (nunca descarta)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Domínios Shopee que são repassados diretamente (não passam pela API)
+_SHP_REPASSE_DIRETO = frozenset({
+    "flapremios.com.br",
+})
+
+
+async def motor_shopee(url: str,
+                        sessao: aiohttp.ClientSession) -> Optional[str]:
+    """
+    Motor exclusivo Shopee.
+    flapremios.com.br → repasse direto sem chamar API.
+    Outros links Shopee → tenta API, fallback para original.
+    """
     log_shp.debug(f"▶ IN: {url[:80]}")
+
+    nl = _netloc(url)
+
+    # Campanha de repasse direto — não precisa converter
+    for dom in _SHP_REPASSE_DIRETO:
+        if nl == dom or nl.endswith("." + dom):
+            log_shp.info(f"  ↩️ Repasse direto (campanha): {url[:60]}")
+            return url
+
+    # Cache primeiro
     cached = db_get_link(url)
-    if cached: return cached
-    for t in range(1,4):
+    if cached:
+        log_shp.debug(f"  💾 Cache: {cached[:60]}")
+        return cached
+
+    # Tenta API GraphQL — 3 tentativas com backoff
+    for t in range(1, 4):
         try:
             ts      = str(int(time.time()))
-            payload = json.dumps({"query":f'mutation {{ generateShortLink(input: {{ originUrl: "{url}" }}) {{ shortLink }} }}'}, separators=(",",":"))
-            sig     = hashlib.sha256(f"{_SHP_APP_ID}{ts}{payload}{_SHP_SECRET}".encode()).hexdigest()
-            hdrs    = {"Authorization":f"SHA256 Credential={_SHP_APP_ID},Timestamp={ts},Signature={sig}","Content-Type":"application/json"}
+            payload = json.dumps({
+                "query": (
+                    f'mutation {{ generateShortLink(input: '
+                    f'{{ originUrl: "{url}" }}) {{ shortLink }} }}'
+                )
+            }, separators=(",", ":"))
+            sig  = hashlib.sha256(
+                f"{_SHP_APP_ID}{ts}{payload}{_SHP_SECRET}".encode()
+            ).hexdigest()
+            hdrs = {
+                "Authorization": (
+                    f"SHA256 Credential={_SHP_APP_ID},"
+                    f"Timestamp={ts},Signature={sig}"
+                ),
+                "Content-Type": "application/json",
+            }
             async with _SEM_HTTP:
-                async with sessao.post("https://open-api.affiliate.shopee.com.br/graphql",data=payload,headers=hdrs,timeout=aiohttp.ClientTimeout(total=12)) as r:
+                async with sessao.post(
+                    "https://open-api.affiliate.shopee.com.br/graphql",
+                    data=payload, headers=hdrs,
+                    timeout=aiohttp.ClientTimeout(total=12),
+                ) as r:
                     res  = await r.json()
-                    link = res.get("data",{}).get("generateShortLink",{}).get("shortLink")
-                    if link: log_shp.info(f"  ✅ t={t}: {link}"); db_set_link(url,link,"shopee"); return link
-                    raise ValueError(f"shortLink vazio: {res}")
-        except Exception as e: log_shp.warning(f"  ⚠️ t={t}/3: {e}"); await asyncio.sleep(2**t)
-    log_shp.error("  ❌ API falhou 3x"); return None
+                    link = (res.get("data", {})
+                               .get("generateShortLink", {})
+                               .get("shortLink"))
+                    if link:
+                        log_shp.info(f"  ✅ Convertido t={t}: {link}")
+                        db_set_link(url, link, "shopee")
+                        return link
+
+                    erro = res.get("errors") or res.get("error")
+                    log_shp.warning(
+                        f"  ⚠️ API sem shortLink t={t}: {erro or res}")
+
+        except Exception as e:
+            log_shp.warning(f"  ⚠️ t={t}/3: {e}")
+
+        await asyncio.sleep(1.5 * t)
+
+    # Fallback: URL original — nunca perde a oferta
+    log_shp.warning(f"  ↩️ Fallback original: {url[:60]}")
+    return url
 
 # ── MÓDULO 9: MOTOR MAGALU ────────────────────────────────────────────────────
 _CUTTLY_LAST_429: float = 0.0
@@ -341,46 +501,50 @@ async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
     if short: db_set_link(url,short,"magalu"); log_mgl.info(f"  ✅ OUT: {short}"); return short
     log_mgl.warning("  ⚠️ Cuttly falhou — link longo, editará depois"); return afiliado
 
-# ── MÓDULO 10: EXTRAÇÃO DE LINKS ─────────────────────────────────────────────
+── MÓDULO 10: EXTRAÇÃO DE LINKS ─────────────────────────────────────────────
+
 _RE_URL = re.compile(r'https?://[^\s\)\]>,"\'<\u200b\u200c\u200d\u2060]+')
 
 def extrair_links(texto: str) -> Tuple[List[str],List[str]]:
     brutos = [u.strip().rstrip('.,;)>]}') for u in _RE_URL.findall(texto)]
-    converter: List[str] = []; preservar: List[str] = []; vistos: set = set()
+    converter: List[str] = []
+    preservar: List[str] = []
+    vistos: set = set()
+
     for url in brutos:
-        if url in vistos: continue
+        if url in vistos:
+            continue
+
         vistos.add(url)
         plat = classificar(url)
-        if plat == "preservar": preservar.append(url)
-        elif plat in ("amazon","shopee","magalu","expandir"): converter.append(url)
+
+        if plat == "preservar":
+            preservar.append(url)
+
+        elif plat in ("amazon", "shopee", "magalu", "ifood", "expandir"):
+            converter.append(url)
+
     return converter, preservar
 
-# ── MÓDULO 11: PIPELINE DE CONVERSÃO PARALELA ────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# MÓDULO 11 ▸ PIPELINE DE CONVERSÃO
+#
+# Mantém sua lógica modular e adiciona converter_links() que o pipeline chama.
+# converter_links() é o adaptador entre seu Módulo 11 e o _pipeline().
+# ══════════════════════════════════════════════════════════════════════════════
 
-LOJAS_PERMITIDAS = ("amazon", "shopee", "magalu", "ifood")
+LOJAS_PERMITIDAS = ("amazon", "shopee", "Ifood", "magalu")
 
-# ==============================
-# 🔎 DETECÇÃO DE PLATAFORMA
-# ==============================
 
 def detectar_plataforma(url: str) -> str:
+    """Detecta plataforma. flapremios.com.br → shopee."""
     try:
         dominio = urlparse(url).netloc.lower()
     except Exception:
         dominio = ""
+    # flapremios é campanha Shopee — classificar() já retorna 'shopee'
+    return classificar(url) or "desconhecido"
 
-    if dominio.endswith("flapremios.com.br"):
-        return "shopee"
-
-    if dominio.endswith("ifood.com.br"):
-        return "ifood"
-
-    return classificar(url)
-
-
-# ==============================
-# 💾 CACHE
-# ==============================
 
 def verificar_cache(url: str, plat: str) -> Tuple[Optional[str], Optional[str]]:
     try:
@@ -389,131 +553,144 @@ def verificar_cache(url: str, plat: str) -> Tuple[Optional[str], Optional[str]]:
             return cached, plat
     except Exception as e:
         log_lnk.error(f"❌ Cache erro: {e}")
-
     return None, None
 
 
-# ==============================
-# 🔗 EXPANDIR LINKS
-# ==============================
-
-async def tratar_expandir(url: str, sessao: aiohttp.ClientSession) -> str:
+async def tratar_expandir(url: str,
+                           sessao: aiohttp.ClientSession) -> str:
     try:
         async with _SEM_HTTP:
             exp = await desencurtar(url, sessao)
-
         if exp and exp != url:
             return exp
-
     except Exception as e:
-        log_lnk.error(f"❌ Erro expandir: {e}")
-
+        log_lnk.error(f"❌ Expandir: {e}")
     return url
 
 
-# ==============================
-# 🔁 RETRY PADRÃO (3x)
-# ==============================
+async def processar_plataforma(url: str, plat: str,
+                                 sessao: aiohttp.ClientSession
+                                 ) -> Tuple[Optional[str], Optional[str]]:
 
-async def tentar_converter_3x(motor_func, url: str, sessao: aiohttp.ClientSession, nome: str) -> Optional[str]:
-    for tentativa in range(1, 4):
-        try:
-            link = await motor_func(url, sessao)
-            if link:
-                return link
+    if plat not in LOJAS_PERMITIDAS:
+        return None, None
 
-        except Exception as e:
-            log_lnk.error(f"❌ {nome} erro t={tentativa}: {e}")
-
-        await asyncio.sleep(1.5 * tentativa)
-
-    log_lnk.warning(f"🚫 {nome} não converteu: {url}")
-    return None
-
-
-# ==============================
-# 🏭 PROCESSAMENTO
-# ==============================
-
-async def processar_plataforma(url: str, plat: str, sessao: aiohttp.ClientSession) -> Tuple[Optional[str], Optional[str]]:
-
-    try:
-        dominio = urlparse(url).netloc.lower()
-    except Exception:
-        dominio = ""
-
-    # 🟡 iFood
+    # 🟡 iFood → passa direto (ANTES de qualquer motor)
     if plat == "ifood":
         return url, "ifood"
-
-    # 🟣 Shopee campanha
-    if plat == "shopee" and dominio.endswith("flapremios.com.br"):
-        return url, "shopee"
 
     motores = {
         "shopee": motor_shopee,
         "amazon": motor_amazon,
-        "magalu": motor_magalu
+        "magalu": motor_magalu,
     }
 
-    motor = motores.get(plat)
-    if not motor:
-        return None, None
+    motor = motores[plat]
 
-    link = await tentar_converter_3x(motor, url, sessao, plat)
+    link = await motor(url, sessao)
 
-    # 🟢 Shopee
     if plat == "shopee":
-        if link and link != url:
-            return link, "shopee"
-        return None, None
+        return (link, "shopee") if link else (None, None)
 
-    # 🔵 Amazon / Magalu
     if plat in ("amazon", "magalu"):
-        if link:
-            return link, plat
-        return None, None
+        return (link, plat) if link else (None, None)
+
+    return None, None
+
+    motores = {
+        "shopee": motor_shopee,
+        "amazon": motor_amazon,
+        "magalu": motor_magalu,
+    }
+    motor = motores[plat]
+
+    # Tenta converter com retry interno de cada motor
+    link = await motor(url, sessao)
+
+    if plat == "shopee":
+        # Shopee: motor_shopee nunca retorna None
+        # (sempre retorna original como fallback)
+        return (link, "shopee") if link else (None, None)
+
+    if plat in ("amazon", "magalu"):
+        return (link, plat) if link else (None, None)
 
     return None, None
 
 
-# ==============================
-# 🧠 FUNÇÃO PRINCIPAL
-# ==============================
-
-async def converter_link(url: str, sessao: aiohttp.ClientSession) -> Tuple[Optional[str], Optional[str]]:
+async def converter_link(url: str,
+                          sessao: aiohttp.ClientSession
+                          ) -> Tuple[Optional[str], Optional[str]]:
+    """Converte um único link."""
     try:
-        # 1. Detectar plataforma
         plat = detectar_plataforma(url)
 
-        # 2. Cache
         cached_link, cached_plat = verificar_cache(url, plat)
         if cached_link:
             return cached_link, cached_plat
 
-        # 3. Expandir
         if plat == "expandir":
-            url_expandida = await tratar_expandir(url, sessao)
-
-            if url_expandida != url:
-                return await converter_link(url_expandida, sessao)
-
+            url_exp = await tratar_expandir(url, sessao)
+            if url_exp != url:
+                return await converter_link(url_exp, sessao)
             plat = detectar_plataforma(url)
 
-        # 4. Processar
         return await processar_plataforma(url, plat, sessao)
 
     except Exception as e:
-        log_lnk.error(f"❌ converter_link erro geral: {e}")
+        log_lnk.error(f"❌ converter_link: {e}")
         return None, None
 
 
-# ==============================
-# 🔌 ADAPTADOR PARA PIPELINE
-# ==============================
-
-async def _converter_um(url: str, sessao: aiohttp.ClientSession) -> Tuple[Optional[str], Optional[str]]:
+async def _converter_um(url: str,
+                         sessao: aiohttp.ClientSession
+                         ) -> Tuple[Optional[str], Optional[str]]:
+    """Interface para gather paralelo."""
     return await converter_link(url, sessao)
+
+
+async def converter_links(links: List[str]) -> Tuple[Dict[str, str], str]:
+    """
+    Adaptador principal — chamado por _pipeline().
+    Converte até 50 links em paralelo.
+    Retorna (mapa_original→convertido, plataforma_principal).
+
+    CRÍTICO: esta função DEVE existir com este nome exato.
+    _pipeline() chama: mapa, plat = await converter_links(...)
+    """
+    if not links:
+        return {}, "amazon"
+
+    log_lnk.info(f"🚀 Convertendo {len(links)} links")
+
+    conn = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300, ssl=False)
+    async with aiohttp.ClientSession(
+        connector=conn,
+        timeout=aiohttp.ClientTimeout(total=40, connect=8),
+        headers={"User-Agent": random.choice(USER_AGENTS)},
+    ) as sessao:
+        resultados = await asyncio.gather(
+            *[_converter_um(l, sessao) for l in links[:50]],
+            return_exceptions=True,
+        )
+
+    mapa:  Dict[str, str] = {}
+    plats: List[str]       = []
+
+    for i, res in enumerate(resultados):
+        if isinstance(res, Exception):
+            log_lnk.error(f"❌ [{i}] {links[i][:50]}: {res}")
+            continue
+        novo, plat = res
+        if novo and plat:
+            mapa[links[i]] = novo
+            plats.append(plat)
+            log_lnk.debug(f"  [{plat.upper()}] → {novo[:50]}")
+
+    plat_p = max(set(plats), key=plats.count) if plats else "amazon"
+    log_lnk.info(f"✅ {len(mapa)}/{len(links)} | plat={plat_p}")
+    return mapa, plat_p
+
 
 # ── MÓDULO 12: LIMPEZA DE RUÍDO ──────────────────────────────────────────────
 _RE_INVISIVEIS  = re.compile(r'[\u200b\u200c\u200d\u00a0\u2060\ufeff]')
@@ -560,10 +737,10 @@ def limpar_ruido_textual(texto: str) -> str:
 
 # ── MÓDULO 13: EMOJIS + RADARES ──────────────────────────────────────────────
 _EMJ: Dict[str,List[str]] = {
-    "titulo_oferta":["🔥","💥","⚡️","🚀"],"titulo_cupom":["🚨","🔔","📢"],
-    "titulo_evento":["⚠️","🎯","🎰"],"preco":["💵","💰","🤑","💸"],
-    "cupom_cod":["🎟","🎫","🏷"],"resgate":["✅","🎯","🔗"],
-    "carrinho":["🛒","🛍"],"frete":["🚚","📦","✈️"],"multi_item":["🔹"],
+    "titulo_oferta":["🔥"],"titulo_cupom":["🚨"],
+    "titulo_evento":["⚠️"],"preco":["💵","💰"],
+    "cupom_cod":["🎟"],"resgate aqui":["✅"],
+    "carrinho":["🛒"],"frete":["🚚","📦"],"multi_item":["🔹"],
 }
 _EMJ_IDX: Dict[str,int] = {k:0 for k in _EMJ}
 
@@ -892,26 +1069,72 @@ async def _marcar(msg_id: int):
 async def _foi_processado(msg_id: int) -> bool:
     async with _IDS_LOCK: return msg_id in _IDS_PROC
 
-# ── MÓDULO 19: ENVIO LIMPO ────────────────────────────────────────────────────
-def _tem_midia(media) -> bool: return media is not None and not isinstance(media,MessageMediaWebPage)
-def _eh_cupom_texto(texto: str) -> bool: return bool(_KW_CUPOM.search(texto))
+# ══════════════════════════════════════════════════════════════════════════════
+# MÓDULO 19 ▸ ENVIO LIMPO
+# Imagem Amazon (_IMG_AMZ): SOMENTE cupom exclusivo Amazon
+# Isolamento por plataforma — zero contaminação cruzada
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _tem_midia(media) -> bool:
+    return media is not None and not isinstance(media, MessageMediaWebPage)
+
+
+def _eh_cupom_texto(texto: str) -> bool:
+    return bool(_KW_CUPOM.search(texto))
+
+
+def _eh_cupom_exclusivo_amazon(texto: str, plat: str) -> bool:
+    """
+    Retorna True SOMENTE quando:
+    - Plataforma é Amazon E
+    - Texto é um cupom (tem 'cupom', 'código', 'off', etc.) E
+    - NÃO menciona Shopee ou Magalu (garante exclusividade)
+    """
+    if plat != "amazon":
+        return False
+    if not _eh_cupom_texto(texto):
+        return False
+    # Garante que não é multi-plataforma
+    tl = texto.lower()
+    if "shopee" in tl or "magalu" in tl or "magazine" in tl:
+        return False
+    return True
+
 
 async def _enviar(msg: str, img_obj) -> object:
+    """Envio limpo. Nunca forward. Sempre constrói do zero."""
     if img_obj:
         if len(msg) <= 1024:
-            try: return await client.send_file(GRUPO_DESTINO,img_obj,caption=msg,parse_mode="md",force_document=False)
+            try:
+                return await client.send_file(
+                    GRUPO_DESTINO, img_obj,
+                    caption=msg, parse_mode="md",
+                    force_document=False)
             except Exception as e:
                 log_tg.warning(f"⚠️ send_file+caption: {e}")
                 try:
-                    await client.send_file(GRUPO_DESTINO,img_obj,force_document=False)
-                    return await client.send_message(GRUPO_DESTINO,msg,parse_mode="md",link_preview=True)
-                except Exception as e2: log_tg.warning(f"⚠️ sem caption: {e2}")
+                    await client.send_file(
+                        GRUPO_DESTINO, img_obj,
+                        force_document=False)
+                    return await client.send_message(
+                        GRUPO_DESTINO, msg,
+                        parse_mode="md", link_preview=True)
+                except Exception as e2:
+                    log_tg.warning(f"⚠️ send_file sem caption: {e2}")
         else:
             try:
-                await client.send_file(GRUPO_DESTINO,img_obj,force_document=False)
-                return await client.send_message(GRUPO_DESTINO,msg,parse_mode="md",link_preview=False)
-            except Exception as e: log_tg.warning(f"⚠️ longo: {e}")
-    return await client.send_message(GRUPO_DESTINO,msg,parse_mode="md",link_preview=True)
+                await client.send_file(
+                    GRUPO_DESTINO, img_obj,
+                    force_document=False)
+                return await client.send_message(
+                    GRUPO_DESTINO, msg,
+                    parse_mode="md", link_preview=False)
+            except Exception as e:
+                log_tg.warning(f"⚠️ send_file longo: {e}")
+
+    return await client.send_message(
+        GRUPO_DESTINO, msg,
+        parse_mode="md", link_preview=True)
 
 # ── MÓDULO 20: SQLITE ─────────────────────────────────────────────────────────
 _DB_PATH = "foguetao.db"; _db_conn: Optional[sqlite3.Connection] = None; _db_lock = Lock()
@@ -1073,36 +1296,7 @@ def parse_links_bulk(urls: List[str]) -> List[ParsedLink]:
     res = [parse_link(u) for u in urls]; validos = [r for r in res if r.valido]
     log_lnk.info(f"🔍 Parser {len(validos)}/{len(urls)}"); return validos
 
-# ── MÓDULO 22: SCHEDULER ─────────────────────────────────────────────────────
-_SCH_LIM_H = 15; _SCH_NOTURNO = (0,7); _SCH_DELAY_MAX = 10.0
-_sch_cnt: Dict[str,List[float]] = {}
-_sch_cnt_lock: asyncio.Lock = None  # type: ignore
-
-async def _sch_add(plat: str):
-    async with _sch_cnt_lock:
-        agora = time.monotonic(); fila = _sch_cnt.setdefault(plat,[])
-        fila.append(agora); _sch_cnt[plat] = [t for t in fila if agora-t < 3600]
-
-async def _sch_count(plat: str) -> int:
-    async with _sch_cnt_lock:
-        agora = time.monotonic(); return sum(1 for t in _sch_cnt.get(plat,[]) if agora-t < 3600)
-
-def _sch_delay(score: float, hora: int) -> float:
-    h0,h1 = _SCH_NOTURNO; base = 5.0 if h0 <= hora < h1 else 0.0
-    if score >= 1.0: return base
-    if score >= 0.5: return min(base+(1.0-score)*8.0,_SCH_DELAY_MAX)
-    return min(base+(0.5-score)*16.0,_SCH_DELAY_MAX)
-
-async def scheduler_gate(plat: str, texto: str) -> float:
-    if _KW_EVENTO.search(texto): return 0.0
-    hora = int(time.strftime("%H")); count = await _sch_count(plat)
-    if count >= _SCH_LIM_H: log_sys.warning(f"⚠️ Scheduler limite | {plat}"); return -1.0
-    return _sch_delay(db_score_hora(plat,hora),hora)
-
-async def scheduler_ok(plat: str):
-    hora = int(time.strftime("%H")); await _sch_add(plat); db_registrar_sch(plat,hora)
-
-# ── MÓDULO 23: ANTI-SATURAÇÃO ─────────────────────────────────────────────────
+# ── MÓDULO 22: ANTI-SATURAÇÃO ─────────────────────────────────────────────────
 _SAT_MAX_PLAT = 10; _SAT_BURST_LIM = 6; _SAT_BURST_JAN = 60
 _burst: List[float] = []
 _burst_lock: asyncio.Lock = None  # type: ignore
@@ -1124,7 +1318,7 @@ async def antisaturacao_gate(plat: str, texto: str) -> float:
 
 def antisaturacao_ok(plat: str, sku: str): db_registrar_sat(plat,sku)
 
-# ── MÓDULO 24: ORCHESTRATOR + PIPELINE ───────────────────────────────────────
+# ── MÓDULO 23: ORCHESTRATOR + PIPELINE ───────────────────────────────────────
 # _init_globals() definida aqui no escopo global — ANTES de qualquer uso.
 # Resolve definitivamente o NameError '_init_globals is not defined'.
 _WORKERS_MAX = 4; _FILA_MAX = 200; _COALESCE_MS = 800
@@ -1245,23 +1439,49 @@ async def _pipeline(event, is_edit: bool = False):
     try: msg_final = renderizar(tc,mapa,links_p,plat)
     except Exception as e: log_sys.error(f"❌ renderizar: {e}"); return
 
-    # IMAGEM — event.message INTEIRO (não .media)
-    tem_img = _tem_midia(event.message.media); img = None; eh_cup = _eh_cupom_texto(tc)
+    # ══════════════════════════════════════════════════════════════════════
+    # IMAGEM — ordem de prioridade + isolamento por plataforma
+    # ══════════════════════════════════════════════════════════════════════
+    tem_img = _tem_midia(event.message.media)
+    img     = None
+    eh_cup  = _eh_cupom_texto(tc)
+
+    # 1. Imagem original da mensagem (sempre prioridade máxima)
     if tem_img:
         try:
-            img,_ = await preparar_imagem(event.message,True)
-            if not img: log_img.warning("⚠️ Imagem original falhou")
-        except Exception as e: log_img.warning(f"⚠️ Imagem orig: {e}"); img = None
+            img, _ = await preparar_imagem(event.message, True)
+            if img:
+                log_img.debug("✅ Imagem original")
+            else:
+                log_img.warning("⚠️ download_media retornou None")
+        except Exception as e:
+            log_img.warning(f"⚠️ Imagem original: {e}")
+            img = None
+
+    # 2. Sem imagem original → busca ou fallback
     if img is None:
+
         if mapa and not eh_cup:
+            # Produto sem imagem → busca na página
             try:
                 img_url = await buscar_imagem(list(mapa.values())[0])
-                if img_url: img,_ = await preparar_imagem(img_url,False)
-            except Exception as e: log_img.warning(f"⚠️ busca img: {e}")
+                if img_url:
+                    img, _ = await preparar_imagem(img_url, False)
+            except Exception as e:
+                log_img.warning(f"⚠️ Busca imagem: {e}")
+
         if img is None and eh_cup:
-            if plat == "shopee" and os.path.exists(_IMG_SHP): img = _IMG_SHP
-            elif plat == "amazon" and os.path.exists(_IMG_AMZ): img = _IMG_AMZ
-            elif plat == "magalu" and os.path.exists(_IMG_MGL): img = _IMG_MGL
+            # Fallback exclusivo por plataforma
+            # _IMG_AMZ: SOMENTE cupom exclusivo Amazon
+            if plat == "shopee" and os.path.exists(_IMG_SHP):
+                img = _IMG_SHP
+                log_img.debug("🟣 Fallback Shopee")
+            elif _eh_cupom_exclusivo_amazon(tc, plat) and os.path.exists(_IMG_AMZ):
+                img = _IMG_AMZ
+                log_img.debug("🟠 Fallback Amazon cupom exclusivo")
+            elif plat == "magalu" and os.path.exists(_IMG_MGL):
+                img = _IMG_MGL
+                log_img.debug("🔵 Fallback Magalu")
 
     await _rate_limit()
     async with _SEM_ENVIO:
@@ -1293,7 +1513,6 @@ async def _pipeline(event, is_edit: bool = False):
                 try: await loop.run_in_executor(_EXECUTOR,salvar_mapa,mp)
                 except Exception as e: log_sys.error(f"❌ salvar_mapa: {e}")
                 await _marcar(msg_id)
-                try: await scheduler_ok(plat)
                 except Exception: pass
                 try: antisaturacao_ok(plat,sku)
                 except Exception: pass
@@ -1314,7 +1533,7 @@ async def _iniciar_orchestrator():
     log_sys.info(f"🎛 Orchestrator | workers={_WORKERS_MAX} fila={_FILA_MAX} coalesce={_COALESCE_MS}ms")
     asyncio.create_task(_worker_loop())
 
-# ── MÓDULO 25: HEALTH CHECK ───────────────────────────────────────────────────
+# ── MÓDULO 24: HEALTH CHECK ───────────────────────────────────────────────────
 async def _health_check():
     while True:
         await asyncio.sleep(300)
@@ -1329,7 +1548,7 @@ async def _health_check():
             log_hc.info(f"💚 links={n_links}(perm) | dedupe={n_dedup} | sat={n_sat} | anti-loop={len(_IDS_PROC)} | fila={len(_buf)} w={_w_ativos} | PIL={'OK' if _PIL_OK else 'OFF'}")
         except Exception as e: log_hc.error(f"❌ Health: {e}",exc_info=True)
 
-# ── MÓDULO 26: INICIALIZAÇÃO ──────────────────────────────────────────────────
+# ── MÓDULO 25: INICIALIZAÇÃO ──────────────────────────────────────────────────
 client = TelegramClient(StringSession(SESSION_STRING),API_ID,API_HASH)
 
 async def _run():
