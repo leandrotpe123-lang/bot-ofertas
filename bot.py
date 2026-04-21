@@ -1421,7 +1421,7 @@ async def _pipeline(event, is_edit: bool = False):
     except Exception as e: log_sys.error(f"❌ converter: {e}"); mapa,plat = {},"amazon"
     if links_c and not mapa and not links_p: log_sys.warning(f"🚫 Zero links | @{uname}"); return
     try:
-       sku = next((f"{r.plat[:3]}_{r.sku}" for r in parsed if r.sku),"") or _extrair_sku(mapa)
+        sku = next((f"{r.plat[:3]}_{r.sku}" for r in parsed if r.sku),"") or _extrair_sku(mapa)
         cup = _extrair_cupom(tc)
     except Exception as e:
         log_sys.error(f"❌ sku: {e}")
