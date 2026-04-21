@@ -356,37 +356,164 @@ def extrair_links(texto: str) -> Tuple[List[str],List[str]]:
     return converter, preservar
 
 # ── MÓDULO 11: PIPELINE DE CONVERSÃO PARALELA ────────────────────────────────
-async def _converter_um(url: str, sessao: aiohttp.ClientSession) -> Tuple[Optional[str],Optional[str]]:
-    plat = classificar(url)
-    cached = db_get_link(url)
-    if cached:
-        p = plat if plat in ("amazon","shopee","magalu") else "amazon"
-        return cached, p
-    if plat == "amazon": r = await motor_amazon(url,sessao); return (r,"amazon") if r else (None,None)
-    if plat == "shopee": r = await motor_shopee(url,sessao); return (r,"shopee") if r else (None,None)
-    if plat == "magalu": r = await motor_magalu(url,sessao); return (r,"magalu") if r else (None,None)
-    if plat == "expandir":
-        try:
-            async with _SEM_HTTP: exp = await desencurtar(url,sessao)
-        except Exception: return None,None
-        p2 = classificar(exp)
-        if p2 in ("amazon","shopee","magalu"): return await _converter_um(exp,sessao)
-        return None,None
-    return None,None
 
-async def converter_links(links: List[str]) -> Tuple[Dict[str,str],str]:
-    if not links: return {}, "amazon"
-    conn = aiohttp.TCPConnector(limit=50,ttl_dns_cache=300,ssl=False)
-    async with aiohttp.ClientSession(connector=conn,timeout=aiohttp.ClientTimeout(total=40,connect=8),headers={"User-Agent":random.choice(USER_AGENTS)}) as sessao:
-        resultados = await asyncio.gather(*[_converter_um(l,sessao) for l in links[:50]], return_exceptions=True)
-    mapa: Dict[str,str] = {}; plats: List[str] = []
-    for i,res in enumerate(resultados):
-        if isinstance(res,Exception): log_lnk.error(f"❌ [{i}]: {res}"); continue
-        novo,plat = res
-        if novo and plat: mapa[links[i]] = novo; plats.append(plat)
-    plat_p = max(set(plats),key=plats.count) if plats else "amazon"
-    log_lnk.info(f"✅ {len(mapa)}/{len(links)} | plat={plat_p}")
-    return mapa, plat_p
+LOJAS_PERMITIDAS = ("amazon", "shopee", "magalu", "ifood")
+
+# ==============================
+# 🔎 DETECÇÃO DE PLATAFORMA
+# ==============================
+
+def detectar_plataforma(url: str) -> str:
+    try:
+        dominio = urlparse(url).netloc.lower()
+    except Exception:
+        dominio = ""
+
+    if dominio.endswith("flapremios.com.br"):
+        return "shopee"
+
+    if dominio.endswith("ifood.com.br"):
+        return "ifood"
+
+    return classificar(url)
+
+
+# ==============================
+# 💾 CACHE
+# ==============================
+
+def verificar_cache(url: str, plat: str) -> Tuple[Optional[str], Optional[str]]:
+    try:
+        cached = db_get_link(url)
+        if cached and plat in LOJAS_PERMITIDAS:
+            return cached, plat
+    except Exception as e:
+        log_lnk.error(f"❌ Cache erro: {e}")
+
+    return None, None
+
+
+# ==============================
+# 🔗 EXPANDIR LINKS
+# ==============================
+
+async def tratar_expandir(url: str, sessao: aiohttp.ClientSession) -> str:
+    try:
+        async with _SEM_HTTP:
+            exp = await desencurtar(url, sessao)
+
+        if exp and exp != url:
+            return exp
+
+    except Exception as e:
+        log_lnk.error(f"❌ Erro expandir: {e}")
+
+    return url
+
+
+# ==============================
+# 🔁 RETRY PADRÃO (3x)
+# ==============================
+
+async def tentar_converter_3x(motor_func, url: str, sessao: aiohttp.ClientSession, nome: str) -> Optional[str]:
+    for tentativa in range(1, 4):
+        try:
+            link = await motor_func(url, sessao)
+            if link:
+                return link
+
+        except Exception as e:
+            log_lnk.error(f"❌ {nome} erro t={tentativa}: {e}")
+
+        await asyncio.sleep(1.5 * tentativa)
+
+    log_lnk.warning(f"🚫 {nome} não converteu: {url}")
+    return None
+
+
+# ==============================
+# 🏭 PROCESSAMENTO
+# ==============================
+
+async def processar_plataforma(url: str, plat: str, sessao: aiohttp.ClientSession) -> Tuple[Optional[str], Optional[str]]:
+
+    try:
+        dominio = urlparse(url).netloc.lower()
+    except Exception:
+        dominio = ""
+
+    # 🟡 iFood
+    if plat == "ifood":
+        return url, "ifood"
+
+    # 🟣 Shopee campanha
+    if plat == "shopee" and dominio.endswith("flapremios.com.br"):
+        return url, "shopee"
+
+    motores = {
+        "shopee": motor_shopee,
+        "amazon": motor_amazon,
+        "magalu": motor_magalu
+    }
+
+    motor = motores.get(plat)
+    if not motor:
+        return None, None
+
+    link = await tentar_converter_3x(motor, url, sessao, plat)
+
+    # 🟢 Shopee
+    if plat == "shopee":
+        if link and link != url:
+            return link, "shopee"
+        return None, None
+
+    # 🔵 Amazon / Magalu
+    if plat in ("amazon", "magalu"):
+        if link:
+            return link, plat
+        return None, None
+
+    return None, None
+
+
+# ==============================
+# 🧠 FUNÇÃO PRINCIPAL
+# ==============================
+
+async def converter_link(url: str, sessao: aiohttp.ClientSession) -> Tuple[Optional[str], Optional[str]]:
+    try:
+        # 1. Detectar plataforma
+        plat = detectar_plataforma(url)
+
+        # 2. Cache
+        cached_link, cached_plat = verificar_cache(url, plat)
+        if cached_link:
+            return cached_link, cached_plat
+
+        # 3. Expandir
+        if plat == "expandir":
+            url_expandida = await tratar_expandir(url, sessao)
+
+            if url_expandida != url:
+                return await converter_link(url_expandida, sessao)
+
+            plat = detectar_plataforma(url)
+
+        # 4. Processar
+        return await processar_plataforma(url, plat, sessao)
+
+    except Exception as e:
+        log_lnk.error(f"❌ converter_link erro geral: {e}")
+        return None, None
+
+
+# ==============================
+# 🔌 ADAPTADOR PARA PIPELINE
+# ==============================
+
+async def _converter_um(url: str, sessao: aiohttp.ClientSession) -> Tuple[Optional[str], Optional[str]]:
+    return await converter_link(url, sessao)
 
 # ── MÓDULO 12: LIMPEZA DE RUÍDO ──────────────────────────────────────────────
 _RE_INVISIVEIS  = re.compile(r'[\u200b\u200c\u200d\u00a0\u2060\ufeff]')
