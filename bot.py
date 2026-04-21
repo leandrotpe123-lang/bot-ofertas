@@ -501,7 +501,7 @@ async def motor_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]
     if short: db_set_link(url,short,"magalu"); log_mgl.info(f"  ✅ OUT: {short}"); return short
     log_mgl.warning("  ⚠️ Cuttly falhou — link longo, editará depois"); return afiliado
 
-── MÓDULO 10: EXTRAÇÃO DE LINKS ─────────────────────────────────────────────
+# ── MÓDULO 10: EXTRAÇÃO DE LINKS ─────────────────────────────────────────────
 
 _RE_URL = re.compile(r'https?://[^\s\)\]>,"\'<\u200b\u200c\u200d\u2060]+')
 
