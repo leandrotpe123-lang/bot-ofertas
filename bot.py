@@ -739,7 +739,7 @@ def limpar_ruido_textual(texto: str) -> str:
 _EMJ: Dict[str,List[str]] = {
     "titulo_oferta":["🔥"],"titulo_cupom":["🚨"],
     "titulo_evento":["⚠️"],"preco":["💵","💰"],
-    "cupom_cod":["🎟"],"resgate aqui":["✅"],
+    "cupom_cod":["🎟"],"resgate_aqui":["✅"],
     "carrinho":["🛒"],"frete":["🚚","📦"],"multi_item":["🔹"],
 }
 _EMJ_IDX: Dict[str,int] = {k:0 for k in _EMJ}
@@ -1421,23 +1421,36 @@ async def _pipeline(event, is_edit: bool = False):
     except Exception as e: log_sys.error(f"❌ converter: {e}"); mapa,plat = {},"amazon"
     if links_c and not mapa and not links_p: log_sys.warning(f"🚫 Zero links | @{uname}"); return
     try:
-        sku = next((f"{r.plat[:3]}_{r.sku}" for r in parsed if r.sku),"") or _extrair_sku(mapa)
+       sku = next((f"{r.plat[:3]}_{r.sku}" for r in parsed if r.sku),"") or _extrair_sku(mapa)
         cup = _extrair_cupom(tc)
-    except Exception as e: log_sys.error(f"❌ sku: {e}"); sku,cup = "",""
+    except Exception as e:
+        log_sys.error(f"❌ sku: {e}")
+        sku, cup = "", ""
+
     if not is_edit:
-        try: delay_sat = await antisaturacao_gate(plat,tc)
-        except Exception as e: log_sys.error(f"❌ antisaturacao: {e}"); delay_sat = 0.0
         try:
-            if not deve_enviar(plat,cup,tc,mapa): return
-        except Exception as e: log_sys.error(f"❌ deve_enviar: {e}"); return
+            delay_sat = await antisaturacao_gate(plat, tc)
+        except Exception as e:
+            log_sys.error(f"❌ antisaturacao: {e}")
+            delay_sat = 0.0
+
         try:
-            delay_sch = await scheduler_gate(plat,tc)
-            if delay_sch == -1.0: log_sys.warning("⚠️ Limite/h"); return
-        except Exception as e: log_sys.error(f"❌ scheduler: {e}"); delay_sch = 0.0
-        total = delay_sch+delay_sat
-        if total > 0: await asyncio.sleep(total)
-    try: msg_final = renderizar(tc,mapa,links_p,plat)
-    except Exception as e: log_sys.error(f"❌ renderizar: {e}"); return
+            if not deve_enviar(plat, cup, tc, mapa): return
+        except Exception as e:
+            log_sys.error(f"❌ deve_enviar: {e}")
+            return
+
+        # Ajuste do scheduler removido
+        delay_sch = 0.0
+        total = delay_sat + delay_sch
+        if total > 0:
+            await asyncio.sleep(total)
+
+    try:
+        msg_final = renderizar(tc, mapa, links_p, plat)
+    except Exception as e:
+        log_sys.error(f"❌ renderizar: {e}")
+        return
 
     # ══════════════════════════════════════════════════════════════════════
     # IMAGEM — ordem de prioridade + isolamento por plataforma
