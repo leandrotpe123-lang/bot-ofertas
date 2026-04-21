@@ -1510,16 +1510,28 @@ async def _pipeline(event, is_edit: bool = False):
                     elif t < 3: await asyncio.sleep(2**t)
             if sent:
                 mp[str(msg_id)] = sent.id
-                try: await loop.run_in_executor(_EXECUTOR,salvar_mapa,mp)
-                except Exception as e: log_sys.error(f"❌ salvar_mapa: {e}")
-                await _marcar(msg_id)
-                except Exception: pass
-                try: antisaturacao_ok(plat,sku)
-                except Exception: pass
-                try: await _burst_add()
-                except Exception: pass
+                try: 
+                    await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
+                except Exception as e: 
+                    log_sys.error(f"❌ salvar_mapa: {e}")
+                
+                await _marcar(msg_id)  # Marcar como processado
+                
+                # O scheduler foi removido, então não tem nada aqui.
+
+                try: 
+                    antisaturacao_ok(plat, sku)
+                except Exception: 
+                    pass
+                
+                try: 
+                    await _burst_add()
+                except Exception: 
+                    pass
+                
                 if plat == "magalu" and mapa:
-                    for url_orig,url_conv in mapa.items():
+                    for url_orig, url_conv in mapa.items():
+                    
                         if "partner_id" in url_conv and "cutt.ly" not in url_conv:
                             try: await _agendar_edicao_magalu(url_conv,msg_id)
                             except Exception: pass
