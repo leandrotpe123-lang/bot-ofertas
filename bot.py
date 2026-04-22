@@ -1364,7 +1364,7 @@ async def _pipeline(event, is_edit: bool = False):
         cup = _extrair_cupom(tc)
 except Exception as e:
         log_sys.error(f"❌ sku: {e}")
-    sku, cup = "", ""
+        sku, cup = "", ""
 
     if not is_edit:
         try:
