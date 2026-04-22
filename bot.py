@@ -1330,39 +1330,76 @@ async def _worker_loop():
                 async with _w_lck: _w_ativos -= 1
 
 async def _pipeline(event, is_edit: bool = False):
-    msg_id = event.message.id; texto = event.message.text or ""
-    try: chat = await event.get_chat(); uname = (chat.username or str(event.chat_id)).lower()
-    except Exception as e: log_sys.error(f"❌ get_chat: {e}"); return
+    msg_id = event.message.id
+    texto = event.message.text or ""
+    try:
+        chat = await event.get_chat()
+        uname = (chat.username or str(event.chat_id)).lower()
+    except Exception as e:
+        log_sys.error(f"❌ get_chat: {e}")
+        return
+
     log_tg.info(f"{'✏️' if is_edit else '📩'} @{uname} | id={msg_id} | {len(texto)}c | q={len(_buf)} w={_w_ativos}")
-    if not texto.strip(): return
+
+    if not texto.strip():
+        return
+
     try:
         if not is_edit:
-            if await _foi_processado(msg_id): return
+            if await _foi_processado(msg_id):
+                return
         else:
             loop = asyncio.get_event_loop()
-            mapa_c = await loop.run_in_executor(_EXECUTOR,ler_mapa)
-            if str(msg_id) not in mapa_c: return
-    except Exception as e: log_sys.error(f"❌ anti-loop: {e}"); return
+            mapa_c = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+            if str(msg_id) not in mapa_c:
+                return
+    except Exception as e:
+        log_sys.error(f"❌ anti-loop: {e}")
+        return
+
     try:
-        if texto_bloqueado(texto): return
-    except Exception as e: log_sys.error(f"❌ filtro: {e}"); return
-    try: tc = limpar_ruido_textual(texto)
-    except Exception as e: log_sys.error(f"❌ limpeza: {e}"); tc = texto
-    if not _tem_contexto(tc): return
+        if texto_bloqueado(texto):
+            return
+    except Exception as e:
+        log_sys.error(f"❌ filtro: {e}")
+        return
+
     try:
-        links_c,links_p = extrair_links(tc); parsed = parse_links_bulk(links_c)
-        diretos     = [r.url_limpa for r in parsed if r.plat not in ("expandir","desconhecido")]
+        tc = limpar_ruido_textual(texto)
+    except Exception as e:
+        log_sys.error(f"❌ limpeza: {e}")
+        tc = texto
+
+    if not _tem_contexto(tc):
+        return
+
+    try:
+        links_c, links_p = extrair_links(tc)
+        parsed = parse_links_bulk(links_c)
+        diretos = [r.url_limpa for r in parsed if r.plat not in ("expandir", "desconhecido")]
         expandir_lst = [r.url_limpa for r in parsed if r.plat == "expandir"]
-    except Exception as e: log_sys.error(f"❌ extração: {e}"); return
+    except Exception as e:
+        log_sys.error(f"❌ extração: {e}")
+        return
+
     if not diretos and not expandir_lst and not links_p:
-        if "fadadoscupons" not in uname: return
-    try: mapa,plat = await converter_links(diretos+expandir_lst)
-    except Exception as e: log_sys.error(f"❌ converter: {e}"); mapa,plat = {},"amazon"
-    if links_c and not mapa and not links_p: log_sys.warning(f"🚫 Zero links | @{uname}"); return
+        if "fadadoscupons" not in uname:
+            return
+
+    try:
+        mapa, plat = await converter_links(diretos + expandir_lst)
+    except Exception as e:
+        log_sys.error(f"❌ converter: {e}")
+        mapa, plat = {}, "amazon"
+
+    if links_c and not mapa and not links_p:
+        log_sys.warning(f"🚫 Zero links | @{uname}")
+        return
+
     try:
         sku = next((f"{r.plat[:3]}_{r.sku}" for r in parsed if r.sku), "") or _extrair_sku(tc, mapa)
         cup = _extrair_cupom(tc)
-except Exception as e:
+    except Exception as e:
         log_sys.error(f"❌ sku: {e}")
         sku, cup = "", ""
 
@@ -1374,7 +1411,8 @@ except Exception as e:
             delay_sat = 0.0
 
         try:
-            if not deve_enviar(plat, cup, tc, mapa): return
+            if not deve_enviar(plat, cup, tc, mapa):
+                return
         except Exception as e:
             log_sys.error(f"❌ deve_enviar: {e}")
             return
