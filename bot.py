@@ -811,165 +811,170 @@ def renderizar(texto: str, mapa_links: Dict[str,str], links_preservar: List[str]
         primeiro = False; saida.append(l)
     return "\n".join(saida).strip()
 
-# ── MÓDULO 15: DEDUPLICAÇÃO SEMÂNTICA ELITE ──────────────────────────────────
-# FIX BOIA INFLÁVEL: usa título do produto como chave quando ASIN não disponível
+# ── MÓDULO 15: DEDUPLICAÇÃO GLOBAL INTELIGENTE ──────────────────────────────
+
 TTL_DEDUPE    = 86400
 JANELA_RAPIDA = 600
 _SIM_FORTE    = 0.85
 _SIM_MEDIO    = 0.75
-_RUIDO_NORM   = frozenset({"promo","promocao","promoção","oferta","desconto","cupom","corre","aproveita","urgente","gratis","grátis","frete","hoje","agora","imperdivel","imperdível","exclusivo","limitado","corra","ative","use","saiu","vazou","resgate","acesse","confira","link","clique","app","relampago","relâmpago","click","veja","novo","nova","valido","válido","somente","apenas","ate","até","partir","ainda","volta","ativo","disponivel","disponível","pix","parcelas"})
-_RE_EMJ_STRIP = re.compile(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF\u2B50\u2B55]+",flags=re.UNICODE)
 
-def _rm_ac(t: str) -> str: return "".join(c for c in unicodedata.normalize("NFD",t) if unicodedata.category(c) != "Mn")
+# ── REATIVAÇÃO ──────────────────────────────────────────────────────────────
+def _eh_reativacao(texto: str) -> bool:
+    tl = texto.lower()
+    gatilhos = [
+        "ainda ativo","ainda disponível","continua ativo",
+        "voltou","de volta","reativado","novamente",
+        "ativo novamente","cupom voltou","cupom ativo",
+        "estoque voltou"
+    ]
+    return any(g in tl for g in gatilhos)
 
-def _extrair_todos_cupons(texto: str) -> frozenset:
-    raw = frozenset(re.findall(r'\b([A-Z][A-Z0-9_-]{3,19})\b',texto))
-    return raw - _FALSO_CUPOM
+# ── FP GLOBAL DE CUPOM (FUNCIONA PRA TODAS PLATAFORMAS) ─────────────────────
+def _fp_cupom_global(plat: str, cupons: frozenset, texto: str) -> str:
+    camp = _detectar_campanha(texto)
+    return hashlib.sha256(
+        f"{plat}|cup|{'|'.join(sorted(cupons))}|{camp}".encode()
+    ).hexdigest()
 
-def _extrair_cupom(texto: str) -> str: return next(iter(sorted(_extrair_todos_cupons(texto))),"")
+# ── FP GLOBAL PRODUTO ───────────────────────────────────────────────────────
+def _fp_produto(plat: str, asin: str, id_mgl: str, mapa_links: dict) -> str:
+    if plat == "amazon" and asin:
+        return hashlib.sha256(f"amz|{asin}".encode()).hexdigest()
 
-def _extrair_asin_texto(texto: str, mapa: dict) -> str:
-    for url in list(mapa.values()) + re.findall(r'https?://\S+',texto):
-        for pat in [r'/dp/([A-Z0-9]{10})',r'/gp/product/([A-Z0-9]{10})']:
-            m = re.search(pat,url)
-            if m: return m.group(1)
+    if plat == "magalu" and id_mgl:
+        return hashlib.sha256(f"mgl|{id_mgl}".encode()).hexdigest()
+
+    # Shopee (SKU via link)
+    for url in mapa_links.values():
+        m = re.search(r'/i\.(\d+\.\d+)', url)
+        if m:
+            return hashlib.sha256(f"shp|{m.group(1)}".encode()).hexdigest()
+
     return ""
 
-def _extrair_id_magalu(texto: str, mapa: dict) -> str:
-    for url in list(mapa.values()) + re.findall(r'https?://\S+',texto):
-        m = re.search(r'/p/([a-z0-9]{6,})/?',url,re.I)
-        if m: return m.group(1)
-    return ""
-
-def _extrair_sku(mapa: dict) -> str:
-    a = _extrair_asin_texto("",mapa)
-    if a: return f"amz_{a}"
-    m = _extrair_id_magalu("",mapa)
-    if m: return f"mgl_{m}"
-    for url in mapa.values():
-        x = re.search(r'/i\.(\d+\.\d+)',url)
-        if x: return f"shp_{x.group(1)}"
-    return ""
-
-def _normalizar_alma(texto: str) -> str:
-    t = _rm_ac(texto.lower())
-    t = re.sub(r'https?://\S+',' ',t); t = _RE_EMJ_STRIP.sub(' ',t)
-    t = re.sub(r'r\$\s*[\d.,]+',' PRECO ',t); t = re.sub(r'\b\d+\s*%',' PCT ',t)
-    t = re.sub(r'\b\d+\b',' NUM ',t); t = re.sub(r'[^\w\s]',' ',t); t = re.sub(r'\s+',' ',t).strip()
-    return ' '.join(sorted(w for w in t.split() if w not in _RUIDO_NORM and len(w) > 2))
-
-def _extrair_titulo_produto(texto: str) -> str:
-    """Extrai título do produto para dedup quando ASIN não está disponível."""
-    for linha in texto.splitlines():
-        l = linha.strip()
-        if not l: continue
-        if re.match(r'^(R\$|https?://|[A-Z]{4,}$)',l): continue
-        if len(l) < 8: continue
-        l_clean = _RE_EMJ_STRIP.sub('',l).strip()
-        if len(l_clean) > 8: return _rm_ac(l_clean.lower())[:80]
-    return ""
-
-def _normalizar_beneficios(texto: str) -> frozenset:
-    b = set()
-    for m in re.finditer(r'r\$\s*(\d+)\s*off\s+em\s+r\$\s*(\d+)',texto,re.I): b.add(f"off_{m.group(1)}_em_{m.group(2)}")
-    for m in re.finditer(r'(\d+)\s*%?\s*off',texto,re.I): b.add(f"off_{m.group(1)}pct")
-    if re.search(r'frete\s+gr[aá]t|entrega\s+gr[aá]t',texto,re.I): b.add("frete_gratis")
-    return frozenset(b)
-
-def _detectar_campanha(texto: str) -> str:
-    tl = texto.lower(); t = []
-    m = _KW_EVENTO.search(texto)
-    if m: t.append(f"evt_{m.group(0).lower()}")
-    if "amazon app" in tl: t.append("amazon_app")
-    if "mastercard" in tl: t.append("mastercard")
-    if "prime" in tl: t.append("prime")
-    return "|".join(sorted(t)) if t else "geral"
-
-def _eh_reativacao(texto: str) -> bool: return bool(_KW_STATUS.search(texto))
-
-def _fp_amazon(asin: str) -> str: return hashlib.sha256(f"amz|{asin}".encode()).hexdigest()
-def _fp_amazon_titulo(titulo: str) -> str: return hashlib.sha256(f"amz_titulo|{titulo}".encode()).hexdigest()
-def _fp_magalu(id_prod: str) -> str: return hashlib.sha256(f"mgl|{id_prod}".encode()).hexdigest()
-def _fp_shopee_cupom(cupons: frozenset) -> str: return hashlib.sha256(f"shp_cup|{'|'.join(sorted(cupons))}".encode()).hexdigest()
-def _fp_shopee_sem(cupons: frozenset, alma: str, benef: frozenset) -> str:
-    return hashlib.sha256(f"shp_sem|{'|'.join(sorted(cupons))}|{alma}|{'|'.join(sorted(benef))}".encode()).hexdigest()
-def _fp_generico(plat: str, cupons: frozenset, alma: str) -> str:
-    return hashlib.sha256(f"{plat}|{'|'.join(sorted(cupons))}|{alma}".encode()).hexdigest()
-
+# ── FUNÇÃO PRINCIPAL ────────────────────────────────────────────────────────
 def deve_enviar(plat: str, cupom: str, texto: str, mapa_links: dict = None) -> bool:
     mapa_links = mapa_links or {}
-    if _eh_reativacao(texto):
-        _registrar_dedupe(plat,cupom,texto,mapa_links); return True
-    cupons = _extrair_todos_cupons(texto); alma = _normalizar_alma(texto)
-    benef  = _normalizar_beneficios(texto); asin = _extrair_asin_texto(texto,mapa_links)
-    id_mgl = _extrair_id_magalu(texto,mapa_links); titulo = _extrair_titulo_produto(texto)
 
-    if plat == "amazon":
-        if asin:
-            ents = db_buscar_dedupe_por_asin(asin,plat)
-            if [e for e in ents if time.time()-e["ts"] < JANELA_RAPIDA]:
-                log_dedup.info(f"🔁 [AMZ] ASIN={asin}"); return False
-            if db_get_dedupe(_fp_amazon(asin)):
-                log_dedup.info(f"🔁 [AMZ-24H] ASIN={asin}"); return False
-        if titulo:
-            fp_tit = _fp_amazon_titulo(titulo)
-            if db_get_dedupe(fp_tit):
-                log_dedup.info(f"🔁 [AMZ-TITULO] {titulo[:40]}"); return False
-            for e in db_buscar_dedupe_janela_rapida(plat):
-                sim = SequenceMatcher(None,alma,e.get("alma","")).ratio()
-                if sim >= _SIM_FORTE: log_dedup.info(f"🔁 [AMZ-SIM] sim={sim:.2f}"); return False
-        _registrar_dedupe(plat,cupom,texto,mapa_links); return True
+    # 🟢 iFood = bypass total
+    if plat == "ifood":
+    cupons = _extrair_todos_cupons(texto)
+    alma   = _normalizar_alma(texto)
+    benef  = _normalizar_beneficios(texto)
 
-    if plat == "magalu":
-        if id_mgl:
-            ents = db_buscar_dedupe_por_id(id_mgl,plat)
-            if [e for e in ents if time.time()-e["ts"] < JANELA_RAPIDA]:
-                log_dedup.info(f"🔁 [MGL] ID={id_mgl}"); return False
-            if db_get_dedupe(_fp_magalu(id_mgl)):
-                log_dedup.info(f"🔁 [MGL-24H]"); return False
-        else:
-            fp = _fp_generico(plat,cupons,alma)
-            if db_get_dedupe(fp): log_dedup.info(f"🔁 [MGL-ALMA]"); return False
-        _registrar_dedupe(plat,cupom,texto,mapa_links); return True
+    # 🔴 1. CUPOM (prioridade)
+    if cupons:
+        fp = hashlib.sha256(
+            f"ifood_cup|{'|'.join(sorted(cupons))}".encode()
+        ).hexdigest()
 
-    if plat == "shopee":
-        if cupons and db_get_dedupe(_fp_shopee_cupom(cupons)):
-            log_dedup.info(f"🔁 [SHP-CUP] {sorted(cupons)}"); return False
-        if db_get_dedupe(_fp_shopee_sem(cupons,alma,benef)):
-            log_dedup.info(f"🔁 [SHP-SEM]"); return False
-        for e in db_buscar_dedupe_janela_rapida(plat):
-            cc = frozenset(e.get("cupons",[])); ccom = bool(cupons & cc) if cupons else False
-            sim = SequenceMatcher(None,alma,e.get("alma","")).ratio() if e.get("alma") else 0.0
-            if ccom and sim >= _SIM_MEDIO: log_dedup.info(f"🔁 [SHP-J] sim={sim:.2f}"); return False
-            if sim >= _SIM_FORTE: log_dedup.info(f"🔁 [SHP-SIM] sim={sim:.2f}"); return False
-            if benef and benef == frozenset(e.get("benef",[])) and sim >= 0.50:
-                log_dedup.info(f"🔁 [SHP-BENEF]"); return False
-        _registrar_dedupe(plat,cupom,texto,mapa_links); return True
+        if db_get_dedupe(fp):
+            log_dedup.info(f"🔁 [IFOOD-CUPOM] {sorted(cupons)}")
+            return False
 
-    fp = _fp_generico(plat,cupons,alma)
-    if db_get_dedupe(fp): log_dedup.info(f"🔁 [GEN]"); return False
+        _registrar_dedupe(plat, cupom, texto, mapa_links)
+        return True
+
+    # 🟠 2. BENEFÍCIOS (brinde, frete grátis, etc)
+    if benef:
+        fp = hashlib.sha256(
+            f"ifood_benef|{'|'.join(sorted(benef))}".encode()
+        ).hexdigest()
+
+        if db_get_dedupe(fp):
+            log_dedup.info(f"🔁 [IFOOD-BENEF]")
+            return False
+
+    # 🔥 3. SIMILARIDADE (texto parecido)
     for e in db_buscar_dedupe_janela_rapida(plat):
-        cc = frozenset(e.get("cupons",[])); ccom = bool(cupons & cc) if cupons else False
-        sim = SequenceMatcher(None,alma,e.get("alma","")).ratio() if e.get("alma") else 0.0
-        if ccom and sim >= _SIM_MEDIO: log_dedup.info(f"🔁 [GEN-CUP]"); return False
-        if sim >= _SIM_FORTE: log_dedup.info(f"🔁 [GEN-SIM]"); return False
-    _registrar_dedupe(plat,cupom,texto,mapa_links); return True
+        sim = SequenceMatcher(None, alma, e.get("alma","")).ratio()
 
+        if sim >= _SIM_FORTE:
+            log_dedup.info(f"🔁 [IFOOD-SIM] {sim:.2f}")
+            return False
+
+    _registrar_dedupe(plat, cupom, texto, mapa_links)
+    return True
+
+    # 🔥 REATIVAÇÃO LIBERA TUDO
+    if _eh_reativacao(texto):
+        log_dedup.info("♻️ [REATIVAÇÃO] liberado")
+        _registrar_dedupe(plat, cupom, texto, mapa_links)
+        return True
+
+    cupons = _extrair_todos_cupons(texto)
+    alma   = _normalizar_alma(texto)
+    benef  = _normalizar_beneficios(texto)
+    asin   = _extrair_asin_texto(texto, mapa_links)
+    id_mgl = _extrair_id_magalu(texto, mapa_links)
+
+    # ── 1. CUPOM (PRIORIDADE GLOBAL) ────────────────────────────────────────
+    if cupons:
+        fp_cup = _fp_cupom_global(plat, cupons, texto)
+
+        # 🔴 já existe
+        if db_get_dedupe(fp_cup):
+            log_dedup.info(f"🔁 [CUPOM] {sorted(cupons)}")
+            return False
+
+        # 🔥 proteção contra texto diferente
+        for e in db_buscar_dedupe_janela_rapida(plat):
+            cc  = frozenset(e.get("cupons", []))
+            sim = SequenceMatcher(None, alma, e.get("alma","")).ratio()
+
+            if cupons & cc and sim >= _SIM_MEDIO:
+                log_dedup.info(f"🔁 [CUP+SIM] sim={sim:.2f}")
+                return False
+
+        _registrar_dedupe(plat, cupom, texto, mapa_links)
+        return True
+
+    # ── 2. PRODUTO ─────────────────────────────────────────────────────────
+    fp_prod = _fp_produto(plat, asin, id_mgl, mapa_links)
+
+    if fp_prod:
+        if db_get_dedupe(fp_prod):
+            log_dedup.info(f"🔁 [PRODUTO] {plat}")
+            return False
+
+        _registrar_dedupe(plat, cupom, texto, mapa_links)
+        return True
+
+    # ── 3. FALLBACK SEMÂNTICO ───────────────────────────────────────────────
+    for e in db_buscar_dedupe_janela_rapida(plat):
+        sim = SequenceMatcher(None, alma, e.get("alma","")).ratio()
+
+        if sim >= _SIM_FORTE:
+            log_dedup.info(f"🔁 [SIM] {sim:.2f}")
+            return False
+
+    _registrar_dedupe(plat, cupom, texto, mapa_links)
+    return True
+
+
+# ── REGISTRO ────────────────────────────────────────────────────────────────
 def _registrar_dedupe(plat: str, cupom: str, texto: str, mapa_links: dict = None):
     mapa_links = mapa_links or {}
-    cupons = _extrair_todos_cupons(texto); alma = _normalizar_alma(texto)
-    camp   = _detectar_campanha(texto); benef = _normalizar_beneficios(texto)
-    asin   = _extrair_asin_texto(texto,mapa_links); id_mgl = _extrair_id_magalu(texto,mapa_links)
-    titulo = _extrair_titulo_produto(texto)
-    if plat == "amazon" and asin:     fp = _fp_amazon(asin)
-    elif plat == "amazon" and titulo: fp = _fp_amazon_titulo(titulo)
-    elif plat == "magalu" and id_mgl: fp = _fp_magalu(id_mgl)
-    elif plat == "shopee":
-        db_set_dedupe(_fp_shopee_cupom(cupons),plat,list(cupons),alma,camp,asin,id_mgl,list(benef))
-        db_set_dedupe(_fp_shopee_sem(cupons,alma,benef),plat,list(cupons),alma,camp,asin,id_mgl,list(benef))
-        return
-    else: fp = _fp_generico(plat,cupons,alma)
-    db_set_dedupe(fp,plat,list(cupons),alma,camp,asin,id_mgl,list(benef))
+
+    cupons = _extrair_todos_cupons(texto)
+    alma   = _normalizar_alma(texto)
+    camp   = _detectar_campanha(texto)
+    benef  = _normalizar_beneficios(texto)
+    asin   = _extrair_asin_texto(texto, mapa_links)
+    id_mgl = _extrair_id_magalu(texto, mapa_links)
+
+    # CUPOM GLOBAL
+    if cupons:
+        fp = _fp_cupom_global(plat, cupons, texto)
+
+    else:
+        fp = _fp_produto(plat, asin, id_mgl, mapa_links)
+
+        if not fp:
+            fp = _fp_generico(plat, cupons, alma)
+
+    db_set_dedupe(fp, plat, list(cupons), alma, camp, asin, id_mgl, list(benef))
+
 
 # ── MÓDULO 16: IMAGEM ─────────────────────────────────────────────────────────
 # CRÍTICO: preparar_imagem recebe event.message INTEIRO (não .media)
