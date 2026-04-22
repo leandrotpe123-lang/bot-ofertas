@@ -290,45 +290,73 @@ async def desencurtar(url: str, sessao: aiohttp.ClientSession, depth: int = 0) -
     except Exception as e: log_lnk.error(f"❌ Desencurtar d={depth}: {e}"); return url
 
 # ── MÓDULO 7: MOTOR AMAZON ────────────────────────────────────────────────────
-_AMZ_LIXO   = frozenset({"ascsubtag","btn_ref","ref_","ref","smid","sprefix","spla","dchild","linkcode","linkid","camp","creative","pf_rd_p","pf_rd_r","pd_rd_wg","pd_rd_w","content-id","pd_rd_r","pd_rd_i","ie","qid","_encoding","dib","dib_tag","m","marketplaceid","ufe","th","psc","ingress","visitid","lp_context_asin","redirectasin","redirectmerchantid","redirectasincustomeraction","ds","rnid","sr"})
-_AMZ_MANTER = frozenset({"tag","keywords","node","k","i","rh","n","field-keywords"})
 
-def _extrair_asin(url: str) -> Optional[str]:
-    text = urlparse(url).path + "?" + urlparse(url).query
-    for pat in [r'/dp/([A-Z0-9]{10})(?:/|$|\?)',r'/gp/product/([A-Z0-9]{10})(?:/|$|\?)',r'/exec/obidos/(?:ASIN/)?([A-Z0-9]{10})',r'[?&]asin=([A-Z0-9]{10})',r'%2Fdp%2F([A-Z0-9]{10})']:
-        m = re.search(pat,text,re.I)
-        if m: return m.group(1).upper()
+CACHE_TTL=86400
+
+def db_get_link(url:str)->Optional[str]:
+    try:
+        with _db() as db:
+            row=db.execute("SELECT url_conv,ts FROM links_cache WHERE url_orig=?",(url,)).fetchone()
+        if row and time.time()-row[1]<CACHE_TTL:return row[0]
+    except:pass
     return None
 
-def _limpar_url_amazon(url: str) -> Optional[str]:
-    p    = urlparse(url)
-    asin = _extrair_asin(url)
-    if asin: return f"https://www.amazon.com.br/dp/{asin}?tag={_AMZ_TAG}"
-    if "/promotion/psp/" in p.path:
-        return urlunparse(p._replace(scheme="https",netloc="www.amazon.com.br",query=f"tag={_AMZ_TAG}",fragment=""))
-    if p.path in ("/",""):
-        log_amz.warning("⚠️ URL Amazon sem ASIN e sem path — descartada"); return None
-    params: dict = {}
-    for k,v in parse_qs(p.query,keep_blank_values=False).items():
-        kl = k.lower()
-        if kl in _AMZ_MANTER: params[k] = v[0]
-        elif kl not in _AMZ_LIXO and len(v[0]) < 60: params[k] = v[0]
-    params["tag"] = _AMZ_TAG
-    return urlunparse(p._replace(scheme="https",netloc="www.amazon.com.br",query=urlencode(params),fragment=""))
-
-async def motor_amazon(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
-    log_amz.debug(f"▶ IN: {url[:80]}")
-    cached = db_get_link(url)
-    if cached: log_amz.debug(f"💾 Cache"); return cached
+def db_set_link(url_orig:str,url_conv:str,plat:str):
     try:
-        async with _SEM_HTTP: exp = await desencurtar(url,sessao)
-    except Exception as e: log_amz.error(f"❌ Desencurtar: {e}"); return None
+        with _db() as db:
+            db.execute("INSERT OR REPLACE INTO links_cache VALUES (?,?,?,?)",(url_orig,url_conv,plat,time.time()))
+    except:pass
+
+async def desencurtar(url:str,sessao:aiohttp.ClientSession)->str:
+    try:
+        async with sessao.head(url,allow_redirects=True,timeout=aiohttp.ClientTimeout(total=5)) as r:
+            if r.url:return str(r.url)
+    except:pass
+    try:
+        async with sessao.get(url,allow_redirects=True,timeout=aiohttp.ClientTimeout(total=8)) as r:
+            return str(r.url)
+    except:return url
+
+_AMZ_LIXO=frozenset({"ascsubtag","btn_ref","ref_","ref","smid","sprefix","spla","dchild","linkcode","linkid","camp","creative","pf_rd_p","pf_rd_r","pd_rd_wg","pd_rd_w","content-id","pd_rd_r","pd_rd_i","ie","qid","_encoding","dib","dib_tag","m","marketplaceid","ufe","th","psc","ingress","visitid","lp_context_asin","redirectasin","redirectmerchantid","redirectasincustomeraction","ds","rnid","sr"})
+_AMZ_MANTER=frozenset({"keywords","node","k","i","rh","n","field-keywords"})
+
+def _extrair_asin(url:str)->Optional[str]:
+    p=urlparse(url);t=p.path+"?"+p.query
+    for pat in [r'/dp/([A-Z0-9]{10})',r'/gp/product/([A-Z0-9]{10})',r'[?&]asin=([A-Z0-9]{10})']:
+        m=re.search(pat,t,re.I)
+        if m:return m.group(1).upper()
+    return None
+
+def _limpar_url_amazon(url:str)->Optional[str]:
+    try:
+        p=urlparse(url);asin=_extrair_asin(url)
+        if asin:return f"https://www.amazon.com.br/dp/{asin}?tag={_AMZ_TAG}"
+        if "/promotion/" in p.path:return f"https://www.amazon.com.br{p.path}?tag={_AMZ_TAG}"
+        params={}
+        for k,v in parse_qs(p.query).items():
+            if k.lower() in _AMZ_MANTER and len(v[0])<60:params[k]=v[0]
+        params["tag"]=_AMZ_TAG
+        return urlunparse(p._replace(scheme="https",netloc="www.amazon.com.br",query=urlencode(params),fragment=""))
+    except:return None
+
+async def motor_amazon(url:str,sessao:aiohttp.ClientSession)->Optional[str]:
+    log_amz.debug(f"▶ IN: {url[:80]}")
+    cached=db_get_link(url)
+    if cached:log_amz.debug("💾 Cache");return cached
+    try:
+        async with _SEM_HTTP:exp=await desencurtar(url,sessao)
+    except:exp=url
     log_amz.debug(f"  EXP: {exp[:80]}")
-    if classificar(exp) != "amazon": log_amz.warning(f"  ⚠️ Não Amazon: {exp[:60]}"); return None
-    final = _limpar_url_amazon(exp)
-    if not final: return None
+    try:
+        if classificar(exp)!="amazon":log_amz.warning("⚠️ Classificação falhou")
+    except:pass
+    final=_limpar_url_amazon(exp)
+    if not final:
+        base=exp.split("?",1)[0]
+        final=f"{base}?tag={_AMZ_TAG}"
     log_amz.info(f"  ✅ OUT: {final}")
-    db_set_link(url,final,"amazon"); return final
+    db_set_link(url,final,"amazon")
+    return final
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO 8 ▸ MOTOR SHOPEE — ISOLADO
