@@ -54,7 +54,7 @@ log_hc   = _mk_log('HEALTH',    '1;38;5;118')
 API_ID         = int(os.environ.get("API_ID", 0))
 API_HASH       = os.environ.get("API_HASH", "")
 SESSION_STRING = os.environ.get("TELEGRAM_SESSION", "")
-GRUPOS_ORIGEM  = ["promotom", "fumotom", "botofera", "fadadoscupons"]
+GRUPOS_ORIGEM  = ["promotom", "fumotom", "botofera", "fadadoscupons", "SamuelF3lipePromo", "paraseubaby", "fadapromos"]
 GRUPO_DESTINO  = "@ofertap"
 _AMZ_TAG       = os.environ.get("AMAZON_TAG",         "leo21073-20")
 _SHP_APP_ID    = os.environ.get("SHOPEE_APP_ID",      "18348480261")
@@ -944,7 +944,7 @@ async def delay_saturacao(plat: str, texto: str) -> float:
 
 _EMJ: Dict[str, List[str]] = {
     "titulo_oferta":["🔥"],"titulo_cupom":["🚨"],"titulo_evento":["⚠️"],
-    "preco":["💵","💰"],"cupom_cod":["🎟"],"resgate":["✅"],
+    "preco":["💵"],"cupom_cod":["🎟"],"resgate":["✅"],
     "carrinho":["🛒"],"frete":["🚚","📦"],"multi_item":["🔹"],
 }
 _EMJ_IDX: Dict[str, int] = {k: 0 for k in _EMJ}
