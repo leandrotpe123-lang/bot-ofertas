@@ -387,9 +387,9 @@ def classificar_links(links: List[str]) -> List[LinkClassificado]:
 # ── 3a. Filtro de texto ─────────────────────────────────────────────────────
 
 _FILTRO_TEXTO = [
-    "Monitor Samsung","Fonte Mancer","Placa de video","Monitor LG",
-    "PC home Essential","Suporte articulado","VHAGAR","Superframe",
-    "AM5","AM4","GTX","DDR5","DDR4","Dram","Monitor Safe",
+    "Monitor Samsung","Placa de Vídeo","Fonte Mancer","Placa de video","Monitor LG",
+    "PC home Essential","PC Gamer Forge","Suporte articulado","VHAGAR","Superframe",
+    "AM5","AM4","GTX","Monitor Gamer","DDR5","DDR4","Dram","Monitor Safe",
     "Monitor Redragon","CL18","CL16","CL32","MT/s","MHz",
     "RX 580","Ryzen","Placa Mãe","Gabinete Gamer",
     "Water Cooler","Air Cooler",
