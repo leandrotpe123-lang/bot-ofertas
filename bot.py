@@ -154,16 +154,26 @@ def _db():
 def db_get_link(url: str) -> Optional[str]:
     try:
         with _db() as db:
-            row = db.execute("SELECT url_conv FROM links_cache WHERE url_orig=?", (url,)).fetchone()
+            row = db.execute(
+                "SELECT url_conv FROM links_cache WHERE url_orig=?",
+                (url,)
+            ).fetchone()
         return row[0] if row else None
-    except Exception as e: log_db.error(f"❌ db_get_link: {e}"); return None
+    except Exception as e:
+        log_db.error(f"❌ db_get_link: {e}")
+        return None
+
 
 def db_set_link(url_orig: str, url_conv: str, plat: str):
     try:
         with _db() as db:
-            db.execute("INSERT OR REPLACE INTO links_cache(url_orig,url_conv,plat,ts)VALUES(?,?,?,?)",
-                       (url_orig, url_conv, plat, time.time()))
-    except Exception as e: log_db.error(f"❌ db_set_link: {e}")
+            db.execute(
+                "INSERT OR REPLACE INTO links_cache(url_orig,url_conv,plat,ts)VALUES(?,?,?,?)",
+                (url_orig, url_conv, plat, time.time())
+            )
+    except Exception as e:
+        log_db.error(f"❌ db_set_link: {e}")
+
 
 def db_get_dedupe(fp: str) -> Optional[dict]:
     try:
@@ -171,25 +181,49 @@ def db_get_dedupe(fp: str) -> Optional[dict]:
         with _db() as db:
             row = db.execute(
                 "SELECT plat,cupons,alma,camp,asin,id_prod,benef,ts "
-                "FROM dedupe_temp WHERE fp=? AND ts>=?", (fp, limite)).fetchone()
+                "FROM dedupe_temp WHERE fp=? AND ts>=?",
+                (fp, limite)
+            ).fetchone()
+
         if row:
-            return {"plat":row[0],"cupons":json.loads(row[1] or "[]"),
-                    "alma":row[2],"camp":row[3],"asin":row[4] or "",
-                    "id_prod":row[5] or "","benef":json.loads(row[6] or "[]"),"ts":row[7]}
-    except Exception as e: log_db.error(f"❌ db_get_dedupe: {e}")
+            return {
+                "plat": row[0],
+                "cupons": json.loads(row[1] or "[]"),
+                "alma": row[2],
+                "camp": row[3],
+                "asin": row[4] or "",
+                "id_prod": row[5] or "",
+                "benef": json.loads(row[6] or "[]"),
+                "ts": row[7],
+            }
+    except Exception as e:
+        log_db.error(f"❌ db_get_dedupe: {e}")
+
     return None
+
 
 def db_set_dedupe(fp: str, plat: str, cupons: list, alma: str,
                   camp: str, asin: str = "", id_prod: str = "", benef: list = None):
     try:
         with _db() as db:
             db.execute(
-                "INSERT OR REPLACE INTO dedupe_temp"
+                "INSERT OR REPLACE INTO dedupe_temp "
                 "(fp,plat,cupons,alma,camp,asin,id_prod,benef,ts)VALUES(?,?,?,?,?,?,?,?,?)",
-                (fp, plat, json.dumps(cupons or []), alma or "",
-                 camp or "geral", asin or "", id_prod or "",
-                 json.dumps(benef or []), time.time()))
-    except Exception as e: log_db.error(f"❌ db_set_dedupe: {e}")
+                (
+                    fp,
+                    plat,
+                    json.dumps(cupons or []),
+                    alma or "",
+                    camp or "geral",
+                    asin or "",
+                    id_prod or "",
+                    json.dumps(benef or []),
+                    time.time(),
+                ),
+            )
+    except Exception as e:
+        log_db.error(f"❌ db_set_dedupe: {e}")
+
 
 def db_buscar_janela_rapida(plat: str, janela: float = 600) -> list:
     try:
@@ -198,27 +232,53 @@ def db_buscar_janela_rapida(plat: str, janela: float = 600) -> list:
             rows = db.execute(
                 "SELECT fp,cupons,alma,asin,id_prod,benef,ts "
                 "FROM dedupe_temp WHERE plat=? AND ts>=? ORDER BY ts DESC",
-                (plat, limite)).fetchall()
-        return [{"fp":r[0],"cupons":json.loads(r[1] or "[]"),"alma":r[2] or "",
-                 "asin":r[3] or "","id_prod":r[4] or "","benef":json.loads(r[5] or "[]"),
-                 "ts":r[6]} for r in rows]
-    except Exception as e: log_db.error(f"❌ db_janela: {e}"); return []
+                (plat, limite),
+            ).fetchall()
+
+        return [
+            {
+                "fp": r[0],
+                "cupons": json.loads(r[1] or "[]"),
+                "alma": r[2] or "",
+                "asin": r[3] or "",
+                "id_prod": r[4] or "",
+                "benef": json.loads(r[5] or "[]"),
+                "ts": r[6],
+            }
+            for r in rows
+        ]
+
+    except Exception as e:
+        log_db.error(f"❌ db_janela: {e}")
+        return []
+
 
 def db_registrar_sat(plat: str, sku: str = ""):
     try:
         with _db() as db:
-            db.execute("INSERT INTO saturacao(plat,sku,ts)VALUES(?,?,?)",
-                       (plat, sku or "", time.time()))
-    except Exception as e: log_db.error(f"❌ db_sat: {e}")
+            db.execute(
+                "INSERT INTO saturacao(plat,sku,ts)VALUES(?,?,?)",
+                (plat, sku or "", time.time()),
+            )
+    except Exception as e:
+        log_db.error(f"❌ db_sat: {e}")
+
 
 def db_count_sat(plat: str, janela: float = 1800) -> int:
     try:
         limite = time.time() - janela
         with _db() as db:
-            row = db.execute("SELECT COUNT(*) FROM saturacao WHERE plat=? AND ts>=?",
-                             (plat, limite)).fetchone()
+            row = db.execute(
+                "SELECT COUNT(*) FROM saturacao WHERE plat=? AND ts>=?",
+                (plat, limite),
+            ).fetchone()
+
         return row[0] if row else 0
-    except Exception as e: log_db.error(f"❌ db_count_sat: {e}"); return 0
+
+    except Exception as e:
+        log_db.error(f"❌ db_count_sat: {e}")
+        return 0
+
 
 def db_limpar():
     """Apaga apenas dados temporários. links_cache NUNCA é apagado."""
@@ -228,9 +288,11 @@ def db_limpar():
             db.execute("DELETE FROM dedupe_temp WHERE ts<?", (agora - TTL_DEDUPE,))
             db.execute("DELETE FROM saturacao WHERE ts<?", (agora - TTL_DEDUPE,))
             db.execute("DELETE FROM scheduler WHERE ts<?", (agora - TTL_SCHEDULER,))
-        log_db.debug("🗑 Limpeza temp OK")
-    except Exception as e: log_db.error(f"❌ db_limpar: {e}")
 
+        log_db.debug("🗑 Limpeza temp OK")
+
+    except Exception as e:
+        log_db.error(f"❌ db_limpar: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMADA 1 — INGESTÃO / EXTRAÇÃO
@@ -247,20 +309,32 @@ class MensagemBruta:
     texto:  str
     links:  List[str]
     tem_midia: bool
-    media_obj: object  # event.message — repassado para download
+    media_obj: object
 
 
 def ingerir(event) -> MensagemBruta:
     """Extrai dados crus da mensagem. Zero lógica de negócio."""
-    texto = event.message.text or ""
-    links = [u.strip().rstrip('.,;)>]}') for u in _RE_URL.findall(texto)]
-    tem_midia = (event.message.media is not None
-                 and not isinstance(event.message.media, MessageMediaWebPage))
+
+    texto = event.message.text or getattr(event.message, "message", "") or ""
+
+    links = [u.strip().rstrip('.,;)>]}!?') for u in _RE_URL.findall(texto)]
+
+    tem_midia = (
+        event.message.media is not None
+        and not isinstance(event.message.media, MessageMediaWebPage)
+    )
+
     try:
-        chat = (event._chat.username or str(event.chat_id)).lower()
+        chat_obj = getattr(event, "_chat", None)
+        username = getattr(chat_obj, "username", None)
+        chat = (username or str(event.chat_id)).lower()
     except Exception:
         chat = str(event.chat_id)
-    log_ing.debug(f"📩 id={event.message.id} chat={chat} links={len(links)} midia={tem_midia}")
+
+    log_ing.debug(
+        f"📩 id={event.message.id} chat={chat} links={len(links)} midia={tem_midia}"
+    )
+
     return MensagemBruta(
         msg_id=event.message.id,
         chat=chat,
@@ -269,7 +343,6 @@ def ingerir(event) -> MensagemBruta:
         tem_midia=tem_midia,
         media_obj=event.message,
     )
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMADA 2 — CLASSIFICAÇÃO
@@ -301,30 +374,43 @@ class LinkClassificado:
     sku:  str        # ASIN, shopee ID, magalu slug, etc.
 
 
-def _netloc(url: str) -> str:
-    try: return urlparse(url).netloc.lower().replace("www.", "")
-    except Exception: return ""
+def _netloc_parse(p) -> str:
+    try:
+        return p.netloc.lower().replace("www.", "")
+    except Exception:
+        return ""
 
-def _extrair_asin(url: str) -> str:
-    path = urlparse(url).path + "?" + urlparse(url).query
+
+def _extrair_asin(p) -> str:
+    path = p.path + "?" + p.query
     for pat in _P_AMZ_ASIN:
         m = pat.search(path)
-        if m: return m.group(1).upper()
+        if m:
+            return m.group(1).upper()
     return ""
 
-def _extrair_sku_shopee(url: str) -> str:
-    path = urlparse(url).path + "?" + urlparse(url).query
+
+def _extrair_sku_shopee(p) -> str:
+    path = p.path + "?" + p.query
     for pat in _P_SHP:
         m = pat.search(path)
-        if m: return f"{m.group(1)}.{m.group(2)}"
+        if m:
+            return f"{m.group(1)}.{m.group(2)}"
     return ""
 
-def _extrair_sku_magalu(url: str) -> str:
-    m = _P_MGL.search(urlparse(url).path)
+
+def _extrair_sku_magalu(p) -> str:
+    m = _P_MGL.search(p.path)
     return m.group(1) if m else ""
 
+
 def classificar_url(url: str) -> LinkClassificado:
-    nl = _netloc(url)
+    try:
+        p = urlparse(url)
+    except Exception:
+        return LinkClassificado(url, None, "invalido", "")
+
+    nl = _netloc_parse(p)
     if not nl:
         return LinkClassificado(url, None, "invalido", "")
 
@@ -343,25 +429,33 @@ def classificar_url(url: str) -> LinkClassificado:
 
     for d in _MGL_DOMINIOS:
         if nl == d or nl.endswith("." + d):
-            p = urlparse(url)
-            sku  = _extrair_sku_magalu(url)
+            sku = _extrair_sku_magalu(p)
             if "sacola" in nl and not p.path.strip("/"):
                 return LinkClassificado(url, "magalu", "invalido", sku)
-            tipo = "produto" if sku else "lista" if "/l/" in p.path else "selecao" if "/selecao/" in p.path else "campanha"
+            tipo = (
+                "produto" if sku
+                else "lista" if "/l/" in p.path
+                else "selecao" if "/selecao/" in p.path
+                else "campanha"
+            )
             return LinkClassificado(url, "magalu", tipo, sku)
 
     for d in _AMZ_DOMINIOS:
         if nl == d or nl.endswith("." + d):
-            asin = _extrair_asin(url)
-            p    = urlparse(url)
-            tipo = "produto" if asin else "busca" if re.search(r'/s[/?]|/deals|/b[/?]', p.path) else "evento" if re.search(r'/events/|/stores/', p.path) else "campanha"
+            asin = _extrair_asin(p)
+            tipo = (
+                "produto" if asin
+                else "busca" if re.search(r'/s[/?]|/deals|/b[/?]', p.path)
+                else "evento" if re.search(r'/events/|/stores/', p.path)
+                else "campanha"
+            )
             return LinkClassificado(url, "amazon", tipo, asin)
 
     for d in _SHP_DOMINIOS:
         if nl == d or nl.endswith("." + d):
             if nl == "flapremios.com.br":
                 return LinkClassificado(url, "shopee", "campanha", "")
-            sku  = _extrair_sku_shopee(url)
+            sku = _extrair_sku_shopee(p)
             return LinkClassificado(url, "shopee", "produto" if sku else "busca", sku)
 
     for d in _ENCURTADORES:
@@ -376,7 +470,6 @@ def classificar_links(links: List[str]) -> List[LinkClassificado]:
     validos = [r for r in result if r.plat not in (None,)]
     log_cls.debug(f"🔍 {len(validos)}/{len(links)} classificados")
     return result
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMADA 3 — NORMALIZAÇÃO
