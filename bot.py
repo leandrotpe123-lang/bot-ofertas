@@ -757,6 +757,18 @@ _AMZ_MANTER = frozenset({"keywords","node","k","i","rh","n","field-keywords"})
 
 _cls_cache = {}
 
+def _netloc(url: str) -> str:
+    """Extrai o domínio de uma URL."""
+    try:
+        from urllib.parse import urlparse
+        return urlparse(url).netloc.lower()
+    except Exception:
+        return ""
+
+def _parece_magalu_encurtado(url: str) -> bool:
+    """Verifica se a URL parece ser um link curto da Magalu."""
+    return "maga.lu" in url or "/S/" in url.upper()
+
 def _limpar_url_amazon(url: str) -> Optional[str]:
     """
     Limpa URL Amazon e adiciona tag.
