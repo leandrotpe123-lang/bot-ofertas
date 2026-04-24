@@ -1016,19 +1016,22 @@ if cl.plat != "magalu" or cl.tipo == "invalido":
 
 afiliado = _afiliar_url_magalu(url)
 
-    # Tenta encurtar (3 tentativas com retry interno em _cuttly)
-    short = await _cuttly(afiliado, sessao)
-    if short:
-        db_set_link(url, short, "magalu")
-        log_nrm.info(f"  ✅ MGL curto: {short}")
-        return short
+# --- AGORA AS LINHAS ABAIXO ESTÃO ALINHADAS COM O 'afiliado' ---
 
-    # Cuttly falhou → envia longo afiliado + tenta encurtar depois
-    log_nrm.warning("  ⚠️ Cuttly falhou → longo afiliado + background")
-    db_set_link(url, afiliado, "magalu")
-    if msg_id:
-        asyncio.create_task(_cuttly_background(afiliado, msg_id))
-    return afiliado   # ← nunca None para Magalu válido
+# Tenta encurtar (3 tentativas com retry interno em _cuttly)
+short = await _cuttly(afiliado, sessao)
+if short:
+    db_set_link(url, short, "magalu")
+    log_nrm.info(f"  ✅ MGL curto: {short}")
+    return short
+
+# Cuttly falhou → envia longo afiliado + tenta encurtar depois
+log_nrm.warning("  ⚠️ Cuttly falhou → longo afiliado + background")
+db_set_link(url, afiliado, "magalu")
+if msg_id:
+    asyncio.create_task(_cuttly_background(afiliado, msg_id))
+
+return afiliado  # ← nunca None para Magalu válido
 
 # ── 3f. Pipeline de normalização ─────────────────────────────────────────────
 
