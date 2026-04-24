@@ -755,6 +755,8 @@ _AMZ_LIXO   = frozenset({
 })
 _AMZ_MANTER = frozenset({"keywords","node","k","i","rh","n","field-keywords"})
 
+_cls_cache = {}
+
 def _limpar_url_amazon(url: str) -> Optional[str]:
     """
     Limpa URL Amazon e adiciona tag.
@@ -764,8 +766,6 @@ def _limpar_url_amazon(url: str) -> Optional[str]:
     try:
         p    = urlparse(url)
         asin = _extrair_asin(url)
-
- _cls_cache = {}
 
         # Sem comissão — devolve limpa sem tag
         if _AMZ_PATHS_SEM_TAG.match(p.path):
