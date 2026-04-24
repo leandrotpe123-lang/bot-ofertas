@@ -473,22 +473,39 @@ def classificar_links(links: List[str]) -> List[LinkClassificado]:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMADA 3 — NORMALIZAÇÃO
-# Responsabilidade: limpar texto, padronizar links, extrair cupom/ASIN/ID,
-# gerar forma canônica. NÃO decide envio. NÃO envia.
+# Cole no lugar do bloco CAMADA 3 atual em foguetao_v76.py (linhas 381–797)
+#
+# CORREÇÕES:
+#   • _netloc() NÃO redefinida aqui — vem da camada 2 (resolve NameError)
+#   • _limpar_url_amazon usa p.netloc (não força .com.br)
+#   • _afiliar_amazon: tipo "claims" → retorna URL sem tag
+#   • _afiliar_shopee: fallback → None (não envia sem afiliação)
+#   • _afiliar_magalu: desencurta cutt.ly/*magalu* e divulgador.magalu.com
+#                      retorna afiliado longo se Cuttly falhar (nunca None)
+#                      agenda background para encurtar depois
+#   • desencurtar: anti-loop cutt.ly, cache de URLs já desencurtadas,
+#                  proteção de HTML > 500k
+#   • _normalizar_um: trata "mundial" e "claims" passando URL intacta
+#   • _extrair_asin_texto: loop unificado sem duplicidade
+#   • extrair_cupom: exige KW na mesma linha do código
+#   • normalizar(): limpa _cls_cache a cada ciclo
+#                   mundiais incluídos no mapa como url→url
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ── 3a. Filtro de texto ─────────────────────────────────────────────────────
+# ── 3a. Filtro de texto ──────────────────────────────────────────────────────
 
 _FILTRO_TEXTO = [
-    "Monitor Samsung","Placa de Vídeo","Fonte Mancer","Placa de video","Monitor LG",
-    "PC home Essential","PC Gamer Forge","Suporte articulado","VHAGAR","Superframe",
-    "AM5","AM4","GTX","Monitor Gamer","DDR5","DDR4","Dram","Monitor Safe",
+    "Monitor Samsung","Fonte Mancer","Placa de video","Monitor LG",
+    "PC home Essential","Suporte articulado","VHAGAR","Superframe",
+    "AM5","AM4","GTX","DDR5","DDR4","Dram","Monitor Safe",
     "Monitor Redragon","CL18","CL16","CL32","MT/s","MHz",
     "RX 580","Ryzen","Placa Mãe","Gabinete Gamer",
     "Water Cooler","Air Cooler",
 ]
 _RE_MERCADO_LIVRE = re.compile(r'\b(?:mercado\s*livre|mercadolivre|mercado\s*pago)\b', re.I)
-_RE_MULTI_OFERTA  = re.compile(r'\b(?:ofertas?|promoções?)\s+(?:na\s+|no\s+|da\s+)?(?:shopee|amazon|magalu|magazine\s*luiza)\b', re.I)
+_RE_MULTI_OFERTA  = re.compile(
+    r'\b(?:ofertas?|promoções?)\s+(?:na\s+|no\s+|da\s+)?'
+    r'(?:shopee|amazon|magalu|magazine\s*luiza)\b', re.I)
 _RE_PRECO_LINHA   = re.compile(r'R\$\s?[\d.,]+')
 _RE_URL_COUNT     = re.compile(r'https?://')
 
@@ -499,28 +516,37 @@ def _eh_multi_produto(texto: str) -> bool:
 
 def texto_bloqueado(texto: str) -> bool:
     if _RE_MERCADO_LIVRE.search(texto):
-        log_cls.debug("🚫 Mercado Livre")
-        return True
-    if _eh_multi_produto(texto):
-        return False
+        log_cls.debug("🚫 Mercado Livre"); return True
+    if _eh_multi_produto(texto): return False
     tl = texto.lower()
     for p in _FILTRO_TEXTO:
         if p.lower() in tl:
-            log_cls.debug(f"🚫 Filtro: '{p}'")
-            return True
+            log_cls.debug(f"🚫 Filtro: '{p}'"); return True
     return False
 
-# ── 3b. Limpeza de ruído textual ────────────────────────────────────────────
+# ── 3b. Limpeza de ruído textual ─────────────────────────────────────────────
 
 _RE_INVISIVEIS  = re.compile(r'[\u200b\u200c\u200d\u00a0\u2060\ufeff]')
-_RE_GRUPO_EXT   = re.compile(r'https?://(?:t\.me|telegram\.me|telegram\.org|chat\.whatsapp\.com)[^\s]*', re.I)
-_RE_LIXO_STRUCT = re.compile(r'^\s*(?:-?\s*An[uú]ncio|Publicidade|:::+|---+|===+|[-–—]\s*(?:ML|MG|AMZ)|(?:ML|MG|AMZ)\s*:)\s*$', re.I)
-_RE_CTA         = re.compile(r'^\s*(?:link\s+(?:do\s+)?produto|link\s+da\s+oferta|resgate\s+aqui|clique\s+aqui|acesse\s+aqui|compre\s+aqui|grupo\s+vip|entrar\s+no\s+grupo|acessar\s+grupo)\s*:?\s*$', re.I)
-_RE_REDES       = re.compile(r'^\s*(?:redes\s+\w+|[-–]\s*grupo\s*(?:cupons?|promoções?|vip)?\s*:?\s*$|[-–]\s*(?:chat|twitter|whatsapp|instagram|tiktok|youtube)\s*:?\s*$|acesse\s+nossas\s+redes)', re.I)
-_RE_ROTULO      = re.compile(r'^\s*[-–•]\s*\w[\w\s]{0,30}:\s*$')
-_RE_EMOJI_CHK   = re.compile(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF\u2B50\u2B55]")
+_RE_GRUPO_EXT   = re.compile(
+    r'https?://(?:t\.me|telegram\.me|telegram\.org|chat\.whatsapp\.com)[^\s]*', re.I)
+_RE_LIXO_STRUCT = re.compile(
+    r'^\s*(?:-?\s*An[uú]ncio|Publicidade|:::+|---+|===+|'
+    r'[-–—]\s*(?:ML|MG|AMZ)|(?:ML|MG|AMZ)\s*:)\s*$', re.I)
+_RE_CTA = re.compile(
+    r'^\s*(?:link\s+(?:do\s+)?produto|link\s+da\s+oferta|resgate\s+aqui|'
+    r'clique\s+aqui|acesse\s+aqui|compre\s+aqui|grupo\s+vip|'
+    r'entrar\s+no\s+grupo|acessar\s+grupo)\s*:?\s*$', re.I)
+_RE_REDES = re.compile(
+    r'^\s*(?:redes\s+\w+|'
+    r'[-–]\s*grupo\s*(?:cupons?|promoções?|vip)?\s*:?\s*$|'
+    r'[-–]\s*(?:chat|twitter|whatsapp|instagram|tiktok|youtube)\s*:?\s*$|'
+    r'acesse\s+nossas\s+redes)', re.I)
+_RE_ROTULO    = re.compile(r'^\s*[-–•]\s*\w[\w\s]{0,30}:\s*$')
+_RE_EMOJI_CHK = re.compile(
+    r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF\u2B50\u2B55]")
 
-def _tem_emoji(s: str) -> bool: return bool(_RE_EMOJI_CHK.search(s))
+def _tem_emoji(s: str) -> bool:
+    return bool(_RE_EMOJI_CHK.search(s))
 
 def _eh_header_canal(linha: str) -> bool:
     l = linha.strip()
@@ -531,7 +557,8 @@ def _eh_header_canal(linha: str) -> bool:
 
 def limpar_texto(texto: str) -> str:
     texto = _RE_INVISIVEIS.sub(" ", texto).replace("\r\n", "\n").replace("\r", "\n")
-    linhas = texto.split("\n"); saida: List[str] = []
+    linhas = texto.split("\n")
+    saida: List[str] = []
     vazio = False; em_redes = False; primeira = True
     for linha in linhas:
         l = linha.strip()
@@ -554,124 +581,250 @@ def limpar_texto(texto: str) -> str:
         saida.append(l)
     return "\n".join(saida).strip()
 
-# ── 3c. Extração de cupom / SKU ─────────────────────────────────────────────
+# ── 3c. Extração de cupom / SKU ──────────────────────────────────────────────
 
-_KW_CUPOM = re.compile(r'\b(?:cupom|cupon|c[oó]digo|coupon|off|resgate|cod)\b', re.I)
+_KW_CUPOM = re.compile(r'\b(?:cupom|cupon|c[oó]digo|coupon|resgate|cod)\b', re.I)
 _KW_COD   = re.compile(r'\b([A-Z][A-Z0-9_-]{3,19})\b')
-_FALSO_CUPOM = frozenset({"FRETE","GRÁTIS","GRATIS","AMAZON","SHOPEE","MAGALU","LINK","CLIQUE",
-    "ACESSE","CONFIRA","HOJE","AGORA","PROMO","OFF","BLACK","SUPER","MEGA","ULTRA","VIP",
-    "NOVO","NOVA","NUM","PRECO","PCT","PS5","PS4","XBOX","USB","ATX","RGB","LED","HD",
-    "SSD","RAM","APP","BOT","API","URL","OK","BR"})
+_FALSO_CUPOM = frozenset({
+    "FRETE","GRÁTIS","GRATIS","AMAZON","SHOPEE","MAGALU","LINK","CLIQUE","ACESSE",
+    "CONFIRA","HOJE","AGORA","PROMO","BLACK","SUPER","MEGA","ULTRA","VIP","NOVO",
+    "NOVA","NUM","PRECO","PCT","PS5","PS4","XBOX","USB","ATX","RGB","LED","HD",
+    "SSD","RAM","APP","BOT","API","URL","OK","BR","PIX","ASTRO","DIGITAL","SLIM",
+    "GRAN","TURISMO","PACOTE","PLAYSTATION","NINTENDO","SONY","SAMSUNG","APPLE",
+    "XIAOMI","PHILIPS","OSTER","MONDIAL","ARNO","BRAUN","LENOVO","LOGITECH",
+    "NESTLÉ","NESTLE","ALPINO","PAMPERS","POSITIVO","INTELBRAS","LG","MALIBU",
+    "OFF","VOLTA","ATIVO","VOLTOU","RENOVADO","NORMALIZOU",
+})
 
 def extrair_cupom(texto: str) -> str:
-    if not _KW_CUPOM.search(texto): return ""
-    for m in _KW_COD.finditer(texto):
-        c = m.group(1)
-        if c not in _FALSO_CUPOM and len(c) >= 4: return c
+    """Extrai código de cupom. Exige KW explícita na mesma linha do código."""
+    for linha in texto.splitlines():
+        if not _KW_CUPOM.search(linha): continue
+        for m in _KW_COD.finditer(linha):
+            c = m.group(1)
+            if c not in _FALSO_CUPOM and len(c) >= 4:
+                return c
     return ""
 
 def _extrair_asin_texto(texto: str, mapa: dict) -> str:
-    for u in mapa.values():
-        a = _extrair_asin(u)
-        if a: return a
-    for pat in _P_AMZ_ASIN:
-        m = pat.search(texto)
-        if m: return m.group(1).upper()
+    """Loop unificado — sem duplicidade de regex."""
+    for u in list(mapa.values()) + [texto]:
+        for pat in _P_AMZ_ASIN:
+            m = pat.search(u)
+            if m: return m.group(1).upper()
     return ""
 
 def _extrair_id_magalu(texto: str, mapa: dict) -> str:
-    for u in mapa.values():
-        s = _extrair_sku_magalu(u)
-        if s: return s
-    m = _P_MGL.search(texto)
-    return m.group(1) if m else ""
+    for u in list(mapa.values()) + [texto]:
+        m = _P_MGL.search(u)
+        if m: return m.group(1)
+    return ""
 
 def tem_contexto(texto: str) -> bool:
     linhas = [l.strip() for l in texto.splitlines()
               if l.strip() and not re.match(r'https?://', l.strip())]
     if not linhas: return False
     total = " ".join(linhas)
-    indicadores = [r'off',r'%',r'r\$',r'cupom',r'desconto',r'promoção',r'oferta',
-                   r'grátis',r'evento',r'live',r'relâmpago',r'flash',r'volta',
-                   r'normalizou',r'a\s+partir',r'ativo',r'disponivel',r'pix']
+    indicadores = [
+        r'off', r'%', r'r\$', r'cupom', r'desconto', r'promoção', r'oferta',
+        r'grátis', r'evento', r'live', r'relâmpago', r'flash', r'volta',
+        r'normalizou', r'a\s+partir', r'ativo', r'disponivel', r'pix',
+        r'voltando', r'reativado', r'jogos?\s+gr[aá]tis',
+    ]
     for ind in indicadores:
         if re.search(ind, total, re.I): return True
     return len(total) > 20
 
 # ── 3d. Desencurtador ────────────────────────────────────────────────────────
 
-_FORCA_GET = frozenset({"amzlink.to","amzn.to","a.co","amzn.com","bit.ly",
-                         "tinyurl.com","rb.gy","is.gd","cutt.ly","ow.ly","buff.ly"})
+_FORCA_GET = frozenset({
+    "amzlink.to","amzn.to","a.co","amzn.com","bit.ly",
+    "tinyurl.com","rb.gy","is.gd","cutt.ly","ow.ly","buff.ly",
+})
+# Cache in-process de URLs já desencurtadas — evita requests repetidos
+_desc_cache: Dict[str, str] = {}
+
+# Hint de Magalu em links encurtados
+_RE_CUTT_MAGALU = re.compile(r'cutt\.ly/[^\s]*magalu', re.I)
+_RE_DIVULGADOR  = re.compile(r'divulgador\.magalu\.com', re.I)
+
+def _parece_magalu_encurtado(url: str) -> bool:
+    return bool(_RE_CUTT_MAGALU.search(url) or _RE_DIVULGADOR.search(url))
 
 async def desencurtar(url: str, sessao: aiohttp.ClientSession, depth: int = 0) -> str:
-    if depth > 15: return url
+    """
+    Segue redirects até 15 níveis.
+    Anti-loop: cutt.ly não é re-expandido após redirect.
+    Cache: URLs já resolvidas não fazem request de novo.
+    HTML > 500k: ignora parse, retorna posição atual.
+    Erro de rede: retorna URL original (não None — chamador decide).
+    """
+    if depth > 15:
+        return url
     url = url.strip().rstrip('.,;)>')
-    if not url.startswith(("http://","https://")): return url
-    nl   = _netloc(url)
-    hdrs = {"User-Agent": random.choice(USER_AGENTS), "Accept": "text/html,*/*;q=0.9", "Accept-Language": "pt-BR,pt;q=0.9"}
+    if not url.startswith(("http://", "https://")):
+        return url
+
+    # Anti-loop: se já é cutt.ly após redirect, para aqui
+    nl = _netloc(url)
+    if depth > 0 and nl == "cutt.ly":
+        return url
+
+    # Cache de desencurtamento
+    if url in _desc_cache:
+        return _desc_cache[url]
+
+    hdrs = {
+        "User-Agent":      random.choice(USER_AGENTS),
+        "Accept":          "text/html,*/*;q=0.9",
+        "Accept-Language": "pt-BR,pt;q=0.9",
+    }
     try:
         usar_head = nl not in _FORCA_GET and not any(nl.endswith("." + d) for d in _FORCA_GET)
         if usar_head:
             try:
                 async with sessao.head(url, headers=hdrs, allow_redirects=True,
-                                       timeout=aiohttp.ClientTimeout(total=8), max_redirects=20) as r:
+                                       timeout=aiohttp.ClientTimeout(total=8),
+                                       max_redirects=20) as r:
                     final = str(r.url)
-                    if final != url: return await desencurtar(final, sessao, depth + 1)
-            except Exception: pass
+                    if final != url:
+                        _desc_cache[url] = final
+                        return await desencurtar(final, sessao, depth + 1)
+            except Exception:
+                pass
+
         async with sessao.get(url, headers=hdrs, allow_redirects=True,
-                              timeout=aiohttp.ClientTimeout(total=15), max_redirects=20) as r:
-            pos  = str(r.url); html = await r.text(errors="ignore")
-            if pos != url: return await desencurtar(pos, sessao, depth + 1)
+                              timeout=aiohttp.ClientTimeout(total=15),
+                              max_redirects=20) as r:
+            pos  = str(r.url)
+            html = await r.text(errors="ignore")
+
+            if pos != url:
+                _desc_cache[url] = pos
+                return await desencurtar(pos, sessao, depth + 1)
+
+            # Proteção HTML grande
+            if len(html) > 500_000:
+                _desc_cache[url] = pos
+                return pos
+
             soup = BeautifulSoup(html, "html.parser")
-            ref  = soup.find("meta", attrs={"http-equiv": re.compile("refresh", re.I)})
+
+            ref = soup.find("meta", attrs={"http-equiv": re.compile("refresh", re.I)})
             if ref and ref.get("content"):
                 m = re.search(r"url[=\s]*([^\s;\"']+)", ref["content"], re.I)
                 if m:
                     novo = m.group(1).strip().strip("'\"")
-                    if novo.startswith("http"): return await desencurtar(novo, sessao, depth + 1)
-            for pat in [r'window\.location(?:\.href)?\s*=\s*["\']([^"\']{15,})["\']',
-                        r'location\.replace\s*\(\s*["\']([^"\']{15,})["\']\s*\)']:
+                    if novo.startswith("http"):
+                        return await desencurtar(novo, sessao, depth + 1)
+
+            for pat in [
+                r'window\.location(?:\.href)?\s*=\s*["\']([^"\']{15,})["\']',
+                r'location\.replace\s*\(\s*["\']([^"\']{15,})["\']\s*\)',
+            ]:
                 mj = re.search(pat, html)
-                if mj and mj.group(1).startswith("http"): return await desencurtar(mj.group(1), sessao, depth + 1)
+                if mj and mj.group(1).startswith("http"):
+                    return await desencurtar(mj.group(1), sessao, depth + 1)
+
             og = soup.find("meta", attrs={"property": "og:url"})
             if og and og.get("content","").startswith("http") and og["content"] != url:
                 return await desencurtar(og["content"], sessao, depth + 1)
+
             canon = soup.find("link", rel="canonical")
             if canon and canon.get("href","").startswith("http") and canon["href"] != url:
                 return await desencurtar(canon["href"], sessao, depth + 1)
+
+            _desc_cache[url] = pos
             return pos
-    except asyncio.TimeoutError: log_nrm.warning(f"⏱ Timeout desencurtar d={depth}: {url[:60]}"); return url
-    except Exception as e: log_nrm.error(f"❌ desencurtar d={depth}: {e}"); return url
+
+    except asyncio.TimeoutError:
+        log_nrm.warning(f"⏱ Timeout desencurtar d={depth}: {url[:60]}")
+        return url
+    except Exception as e:
+        log_nrm.error(f"❌ desencurtar d={depth}: {e}")
+        return url
 
 # ── 3e. Motores de afiliação ─────────────────────────────────────────────────
 
-_AMZ_LIXO   = frozenset({"ascsubtag","btn_ref","ref_","ref","smid","sprefix","spla","dchild",
-    "linkcode","linkid","camp","creative","pf_rd_p","pf_rd_r","pd_rd_wg","pd_rd_w",
-    "content-id","pd_rd_r","pd_rd_i","ie","qid","_encoding","dib","dib_tag","m",
-    "marketplaceid","ufe","th","psc","ingress","visitid","ds","rnid","sr"})
+_AMZ_LIXO   = frozenset({
+    "ascsubtag","btn_ref","ref_","ref","smid","sprefix","spla","dchild",
+    "linkcode","linkid","camp","creative","pf_rd_p","pf_rd_r","pd_rd_wg",
+    "pd_rd_w","content-id","pd_rd_r","pd_rd_i","ie","qid","_encoding",
+    "dib","dib_tag","m","marketplaceid","ufe","th","psc","ingress",
+    "visitid","ds","rnid","sr",
+})
 _AMZ_MANTER = frozenset({"keywords","node","k","i","rh","n","field-keywords"})
 
 def _limpar_url_amazon(url: str) -> Optional[str]:
+    """
+    Limpa URL Amazon e adiciona tag.
+    Usa p.netloc original — NÃO força .com.br (preserva .com, .eu).
+    Paths sem comissão (prime, claims, gaming) → URL limpa SEM tag.
+    """
     try:
-        p = urlparse(url); asin = _extrair_asin(url)
-        if asin: return f"https://www.amazon.com.br/dp/{asin}?tag={_AMZ_TAG}"
-        if "/promotion/" in p.path: return f"https://www.amazon.com.br{p.path}?tag={_AMZ_TAG}"
+        p    = urlparse(url)
+        asin = _extrair_asin(url)
+
+        # Sem comissão — devolve limpa sem tag
+        if _AMZ_PATHS_SEM_TAG.match(p.path):
+            return urlunparse(p._replace(query="", fragment=""))
+
+        if asin:
+            return urlunparse(p._replace(
+                path=f"/dp/{asin}",
+                query=f"tag={_AMZ_TAG}",
+                fragment="",
+            ))
+        if "/promotion/" in p.path:
+            return urlunparse(p._replace(
+                query=f"tag={_AMZ_TAG}", fragment=""))
+
         params = {k: v[0] for k, v in parse_qs(p.query).items()
                   if k.lower() in _AMZ_MANTER and len(v[0]) < 60}
         params["tag"] = _AMZ_TAG
-        return urlunparse(p._replace(scheme="https", netloc="www.amazon.com.br",
-                                     query=urlencode(params), fragment=""))
-    except Exception: return None
+        return urlunparse(p._replace(
+            scheme="https",
+            netloc=p.netloc,        # ← preserva netloc original
+            query=urlencode(params),
+            fragment="",
+        ))
+    except Exception:
+        return None
 
 async def _afiliar_amazon(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
     log_nrm.debug(f"▶ AMZ: {url[:80]}")
     cached = db_get_link(url)
     if cached: return cached
+
+    # Claims/prime antes de qualquer processamento
+    lc_pre = _classificar_cached(url)
+    if lc_pre.tipo == "claims":
+        log_nrm.debug(f"  AMZ claims/prime → sem tag: {url[:60]}")
+        return url
+
+    # Mundial (gaming.amazon.com) → passa intacto
+    if lc_pre.plat == "mundial":
+        return url
+
     try:
-        async with _SEM_HTTP: exp = await desencurtar(url, sessao)
-    except Exception: exp = url
+        async with _SEM_HTTP:
+            exp = await desencurtar(url, sessao)
+    except Exception:
+        return None
+
+    # Reclassifica após expandir
+    lc_exp = _classificar_cached(exp)
+    if lc_exp.tipo == "claims" or lc_exp.plat == "mundial":
+        return exp
+
     final = _limpar_url_amazon(exp)
-    if not final: final = f"{exp.split('?',1)[0]}?tag={_AMZ_TAG}"
+    if not final:
+        p = urlparse(exp)
+        if _AMZ_PATHS_SEM_TAG.match(p.path):
+            final = urlunparse(p._replace(query="", fragment=""))
+        else:
+            final = f"{exp.split('?',1)[0]}?tag={_AMZ_TAG}"
+
     db_set_link(url, final, "amazon")
     log_nrm.info(f"  ✅ AMZ: {final[:70]}")
     return final
@@ -679,36 +832,64 @@ async def _afiliar_amazon(url: str, sessao: aiohttp.ClientSession) -> Optional[s
 _SHP_REPASSE_DIRETO = frozenset({"flapremios.com.br"})
 
 async def _afiliar_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
+    """
+    Retry: 3 tentativas com backoff 1.5s, 3s, 4.5s.
+    Fallback: None — não envia link sem afiliação.
+    flapremios.com.br: repasse direto (já tem afiliação embutida).
+    """
     log_nrm.debug(f"▶ SHP: {url[:80]}")
     nl = _netloc(url)
     for d in _SHP_REPASSE_DIRETO:
         if nl == d or nl.endswith("." + d):
-            log_nrm.info(f"  ↩️ Shopee repasse direto: {url[:60]}")
+            log_nrm.info(f"  ↩️ SHP repasse direto: {url[:60]}")
             return url
+
     cached = db_get_link(url)
     if cached: return cached
-    for t in range(1, 4):
+
+    for tentativa in range(1, 4):
         try:
             ts      = str(int(time.time()))
-            payload = json.dumps({"query": f'mutation {{ generateShortLink(input: {{ originUrl: "{url}" }}) {{ shortLink }} }}'}, separators=(",", ":"))
-            sig     = hashlib.sha256(f"{_SHP_APP_ID}{ts}{payload}{_SHP_SECRET}".encode()).hexdigest()
-            hdrs    = {"Authorization": f"SHA256 Credential={_SHP_APP_ID},Timestamp={ts},Signature={sig}",
-                       "Content-Type": "application/json"}
+            payload = json.dumps({
+                "query": (
+                    f'mutation {{ generateShortLink(input: '
+                    f'{{ originUrl: "{url}" }}) {{ shortLink }} }}'
+                )
+            }, separators=(",", ":"))
+            sig  = hashlib.sha256(
+                f"{_SHP_APP_ID}{ts}{payload}{_SHP_SECRET}".encode()
+            ).hexdigest()
+            hdrs = {
+                "Authorization": (
+                    f"SHA256 Credential={_SHP_APP_ID},"
+                    f"Timestamp={ts},Signature={sig}"
+                ),
+                "Content-Type": "application/json",
+            }
             async with _SEM_HTTP:
-                async with sessao.post("https://open-api.affiliate.shopee.com.br/graphql",
-                                       data=payload, headers=hdrs,
-                                       timeout=aiohttp.ClientTimeout(total=12)) as r:
+                async with sessao.post(
+                    "https://open-api.affiliate.shopee.com.br/graphql",
+                    data=payload, headers=hdrs,
+                    timeout=aiohttp.ClientTimeout(total=12),
+                ) as r:
                     res  = await r.json()
-                    link = res.get("data",{}).get("generateShortLink",{}).get("shortLink")
+                    link = (res.get("data", {})
+                               .get("generateShortLink", {})
+                               .get("shortLink"))
                     if link:
                         db_set_link(url, link, "shopee")
-                        log_nrm.info(f"  ✅ SHP t={t}: {link}")
+                        log_nrm.info(f"  ✅ SHP t={tentativa}: {link}")
                         return link
-                    log_nrm.warning(f"  ⚠️ SHP API t={t}: {res.get('errors') or res.get('error')}")
-        except Exception as e: log_nrm.warning(f"  ⚠️ SHP t={t}: {e}")
-        await asyncio.sleep(1.5 * t)
-    log_nrm.warning(f"  ↩️ SHP fallback original: {url[:60]}")
-    return url
+                    log_nrm.warning(
+                        f"  ⚠️ SHP API t={tentativa}: "
+                        f"{res.get('errors') or res.get('error')}")
+        except Exception as e:
+            log_nrm.warning(f"  ⚠️ SHP t={tentativa}: {e}")
+        if tentativa < 3:
+            await asyncio.sleep(tentativa * 1.5)
+
+    log_nrm.warning(f"  ❌ SHP falhou 3x → None: {url[:60]}")
+    return None   # ← não envia link sem afiliação
 
 _CUTTLY_LAST_429: float = 0.0
 _CUTTLY_BACKOFF:  float = 65.0
@@ -717,52 +898,77 @@ def _afiliar_url_magalu(url: str) -> str:
     p      = urlparse(url)
     path   = re.sub(r'^(/magazine)[^/]+', rf'\1{_MGL_SLUG}', p.path)
     params = {k: v[0] for k, v in parse_qs(p.query, keep_blank_values=True).items()}
-    for k in ["tag","partnerid","promoterid","afforcedeeplink","deeplinkvalue","isretargeting",
-              "partner_id","promoter_id","utm_source","utm_medium","utm_campaign","pid","c",
-              "af_force_deeplink","deep_link_value"]:
+    for k in [
+        "tag","partnerid","promoterid","afforcedeeplink","deeplinkvalue",
+        "isretargeting","partner_id","promoter_id","utm_source","utm_medium",
+        "utm_campaign","pid","c","af_force_deeplink","deep_link_value",
+    ]:
         params.pop(k, None)
-    params.update({"partner_id": _MGL_PARTNER,"promoter_id": _MGL_PROMOTER,
-                   "utm_source":"divulgador","utm_medium":"magalu",
-                   "utm_campaign": _MGL_PROMOTER,"pid": _MGL_PID,"c": _MGL_PROMOTER,
-                   "af_force_deeplink":"true"})
+    params.update({
+        "partner_id":        _MGL_PARTNER,
+        "promoter_id":       _MGL_PROMOTER,
+        "utm_source":        "divulgador",
+        "utm_medium":        "magalu",
+        "utm_campaign":      _MGL_PROMOTER,
+        "pid":               _MGL_PID,
+        "c":                 _MGL_PROMOTER,
+        "af_force_deeplink": "true",
+    })
     base = urlunparse(p._replace(path=path, query="", fragment=""))
-    params["deep_link_value"] = (f"{base}?utm_source=divulgador&utm_medium=magalu"
-                                  f"&partner_id={_MGL_PARTNER}&promoter_id={_MGL_PROMOTER}")
+    params["deep_link_value"] = (
+        f"{base}?utm_source=divulgador&utm_medium=magalu"
+        f"&partner_id={_MGL_PARTNER}&promoter_id={_MGL_PROMOTER}"
+    )
     return urlunparse(p._replace(path=path, query=urlencode(params), fragment=""))
 
 async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
     global _CUTTLY_LAST_429
     api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={quote(url, safe='')}"
-    for t in range(1, 4):
+    for tentativa in range(1, 4):
         espera = _CUTTLY_BACKOFF - (time.time() - _CUTTLY_LAST_429)
-        if espera > 0: await asyncio.sleep(espera)
+        if espera > 0:
+            await asyncio.sleep(espera)
         try:
             async with _SEM_HTTP:
                 async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=15)) as r:
-                    if r.status == 429: _CUTTLY_LAST_429 = time.time(); await asyncio.sleep(_CUTTLY_BACKOFF); continue
-                    if r.status == 401: log_nrm.error("  ❌ Cuttly 401"); return None
-                    if r.status != 200: await asyncio.sleep(2 ** t); continue
-                    try: data = await r.json(content_type=None)
-                    except Exception: await asyncio.sleep(2 ** t); continue
-                    status = data.get("url",{}).get("status")
+                    if r.status == 429:
+                        _CUTTLY_LAST_429 = time.time()
+                        await asyncio.sleep(_CUTTLY_BACKOFF); continue
+                    if r.status == 401:
+                        log_nrm.error("  ❌ Cuttly 401 — chave inválida"); return None
+                    if r.status != 200:
+                        await asyncio.sleep(2 ** tentativa); continue
+                    try:
+                        data = await r.json(content_type=None)
+                    except Exception:
+                        await asyncio.sleep(2 ** tentativa); continue
+                    status = data.get("url", {}).get("status")
                     if status in (7, 2):
                         short = data["url"].get("shortLink")
                         if short: return short
-                    await asyncio.sleep(2 ** t)
-        except asyncio.TimeoutError: await asyncio.sleep(2 ** t)
-        except Exception as e: log_nrm.error(f"  ❌ Cuttly t={t}: {e}"); await asyncio.sleep(2 ** t)
+                    await asyncio.sleep(2 ** tentativa)
+        except asyncio.TimeoutError:
+            await asyncio.sleep(2 ** tentativa)
+        except Exception as e:
+            log_nrm.error(f"  ❌ Cuttly t={tentativa}: {e}")
+            await asyncio.sleep(2 ** tentativa)
     return None
 
 async def _cuttly_background(url_longo: str, msg_id_origem: int):
+    """
+    Tenta encurtar em background após envio.
+    Quando consegue, edita a mensagem no destino.
+    10 tentativas com intervalo de 45s — não trava o bot.
+    """
     conn = aiohttp.TCPConnector(ssl=False)
     async with aiohttp.ClientSession(connector=conn) as sessao:
-        for tent in range(15):
+        for tent in range(10):
             await asyncio.sleep(45)
             try:
                 short = await _cuttly(url_longo, sessao)
                 if short:
-                    loop = asyncio.get_event_loop()
-                    mapa = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+                    loop    = asyncio.get_event_loop()
+                    mapa    = await loop.run_in_executor(_EXECUTOR, ler_mapa)
                     id_dest = mapa.get(str(msg_id_origem))
                     if id_dest:
                         try:
@@ -770,83 +976,153 @@ async def _cuttly_background(url_longo: str, msg_id_origem: int):
                             if msg_atual and msg_atual.text:
                                 novo = msg_atual.text.replace(url_longo, short)
                                 if novo != msg_atual.text:
-                                    await client.edit_message(GRUPO_DESTINO, id_dest, novo, parse_mode="md")
-                                    log_nrm.info(f"  ✅ Magalu editado BG: {id_dest}")
-                        except Exception as e: log_nrm.warning(f"  ⚠️ Edit BG: {e}")
-                    db_set_link(url_longo, short, "magalu"); return
-            except Exception as e: log_nrm.warning(f"  ⚠️ BG t={tent}: {e}")
+                                    await client.edit_message(
+                                        GRUPO_DESTINO, id_dest, novo, parse_mode="md")
+                                    log_nrm.info(f"  ✅ MGL BG editado: {id_dest}")
+                        except Exception as e:
+                            log_nrm.warning(f"  ⚠️ MGL BG edit: {e}")
+                    db_set_link(url_longo, short, "magalu")
+                    return
+            except Exception as e:
+                log_nrm.warning(f"  ⚠️ MGL BG t={tent}: {e}")
 
-async def _afiliar_magalu(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
+async def _afiliar_magalu(url: str, sessao: aiohttp.ClientSession,
+                           msg_id: int = 0) -> Optional[str]:
+    """
+    Motor Magalu.
+    Fluxo: cache → desencurtar → validar → afiliar → encurtar → enviar sempre.
+    Se Cuttly falhar → envia link longo afiliado + agenda background.
+    Nunca retorna None se o link é Magalu válido.
+    """
     log_nrm.debug(f"▶ MGL: {url[:80]}")
     cached = db_get_link(url)
     if cached: return cached
+
     nl = _netloc(url)
-    if "maga.lu" in nl or nl in _ENCURTADORES:
-        try:
-            async with _SEM_HTTP: url = await desencurtar(url, sessao)
-        except Exception as e: log_nrm.error(f"  ❌ MGL desencurtar: {e}"); return None
-    cl = classificar_url(url)
-    if cl.plat != "magalu" or cl.tipo == "invalido": return None
-    afiliado = _afiliar_url_magalu(url)
-    short    = await _cuttly(afiliado, sessao)
-    if short: db_set_link(url, short, "magalu"); log_nrm.info(f"  ✅ MGL: {short}"); return short
-    log_nrm.warning("  ⚠️ Cuttly falhou — retornando link longo")
-    return afiliado
 
-# ── 3f. Pipeline de normalização (orquestra tudo acima) ─────────────────────
+    # Desencurta se necessário
+if _parece_magalu_encurtado(url) or "maga.lu" in nl or nl in _ENCURTADORES:
+    try:
+        async with _SEM_HTTP:
+            url = await desencurtar(url, sessao)
+    except Exception as e:
+        log_nrm.error(f"  ❌ MGL desencurtar: {e}")
+        return None
 
-async def _normalizar_um(lc: LinkClassificado, sessao: aiohttp.ClientSession) -> Tuple[str, Optional[str], str]:
-    """Retorna (url_original, url_convertida, plat)."""
+cl = _classificar_cached(url)
+if cl.plat != "magalu" or cl.tipo == "invalido":
+    log_nrm.debug(f"  MGL descartado: plat={cl.plat} tipo={cl.tipo}")
+    return None
+
+afiliado = _afiliar_url_magalu(url)
+
+    # Tenta encurtar (3 tentativas com retry interno em _cuttly)
+    short = await _cuttly(afiliado, sessao)
+    if short:
+        db_set_link(url, short, "magalu")
+        log_nrm.info(f"  ✅ MGL curto: {short}")
+        return short
+
+    # Cuttly falhou → envia longo afiliado + tenta encurtar depois
+    log_nrm.warning("  ⚠️ Cuttly falhou → longo afiliado + background")
+    db_set_link(url, afiliado, "magalu")
+    if msg_id:
+        asyncio.create_task(_cuttly_background(afiliado, msg_id))
+    return afiliado   # ← nunca None para Magalu válido
+
+# ── 3f. Pipeline de normalização ─────────────────────────────────────────────
+
+async def _normalizar_um(
+    lc: LinkClassificado,
+    sessao: aiohttp.ClientSession,
+    msg_id: int = 0,
+) -> Tuple[str, Optional[str], str]:
+    """
+    Retorna (url_original, url_convertida, plat).
+    mundial  → url_convertida == url_original (sem conversão)
+    claims   → url_convertida == url_original (sem tag)
+    preservar→ url_convertida == url_original
+    None     → url_convertida = None (descarta)
+    """
     plat = lc.plat
-    if plat == "preservar": return lc.url_original, lc.url_original, "preservar"
+
+    if plat == "mundial":
+        return lc.url_original, lc.url_original, "mundial"
+    if plat == "preservar":
+        return lc.url_original, lc.url_original, "preservar"
     if plat is None or lc.tipo in ("invalido","bloqueado","grupo_externo","desconhecido"):
         return lc.url_original, None, plat or "none"
+    if plat == "amazon" and lc.tipo == "claims":
+        return lc.url_original, lc.url_original, "amazon"
 
     cached = db_get_link(lc.url_original)
     if cached: return lc.url_original, cached, plat
 
     url = lc.url_original
+
+    # Encurtadores genéricos → desencurta e reclassifica
     if plat == "expandir":
-        url = await desencurtar(url, sessao)
-        lc  = classificar_url(url)
+        try:
+            url = await desencurtar(url, sessao)
+        except Exception:
+            return lc.url_original, None, "none"
+        lc   = _classificar_cached(url)
         plat = lc.plat
-        if plat is None: return lc.url_original, None, "none"
+        if plat is None:
+            return lc.url_original, None, "none"
+        if plat == "mundial":
+            return lc.url_original, url, "mundial"
+        if plat == "amazon" and lc.tipo == "claims":
+            return lc.url_original, url, "amazon"
         cached = db_get_link(url)
         if cached: return lc.url_original, cached, plat
 
-    motores = {"amazon": _afiliar_amazon, "shopee": _afiliar_shopee, "magalu": _afiliar_magalu}
-    motor   = motores.get(plat)
-    if not motor: return lc.url_original, None, plat
+    if plat == "amazon":
+        convertido = await _afiliar_amazon(url, sessao)
+    elif plat == "shopee":
+        convertido = await _afiliar_shopee(url, sessao)
+    elif plat == "magalu":
+        convertido = await _afiliar_magalu(url, sessao, msg_id)
+    else:
+        convertido = None
 
-    convertido = await motor(url, sessao)
     return lc.url_original, convertido, plat
 
 
 @dataclass
 class MensagemNormalizada:
-    msg_id:    int
-    chat:      str
+    msg_id:      int
+    chat:        str
     texto_limpo: str
-    mapa:      Dict[str, str]   # url_original → url_convertida
-    preservar: List[str]
-    plat:      str              # plataforma dominante
-    cupom:     str
-    sku:       str
-    tem_midia: bool
-    media_obj: object
+    mapa:        Dict[str, str]
+    preservar:   List[str]
+    plat:        str
+    cupom:       str
+    sku:         str
+    tem_midia:   bool
+    media_obj:   object
 
 
 async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
-    """Limpa texto e converte links. Retorna None se não há o que enviar."""
+    """
+    Orquestra camada 3.
+    ClientSession criado uma vez aqui e passado para todas as funções internas.
+    """
     if not bruta.texto.strip(): return None
     if texto_bloqueado(bruta.texto): return None
 
     texto_limpo = limpar_texto(bruta.texto)
     if not tem_contexto(texto_limpo): return None
 
+    # Limpa cache de classificação do ciclo anterior
+    _cls_cache.clear()
+    _desc_cache.clear()
+
     classificados = classificar_links(bruta.links)
-    converter     = [lc for lc in classificados if lc.plat not in ("preservar", None)]
-    preservar_lst = [lc.url_original for lc in classificados if lc.plat == "preservar"]
+    converter     = [lc for lc in classificados
+                     if lc.plat not in ("preservar", None)]
+    preservar_lst = [lc.url_original for lc in classificados
+                     if lc.plat == "preservar"]
 
     if not converter and not preservar_lst:
         if "fadadoscupons" not in bruta.chat: return None
@@ -858,17 +1134,21 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
         headers={"User-Agent": random.choice(USER_AGENTS)},
     ) as sessao:
         resultados = await asyncio.gather(
-            *[_normalizar_um(lc, sessao) for lc in converter[:50]],
+            *[_normalizar_um(lc, sessao, bruta.msg_id) for lc in converter[:50]],
             return_exceptions=True,
         )
 
-    mapa: Dict[str, str] = {}
-    plats: List[str] = []
+    mapa:  Dict[str, str] = {}
+    plats: List[str]      = []
     for res in resultados:
-        if isinstance(res, Exception): log_nrm.error(f"❌ normalizar link: {res}"); continue
+        if isinstance(res, Exception):
+            log_nrm.error(f"❌ normalizar link: {res}"); continue
         orig, conv, plat = res
-        if conv and plat not in ("none","preservar",None):
-            mapa[orig] = conv; plats.append(plat)
+        if conv and plat not in ("none", None):
+            mapa[orig] = conv
+            # Mundiais e preservar entram no mapa mas não contam como plataforma
+            if plat not in ("mundial", "preservar"):
+                plats.append(plat)
 
     if converter and not mapa and not preservar_lst:
         log_nrm.warning(f"🚫 Zero links convertidos | @{bruta.chat}")
@@ -876,19 +1156,23 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
 
     plat_dom = max(set(plats), key=plats.count) if plats else "amazon"
     cupom    = extrair_cupom(texto_limpo)
-    sku      = (next((f"{lc.plat[:3]}_{lc.sku}" for lc in classificados if lc.sku), "")
-                or _extrair_asin_texto(texto_limpo, mapa)
-                or _extrair_id_magalu(texto_limpo, mapa))
+    sku      = (
+        next((f"{lc.plat[:3]}_{lc.sku}" for lc in classificados if lc.sku), "")
+        or _extrair_asin_texto(texto_limpo, mapa)
+        or _extrair_id_magalu(texto_limpo, mapa)
+    )
 
-    log_nrm.info(f"✅ {len(mapa)}/{len(converter)} | plat={plat_dom} sku={sku}")
+    log_nrm.info(
+        f"✅ {len(mapa)}/{len(converter)} | "
+        f"plat={plat_dom} cupom='{cupom}' sku={sku}"
+    )
     return MensagemNormalizada(
         msg_id=bruta.msg_id, chat=bruta.chat,
         texto_limpo=texto_limpo, mapa=mapa,
         preservar=preservar_lst, plat=plat_dom,
         cupom=cupom, sku=sku,
         tem_midia=bruta.tem_midia, media_obj=bruta.media_obj,
-    )
-
+)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMADA 4 — DEDUPLICAÇÃO  (DECISÃO PURA)
