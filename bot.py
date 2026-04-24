@@ -1000,37 +1000,37 @@ async def _afiliar_magalu(url: str, sessao: aiohttp.ClientSession,
 
     nl = _netloc(url)
 
-# Desencurta se necessário
-if _parece_magalu_encurtado(url) or "maga.lu" in nl or nl in _ENCURTADORES:
-    try:
-        async with _SEM_HTTP:
-            url = await desencurtar(url, sessao)
-    except Exception as e:
-        log_nrm.error(f"  ❌ MGL desencurtar: {e}")
+    # Desencurta se necessário
+    if _parece_magalu_encurtado(url) or "maga.lu" in nl or nl in _ENCURTADORES:
+        try:
+            async with _SEM_HTTP:
+                url = await desencurtar(url, sessao)
+        except Exception as e:
+            log_nrm.error(f"  ❌ MGL desencurtar: {e}")
+            return None
+
+    cl = _classificar_cached(url)
+    if cl.plat != "magalu" or cl.tipo == "invalido":
+        log_nrm.debug(f"  MGL descartado: plat={cl.plat} tipo={cl.tipo}")
         return None
 
-cl = _classificar_cached(url)
-if cl.plat != "magalu" or cl.tipo == "invalido":
-    log_nrm.debug(f"  MGL descartado: plat={cl.plat} tipo={cl.tipo}")
-    return None
+    afiliado = _afiliar_url_magalu(url)
 
-afiliado = _afiliar_url_magalu(url)
+    # Tenta encurtar (3 tentativas com retry interno em _cuttly)
+    short = await _cuttly(afiliado, sessao)
+    if short:
+        db_set_link(url, short, "magalu")
+        log_nrm.info(f"  ✅ MGL curto: {short}")
+        return short
 
-# Tenta encurtar (3 tentativas com retry interno em _cuttly)
-short = await _cuttly(afiliado, sessao)
-if short:
-    db_set_link(url, short, "magalu")
-    log_nrm.info(f"  ✅ MGL curto: {short}")
-    return short
+    # Cuttly falhou → envia longo afiliado + tenta encurtar depois
+    log_nrm.warning("  ⚠️ Cuttly falhou → longo afiliado + background")
+    db_set_link(url, afiliado, "magalu")
+    if msg_id:
+        asyncio.create_task(_cuttly_background(afiliado, msg_id))
 
-# Cuttly falhou → envia longo afiliado + tenta encurtar depois
-log_nrm.warning("  ⚠️ Cuttly falhou → longo afiliado + background")
-db_set_link(url, afiliado, "magalu")
-if msg_id:
-    asyncio.create_task(_cuttly_background(afiliado, msg_id))
-
-return afiliado  # ← nunca None para Magalu válido
-
+    return afiliado
+                               
 # ── 3f. Pipeline de normalização ─────────────────────────────────────────────
 
 async def _normalizar_um(
