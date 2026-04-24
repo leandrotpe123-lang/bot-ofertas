@@ -833,9 +833,9 @@ _SHP_REPASSE_DIRETO = frozenset({"flapremios.com.br"})
 
 async def _afiliar_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
     """
-    Retry: 3 tentativas com backoff 1.5s, 3s, 4.5s.
-    Fallback: None — não envia link sem afiliação.
-    flapremios.com.br: repasse direto (já tem afiliação embutida).
+   # Retry: 3 tentativas com backoff 1.5s, 3s, 4.5s.
+#. Fallback: None — não envia link sem afiliação.
+  #  flapremios.com.br: repasse direto (já tem afiliação embutida).
     """
     log_nrm.debug(f"▶ SHP: {url[:80]}")
     nl = _netloc(url)
