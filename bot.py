@@ -765,6 +765,8 @@ def _limpar_url_amazon(url: str) -> Optional[str]:
         p    = urlparse(url)
         asin = _extrair_asin(url)
 
+ _cls_cache = {}
+
         # Sem comissão — devolve limpa sem tag
         if _AMZ_PATHS_SEM_TAG.match(p.path):
             return urlunparse(p._replace(query="", fragment=""))
