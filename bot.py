@@ -9,6 +9,7 @@ import os, random, re, sqlite3, time, unicodedata
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
+from functools import lru_cache  
 from threading import Lock
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
@@ -464,6 +465,9 @@ def classificar_url(url: str) -> LinkClassificado:
 
     return LinkClassificado(url, None, "desconhecido", "")
 
+@lru_cache(maxsize=1024)
+def _classificar_cached(url: str) -> LinkClassificado:
+    return classificar_url(url)
 
 def classificar_links(links: List[str]) -> List[LinkClassificado]:
     result = [classificar_url(u) for u in links]
