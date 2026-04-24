@@ -1000,7 +1000,7 @@ async def _afiliar_magalu(url: str, sessao: aiohttp.ClientSession,
 
     nl = _netloc(url)
 
-    # Desencurta se necessário
+# Desencurta se necessário
 if _parece_magalu_encurtado(url) or "maga.lu" in nl or nl in _ENCURTADORES:
     try:
         async with _SEM_HTTP:
@@ -1015,8 +1015,6 @@ if cl.plat != "magalu" or cl.tipo == "invalido":
     return None
 
 afiliado = _afiliar_url_magalu(url)
-
-# --- AGORA AS LINHAS ABAIXO ESTÃO ALINHADAS COM O 'afiliado' ---
 
 # Tenta encurtar (3 tentativas com retry interno em _cuttly)
 short = await _cuttly(afiliado, sessao)
