@@ -4,13 +4,15 @@
 # ║  4.Deduplicação → 5.Montagem → 6.Envio                          ║
 # ╚══════════════════════════════════════════════════════════════════╝
 from __future__ import annotations
+
 import asyncio, concurrent.futures, hashlib, heapq, io, json, logging
 import os, random, re, sqlite3, time, unicodedata
+
+from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from functools import lru_cache
-from collections import OrderedDict
 from threading import Lock
 from typing import Dict, List, Optional, Tuple, Set
 from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
@@ -22,7 +24,7 @@ from telethon.errors import (
     AuthKeyUnregisteredError,
     FloodWaitError,
     MessageNotModifiedError,
-    SessionPasswordNeededError
+    SessionPasswordNeededError,
 )
 from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaWebPage
