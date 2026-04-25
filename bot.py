@@ -9,17 +9,24 @@ import os, random, re, sqlite3, time, unicodedata
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from functools import lru_cache  
+from functools import lru_cache
+from collections import OrderedDict
 from threading import Lock
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
 from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
+
 import aiohttp
 from bs4 import BeautifulSoup
 from telethon import TelegramClient, events
-from telethon.errors import (AuthKeyUnregisteredError, FloodWaitError,
-    MessageNotModifiedError, SessionPasswordNeededError)
+from telethon.errors import (
+    AuthKeyUnregisteredError,
+    FloodWaitError,
+    MessageNotModifiedError,
+    SessionPasswordNeededError
+)
 from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaWebPage
+
 try:
     from PIL import Image
     _PIL_OK = True
