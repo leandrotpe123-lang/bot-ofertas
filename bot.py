@@ -545,23 +545,6 @@ def classificar_links(links:List[str])->List[LinkClassificado]:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMADA 3 — NORMALIZAÇÃO
-# Cole no lugar do bloco CAMADA 3 atual em foguetao_v76.py (linhas 381–797)
-#
-# CORREÇÕES:
-#   • _netloc() NÃO redefinida aqui — vem da camada 2 (resolve NameError)
-#   • _limpar_url_amazon usa p.netloc (não força .com.br)
-#   • _afiliar_amazon: tipo "claims" → retorna URL sem tag
-#   • _afiliar_shopee: fallback → None (não envia sem afiliação)
-#   • _afiliar_magalu: desencurta cutt.ly/*magalu* e divulgador.magalu.com
-#                      retorna afiliado longo se Cuttly falhar (nunca None)
-#                      agenda background para encurtar depois
-#   • desencurtar: anti-loop cutt.ly, cache de URLs já desencurtadas,
-#                  proteção de HTML > 500k
-#   • _normalizar_um: trata "mundial" e "claims" passando URL intacta
-#   • _extrair_asin_texto: loop unificado sem duplicidade
-#   • extrair_cupom: exige KW na mesma linha do código
-#   • normalizar(): limpa _cls_cache a cada ciclo
-#                   mundiais incluídos no mapa como url→url
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ── 3a. Filtro de texto ──────────────────────────────────────────────────────
@@ -669,7 +652,6 @@ _FALSO_CUPOM = frozenset({
 })
 
 def extrair_cupom(texto: str) -> str:
-    """Extrai código de cupom. Exige KW explícita na mesma linha do código."""
     for linha in texto.splitlines():
         if not _KW_CUPOM.search(linha): continue
         for m in _KW_COD.finditer(linha):
@@ -679,7 +661,6 @@ def extrair_cupom(texto: str) -> str:
     return ""
 
 def _extrair_asin_texto(texto: str, mapa: dict) -> str:
-    """Loop unificado — sem duplicidade de regex."""
     for u in list(mapa.values()) + [texto]:
         for pat in _P_AMZ_ASIN:
             m = pat.search(u)
@@ -713,39 +694,24 @@ _FORCA_GET = frozenset({
     "amzlink.to","amzn.to","a.co","amzn.com","bit.ly",
     "tinyurl.com","rb.gy","is.gd","cutt.ly","ow.ly","buff.ly",
 })
-# Cache in-process de URLs já desencurtadas — evita requests repetidos
 _desc_cache: Dict[str, str] = {}
 
-# Hint de Magalu em links encurtados
-_RE_CUTT_MAGALU = re.compile(r'cutt\.ly/[^\s]*magalu', re.I)
-_RE_DIVULGADOR  = re.compile(r'divulgador\.magalu\.com', re.I)
+# Detecção de links Magalu encurtados — padrões expandidos
+_RE_CUTT_MAGALU  = re.compile(r'cutt\.ly/', re.I)   # qualquer cutt.ly pode ser magalu → desencurta sempre
+_RE_MAGA_LU      = re.compile(r'maga\.lu/', re.I)
+_RE_DIVULGADOR   = re.compile(r'divulgador\.magalu\.com', re.I)
 
 def _parece_magalu_encurtado(url: str) -> bool:
-    return bool(_RE_CUTT_MAGALU.search(url) or _RE_DIVULGADOR.search(url))
+    # cutt.ly, maga.lu e divulgador.magalu.com são sempre desencurtados no fluxo Magalu
+    return bool(_RE_MAGA_LU.search(url) or _RE_DIVULGADOR.search(url))
 
 async def desencurtar(url: str, sessao: aiohttp.ClientSession, depth: int = 0) -> str:
-    """
-    Segue redirects até 15 níveis.
-    Anti-loop: cutt.ly não é re-expandido após redirect.
-    Cache: URLs já resolvidas não fazem request de novo.
-    HTML > 500k: ignora parse, retorna posição atual.
-    Erro de rede: retorna URL original (não None — chamador decide).
-    """
-    if depth > 15:
-        return url
+    if depth > 15: return url
     url = url.strip().rstrip('.,;)>')
-    if not url.startswith(("http://", "https://")):
-        return url
-
-    # Anti-loop: se já é cutt.ly após redirect, para aqui
+    if not url.startswith(("http://", "https://")): return url
     nl = _netloc(url)
-    if depth > 0 and nl == "cutt.ly":
-        return url
-
-    # Cache de desencurtamento
-    if url in _desc_cache:
-        return _desc_cache[url]
-
+    if depth > 0 and nl == "cutt.ly": return url
+    if url in _desc_cache: return _desc_cache[url]
     hdrs = {
         "User-Agent":      random.choice(USER_AGENTS),
         "Accept":          "text/html,*/*;q=0.9",
@@ -764,24 +730,17 @@ async def desencurtar(url: str, sessao: aiohttp.ClientSession, depth: int = 0) -
                         return await desencurtar(final, sessao, depth + 1)
             except Exception:
                 pass
-
         async with sessao.get(url, headers=hdrs, allow_redirects=True,
                               timeout=aiohttp.ClientTimeout(total=15),
                               max_redirects=20) as r:
             pos  = str(r.url)
             html = await r.text(errors="ignore")
-
             if pos != url:
                 _desc_cache[url] = pos
                 return await desencurtar(pos, sessao, depth + 1)
-
-            # Proteção HTML grande
             if len(html) > 500_000:
-                _desc_cache[url] = pos
-                return pos
-
+                _desc_cache[url] = pos; return pos
             soup = BeautifulSoup(html, "html.parser")
-
             ref = soup.find("meta", attrs={"http-equiv": re.compile("refresh", re.I)})
             if ref and ref.get("content"):
                 m = re.search(r"url[=\s]*([^\s;\"']+)", ref["content"], re.I)
@@ -789,7 +748,6 @@ async def desencurtar(url: str, sessao: aiohttp.ClientSession, depth: int = 0) -
                     novo = m.group(1).strip().strip("'\"")
                     if novo.startswith("http"):
                         return await desencurtar(novo, sessao, depth + 1)
-
             for pat in [
                 r'window\.location(?:\.href)?\s*=\s*["\']([^"\']{15,})["\']',
                 r'location\.replace\s*\(\s*["\']([^"\']{15,})["\']\s*\)',
@@ -797,24 +755,17 @@ async def desencurtar(url: str, sessao: aiohttp.ClientSession, depth: int = 0) -
                 mj = re.search(pat, html)
                 if mj and mj.group(1).startswith("http"):
                     return await desencurtar(mj.group(1), sessao, depth + 1)
-
             og = soup.find("meta", attrs={"property": "og:url"})
             if og and og.get("content","").startswith("http") and og["content"] != url:
                 return await desencurtar(og["content"], sessao, depth + 1)
-
             canon = soup.find("link", rel="canonical")
             if canon and canon.get("href","").startswith("http") and canon["href"] != url:
                 return await desencurtar(canon["href"], sessao, depth + 1)
-
-            _desc_cache[url] = pos
-            return pos
-
+            _desc_cache[url] = pos; return pos
     except asyncio.TimeoutError:
-        log_nrm.warning(f"⏱ Timeout desencurtar d={depth}: {url[:60]}")
-        return url
+        log_nrm.warning(f"⏱ Timeout desencurtar d={depth}: {url[:60]}"); return url
     except Exception as e:
-        log_nrm.error(f"❌ desencurtar d={depth}: {e}")
-        return url
+        log_nrm.error(f"❌ desencurtar d={depth}: {e}"); return url
 
 # ── 3e. Motores de afiliação ─────────────────────────────────────────────────
 
@@ -827,26 +778,12 @@ _AMZ_LIXO   = frozenset({
 })
 _AMZ_MANTER = frozenset({"keywords","node","k","i","rh","n","field-keywords"})
 
-_cls_cache: OrderedDict[str, LinkClassificado] = OrderedDict()
-
-def _parece_magalu_encurtado(url: str) -> bool:
-    """Verifica se a URL parece ser um link curto da Magalu."""
-    return "maga.lu" in url or "/S/" in url.upper()
-
 def _limpar_url_amazon(url: str) -> Optional[str]:
-    """
-    Limpa URL Amazon e adiciona tag.
-    Usa p.netloc original — NÃO força .com.br (preserva .com, .eu).
-    Paths sem comissão (prime, claims, gaming) → URL limpa SEM tag.
-    """
     try:
         p    = urlparse(url)
-        asin = _extrair_asin(url)
-
-        # Sem comissão — devolve limpa sem tag
+        asin = _extrair_asin(p)
         if _AMZ_PATHS_SEM_TAG.match(p.path):
             return urlunparse(p._replace(query="", fragment=""))
-
         if asin:
             return urlunparse(p._replace(
                 path=f"/dp/{asin}",
@@ -854,17 +791,13 @@ def _limpar_url_amazon(url: str) -> Optional[str]:
                 fragment="",
             ))
         if "/promotion/" in p.path:
-            return urlunparse(p._replace(
-                query=f"tag={_AMZ_TAG}", fragment=""))
-
+            return urlunparse(p._replace(query=f"tag={_AMZ_TAG}", fragment=""))
         params = {k: v[0] for k, v in parse_qs(p.query).items()
                   if k.lower() in _AMZ_MANTER and len(v[0]) < 60}
         params["tag"] = _AMZ_TAG
         return urlunparse(p._replace(
-            scheme="https",
-            netloc=p.netloc,        # ← preserva netloc original
-            query=urlencode(params),
-            fragment="",
+            scheme="https", netloc=p.netloc,
+            query=urlencode(params), fragment="",
         ))
     except Exception:
         return None
@@ -873,28 +806,16 @@ async def _afiliar_amazon(url: str, sessao: aiohttp.ClientSession) -> Optional[s
     log_nrm.debug(f"▶ AMZ: {url[:80]}")
     cached = db_get_link(url)
     if cached: return cached
-
-    # Claims/prime antes de qualquer processamento
     lc_pre = _classificar_cached(url)
-    if lc_pre.tipo == "claims":
-        log_nrm.debug(f"  AMZ claims/prime → sem tag: {url[:60]}")
-        return url
-
-    # Mundial (gaming.amazon.com) → passa intacto
-    if lc_pre.plat == "mundial":
-        return url
-
+    if lc_pre.tipo == "claims": return url
+    if lc_pre.plat == "mundial": return url
     try:
         async with _SEM_HTTP:
             exp = await desencurtar(url, sessao)
     except Exception:
         return None
-
-    # Reclassifica após expandir
     lc_exp = _classificar_cached(exp)
-    if lc_exp.tipo == "claims" or lc_exp.plat == "mundial":
-        return exp
-
+    if lc_exp.tipo == "claims" or lc_exp.plat == "mundial": return exp
     final = _limpar_url_amazon(exp)
     if not final:
         p = urlparse(exp)
@@ -902,7 +823,6 @@ async def _afiliar_amazon(url: str, sessao: aiohttp.ClientSession) -> Optional[s
             final = urlunparse(p._replace(query="", fragment=""))
         else:
             final = f"{exp.split('?',1)[0]}?tag={_AMZ_TAG}"
-
     db_set_link(url, final, "amazon")
     log_nrm.info(f"  ✅ AMZ: {final[:70]}")
     return final
@@ -910,21 +830,13 @@ async def _afiliar_amazon(url: str, sessao: aiohttp.ClientSession) -> Optional[s
 _SHP_REPASSE_DIRETO = frozenset({"flapremios.com.br"})
 
 async def _afiliar_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
-    """
-   # Retry: 3 tentativas com backoff 1.5s, 3s, 4.5s.
-#. Fallback: None — não envia link sem afiliação.
-  #  flapremios.com.br: repasse direto (já tem afiliação embutida).
-    """
     log_nrm.debug(f"▶ SHP: {url[:80]}")
     nl = _netloc(url)
     for d in _SHP_REPASSE_DIRETO:
         if nl == d or nl.endswith("." + d):
-            log_nrm.info(f"  ↩️ SHP repasse direto: {url[:60]}")
-            return url
-
+            log_nrm.info(f"  ↩️ SHP repasse direto: {url[:60]}"); return url
     cached = db_get_link(url)
     if cached: return cached
-
     for tentativa in range(1, 4):
         try:
             ts      = str(int(time.time()))
@@ -965,24 +877,30 @@ async def _afiliar_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[s
             log_nrm.warning(f"  ⚠️ SHP t={tentativa}: {e}")
         if tentativa < 3:
             await asyncio.sleep(tentativa * 1.5)
-
     log_nrm.warning(f"  ❌ SHP falhou 3x → None: {url[:60]}")
-    return None   # ← não envia link sem afiliação
+    return None
 
 _CUTTLY_LAST_429: float = 0.0
 _CUTTLY_BACKOFF:  float = 65.0
 
 def _afiliar_url_magalu(url: str) -> str:
-    p      = urlparse(url)
-    path   = re.sub(r'^(/magazine)[^/]+', rf'\1{_MGL_SLUG}', p.path)
-    params = {k: v[0] for k, v in parse_qs(p.query, keep_blank_values=True).items()}
-    for k in [
-        "tag","partnerid","promoterid","afforcedeeplink","deeplinkvalue",
-        "isretargeting","partner_id","promoter_id","utm_source","utm_medium",
-        "utm_campaign","pid","c","af_force_deeplink","deep_link_value",
-    ]:
-        params.pop(k, None)
-    params.update({
+    """
+    Reconstrói URL Magalu com afiliação limpa.
+    Remove TODOS os parâmetros do grupo origem e injeta apenas os do promotor.
+    """
+    p = urlparse(url)
+    # Normaliza host para magazineluiza.com.br
+    host = p.netloc
+    if "divulgador.magalu.com" in host or "magazinevoce.com.br" in host:
+        host = "www.magazineluiza.com.br"
+    # Extrai SKU do path
+    sku = _extrair_sku_magalu(p)
+    # Monta path limpo
+    if sku:
+        path = f"/{sku}/p/{sku}/"
+    else:
+        path = re.sub(r'^(/magazine)[^/]+', rf'\1{_MGL_SLUG}', p.path)
+    params = {
         "partner_id":        _MGL_PARTNER,
         "promoter_id":       _MGL_PROMOTER,
         "utm_source":        "divulgador",
@@ -991,21 +909,22 @@ def _afiliar_url_magalu(url: str) -> str:
         "pid":               _MGL_PID,
         "c":                 _MGL_PROMOTER,
         "af_force_deeplink": "true",
-    })
-    base = urlunparse(p._replace(path=path, query="", fragment=""))
+    }
+    base = urlunparse(p._replace(netloc=host, path=path, query="", fragment=""))
     params["deep_link_value"] = (
         f"{base}?utm_source=divulgador&utm_medium=magalu"
         f"&partner_id={_MGL_PARTNER}&promoter_id={_MGL_PROMOTER}"
     )
-    return urlunparse(p._replace(path=path, query=urlencode(params), fragment=""))
+    return urlunparse(p._replace(netloc=host, path=path, query=urlencode(params), fragment=""))
 
 async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
     global _CUTTLY_LAST_429
+    if not _CUTTLY_KEY:
+        return None
     api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={quote(url, safe='')}"
     for tentativa in range(1, 4):
         espera = _CUTTLY_BACKOFF - (time.time() - _CUTTLY_LAST_429)
-        if espera > 0:
-            await asyncio.sleep(espera)
+        if espera > 0: await asyncio.sleep(espera)
         try:
             async with _SEM_HTTP:
                 async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=15)) as r:
@@ -1016,99 +935,45 @@ async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
                         log_nrm.error("  ❌ Cuttly 401 — chave inválida"); return None
                     if r.status != 200:
                         await asyncio.sleep(2 ** tentativa); continue
-                    try:
-                        data = await r.json(content_type=None)
-                    except Exception:
-                        await asyncio.sleep(2 ** tentativa); continue
+                    try: data = await r.json(content_type=None)
+                    except Exception: await asyncio.sleep(2 ** tentativa); continue
                     status = data.get("url", {}).get("status")
                     if status in (7, 2):
                         short = data["url"].get("shortLink")
                         if short: return short
                     await asyncio.sleep(2 ** tentativa)
-        except asyncio.TimeoutError:
-            await asyncio.sleep(2 ** tentativa)
+        except asyncio.TimeoutError: await asyncio.sleep(2 ** tentativa)
         except Exception as e:
             log_nrm.error(f"  ❌ Cuttly t={tentativa}: {e}")
             await asyncio.sleep(2 ** tentativa)
     return None
 
-async def _cuttly_background(url_longo: str, msg_id_origem: int):
-    """
-    Tenta encurtar em background após envio.
-    Quando consegue, edita a mensagem no destino.
-    10 tentativas com intervalo de 45s — não trava o bot.
-    """
-    conn = aiohttp.TCPConnector(ssl=False)
-    async with aiohttp.ClientSession(connector=conn) as sessao:
-        for tent in range(10):
-            await asyncio.sleep(45)
-            try:
-                short = await _cuttly(url_longo, sessao)
-                if short:
-                    loop    = asyncio.get_event_loop()
-                    mapa    = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-                    id_dest = mapa.get(str(msg_id_origem))
-                    if id_dest:
-                        try:
-                            msg_atual = await client.get_messages(GRUPO_DESTINO, ids=id_dest)
-                            if msg_atual and msg_atual.text:
-                                novo = msg_atual.text.replace(url_longo, short)
-                                if novo != msg_atual.text:
-                                    await client.edit_message(
-                                        GRUPO_DESTINO, id_dest, novo, parse_mode="md")
-                                    log_nrm.info(f"  ✅ MGL BG editado: {id_dest}")
-                        except Exception as e:
-                            log_nrm.warning(f"  ⚠️ MGL BG edit: {e}")
-                    db_set_link(url_longo, short, "magalu")
-                    return
-            except Exception as e:
-                log_nrm.warning(f"  ⚠️ MGL BG t={tent}: {e}")
-
 async def _afiliar_magalu(url: str, sessao: aiohttp.ClientSession,
                            msg_id: int = 0) -> Optional[str]:
-    """
-    Motor Magalu.
-    Fluxo: cache → desencurtar → validar → afiliar → encurtar → enviar sempre.
-    Se Cuttly falhar → envia link longo afiliado + agenda background.
-    Nunca retorna None se o link é Magalu válido.
-    """
     log_nrm.debug(f"▶ MGL: {url[:80]}")
     cached = db_get_link(url)
     if cached: return cached
-
     nl = _netloc(url)
-
-    # Desencurta se necessário
-    if _parece_magalu_encurtado(url) or "maga.lu" in nl or nl in _ENCURTADORES:
+    # Desencurta cutt.ly, maga.lu e encurtadores genéricos
+    if nl == "cutt.ly" or "maga.lu" in nl or nl in _ENCURTADORES:
         try:
             async with _SEM_HTTP:
                 url = await desencurtar(url, sessao)
         except Exception as e:
-            log_nrm.error(f"  ❌ MGL desencurtar: {e}")
-            return None
-
+            log_nrm.error(f"  ❌ MGL desencurtar: {e}"); return None
     cl = _classificar_cached(url)
     if cl.plat != "magalu" or cl.tipo == "invalido":
-        log_nrm.debug(f"  MGL descartado: plat={cl.plat} tipo={cl.tipo}")
-        return None
-
+        log_nrm.debug(f"  MGL descartado: plat={cl.plat} tipo={cl.tipo}"); return None
     afiliado = _afiliar_url_magalu(url)
-
-    # Tenta encurtar (3 tentativas com retry interno em _cuttly)
     short = await _cuttly(afiliado, sessao)
     if short:
         db_set_link(url, short, "magalu")
         log_nrm.info(f"  ✅ MGL curto: {short}")
         return short
-
-    # Cuttly falhou → envia longo afiliado + tenta encurtar depois
-    log_nrm.warning("  ⚠️ Cuttly falhou → longo afiliado + background")
+    log_nrm.warning("  ⚠️ Cuttly falhou → longo afiliado")
     db_set_link(url, afiliado, "magalu")
-    if msg_id:
-        asyncio.create_task(_cuttly_background(afiliado, msg_id))
-
     return afiliado
-                               
+
 # ── 3f. Pipeline de normalização ─────────────────────────────────────────────
 
 async def _normalizar_um(
@@ -1116,46 +981,26 @@ async def _normalizar_um(
     sessao: aiohttp.ClientSession,
     msg_id: int = 0,
 ) -> Tuple[str, Optional[str], str]:
-    """
-    Retorna (url_original, url_convertida, plat).
-    mundial  → url_convertida == url_original (sem conversão)
-    claims   → url_convertida == url_original (sem tag)
-    preservar→ url_convertida == url_original
-    None     → url_convertida = None (descarta)
-    """
     plat = lc.plat
-
-    if plat == "mundial":
-        return lc.url_original, lc.url_original, "mundial"
-    if plat == "preservar":
-        return lc.url_original, lc.url_original, "preservar"
+    if plat == "mundial":   return lc.url_original, lc.url_original, "mundial"
+    if plat == "preservar": return lc.url_original, lc.url_original, "preservar"
     if plat is None or lc.tipo in ("invalido","bloqueado","grupo_externo","desconhecido"):
         return lc.url_original, None, plat or "none"
     if plat == "amazon" and lc.tipo == "claims":
         return lc.url_original, lc.url_original, "amazon"
-
     cached = db_get_link(lc.url_original)
     if cached: return lc.url_original, cached, plat
-
     url = lc.url_original
-
-    # Encurtadores genéricos → desencurta e reclassifica
     if plat == "expandir":
-        try:
-            url = await desencurtar(url, sessao)
-        except Exception:
-            return lc.url_original, None, "none"
+        try: url = await desencurtar(url, sessao)
+        except Exception: return lc.url_original, None, "none"
         lc   = _classificar_cached(url)
         plat = lc.plat
-        if plat is None:
-            return lc.url_original, None, "none"
-        if plat == "mundial":
-            return lc.url_original, url, "mundial"
-        if plat == "amazon" and lc.tipo == "claims":
-            return lc.url_original, url, "amazon"
+        if plat is None: return lc.url_original, None, "none"
+        if plat == "mundial": return lc.url_original, url, "mundial"
+        if plat == "amazon" and lc.tipo == "claims": return lc.url_original, url, "amazon"
         cached = db_get_link(url)
         if cached: return lc.url_original, cached, plat
-
     if plat == "amazon":
         convertido = await _afiliar_amazon(url, sessao)
     elif plat == "shopee":
@@ -1164,7 +1009,6 @@ async def _normalizar_um(
         convertido = await _afiliar_magalu(url, sessao, msg_id)
     else:
         convertido = None
-
     return lc.url_original, convertido, plat
 
 
@@ -1183,29 +1027,17 @@ class MensagemNormalizada:
 
 
 async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
-    """
-    Orquestra camada 3.
-    ClientSession criado uma vez aqui e passado para todas as funções internas.
-    """
     if not bruta.texto.strip(): return None
     if texto_bloqueado(bruta.texto): return None
-
     texto_limpo = limpar_texto(bruta.texto)
     if not tem_contexto(texto_limpo): return None
-
-    # Limpa cache de classificação do ciclo anterior
     _cls_cache.clear()
     _desc_cache.clear()
-
     classificados = classificar_links(bruta.links)
-    converter     = [lc for lc in classificados
-                     if lc.plat not in ("preservar", None)]
-    preservar_lst = [lc.url_original for lc in classificados
-                     if lc.plat == "preservar"]
-
+    converter     = [lc for lc in classificados if lc.plat not in ("preservar", None)]
+    preservar_lst = [lc.url_original for lc in classificados if lc.plat == "preservar"]
     if not converter and not preservar_lst:
         if "fadadoscupons" not in bruta.chat: return None
-
     conn = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300, ssl=False)
     async with aiohttp.ClientSession(
         connector=conn,
@@ -1216,7 +1048,6 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
             *[_normalizar_um(lc, sessao, bruta.msg_id) for lc in converter[:50]],
             return_exceptions=True,
         )
-
     mapa:  Dict[str, str] = {}
     plats: List[str]      = []
     for res in resultados:
@@ -1225,14 +1056,11 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
         orig, conv, plat = res
         if conv and plat not in ("none", None):
             mapa[orig] = conv
-            # Mundiais e preservar entram no mapa mas não contam como plataforma
             if plat not in ("mundial", "preservar"):
                 plats.append(plat)
-
     if converter and not mapa and not preservar_lst:
         log_nrm.warning(f"🚫 Zero links convertidos | @{bruta.chat}")
         return None
-
     plat_dom = max(set(plats), key=plats.count) if plats else "amazon"
     cupom    = extrair_cupom(texto_limpo)
     sku      = (
@@ -1240,10 +1068,8 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
         or _extrair_asin_texto(texto_limpo, mapa)
         or _extrair_id_magalu(texto_limpo, mapa)
     )
-
     log_nrm.info(
-        f"✅ {len(mapa)}/{len(converter)} | "
-        f"plat={plat_dom} cupom='{cupom}' sku={sku}"
+        f"✅ {len(mapa)}/{len(converter)} | plat={plat_dom} cupom='{cupom}' sku={sku}"
     )
     return MensagemNormalizada(
         msg_id=bruta.msg_id, chat=bruta.chat,
@@ -1251,7 +1077,7 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
         preservar=preservar_lst, plat=plat_dom,
         cupom=cupom, sku=sku,
         tem_midia=bruta.tem_midia, media_obj=bruta.media_obj,
-)
+            )
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMADA 4 — DEDUPLICAÇÃO  (DECISÃO PURA)
@@ -1391,17 +1217,21 @@ async def delay_saturacao(plat: str, texto: str) -> float:
     if await _burst_count() >= _SAT_BURST_LIM: delay += 4.0
     return delay
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
-# CAMADA 5 — MONTAGEM (FORMATTER)
-# Responsabilidade: construir mensagem final bonita + buscar imagem.
-# NÃO decide envio. NÃO acessa Telegram. NÃO altera banco.
+# CAMADA 5 — MONTAGEM
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _EMJ: Dict[str, List[str]] = {
-    "titulo_oferta":["🔥"],"titulo_cupom":["🚨"],"titulo_evento":["⚠️"],
-    "preco":["💵"],"cupom_cod":["🎟"],"resgate":["✅"],
-    "carrinho":["🛒"],"frete":["🚚","📦"],"multi_item":["🔹"],
+    "titulo_oferta": ["🔥"],
+    "titulo_cupom":  ["🚨"],
+    "titulo_evento": ["⚠️"],
+    "preco":         ["💵"],
+    "cupom_cod":     ["🎟"],
+    "resgate":       ["⭐"],   # ← trocado de ✅ para ⭐
+    "carrinho":      ["🛒"],
+    "frete":         ["🚚", "📦"],
+    "multi_item":    ["🔹"],
+    "link_prod":     ["✅"],   # ← novo: link produto/lista
 }
 _EMJ_IDX: Dict[str, int] = {k: 0 for k in _EMJ}
 
@@ -1412,12 +1242,18 @@ def _prox_emoji(cat: str) -> str:
 _KW_PRECO    = re.compile(r'R\$\s?[\d.,]+', re.I)
 _KW_FRETE    = re.compile(r'\b(?:frete\s+gr[aá]t|entrega\s+gr[aá]t|sem\s+frete|frete\s+0)\b', re.I)
 _KW_STATUS   = re.compile(r'\b(?:voltando|voltou|normalizou|renovado|ainda\s+ativo|de\s+volta|reativado)\b', re.I)
-_KW_RESGATE  = re.compile(r'\b(?:resgate|clique|acesse|ative|use\s+o\s+cupom)\b', re.I)
+_KW_RESGATE  = re.compile(r'\b(?:resgate|clique|acesse|ative|use\s+o\s+cupom|lista|link\s+produto|link\s+lista)\b', re.I)
 _KW_CARRINHO = re.compile(r'\b(?:carrinho|cart)\b', re.I)
+_KW_LINK_PROD= re.compile(r'\b(?:link\s+produto|link\s+da\s+oferta|produto|link\s+lista)\b', re.I)
 
 _RE_LIXO_PREF  = re.compile(r'^\s*(?:::?\s*ML|[-–]\s*ML|ML\s*:|[-:•|]\s*(?:ML|MG|AMZ)\s*[-:•]?)\s*', re.I)
 _RE_ANUNCIO    = re.compile(r'^\s*[-#]?\s*(?:an[uú]ncio|publicidade|patrocinado)\s*$', re.I)
 _RE_URL_RENDER = re.compile(r'https?://[^\s\)\]>,"\'<\u200b\u200c]+')
+
+# Títulos típicos que NÃO devem receber crases mesmo contendo palavras maiúsculas
+_RE_TITULO_LINHA = re.compile(
+    r'^(?:🔥|🚨|⚠️|💥|⚡|🚀)\s', re.UNICODE
+)
 
 def _contar_produtos(texto: str) -> int:
     return sum(1 for l in texto.splitlines() if _KW_PRECO.search(l))
@@ -1426,21 +1262,25 @@ def _emoji_linha(linha: str, eh_titulo: bool, is_multi: bool = False) -> Optiona
     if _tem_emoji(linha): return None
     if eh_titulo:
         if _KW_EVENTO.search(linha): return _prox_emoji("titulo_evento")
-        if _KW_CUPOM.search(linha): return _prox_emoji("titulo_cupom")
+        if _KW_CUPOM.search(linha):  return _prox_emoji("titulo_cupom")
         return _prox_emoji("titulo_oferta")
     if is_multi and _KW_PRECO.search(linha): return "🔹"
-    if _KW_FRETE.search(linha): return _prox_emoji("frete")
-    if _KW_CUPOM.search(linha): return _prox_emoji("cupom_cod")
-    if _KW_PRECO.search(linha): return _prox_emoji("preco")
-    if _KW_RESGATE.search(linha): return _prox_emoji("resgate")
+    if _KW_FRETE.search(linha):    return _prox_emoji("frete")
     if _KW_CARRINHO.search(linha): return _prox_emoji("carrinho")
+    if _KW_CUPOM.search(linha):    return _prox_emoji("cupom_cod")
+    if _KW_PRECO.search(linha):    return _prox_emoji("preco")
+    if _KW_LINK_PROD.search(linha):return _prox_emoji("link_prod")
+    if _KW_RESGATE.search(linha):  return _prox_emoji("resgate")
     return None
 
-def _crases(linha: str) -> str:
-    if "http" in linha or "`" in linha: return linha
-    if not (_KW_CUPOM.search(linha) or _KW_COD.search(linha)): return linha
+def _crases(linha: str, eh_titulo: bool = False) -> str:
+    if "http" in linha or eh_titulo: return linha
+    if "`" in linha: return linha
+    if not _KW_CUPOM.search(linha): return linha
     def _sub(m: re.Match) -> str:
-        c = m.group(0); return c if (c in _FALSO_CUPOM or len(c) < 4) else f"`{c}`"
+        c = m.group(0)
+        if c in _FALSO_CUPOM or len(c) < 4: return c
+        return f"`{c}`"
     return re.sub(r'\b([A-Z][A-Z0-9_-]{4,20})\b', _sub, linha)
 
 def montar_texto(norm: MensagemNormalizada) -> str:
@@ -1462,30 +1302,42 @@ def montar_texto(norm: MensagemNormalizada) -> str:
             continue
         l = _RE_URL_RENDER.sub(lambda m: mapa.get(m.group(0).rstrip('.,;)>'), ""), l).strip()
         if not l: continue
-        l = _crases(l)
+        eh_titulo = primeiro
+        l = _crases(l, eh_titulo=eh_titulo)
         if not _tem_emoji(l):
-            e = _emoji_linha(l, eh_titulo=primeiro, is_multi=is_multi)
+            e = _emoji_linha(l, eh_titulo=eh_titulo, is_multi=is_multi)
             if e: l = f"{e} {l}"
         primeiro = False; saida.append(l)
     return "\n".join(saida).strip()
 
+# ── Busca de imagem de produto ────────────────────────────────────────────────
 
 async def buscar_imagem_produto(url: str) -> Optional[str]:
+    """Busca og:image / twitter:image / ld+json / maior img para qualquer plataforma."""
     if not url or not url.startswith("http"): return None
     hdrs = {"User-Agent": random.choice(USER_AGENTS), "Accept": "text/html,*/*;q=0.9"}
     for t in range(1, 4):
         try:
             async with aiohttp.ClientSession(headers=hdrs) as s:
-                async with s.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                async with s.get(url, allow_redirects=True,
+                                 timeout=aiohttp.ClientTimeout(total=15)) as r:
                     ct = r.headers.get("content-type","")
                     if "image" in ct: return str(r.url)
-                    html = await r.text(errors="ignore"); soup = BeautifulSoup(html,"html.parser")
-                    for attr in [{"property":"og:image"},{"property":"og:image:secure_url"},{"name":"twitter:image"}]:
+                    html = await r.text(errors="ignore")
+                    soup = BeautifulSoup(html, "html.parser")
+                    for attr in [
+                        {"property":"og:image"},
+                        {"property":"og:image:secure_url"},
+                        {"name":"twitter:image"},
+                    ]:
                         tag = soup.find("meta", attrs=attr)
                         if not tag: continue
                         img_url = tag.get("content","")
                         if not img_url.startswith("http"): continue
-                        img_url = re.sub(r'[?&](?:width|height|w|h|size|resize|fit|quality|q|maxwidth|maxheight|format|auto|compress|crop|scale)=[^&]+','',img_url).rstrip('?&')
+                        img_url = re.sub(
+                            r'[?&](?:width|height|w|h|size|resize|fit|quality|q|'
+                            r'maxwidth|maxheight|format|auto|compress|crop|scale)=[^&]+',
+                            '', img_url).rstrip('?&')
                         return img_url
                     for scr in soup.find_all("script", type="application/ld+json"):
                         try:
@@ -1498,23 +1350,29 @@ async def buscar_imagem_produto(url: str) -> Optional[str]:
                                     c = img[0]
                                     if isinstance(c, str): return c
                                     if isinstance(c, dict):
-                                        u = c.get("url","")
-                                        if u.startswith("http"): return u
+                                        u2 = c.get("url","")
+                                        if u2.startswith("http"): return u2
                         except Exception: pass
                     melhor_src = None; melhor_area = 0
                     for img_tag in soup.find_all("img", src=True):
                         src = img_tag.get("src","")
                         if not src.startswith("http"): continue
-                        if any(x in src.lower() for x in ["icon","logo","avatar","badge","spinner"]): continue
+                        if any(x in src.lower() for x in
+                               ["icon","logo","avatar","badge","spinner"]): continue
                         try:
-                            w = int(img_tag.get("width",0)); h = int(img_tag.get("height",0)); area = w * h
-                            if area > melhor_area: melhor_area = area; melhor_src = src
+                            w = int(img_tag.get("width",0))
+                            h = int(img_tag.get("height",0))
+                            area = w * h
+                            if area > melhor_area:
+                                melhor_area = area; melhor_src = src
                         except (ValueError, TypeError):
-                            if any(x in src.lower() for x in ["product","produto","item","image","foto","zoom","large","xl","hd","original"]):
+                            if any(x in src.lower() for x in
+                                   ["product","produto","item","image","foto",
+                                    "zoom","large","xl","hd","original"]):
                                 if not melhor_src: melhor_src = src
                     if melhor_src: return melhor_src
         except asyncio.TimeoutError: log_fmt.warning(f"⏱ Timeout buscar_img t={t}")
-        except Exception as e: log_fmt.warning(f"⚠️ buscar_img t={t}: {e}")
+        except Exception as e:      log_fmt.warning(f"⚠️ buscar_img t={t}: {e}")
         if t < 3: await asyncio.sleep(1.0)
     return None
 
@@ -1527,67 +1385,106 @@ async def preparar_imagem_tg(media_obj) -> Optional[object]:
         buf.seek(0)
         if buf.getbuffer().nbytes < 500: return None
         buf.name = "imagem.jpg"; return buf
-    except Exception as e: log_fmt.warning(f"⚠️ download_media: {e}"); return None
+    except Exception as e:
+        log_fmt.warning(f"⚠️ download_media: {e}"); return None
 
 
 async def preparar_imagem_url(url: str) -> Optional[object]:
     try:
-        async with aiohttp.ClientSession(headers={"User-Agent": random.choice(USER_AGENTS)}) as s:
-            async with s.get(url, timeout=aiohttp.ClientTimeout(total=20), allow_redirects=True) as r:
+        async with aiohttp.ClientSession(
+            headers={"User-Agent": random.choice(USER_AGENTS)}
+        ) as s:
+            async with s.get(url, timeout=aiohttp.ClientTimeout(total=20),
+                             allow_redirects=True) as r:
                 if r.status == 200:
                     data = await r.read()
                     if len(data) < 1000: return None
                     buf = io.BytesIO(data); buf.name = "produto.jpg"; return buf
-    except Exception as e: log_fmt.warning(f"⚠️ preparar_img_url: {e}")
+    except Exception as e:
+        log_fmt.warning(f"⚠️ preparar_img_url: {e}")
     return None
 
 
-def _eh_cupom_exclusivo_amazon(norm: MensagemNormalizada) -> bool:
-    if norm.plat != "amazon": return False
-    if not _KW_CUPOM.search(norm.texto_limpo): return False
-    tl = norm.texto_limpo.lower()
-    return "shopee" not in tl and "magalu" not in tl and "magazine" not in tl
+# ── Lógica de imagem isolada por plataforma/tipo ─────────────────────────────
+
+def _tem_cupom(norm: MensagemNormalizada) -> bool:
+    return bool(norm.cupom or _KW_CUPOM.search(norm.texto_limpo))
+
+def _eh_apenas_cupom(norm: MensagemNormalizada) -> bool:
+    """True quando a mensagem é de cupom puro (sem produto identificado pelo SKU)."""
+    return _tem_cupom(norm) and not norm.sku
+
+async def _resolver_imagem(norm: MensagemNormalizada) -> object:
+    """
+    Regras isoladas por plataforma:
+
+    1. Sempre tenta a mídia original do grupo monitorado primeiro.
+    2. Se não vier mídia:
+       - Produto com link → busca og:image do link afiliado.
+       - Cupom sem imagem:
+           Amazon  → _IMG_AMZ  (SOMENTE cupom Amazon sem mídia)
+           Shopee  → _IMG_SHP  (SOMENTE cupom Shopee sem mídia)
+           Magalu  → _IMG_MGL  (SOMENTE cupom Magalu sem mídia)
+    3. Produto sem imagem encontrada → None (envia só texto).
+    """
+    # Passo 1: mídia original
+    if norm.tem_midia:
+        img = await preparar_imagem_tg(norm.media_obj)
+        if img: return img
+
+    eh_cupom = _tem_cupom(norm)
+
+    # Passo 2a: produto com link → tenta buscar imagem real
+    if not eh_cupom and norm.mapa:
+        primeiro_link = next(iter(norm.mapa.values()), None)
+        if primeiro_link:
+            img_url = await buscar_imagem_produto(primeiro_link)
+            if img_url:
+                img = await preparar_imagem_url(img_url)
+                if img: return img
+
+    # Passo 2b: produto sem og:image mas com link (tenta mesmo para qualquer plat)
+    if norm.mapa and eh_cupom:
+        # Para cupons que também têm link de produto, tenta buscar imagem real primeiro
+        primeiro_link = next(iter(norm.mapa.values()), None)
+        if primeiro_link and not _eh_apenas_cupom(norm):
+            img_url = await buscar_imagem_produto(primeiro_link)
+            if img_url:
+                img = await preparar_imagem_url(img_url)
+                if img: return img
+
+    # Passo 3: imagem de fallback SOMENTE para cupom sem mídia, isolado por plataforma
+    if eh_cupom and not norm.tem_midia:
+        if norm.plat == "amazon" and os.path.exists(_IMG_AMZ):
+            return _IMG_AMZ
+        if norm.plat == "shopee" and os.path.exists(_IMG_SHP):
+            return _IMG_SHP
+        if norm.plat == "magalu" and os.path.exists(_IMG_MGL):
+            return _IMG_MGL
+
+    return None
 
 
 @dataclass
 class MensagemMontada:
-    msg_id:    int
-    chat:      str
-    plat:      str
-    sku:       str
-    texto:     str
-    imagem:    object       # BytesIO | str (path) | None
-    mapa:      Dict[str, str]
+    msg_id:        int
+    chat:          str
+    plat:          str
+    sku:           str
+    texto:         str
+    imagem:        object
+    mapa:          Dict[str, str]
     msg_id_origem: int
 
 
 async def montar(norm: MensagemNormalizada) -> MensagemMontada:
-    texto = montar_texto(norm)
-    img   = None
-
-    if norm.tem_midia:
-        img = await preparar_imagem_tg(norm.media_obj)
-
-    if img is None:
-        eh_cupom = bool(_KW_CUPOM.search(norm.texto_limpo))
-        if norm.mapa and not eh_cupom:
-            img_url = await buscar_imagem_produto(list(norm.mapa.values())[0])
-            if img_url:
-                img = await preparar_imagem_url(img_url)
-        if img is None and eh_cupom:
-            if norm.plat == "shopee" and os.path.exists(_IMG_SHP):
-                img = _IMG_SHP
-            elif _eh_cupom_exclusivo_amazon(norm) and os.path.exists(_IMG_AMZ):
-                img = _IMG_AMZ
-            elif norm.plat == "magalu" and os.path.exists(_IMG_MGL):
-                img = _IMG_MGL
-
+    texto  = montar_texto(norm)
+    imagem = await _resolver_imagem(norm)
     return MensagemMontada(
         msg_id=norm.msg_id, chat=norm.chat, plat=norm.plat,
-        sku=norm.sku, texto=texto, imagem=img,
+        sku=norm.sku, texto=texto, imagem=imagem,
         mapa=norm.mapa, msg_id_origem=norm.msg_id,
-    )
-
+)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMADA 6 — ENVIO (OUTPUT)
