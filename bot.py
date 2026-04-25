@@ -885,22 +885,21 @@ _CUTTLY_BACKOFF:  float = 65.0
 
 def _afiliar_url_magalu(url: str) -> str:
     """
-    Reconstrói URL Magalu com afiliação limpa.
-    Remove TODOS os parâmetros do grupo origem e injeta apenas os do promotor.
+    Troca SOMENTE os parâmetros de afiliação pelo do promotor.
+    Preserva path e host originais — não reconstrói nada.
     """
     p = urlparse(url)
-    # Normaliza host para magazineluiza.com.br
-    host = p.netloc
-    if "divulgador.magalu.com" in host or "magazinevoce.com.br" in host:
-        host = "www.magazineluiza.com.br"
-    # Extrai SKU do path
-    sku = _extrair_sku_magalu(p)
-    # Monta path limpo
-    if sku:
-        path = f"/{sku}/p/{sku}/"
-    else:
-        path = re.sub(r'^(/magazine)[^/]+', rf'\1{_MGL_SLUG}', p.path)
-    params = {
+    # Remove todos os parâmetros de afiliação do grupo origem
+    params_orig = {k: v[0] for k, v in parse_qs(p.query, keep_blank_values=True).items()}
+    for k in list(params_orig.keys()):
+        if k in {
+            "partnerid","promoterid","afforcedeeplink","deeplinkvalue",
+            "partner_id","promoter_id","utm_source","utm_medium","utm_campaign",
+            "pid","c","af_force_deeplink","deep_link_value","isretargeting",
+        }:
+            params_orig.pop(k)
+    # Injeta apenas os parâmetros do promotor
+    params_orig.update({
         "partner_id":        _MGL_PARTNER,
         "promoter_id":       _MGL_PROMOTER,
         "utm_source":        "divulgador",
@@ -909,8 +908,8 @@ def _afiliar_url_magalu(url: str) -> str:
         "pid":               _MGL_PID,
         "c":                 _MGL_PROMOTER,
         "af_force_deeplink": "true",
-    }
-    base = urlunparse(p._replace(netloc=host, path=path, query="", fragment=""))
+    })
+    return urlunparse(p._replace(query=urlencode(params_orig), fragment=""))
     params["deep_link_value"] = (
         f"{base}?utm_source=divulgador&utm_medium=magalu"
         f"&partner_id={_MGL_PARTNER}&promoter_id={_MGL_PROMOTER}"
@@ -964,14 +963,19 @@ async def _afiliar_magalu(url: str, sessao: aiohttp.ClientSession,
     cl = _classificar_cached(url)
     if cl.plat != "magalu" or cl.tipo == "invalido":
         log_nrm.debug(f"  MGL descartado: plat={cl.plat} tipo={cl.tipo}"); return None
+    # Só troca parâmetros, preserva path/host original
     afiliado = _afiliar_url_magalu(url)
+    # Tenta encurtar
     short = await _cuttly(afiliado, sessao)
     if short:
         db_set_link(url, short, "magalu")
         log_nrm.info(f"  ✅ MGL curto: {short}")
         return short
+    # Cuttly falhou → envia longo afiliado, edita depois quando encurtar
     log_nrm.warning("  ⚠️ Cuttly falhou → longo afiliado")
     db_set_link(url, afiliado, "magalu")
+    if msg_id:
+        asyncio.create_task(_cuttly_background(afiliado, msg_id))
     return afiliado
 
 # ── 3f. Pipeline de normalização ─────────────────────────────────────────────
