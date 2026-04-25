@@ -346,133 +346,248 @@ def ingerir(event) -> MensagemBruta:
     )
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CAMADA 2 — CLASSIFICAÇÃO
-# Responsabilidade: identificar plataforma e tipo de cada URL.
-# Retorna enums limpos — não converte, não filtra texto.
+# CAMADA 2 — CLASSIFICAÇÃO  v76.4
+#
+# CORREÇÕES aplicadas (em ordem de prioridade):
+#   1. _netloc()          → remove porta, auth, www, ponto final
+#   2. classificar_links()→ deduplica links repetidos antes de processar
+#   3. _P_SHP             → adiciona /item/(\d+)/(\d+) (formato Shopee alternativo)
+#   4. _P_MGL             → tolerante a 5+ chars, pega /p/abc12 e similares
+#   5. LinkClassificado   → plat e tipo como Optional[str]
+#   6. _extrair_asin      → parse único (não chama urlparse duas vezes)
+#   7. _extrair_sku_shopee→ parse único
+#   8. _extrair_sku_magalu→ parse único
+#   9. _classificar_cached→ normaliza key (strip + rstrip "/")
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_AMZ_DOMINIOS = frozenset({"amazon.com.br","amazon.com","amzn.to","amzn.com","a.co","amzlink.to","amzn.eu"})
-_SHP_DOMINIOS = frozenset({"shopee.com.br","s.shopee.com.br","shopee.com","shope.ee","flapremios.com.br"})
-_MGL_DOMINIOS = frozenset({"magazineluiza.com.br","sacola.magazineluiza.com.br","magazinevoce.com.br","maga.lu"})
-_ENCURTADORES = frozenset({"bit.ly","cutt.ly","tinyurl.com","t.co","ow.ly","goo.gl","rb.gy","is.gd","tiny.cc","buff.ly","short.io","bl.ink","rebrand.ly","shorturl.at"})
-_PRESERVE     = frozenset({"wa.me","api.whatsapp.com"})
-_DELETAR      = frozenset({"t.me","telegram.me","telegram.org","chat.whatsapp.com"})
-_BLOQUEADOS   = frozenset({"mercadolivre.com.br","mercadopago.com.br","mercadolivre.com","meli.com","ml.com.br"})
+_MUNDIAIS = frozenset({
+    "store.epicgames.com", "epicgames.com",
+    "store.steampowered.com", "steampowered.com",
+    "gaming.amazon.com",
+    "twitch.tv", "gog.com", "humblebundle.com", "itch.io",
+})
+_BLOQUEADOS = frozenset({
+    "mercadolivre.com.br", "mercadopago.com.br", "mercadolivre.com",
+    "meli.com", "ml.com.br",
+    "pelando.com.br", "promobit.com.br", "cuponomia.com.br",
+    "zoom.com.br", "buscape.com.br", "bondfaro.com.br",
+    "ofertasbrasil.com.br",
+})
+_AMZ_DOMINIOS = frozenset({
+    "amazon.com.br", "amazon.com",
+    "amzn.to", "amzn.com", "a.co", "amzlink.to", "amzn.eu",
+})
+_SHP_DOMINIOS = frozenset({
+    "shopee.com.br", "s.shopee.com.br", "shopee.com", "shope.ee",
+    "flapremios.com.br",
+})
+_MGL_DOMINIOS = frozenset({
+    "magazineluiza.com.br", "sacola.magazineluiza.com.br",
+    "magazinevoce.com.br", "maga.lu",
+    "divulgador.magalu.com",
+})
+_ENCURTADORES = frozenset({
+    "bit.ly", "cutt.ly", "tinyurl.com", "t.co", "ow.ly", "goo.gl",
+    "rb.gy", "is.gd", "tiny.cc", "buff.ly", "short.io", "bl.ink",
+    "rebrand.ly", "shorturl.at",
+})
+_PRESERVE = frozenset({"wa.me", "api.whatsapp.com"})
+_DELETAR  = frozenset({"t.me", "telegram.me", "telegram.org", "chat.whatsapp.com"})
 
-_P_SHP = [re.compile(r'/product/(\d+)/(\d+)'), re.compile(r'/i\.(\d+)\.(\d+)')]
-_P_MGL = re.compile(r'/(?:[^/]+/)?p/([a-z0-9]{6,})/?', re.I)
-_P_AMZ_ASIN = [
-    re.compile(r'/dp/([A-Z0-9]{10})', re.I),
-    re.compile(r'/gp/product/([A-Z0-9]{10})', re.I),
-    re.compile(r'[?&]asin=([A-Z0-9]{10})', re.I),
+# CORREÇÃO 2: match exato com /|$ — evita que /primevideo case com "prime"
+_AMZ_PATHS_SEM_TAG = re.compile(
+    r'^/(?:'
+    r'gaming(?:/|$)|'
+    r'claims(?:/|$)|'
+    r'gp/yourstore(?:/|$)|'
+    r'gp/css(?:/|$)|'
+    r'gp/help(?:/|$)|'
+    r'gp/cart(?:/|$)|'
+    r'wishlist(?:/|$)|'
+    r'hz/|'
+    r'ap/|'
+    r'gp/registry(?:/|$)'
+    r')',
+    re.I
+)
+
+# CORREÇÃO 4: adiciona /item/(\d+)/(\d+) — formato alternativo Shopee
+_P_SHP = [
+    re.compile(r'/product/(\d+)/(\d+)'),
+    re.compile(r'/item/(\d+)/(\d+)'),       # ← novo
+    re.compile(r'/i\.(\d+)\.(\d+)'),
 ]
 
+# CORREÇÃO 5: tolerante a 5+ chars, pega /p/abc12 e /produto/x/p/abc123
+_P_MGL = re.compile(r'/p/([a-z0-9]{5,})(?:/|$|[?#])', re.I)
+
+_P_AMZ_ASIN = [
+    re.compile(r'/dp/([A-Z0-9]{10})',          re.I),
+    re.compile(r'/gp/product/([A-Z0-9]{10})',  re.I),
+    re.compile(r'[?&]asin=([A-Z0-9]{10})',     re.I),
+]
+
+
+# CORREÇÃO 6: plat e tipo como Optional[str]
 @dataclass
 class LinkClassificado:
     url_original: str
-    plat: str        # amazon | shopee | magalu | expandir | preservar | None
-    tipo: str        # produto | busca | evento | campanha | encurtado | invalido
-    sku:  str        # ASIN, shopee ID, magalu slug, etc.
+    plat: Optional[str]   # amazon|shopee|magalu|mundial|expandir|preservar|None
+    tipo: Optional[str]   # produto|busca|evento|campanha|claims|encurtado|invalido|bloqueado|mundial
+    sku:  str             # ASIN, shopee ID, magalu slug
 
 
-def _netloc_parse(p) -> str:
+def _netloc(url: str) -> str:
+    """
+    Extrai netloc limpo da URL.
+    CORREÇÃO 1: remove porta (:443), credenciais (user@), www., ponto final.
+    Exemplos:
+      https://www.amazon.com.br:443/dp/X  →  amazon.com.br
+      https://user:pw@shopee.com.br/      →  shopee.com.br
+      https://amazon.com.br./dp/X         →  amazon.com.br
+    """
     try:
-        return p.netloc.lower().replace("www.", "")
+        nl = urlparse(url).netloc.lower()
+        nl = nl.split("@")[-1]   # remove credenciais
+        nl = nl.split(":")[0]    # remove porta
+        if nl.startswith("www."):
+            nl = nl[4:]
+        return nl.strip(".")     # remove ponto final
     except Exception:
         return ""
 
 
-def _extrair_asin(p) -> str:
-    path = p.path + "?" + p.query
+# CORREÇÃO 7: parse único em _extrair_asin
+def _extrair_asin(url: str) -> str:
+    p    = urlparse(url)
+    text = p.path + "?" + p.query
     for pat in _P_AMZ_ASIN:
-        m = pat.search(path)
-        if m:
-            return m.group(1).upper()
+        m = pat.search(text)
+        if m: return m.group(1).upper()
     return ""
 
-
-def _extrair_sku_shopee(p) -> str:
-    path = p.path + "?" + p.query
+# CORREÇÃO 8: parse único em _extrair_sku_shopee
+def _extrair_sku_shopee(url: str) -> str:
+    p    = urlparse(url)
+    text = p.path + "?" + p.query
     for pat in _P_SHP:
-        m = pat.search(path)
-        if m:
-            return f"{m.group(1)}.{m.group(2)}"
+        m = pat.search(text)
+        if m: return f"{m.group(1)}.{m.group(2)}"
     return ""
 
-
-def _extrair_sku_magalu(p) -> str:
-    m = _P_MGL.search(p.path)
+# CORREÇÃO 9: parse único em _extrair_sku_magalu
+def _extrair_sku_magalu(url: str) -> str:
+    m = _P_MGL.search(urlparse(url).path)
     return m.group(1) if m else ""
 
 
 def classificar_url(url: str) -> LinkClassificado:
-    try:
-        p = urlparse(url)
-    except Exception:
+    # Validação mínima antes de qualquer parse
+    if "://" not in url:
         return LinkClassificado(url, None, "invalido", "")
 
-    nl = _netloc_parse(p)
+    nl = _netloc(url)
     if not nl:
         return LinkClassificado(url, None, "invalido", "")
 
+    # Parse único — reaproveitado em todo o bloco Amazon/Magalu
+    p = urlparse(url)
+
+    # Mundiais — passa sem conversão, sem tag
+    for d in _MUNDIAIS:
+        if nl == d or nl.endswith("." + d):
+            log_cls.debug(f"🌍 Mundial: {nl}")
+            return LinkClassificado(url, "mundial", "mundial", "")
+
+    # Bloqueados — descarta
     for d in _BLOQUEADOS:
         if nl == d or nl.endswith("." + d):
             log_cls.debug(f"🚫 Bloqueado: {nl}")
             return LinkClassificado(url, None, "bloqueado", "")
 
+    # Grupos externos Telegram/WhatsApp
     for d in _DELETAR:
         if nl == d or nl.endswith("." + d):
             return LinkClassificado(url, None, "grupo_externo", "")
 
+    # Preservar (wa.me)
     for d in _PRESERVE:
         if nl == d or nl.endswith("." + d):
             return LinkClassificado(url, "preservar", "preservar", "")
 
+    # Magalu (inclui divulgador.magalu.com)
     for d in _MGL_DOMINIOS:
         if nl == d or nl.endswith("." + d):
-            sku = _extrair_sku_magalu(p)
+            sku = _extrair_sku_magalu(url)
             if "sacola" in nl and not p.path.strip("/"):
                 return LinkClassificado(url, "magalu", "invalido", sku)
-            tipo = (
-                "produto" if sku
-                else "lista" if "/l/" in p.path
-                else "selecao" if "/selecao/" in p.path
-                else "campanha"
-            )
+            tipo = ("produto"  if sku
+                    else "lista"   if "/l/"       in p.path
+                    else "selecao" if "/selecao/" in p.path
+                    else "campanha")
+            log_cls.debug(f"🔵 Magalu tipo={tipo} sku={sku or '—'}")
             return LinkClassificado(url, "magalu", tipo, sku)
 
+    # Amazon
     for d in _AMZ_DOMINIOS:
         if nl == d or nl.endswith("." + d):
-            asin = _extrair_asin(p)
-            tipo = (
-                "produto" if asin
-                else "busca" if re.search(r'/s[/?]|/deals|/b[/?]', p.path)
-                else "evento" if re.search(r'/events/|/stores/', p.path)
-                else "campanha"
-            )
+            asin = _extrair_asin(url)
+            # CORREÇÃO 2 já aplicada em _AMZ_PATHS_SEM_TAG acima
+            if _AMZ_PATHS_SEM_TAG.match(p.path):
+                log_cls.debug(f"🟠 Amazon claims/prime (sem tag): {p.path[:40]}")
+                return LinkClassificado(url, "amazon", "claims", "")
+            tipo = ("produto"  if asin
+                    else "busca"   if re.search(r'/s[/?]|/deals|/b[/?]', p.path)
+                    else "evento"  if re.search(r'/events/|/stores/',     p.path)
+                    else "campanha")
+            log_cls.debug(f"🟠 Amazon tipo={tipo} asin={asin or '—'}")
             return LinkClassificado(url, "amazon", tipo, asin)
 
+    # Shopee (inclui flapremios.com.br)
     for d in _SHP_DOMINIOS:
         if nl == d or nl.endswith("." + d):
             if nl == "flapremios.com.br":
+                log_cls.debug("🟣 Shopee campanha flapremios")
                 return LinkClassificado(url, "shopee", "campanha", "")
-            sku = _extrair_sku_shopee(p)
+            sku = _extrair_sku_shopee(url)
+            log_cls.debug(f"🟣 Shopee sku={sku or '—'}")
             return LinkClassificado(url, "shopee", "produto" if sku else "busca", sku)
 
+    # Encurtadores genéricos
     for d in _ENCURTADORES:
         if nl == d or nl.endswith("." + d):
             return LinkClassificado(url, "expandir", "encurtado", "")
 
     return LinkClassificado(url, None, "desconhecido", "")
 
-@lru_cache(maxsize=1024)
+
+# Cache in-process — limpo em normalizar() a cada mensagem nova.
+_cls_cache: Dict[str, LinkClassificado] = {}
+
 def _classificar_cached(url: str) -> LinkClassificado:
-    return classificar_url(url)
+    # CORREÇÃO 10: normaliza key antes de entrar no cache
+    key = url.strip().rstrip("/")
+    if len(_cls_cache) > 5000:
+        _cls_cache.clear()
+    lc = _cls_cache.get(key)
+    if lc is None:
+        lc = classificar_url(url)
+        _cls_cache[key] = lc
+    return lc
+
 
 def classificar_links(links: List[str]) -> List[LinkClassificado]:
-    result = [classificar_url(u) for u in links]
-    validos = [r for r in result if r.plat not in (None,)]
-    log_cls.debug(f"🔍 {len(validos)}/{len(links)} classificados")
+    # CORREÇÃO 3: deduplica links repetidos antes de processar
+    vistos: set = set()
+    result: List[LinkClassificado] = []
+    for u in links:
+        key = u.strip().rstrip("/")
+        if key in vistos:
+            continue
+        vistos.add(key)
+        result.append(_classificar_cached(u))
+    validos = [r for r in result if r.plat is not None]
+    log_cls.debug(f"🔍 {len(validos)}/{len(links)} classificados ({len(links)-len(result)} dupl.)")
     return result
 
 # ═══════════════════════════════════════════════════════════════════════════════
