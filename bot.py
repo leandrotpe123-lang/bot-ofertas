@@ -569,10 +569,10 @@ def classificar_links(links:List[str])->List[LinkClassificado]:
 _FILTRO_TEXTO = [
     "Monitor Samsung","Fonte Mancer","Placa de video","Monitor LG",
     "PC home Essential","Suporte articulado","VHAGAR","Superframe",
-    "AM5","AM4","GTX","DDR5","DDR4","Dram","Monitor Safe",
+    "AM5","AM4","GTX","Placa de Vídeo","DDR5","DDR4","Dram","Monitor Safe",
     "Monitor Redragon","CL18","CL16","CL32","MT/s","MHz",
     "RX 580","Ryzen","Placa Mãe","Gabinete Gamer",
-    "Water Cooler","Air Cooler",
+    "Water Cooler","Monitor Dell","Monitor Gamer","Air Cooler",
 ]
 _RE_MERCADO_LIVRE = re.compile(r'\b(?:mercado\s*livre|mercadolivre|mercado\s*pago)\b', re.I)
 _RE_MULTI_OFERTA  = re.compile(
