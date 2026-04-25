@@ -827,15 +827,7 @@ _AMZ_LIXO   = frozenset({
 })
 _AMZ_MANTER = frozenset({"keywords","node","k","i","rh","n","field-keywords"})
 
-_cls_cache = {}
-
-def _netloc(url: str) -> str:
-    """Extrai o domínio de uma URL."""
-    try:
-        from urllib.parse import urlparse
-        return urlparse(url).netloc.lower()
-    except Exception:
-        return ""
+_cls_cache: OrderedDict[str, LinkClassificado] = OrderedDict()
 
 def _parece_magalu_encurtado(url: str) -> bool:
     """Verifica se a URL parece ser um link curto da Magalu."""
