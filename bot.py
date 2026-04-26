@@ -1908,7 +1908,7 @@ async def _worker_loop():
                 await _pipeline(event, is_edit)
             except Exception as e: log_sys.error(f"❌ Worker: {e}", exc_info=True)
             finally:
-                async with _w_lck: _w_ativos -= 
+                async with _w_lck: _w_ativos -= 1
 
 async def delay_saturacao(plat: str, texto: str) -> float:
     if _KW_EVENTO.search(texto): return 0.0
