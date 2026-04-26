@@ -698,7 +698,7 @@ def tem_contexto(texto: str) -> bool:
         if re.search(ind, total, re.I): return True
     return len(total) > 20
 
-# ── 3d. Sanitização (passo 2) ────────────────────────────────────────────────
+# ── 3d. Sanitização ──────────────────────────────────────────────────────────
 
 def _sanitizar_url(url: str) -> str:
     return url.strip().rstrip('.,;)>!?\n\r ')
@@ -713,17 +713,11 @@ _cache_lock  = Lock()
 _CACHE_LIMIT = 5000
 
 def _cache_key(url: str) -> str:
-    """
-    Normaliza URL para chave de cache.
-    Remove parâmetros de tracking — tag é EXCLUSIVO da Amazon e não entra aqui.
-    Shopee e Magalu têm seus próprios parâmetros tratados nos motores.
-    """
     try:
         p = urlparse(url.strip())
         host = (p.hostname or "").lower().strip(".")
         path = p.path.rstrip("/")
         params = parse_qs(p.query)
-        # Remove apenas tracking genérico — NÃO remove tag aqui
         remover_genericos = {
             "ascsubtag","smid","utm_source","utm_medium","utm_campaign",
             "utm_term","utm_content","aff_id","affiliate_id",
@@ -791,32 +785,56 @@ def _db_count_links() -> int:
     except Exception:
         return 0
 
-# ── 3f. Desencurtador ────────────────────────────────────────────────────────
+# ── 3f. Desencurtador reforçado ──────────────────────────────────────────────
 
+# cutt.ly SEMPRE via GET — nunca HEAD
 _FORCA_GET = frozenset({
-    "amzlink.to","amzn.to","a.co","amzn.com","bit.ly",
-    "tinyurl.com","rb.gy","is.gd","cutt.ly","ow.ly","buff.ly",
+    "amzlink.to","amzn.to","a.co","amzn.com","bit.ly","cutt.ly",
+    "tinyurl.com","rb.gy","is.gd","ow.ly","buff.ly","maga.lu",
 })
 
+# Domínios Magalu conhecidos — usados para validar após desencurtar
+_MGL_DOMINIOS_SET = frozenset({
+    "magazineluiza.com.br","sacola.magazineluiza.com.br",
+    "magazinevoce.com.br","maga.lu","divulgador.magalu.com",
+    "m.magazineluiza.com.br",
+})
+
+def _eh_magalu_url(url: str) -> bool:
+    nl = _netloc(url)
+    return any(nl == d or nl.endswith("." + d) for d in _MGL_DOMINIOS_SET)
+
 async def desencurtar(url: str, sessao: aiohttp.ClientSession, depth: int = 0) -> str:
+    """
+    Desencurtador reforçado.
+    cutt.ly: sempre GET com follow_redirects, extrai Location header se precisar.
+    Magalu encurtado: segue até destrinchar o domínio final.
+    Anti-loop: para se depth > 15 ou se voltou para cutt.ly após redirect.
+    """
     if depth > 15: return url
     url = _sanitizar_url(url)
     if not url.startswith(("http://", "https://")): return url
     nl = _netloc(url)
+    # Anti-loop: cutt.ly só é processado na primeira chamada
     if depth > 0 and nl == "cutt.ly": return url
     cached = _get_raw(url)
     if cached: return cached
+
     hdrs = {
         "User-Agent":      random.choice(USER_AGENTS),
-        "Accept":          "text/html,*/*;q=0.9",
-        "Accept-Language": "pt-BR,pt;q=0.9",
+        "Accept":          "text/html,application/xhtml+xml,*/*;q=0.9",
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
     }
+
     try:
-        usar_head = nl not in _FORCA_GET and not any(nl.endswith("." + d) for d in _FORCA_GET)
+        # cutt.ly e _FORCA_GET: sempre GET direto
+        usar_head = nl not in _FORCA_GET and not any(
+            nl.endswith("." + d) for d in _FORCA_GET)
+
         if usar_head:
             try:
                 async with sessao.head(url, headers=hdrs, allow_redirects=True,
-                                       timeout=aiohttp.ClientTimeout(total=8),
+                                       timeout=aiohttp.ClientTimeout(total=10),
                                        max_redirects=20) as r:
                     final = str(r.url)
                     if final != url:
@@ -824,17 +842,24 @@ async def desencurtar(url: str, sessao: aiohttp.ClientSession, depth: int = 0) -
                         return await desencurtar(final, sessao, depth + 1)
             except Exception:
                 pass
+
+        # GET completo
         async with sessao.get(url, headers=hdrs, allow_redirects=True,
-                              timeout=aiohttp.ClientTimeout(total=15),
+                              timeout=aiohttp.ClientTimeout(total=20),
                               max_redirects=20) as r:
             pos  = str(r.url)
-            html = await r.text(errors="ignore")
+            # Redirect resolvido pelo aiohttp
             if pos != url:
                 _set_raw(url, pos)
                 return await desencurtar(pos, sessao, depth + 1)
+
+            html = await r.text(errors="ignore")
             if len(html) > 500_000:
                 _set_raw(url, pos); return pos
+
             soup = BeautifulSoup(html, "html.parser")
+
+            # meta refresh
             ref = soup.find("meta", attrs={"http-equiv": re.compile("refresh", re.I)})
             if ref and ref.get("content"):
                 m = re.search(r"url[=\s]*([^\s;\"']+)", ref["content"], re.I)
@@ -842,26 +867,35 @@ async def desencurtar(url: str, sessao: aiohttp.ClientSession, depth: int = 0) -
                     novo = m.group(1).strip().strip("'\"")
                     if novo.startswith("http"):
                         return await desencurtar(novo, sessao, depth + 1)
+
+            # JS redirect
             for pat in [
                 r'window\.location(?:\.href)?\s*=\s*["\']([^"\']{15,})["\']',
                 r'location\.replace\s*\(\s*["\']([^"\']{15,})["\']\s*\)',
+                r'location\.href\s*=\s*["\']([^"\']{15,})["\']',
             ]:
                 mj = re.search(pat, html)
                 if mj and mj.group(1).startswith("http"):
                     return await desencurtar(mj.group(1), sessao, depth + 1)
+
+            # og:url
             og = soup.find("meta", attrs={"property": "og:url"})
             if og and og.get("content","").startswith("http") and og["content"] != url:
                 return await desencurtar(og["content"], sessao, depth + 1)
+
+            # canonical
             canon = soup.find("link", rel="canonical")
             if canon and canon.get("href","").startswith("http") and canon["href"] != url:
                 return await desencurtar(canon["href"], sessao, depth + 1)
+
             _set_raw(url, pos); return pos
+
     except asyncio.TimeoutError:
         log_nrm.warning(f"⏱ Timeout desencurtar d={depth}: {url[:60]}"); return url
     except Exception as e:
         log_nrm.error(f"❌ desencurtar d={depth}: {e}"); return url
 
-# ── 3g. Limpeza leve de parâmetros (passo 8) ─────────────────────────────────
+# ── 3g. Limpeza de parâmetros ────────────────────────────────────────────────
 
 _AMZ_MANTER = frozenset({"keywords","node","k","i","rh","n","field-keywords"})
 
@@ -890,7 +924,7 @@ def _limpar_params_magalu(params: dict) -> dict:
 # ── 3h. Motores de afiliação ─────────────────────────────────────────────────
 
 def _limpar_url_amazon(url: str) -> Optional[str]:
-    """Limpa e aplica tag Amazon. tag é EXCLUSIVO da Amazon."""
+    """Limpa e aplica tag. tag é EXCLUSIVO da Amazon."""
     try:
         p    = urlparse(url)
         asin = _extrair_asin(p)
@@ -1114,31 +1148,51 @@ async def _cuttly_background(url_longo: str, msg_id_origem: int):
 
 async def _afiliar_magalu(url: str, sessao: aiohttp.ClientSession,
                            msg_id: int = 0) -> Optional[str]:
+    """
+    Magalu reforçado:
+    cutt.ly com ou sem 'magalu' no nome → desencurta sempre via GET.
+    Após desencurtar → valida domínio Magalu → aplica afiliação.
+    """
     url = _sanitizar_url(url)
     log_nrm.debug(f"▶ MGL: {url[:80]}")
     cached = _get_final(url)
     if cached: return cached
     cached = db_get_link(url)
     if cached: return cached
+
     nl = _netloc(url)
-    if nl == "cutt.ly" or "maga.lu" in nl or nl in _ENCURTADORES:
+
+    # Desencurta cutt.ly, maga.lu e qualquer encurtador
+    if nl == "cutt.ly" or nl == "maga.lu" or nl in _ENCURTADORES:
+        log_nrm.debug(f"  MGL desencurtando: {url[:60]}")
         try:
             async with _SEM_HTTP:
-                url = await desencurtar(url, sessao)
+                url_exp = await desencurtar(url, sessao)
+            log_nrm.debug(f"  MGL expandido: {url_exp[:80]}")
+            if not _eh_magalu_url(url_exp):
+                log_nrm.debug(f"  MGL pós-expand não é Magalu: {_netloc(url_exp)}")
+                return None
+            url = url_exp
         except Exception as e:
             log_nrm.error(f"  ❌ MGL desencurtar: {e}"); return None
+
     cl = _classificar_cached(url)
     if cl.plat != "magalu" or cl.tipo == "invalido":
         log_nrm.debug(f"  MGL descartado: plat={cl.plat} tipo={cl.tipo}"); return None
+
     afiliado = _afiliar_url_magalu(url)
-    if not afiliado or ("magalu" not in afiliado and "magazineluiza" not in afiliado):
+    if not afiliado or (
+        "magalu" not in afiliado and "magazineluiza" not in afiliado
+    ):
         log_nrm.warning("  ⚠️ MGL validação falhou"); return None
+
     short = await _cuttly(afiliado, sessao)
     if short:
         _set_final(url, short)
         db_set_link(url, short, "magalu")
         log_nrm.info(f"  ✅ MGL curto: {short}")
         return short
+
     log_nrm.warning("  ⚠️ Cuttly falhou → longo afiliado")
     _set_final(url, afiliado)
     db_set_link(url, afiliado, "magalu")
@@ -1207,14 +1261,11 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
     if texto_bloqueado(bruta.texto): return None
     texto_limpo = limpar_texto(bruta.texto)
     if not tem_contexto(texto_limpo): return None
-
     classificados = classificar_links(bruta.links)
     converter     = [lc for lc in classificados if lc.plat not in ("preservar", None)]
     preservar_lst = [lc.url_original for lc in classificados if lc.plat == "preservar"]
-
     if not converter and not preservar_lst:
         if "fadadoscupons" not in bruta.chat: return None
-
     conn = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300, ssl=False)
     async with aiohttp.ClientSession(
         connector=conn,
@@ -1225,7 +1276,6 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
             *[_normalizar_um(lc, sessao, bruta.msg_id) for lc in converter[:50]],
             return_exceptions=True,
         )
-
     mapa:  Dict[str, str] = {}
     plats: List[str]      = []
     for res in resultados:
@@ -1236,11 +1286,9 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
             mapa[orig] = conv
             if plat not in ("mundial", "preservar"):
                 plats.append(plat)
-
     if converter and not mapa and not preservar_lst:
         log_nrm.warning(f"🚫 Zero links convertidos | @{bruta.chat}")
         return None
-
     plat_dom = max(set(plats), key=plats.count) if plats else "amazon"
     cupom    = extrair_cupom(texto_limpo)
     sku      = (
@@ -1248,7 +1296,6 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
         or _extrair_asin_texto(texto_limpo, mapa)
         or _extrair_id_magalu(texto_limpo, mapa)
     )
-
     log_nrm.info(
         f"✅ {len(mapa)}/{len(converter)} | plat={plat_dom} cupom='{cupom}' sku={sku}"
     )
@@ -1259,7 +1306,8 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
         preservar=preservar_lst, plat=plat_dom,
         cupom=cupom, sku=sku,
         tem_midia=bruta.tem_midia, media_obj=bruta.media_obj,
-            )
+                )
+         
             
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMADA 4 — DEDUPLICAÇÃO  (nível sênior)
@@ -1860,8 +1908,14 @@ async def _worker_loop():
                 await _pipeline(event, is_edit)
             except Exception as e: log_sys.error(f"❌ Worker: {e}", exc_info=True)
             finally:
-                async with _w_lck: _w_ativos -= 1
+                async with _w_lck: _w_ativos -= 
 
+async def delay_saturacao(plat: str, texto: str) -> float:
+    if _KW_EVENTO.search(texto): return 0.0
+    delay = 0.0
+    if db_count_sat(plat) >= _SAT_MAX_PLAT: delay += 6.0
+    if await _burst_count() >= _SAT_BURST_LIM: delay += 4.0
+    return delay
 
 async def _pipeline(event, is_edit: bool = False):
     """Orquestra as 6 camadas em sequência."""
