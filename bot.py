@@ -139,6 +139,12 @@ def _init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             plat TEXT NOT NULL, hora INTEGER NOT NULL,
             score REAL DEFAULT 1.0, ts REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS short_links(
+            code TEXT PRIMARY KEY,
+            url  TEXT NOT NULL,
+            ts   REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_sl_code ON short_links(code);
         CREATE INDEX IF NOT EXISTS idx_lc_plat ON links_cache(plat);
         CREATE INDEX IF NOT EXISTS idx_dt_plat ON dedupe_temp(plat,ts);
         CREATE INDEX IF NOT EXISTS idx_dt_asin ON dedupe_temp(asin);
@@ -1120,21 +1126,79 @@ async def _afiliar_shopee(
     db_set_link(url, link, "shopee")
     return link
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ENCURTADOR PRÓPRIO — exclusivo Magalu
+# Formato: https://leoind.com.br/XXXXXXX-magalu
+# REGRA: só encurta DEPOIS de aplicar afiliação — nunca antes
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ── Magalu: desencurtar → validar → afiliar ──────────────────────────────────
+_SHORT_BASE = f"https://{os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'leoind.com.br')}"
+
+def _gerar_code_magalu(url_afiliada: str) -> str:
+    """Código estável baseado na URL já afiliada."""
+    return hashlib.sha256(url_afiliada.encode()).hexdigest()[:7]
+
+async def _encurtador_proprio_magalu(url_afiliada: str) -> Optional[str]:
+    """
+    Encurtador próprio exclusivo para Magalu.
+    Só aceita URL que já tenha os parâmetros de afiliado corretos.
+    Salva no SQLite e retorna link curto.
+    NUNCA é chamado antes de _afiliar_url_magalu().
+    """
+    # Validação: garante que é URL afiliada com IDs corretos
+    if _MGL_PARTNER not in url_afiliada:
+        log_nrm.warning("  ⚠️ Encurtador próprio: partner_id ausente — recusado")
+        return None
+    if _MGL_PROMOTER not in url_afiliada:
+        log_nrm.warning("  ⚠️ Encurtador próprio: promoter_id ausente — recusado")
+        return None
+    if "magalu" not in url_afiliada and "magazineluiza" not in url_afiliada:
+        log_nrm.warning("  ⚠️ Encurtador próprio: não é URL Magalu — recusado")
+        return None
+
+    code = _gerar_code_magalu(url_afiliada)
+    short = f"{_SHORT_BASE}/{code}-magalu"
+
+    try:
+        with _db() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO short_links(code, url, ts) VALUES(?,?,?)",
+                (code, url_afiliada, time.time())
+            )
+        log_nrm.info(f"  ✅ Encurtador próprio: {short}")
+        return short
+    except Exception as e:
+        log_nrm.error(f"  ❌ Encurtador próprio: {e}")
+        return None
+
+async def _resolver_short_magalu(code: str) -> Optional[str]:
+    """Resolve code → URL afiliada original. Usado pelo servidor de redirect."""
+    try:
+        with _db() as db:
+            row = db.execute(
+                "SELECT url FROM short_links WHERE code=?", (code,)
+            ).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MAGALU — fluxo completo em ordem obrigatória
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _afiliar_url_magalu(url: str) -> str:
     """
-    Remove parâmetros de afiliado do grupo e injeta os do promotor.
-    NÃO altera path nem estrutura do link. Sem tag (exclusiva da Amazon).
+    Troca parâmetros de afiliado do grupo pelos do promotor.
+    NÃO altera path nem estrutura do link.
+    Sem tag — tag é exclusivo da Amazon.
     """
     p = urlparse(url)
-    params_orig = {
+    params = {
         k: v[0]
         for k, v in parse_qs(p.query, keep_blank_values=True).items()
     }
-    params_orig = _limpar_params_magalu(params_orig)
-    params_orig.update({
+    params = _limpar_params_magalu(params)
+    params.update({
         "partner_id":        _MGL_PARTNER,
         "promoter_id":       _MGL_PROMOTER,
         "utm_source":        "divulgador",
@@ -1144,41 +1208,47 @@ def _afiliar_url_magalu(url: str) -> str:
         "c":                 _MGL_PROMOTER,
         "af_force_deeplink": "true",
     })
-    return urlunparse(p._replace(query=urlencode(params_orig), fragment=""))
+    return urlunparse(p._replace(query=urlencode(params), fragment=""))
 
 async def _afiliar_magalu(
     url: str, sessao: aiohttp.ClientSession, msg_id: int = 0
 ) -> Optional[str]:
     """
-    Fluxo Magalu:
+    Fluxo Magalu em ordem obrigatória:
     1. Cache
-    2. Desencurtar se necessário (cutt.ly, maga.lu, encurtadores)
+    2. Desencurtar (cutt.ly / maga.lu / encurtadores)
     3. Validar que é Magalu após expansão
-    4. Aplicar afiliação (não altera path)
-    5. Tentar encurtar via Cuttly
-    6. Fallback: envia longo afiliado + agenda background
+    4. Aplicar afiliação ← OBRIGATÓRIO antes de qualquer encurtamento
+    5. Encurtador próprio (leoind.com.br/XXXX-magalu)
+    6. Fallback: Cuttly
+    7. Fallback final: longo afiliado + background
     """
     url = _sanitizar_url(url)
-    log_nrm.debug(f"▶ MGL: {url[:80]}")
+    log_nrm.debug(f"▶ MGL entrada: {url[:80]}")
 
+    # 1. Cache
     cached = _get_final(url)
-    if cached: return cached
+    if cached:
+        log_nrm.debug(f"  MGL cache hit: {cached[:60]}")
+        return cached
     cached = db_get_link(url)
-    if cached: return cached
+    if cached:
+        log_nrm.debug(f"  MGL db hit: {cached[:60]}")
+        return cached
 
     nl = _netloc(url)
 
-    # Passo 2: desencurtar se necessário
+    # 2. Desencurtar se necessário
     if nl == "cutt.ly" or nl == "maga.lu" or nl in _ENCURTADORES:
         log_nrm.debug(f"  MGL desencurtando: {url[:60]}")
         try:
             async with _SEM_HTTP:
                 url_exp = await desencurtar(url, sessao)
             log_nrm.debug(f"  MGL expandido: {url_exp[:80]}")
-            # Passo 3: validar que é Magalu após expansão
+            # 3. Valida que é Magalu após expansão
             if not _eh_magalu_url(url_exp):
-                log_nrm.debug(
-                    f"  MGL pós-expand não é Magalu: {_netloc(url_exp)}"
+                log_nrm.warning(
+                    f"  MGL pós-expand não é Magalu: {_netloc(url_exp)} — descarta"
                 )
                 return None
             url = url_exp
@@ -1186,36 +1256,44 @@ async def _afiliar_magalu(
             log_nrm.error(f"  ❌ MGL desencurtar: {e}")
             return None
 
+    # 3. Valida plataforma
     cl = _classificar_cached(url)
     if cl.plat != "magalu" or cl.tipo == "invalido":
-        log_nrm.debug(
-            f"  MGL descartado: plat={cl.plat} tipo={cl.tipo}"
-        )
+        log_nrm.warning(f"  MGL descartado: plat={cl.plat} tipo={cl.tipo}")
         return None
 
-    # Passo 4: aplica afiliação sem alterar path
+    # 4. Aplica afiliação — NUNCA encurta antes daqui
     afiliado = _afiliar_url_magalu(url)
     if not afiliado or (
         "magalu" not in afiliado and "magazineluiza" not in afiliado
     ):
-        log_nrm.warning("  ⚠️ MGL validação falhou")
+        log_nrm.warning("  ⚠️ MGL afiliação inválida")
         return None
+    log_nrm.debug(f"  MGL afiliado: {afiliado[:80]}")
 
-    # Passo 5: tenta encurtar
+    # 5. Encurtador próprio (leoind.com.br)
+    short = await _encurtador_proprio_magalu(afiliado)
+    if short:
+        _set_final(url, short)
+        db_set_link(url, short, "magalu")
+        log_nrm.info(f"  ✅ MGL próprio: {short}")
+        return short
+
+    # 6. Fallback: Cuttly
     short = await _cuttly(afiliado, sessao)
     if short:
         _set_final(url, short)
         db_set_link(url, short, "magalu")
-        log_nrm.info(f"  ✅ MGL curto: {short}")
+        log_nrm.info(f"  ✅ MGL Cuttly: {short}")
         return short
 
-    # Passo 6: fallback longo + agenda background
-    log_nrm.warning("  ⚠️ Cuttly falhou → longo afiliado")
+    # 7. Fallback final: longo afiliado + tenta encurtar depois
+    log_nrm.warning("  ⚠️ MGL encurtadores falharam → longo afiliado")
     _set_final(url, afiliado)
     db_set_link(url, afiliado, "magalu")
     if msg_id:
         asyncio.create_task(_cuttly_background(afiliado, msg_id))
-    return afiliado
+    return afiliado                    
 
 # ── 3i. Pipeline principal ───────────────────────────────────────────────────
 
@@ -1588,34 +1666,51 @@ def montar_texto(norm: MensagemNormalizada) -> str:
         primeiro = False; saida.append(l)
     return "\n".join(saida).strip()
 
-
 async def buscar_imagem_produto(url: str) -> Optional[str]:
+    """
+    Busca og:image do produto via link afiliado.
+    Prioridade: og:image → twitter:image → ld+json → maior img tag.
+    Só para OFERTAS — nunca chamado para cupons.
+    """
     if not url or not url.startswith("http"): return None
-    hdrs = {"User-Agent": random.choice(USER_AGENTS), "Accept": "text/html,*/*;q=0.9"}
+    hdrs = {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept":     "text/html,*/*;q=0.9",
+    }
     for t in range(1, 4):
         try:
             async with aiohttp.ClientSession(headers=hdrs) as s:
-                async with s.get(url, allow_redirects=True,
-                                 timeout=aiohttp.ClientTimeout(total=15)) as r:
-                    ct = r.headers.get("content-type","")
-                    if "image" in ct: return str(r.url)
+                async with s.get(
+                    url, allow_redirects=True,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as r:
+                    ct = r.headers.get("content-type", "")
+                    if "image" in ct:
+                        return str(r.url)
                     html = await r.text(errors="ignore")
                     soup = BeautifulSoup(html, "html.parser")
+
+                    # og:image (mais confiável)
                     for attr in [
-                        {"property":"og:image"},
-                        {"property":"og:image:secure_url"},
-                        {"name":"twitter:image"},
+                        {"property": "og:image"},
+                        {"property": "og:image:secure_url"},
+                        {"name":     "twitter:image"},
                     ]:
                         tag = soup.find("meta", attrs=attr)
                         if not tag: continue
-                        img_url = tag.get("content","")
+                        img_url = tag.get("content", "")
                         if not img_url.startswith("http"): continue
+                        # Remove parâmetros de resize que reduzem qualidade
                         img_url = re.sub(
-                            r'[?&](?:width|height|w|h|size|resize|fit|quality|q|'
-                            r'maxwidth|maxheight|format|auto|compress|crop|scale)=[^&]+',
-                            '', img_url).rstrip('?&')
-                        log_fmt.info(f"🖼 og:image encontrada: {img_url[:60]}")
+                            r'[?&](?:width|height|w|h|size|resize|fit|'
+                            r'quality|q|maxwidth|maxheight|format|auto|'
+                            r'compress|crop|scale)=[^&]+',
+                            '', img_url
+                        ).rstrip('?&')
+                        log_fmt.info(f"🖼 og:image: {img_url[:60]}")
                         return img_url
+
+                    # ld+json
                     for scr in soup.find_all("script", type="application/ld+json"):
                         try:
                             data  = json.loads(scr.string or "")
@@ -1628,32 +1723,40 @@ async def buscar_imagem_produto(url: str) -> Optional[str]:
                                     c = img[0]
                                     if isinstance(c, str): return c
                                     if isinstance(c, dict):
-                                        u2 = c.get("url","")
+                                        u2 = c.get("url", "")
                                         if u2.startswith("http"): return u2
-                        except Exception: pass
-                    melhor_src = None; melhor_area = 0
+                        except Exception:
+                            pass
+
+                    # Maior img tag como último recurso
+                    melhor = None; melhor_area = 0
                     for img_tag in soup.find_all("img", src=True):
-                        src = img_tag.get("src","")
+                        src = img_tag.get("src", "")
                         if not src.startswith("http"): continue
                         if any(x in src.lower() for x in
-                               ["icon","logo","avatar","badge","spinner"]): continue
+                               ["icon","logo","avatar","badge","spinner"]):
+                            continue
                         try:
-                            w = int(img_tag.get("width",0))
-                            h = int(img_tag.get("height",0))
+                            w    = int(img_tag.get("width",  0))
+                            h    = int(img_tag.get("height", 0))
                             area = w * h
                             if area > melhor_area:
-                                melhor_area = area; melhor_src = src
+                                melhor_area = area; melhor = src
                         except (ValueError, TypeError):
                             if any(x in src.lower() for x in
-                                   ["product","produto","item","image","foto",
-                                    "zoom","large","xl","hd","original"]):
-                                if not melhor_src: melhor_src = src
-                    if melhor_src:
-                        log_fmt.info(f"🖼 img tag encontrada: {melhor_src[:60]}")
-                        return melhor_src
-        except asyncio.TimeoutError: log_fmt.warning(f"⏱ Timeout buscar_img t={t}")
-        except Exception as e:      log_fmt.warning(f"⚠️ buscar_img t={t}: {e}")
+                                   ["product","produto","item","image",
+                                    "foto","zoom","large","xl","hd","original"]):
+                                if not melhor: melhor = src
+                    if melhor:
+                        log_fmt.info(f"🖼 img tag: {melhor[:60]}")
+                        return melhor
+
+        except asyncio.TimeoutError:
+            log_fmt.warning(f"⏱ Timeout buscar_img t={t}")
+        except Exception as e:
+            log_fmt.warning(f"⚠️ buscar_img t={t}: {e}")
         if t < 3: await asyncio.sleep(1.0)
+
     log_fmt.warning(f"🖼 Nenhuma imagem encontrada: {url[:60]}")
     return None
 
@@ -1675,103 +1778,78 @@ async def preparar_imagem_url(url: str) -> Optional[object]:
         async with aiohttp.ClientSession(
             headers={"User-Agent": random.choice(USER_AGENTS)}
         ) as s:
-            async with s.get(url, timeout=aiohttp.ClientTimeout(total=20),
-                             allow_redirects=True) as r:
+            async with s.get(
+                url, timeout=aiohttp.ClientTimeout(total=20),
+                allow_redirects=True
+            ) as r:
                 if r.status == 200:
                     data = await r.read()
                     if len(data) < 1000: return None
-                    buf = io.BytesIO(data); buf.name = "produto.jpg"; return buf
+                    buf = io.BytesIO(data)
+                    buf.name = "produto.jpg"
+                    return buf
     except Exception as e:
         log_fmt.warning(f"⚠️ preparar_img_url: {e}")
     return None
 
+
 async def _resolver_imagem(norm: MensagemNormalizada) -> object:
     """
-    Regra isolada por tipo de conteúdo:
+    Lógica de imagem isolada por tipo de conteúdo.
 
-    CUPOM → usa imagem original do Telegram (se veio) ou fallback da plataforma.
-             NUNCA busca og:image. Cupom tem sua própria imagem.
-
-    OFERTA (produto com link) →
+    OFERTA (tem link de produto):
         1. Mídia original do grupo monitorado
-        2. Busca og:image do link afiliado
-        3. Fallback da plataforma se nenhuma encontrada
+        2. og:image do link afiliado
+        3. Fallback da plataforma
 
-    Imagens sempre vêm do produto, não do chat (exceto mídia original).
+    CUPOM (sem link de produto ou só cupom):
+        1. Mídia original se veio
+        2. Fallback fixo da plataforma
+        NÃO busca og:image — cupom tem imagem própria
+
+    Nenhuma lógica de imagem é compartilhada entre os dois tipos.
     """
-    eh_cupom = bool(norm.cupom or _KW_CUPOM.search(norm.texto_limpo))
-    tem_link_produto = bool(norm.mapa)
+    eh_cupom        = bool(norm.cupom or _KW_CUPOM.search(norm.texto_limpo))
+    tem_link_prod   = bool(norm.mapa)
 
-    # ── CUPOM: não busca og:image ─────────────────────────────────────
-    if eh_cupom and not tem_link_produto:
+    # ── CUPOM: isolado, não busca og:image ───────────────────────────
+    if eh_cupom and not tem_link_prod:
         if norm.tem_midia:
             img = await preparar_imagem_tg(norm.media_obj)
             if img: return img
-        # Fallback isolado por plataforma
+        # Fallback fixo por plataforma
         if norm.plat == "amazon" and os.path.exists(_IMG_AMZ):
-            log_fmt.info("🖼 Fallback cupom Amazon")
             return _IMG_AMZ
         if norm.plat == "shopee" and os.path.exists(_IMG_SHP):
-            log_fmt.info("🖼 Fallback cupom Shopee")
             return _IMG_SHP
         if norm.plat == "magalu" and os.path.exists(_IMG_MGL):
-            log_fmt.info("🖼 Fallback cupom Magalu")
             return _IMG_MGL
         return None
 
     # ── OFERTA: busca imagem do produto ──────────────────────────────
 
-    # 1. Mídia original (sempre primeira opção)
+    # 1. Mídia original sempre primeiro
     if norm.tem_midia:
         img = await preparar_imagem_tg(norm.media_obj)
         if img:
-            log_fmt.debug("🖼 Usando mídia original")
+            log_fmt.debug("🖼 Mídia original")
             return img
 
-    # 2. Busca og:image do link afiliado (produto)
-    if tem_link_produto:
-        for link_afiliado in norm.mapa.values():
-            if not link_afiliado.startswith("http"): continue
-            img_url = await buscar_imagem_produto(link_afiliado)
+    # 2. og:image do link afiliado
+    if tem_link_prod:
+        for link in norm.mapa.values():
+            if not link.startswith("http"): continue
+            img_url = await buscar_imagem_produto(link)
             if img_url:
                 img = await preparar_imagem_url(img_url)
-                if img:
-                    log_fmt.info(f"🖼 Imagem produto: {img_url[:60]}")
-                    return img
+                if img: return img
 
     # 3. Fallback da plataforma
-    if norm.plat == "shopee" and os.path.exists(_IMG_SHP):
-        log_fmt.info("🖼 Fallback oferta Shopee")
-        return _IMG_SHP
-    if norm.plat == "amazon" and os.path.exists(_IMG_AMZ):
-        log_fmt.info("🖼 Fallback oferta Amazon")
-        return _IMG_AMZ
-    if norm.plat == "magalu" and os.path.exists(_IMG_MGL):
-        log_fmt.info("🖼 Fallback oferta Magalu")
-        return _IMG_MGL
+    if norm.plat == "shopee" and os.path.exists(_IMG_SHP): return _IMG_SHP
+    if norm.plat == "amazon" and os.path.exists(_IMG_AMZ): return _IMG_AMZ
+    if norm.plat == "magalu" and os.path.exists(_IMG_MGL): return _IMG_MGL
 
     return None
-
-@dataclass
-class MensagemMontada:
-    msg_id:        int
-    chat:          str
-    plat:          str
-    sku:           str
-    texto:         str
-    imagem:        object
-    mapa:          Dict[str, str]
-    msg_id_origem: int
-
-
-async def montar(norm: MensagemNormalizada) -> MensagemMontada:
-    texto  = montar_texto(norm)
-    imagem = await _resolver_imagem(norm)
-    return MensagemMontada(
-        msg_id=norm.msg_id, chat=norm.chat, plat=norm.plat,
-        sku=norm.sku, texto=texto, imagem=imagem,
-        mapa=norm.mapa, msg_id_origem=norm.msg_id,
-        ) 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMADA 6 — ENVIO (OUTPUT)
@@ -2066,6 +2144,7 @@ client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 async def _run():
     _init_globals()
     _init_db()
+    
     _KW_EVENTO = set()
     log_sys.info("🔌 Conectando...")
     await client.connect()
@@ -2088,8 +2167,41 @@ async def _run():
         try: await processar(event, is_edit=True)
         except Exception as e: log_sys.error(f"❌ on_edit: {e}", exc_info=True)
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SERVIDOR DE REDIRECT — encurtador próprio Magalu
+# Roda no mesmo processo do bot. Porta 8080.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _handle_redirect(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    code = request.match_info.get("code", "").replace("-magalu", "")
+    if not code:
+        return aiohttp.web.Response(status=404, text="Not found")
+    url_destino = await _resolver_short_magalu(code)
+    if url_destino:
+        raise aiohttp.web.HTTPFound(location=url_destino)
+    return aiohttp.web.Response(status=404, text="Link não encontrado")
+
+async def _handle_health(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    return aiohttp.web.Response(text="OK")
+
+async def _iniciar_servidor_web():
+    app = aiohttp.web.Application()
+    app.router.add_get("/",       _handle_health)
+    app.router.add_get("/health", _handle_health)
+    app.router.add_get("/{code}", _handle_redirect)
+    runner = aiohttp.web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = aiohttp.web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    log_sys.info(
+        f"🌐 Servidor redirect ativo | porta={port} | "
+        f"base={_SHORT_BASE}"
+    )
+
     asyncio.create_task(_health_check())
-    await _iniciar_orchestrator()
+asyncio.create_task(_iniciar_orchestrator())
+asyncio.create_task(_iniciar_servidor_web())  
     await client.run_until_disconnected()
     return True
 
