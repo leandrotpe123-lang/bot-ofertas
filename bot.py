@@ -1667,6 +1667,15 @@ def montar_texto(norm: MensagemNormalizada) -> str:
         primeiro = False; saida.append(l)
     return "\n".join(saida).strip()
 
+async def montar(norm: MensagemNormalizada) -> MensagemMontada:
+    texto  = montar_texto(norm)
+    imagem = await _resolver_imagem(norm)
+    return MensagemMontada(
+        msg_id=norm.msg_id, chat=norm.chat, plat=norm.plat,
+        sku=norm.sku, texto=texto, imagem=imagem,
+        mapa=norm.mapa, msg_id_origem=norm.msg_id,
+    )
+
 async def buscar_imagem_produto(url: str) -> Optional[str]:
     """
     Busca og:image do produto via link afiliado.
