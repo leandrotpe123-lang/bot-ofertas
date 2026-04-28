@@ -1667,6 +1667,17 @@ def montar_texto(norm: MensagemNormalizada) -> str:
         primeiro = False; saida.append(l)
     return "\n".join(saida).strip()
 
+@dataclass
+class MensagemMontada:
+    msg_id:        int
+    chat:          str
+    plat:          str
+    sku:           str
+    texto:         str
+    imagem:        object
+    mapa:          Dict[str, str]
+    msg_id_origem: int
+
 async def montar(norm: MensagemNormalizada) -> MensagemMontada:
     texto  = montar_texto(norm)
     imagem = await _resolver_imagem(norm)
@@ -1802,50 +1813,49 @@ async def preparar_imagem_url(url: str) -> Optional[object]:
         log_fmt.warning(f"⚠️ preparar_img_url: {e}")
     return None
 
-
 async def _resolver_imagem(norm: MensagemNormalizada) -> object:
-    """
-    Lógica de imagem isolada por tipo de conteúdo.
+    eh_cupom      = bool(norm.cupom or _KW_CUPOM.search(norm.texto_limpo))
+    tem_link_prod = bool(norm.mapa)
 
-    OFERTA (tem link de produto):
-        1. Mídia original do grupo monitorado
-        2. og:image do link afiliado
-        3. Fallback da plataforma
-
-    CUPOM (sem link de produto ou só cupom):
-        1. Mídia original se veio
-        2. Fallback fixo da plataforma
-        NÃO busca og:image — cupom tem imagem própria
-
-    Nenhuma lógica de imagem é compartilhada entre os dois tipos.
-    """
-    eh_cupom        = bool(norm.cupom or _KW_CUPOM.search(norm.texto_limpo))
-    tem_link_prod   = bool(norm.mapa)
-
-    # ── CUPOM: isolado, não busca og:image ───────────────────────────
+    # ── CUPOM sem link de produto ─────────────────────────────────────
     if eh_cupom and not tem_link_prod:
         if norm.tem_midia:
             img = await preparar_imagem_tg(norm.media_obj)
             if img: return img
-        # Fallback fixo por plataforma
-        if norm.plat == "amazon" and os.path.exists(_IMG_AMZ):
-            return _IMG_AMZ
         if norm.plat == "shopee" and os.path.exists(_IMG_SHP):
+            log_fmt.info("🖼 Fallback cupom Shopee")
             return _IMG_SHP
+        if norm.plat == "amazon" and os.path.exists(_IMG_AMZ):
+            log_fmt.info("🖼 Fallback cupom Amazon")
+            return _IMG_AMZ
         if norm.plat == "magalu" and os.path.exists(_IMG_MGL):
+            log_fmt.info("🖼 Fallback cupom Magalu")
             return _IMG_MGL
+        log_fmt.warning(f"⚠️ Sem imagem fallback cupom {norm.plat}")
         return None
 
-    # ── OFERTA: busca imagem do produto ──────────────────────────────
+    # ── CUPOM com link de produto ─────────────────────────────────────
+    if eh_cupom and tem_link_prod:
+        if norm.tem_midia:
+            img = await preparar_imagem_tg(norm.media_obj)
+            if img: return img
+        for link in norm.mapa.values():
+            if not link.startswith("http"): continue
+            img_url = await buscar_imagem_produto(link)
+            if img_url:
+                img = await preparar_imagem_url(img_url)
+                if img: return img
+        if norm.plat == "shopee" and os.path.exists(_IMG_SHP): return _IMG_SHP
+        if norm.plat == "amazon" and os.path.exists(_IMG_AMZ): return _IMG_AMZ
+        if norm.plat == "magalu" and os.path.exists(_IMG_MGL): return _IMG_MGL
+        return None
 
-    # 1. Mídia original sempre primeiro
+    # ── OFERTA (produto sem cupom) ────────────────────────────────────
     if norm.tem_midia:
         img = await preparar_imagem_tg(norm.media_obj)
         if img:
             log_fmt.debug("🖼 Mídia original")
             return img
-
-    # 2. og:image do link afiliado
     if tem_link_prod:
         for link in norm.mapa.values():
             if not link.startswith("http"): continue
@@ -1853,14 +1863,11 @@ async def _resolver_imagem(norm: MensagemNormalizada) -> object:
             if img_url:
                 img = await preparar_imagem_url(img_url)
                 if img: return img
-
-    # 3. Fallback da plataforma
     if norm.plat == "shopee" and os.path.exists(_IMG_SHP): return _IMG_SHP
     if norm.plat == "amazon" and os.path.exists(_IMG_AMZ): return _IMG_AMZ
     if norm.plat == "magalu" and os.path.exists(_IMG_MGL): return _IMG_MGL
-
     return None
-
+    
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMADA 6 — ENVIO (OUTPUT)
 # Responsabilidade: enviar no Telegram. NÃO pensa em lógica nenhuma.
