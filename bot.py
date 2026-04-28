@@ -979,16 +979,29 @@ async def _afiliar_amazon(url: str, sessao: aiohttp.ClientSession) -> Optional[s
 _SHP_REPASSE_DIRETO = frozenset({"flapremios.com.br"})
 
 async def _expandir_shopee(url: str, sessao: aiohttp.ClientSession) -> str:
+    """
+    Expande QUALQUER link Shopee antes de chamar a API.
+    s.shopee.com.br, shope.ee e encurtadores → GET completo.
+    Resolve erro 11001 invalid origin url.
+    """
     nl = _netloc(url)
-    if nl in {"s.shopee.com.br","shope.ee","s.shopee.com"} or nl in _ENCURTADORES:
+    precisa_expandir = (
+        nl in {"s.shopee.com.br", "shope.ee", "s.shopee.com"}
+        or nl in _ENCURTADORES
+        or nl in _FORCA_GET
+    )
+    if precisa_expandir:
         try:
             async with _SEM_HTTP:
-                return await desencurtar(url, sessao)
-        except Exception:
-            pass
+                expandida = await desencurtar(url, sessao)
+                log_nrm.debug(f"  SHP expandida: {expandida[:80]}")
+                return expandida
+        except Exception as e:
+            log_nrm.warning(f"  ⚠️ SHP expandir falhou: {e}")
     return url
 
 def _extrair_url_produto_shopee(url: str) -> Optional[str]:
+    """Extrai URL canônica do produto para fallback de afiliação."""
     try:
         p = urlparse(url)
         for pat in _P_SHP:
@@ -999,7 +1012,13 @@ def _extrair_url_produto_shopee(url: str) -> Optional[str]:
         pass
     return None
 
-async def _chamar_api_shopee(url_produto: str, sessao: aiohttp.ClientSession) -> Optional[str]:
+async def _chamar_api_shopee(
+    url_produto: str, sessao: aiohttp.ClientSession
+) -> Optional[str]:
+    """
+    Chama API Shopee com retry inteligente (3 tentativas).
+    Não desiste na primeira falha.
+    """
     for tentativa in range(1, 4):
         try:
             ts      = str(int(time.time()))
@@ -1009,7 +1028,7 @@ async def _chamar_api_shopee(url_produto: str, sessao: aiohttp.ClientSession) ->
                     f'{{ originUrl: "{url_produto}" }}) {{ shortLink }} }}'
                 )
             }, separators=(",", ":"))
-            sig  = hashlib.sha256(
+            sig = hashlib.sha256(
                 f"{_SHP_APP_ID}{ts}{payload}{_SHP_SECRET}".encode()
             ).hexdigest()
             hdrs = {
@@ -1033,48 +1052,87 @@ async def _chamar_api_shopee(url_produto: str, sessao: aiohttp.ClientSession) ->
                         log_nrm.info(f"  ✅ SHP t={tentativa}: {link}")
                         return link
                     erros = res.get('errors') or res.get('error')
-                    log_nrm.warning(f"  ⚠️ SHP API t={tentativa}: {erros}")
+                    log_nrm.warning(
+                        f"  ⚠️ SHP API t={tentativa}: {erros}"
+                    )
         except Exception as e:
             log_nrm.warning(f"  ⚠️ SHP t={tentativa}: {e}")
         if tentativa < 3:
             await asyncio.sleep(tentativa * 1.5)
     return None
 
-async def _afiliar_shopee(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
+async def _afiliar_shopee(
+    url: str, sessao: aiohttp.ClientSession
+) -> Optional[str]:
+    """
+    Fluxo Shopee:
+    1. Repasse direto (flapremios)
+    2. Cache
+    3. Expandir SEMPRE (resolve erro 11001)
+    4. Limpeza leve
+    5. API com retry 3x
+    6. Fallback: URL canônica do produto
+    7. Descarta se todas falharem (nunca envia sem afiliação)
+    """
     url = _sanitizar_url(url)
     log_nrm.debug(f"▶ SHP: {url[:80]}")
+
     nl = _netloc(url)
     for d in _SHP_REPASSE_DIRETO:
         if nl == d or nl.endswith("." + d):
-            log_nrm.info(f"  ↩️ SHP repasse direto: {url[:60]}"); return url
+            log_nrm.info(f"  ↩️ SHP repasse direto: {url[:60]}")
+            return url
+
     cached = _get_final(url)
     if cached: return cached
     cached = db_get_link(url)
     if cached: return cached
+
+    # Passo 3: expandir SEMPRE antes da API
     url_expandida = await _expandir_shopee(url, sessao)
-    url_limpa     = _limpar_params_shopee(url_expandida)
+
+    # Passo 4: limpeza leve
+    url_limpa = _limpar_params_shopee(url_expandida)
+
+    # Passo 5: API com retry
+    log_nrm.debug(f"  SHP → API: {url_limpa[:80]}")
     link = await _chamar_api_shopee(url_limpa, sessao)
+
+    # Passo 6: fallback URL canônica
     if not link:
         url_prod = _extrair_url_produto_shopee(url_expandida)
         if url_prod and url_prod != url_limpa:
             log_nrm.info(f"  🔄 SHP fallback produto: {url_prod[:60]}")
             link = await _chamar_api_shopee(url_prod, sessao)
+
+    # Passo 7: descarta — nunca envia sem afiliação
     if not link:
-        log_nrm.warning(f"  ❌ SHP sem afiliação → descarta: {url[:60]}")
+        log_nrm.warning(
+            f"  ❌ SHP sem afiliação após 3 tentativas → descarta: {url[:60]}"
+        )
         return None
+
     if "shopee" not in _netloc(link):
-        log_nrm.warning(f"  ⚠️ SHP validação falhou: {link}"); return None
+        log_nrm.warning(f"  ⚠️ SHP validação falhou: {link}")
+        return None
+
     _set_final(url, link)
     db_set_link(url, link, "shopee")
     return link
 
-_CUTTLY_LAST_429: float = 0.0
-_CUTTLY_BACKOFF:  float = 65.0
+
+# ── Magalu: desencurtar → validar → afiliar ──────────────────────────────────
 
 def _afiliar_url_magalu(url: str) -> str:
-    """Remove afiliado antigo e injeta parâmetros do promotor. Sem tag."""
+    """
+    Remove parâmetros de afiliado do grupo e injeta os do promotor.
+    NÃO altera path nem estrutura do link. Sem tag (exclusiva da Amazon).
+    """
     p = urlparse(url)
-    params_orig = {k: v[0] for k, v in parse_qs(p.query, keep_blank_values=True).items()}
+    params_orig = {
+        k: v[0]
+        for k, v in parse_qs(p.query, keep_blank_values=True).items()
+    }
     params_orig = _limpar_params_magalu(params_orig)
     params_orig.update({
         "partner_id":        _MGL_PARTNER,
@@ -1088,73 +1146,21 @@ def _afiliar_url_magalu(url: str) -> str:
     })
     return urlunparse(p._replace(query=urlencode(params_orig), fragment=""))
 
-async def _cuttly(url: str, sessao: aiohttp.ClientSession) -> Optional[str]:
-    global _CUTTLY_LAST_429
-    if not _CUTTLY_KEY: return None
-    api = f"https://cutt.ly/api/api.php?key={_CUTTLY_KEY}&short={quote(url, safe='')}"
-    for tentativa in range(1, 4):
-        espera = _CUTTLY_BACKOFF - (time.time() - _CUTTLY_LAST_429)
-        if espera > 0: await asyncio.sleep(espera)
-        try:
-            async with _SEM_HTTP:
-                async with sessao.get(api, timeout=aiohttp.ClientTimeout(total=15)) as r:
-                    if r.status == 429:
-                        _CUTTLY_LAST_429 = time.time()
-                        await asyncio.sleep(_CUTTLY_BACKOFF); continue
-                    if r.status == 401:
-                        log_nrm.error("  ❌ Cuttly 401 — chave inválida"); return None
-                    if r.status != 200:
-                        await asyncio.sleep(2 ** tentativa); continue
-                    try: data = await r.json(content_type=None)
-                    except Exception: await asyncio.sleep(2 ** tentativa); continue
-                    status = data.get("url", {}).get("status")
-                    if status in (7, 2):
-                        short = data["url"].get("shortLink")
-                        if short: return short
-                    await asyncio.sleep(2 ** tentativa)
-        except asyncio.TimeoutError: await asyncio.sleep(2 ** tentativa)
-        except Exception as e:
-            log_nrm.error(f"  ❌ Cuttly t={tentativa}: {e}")
-            await asyncio.sleep(2 ** tentativa)
-    return None
-
-async def _cuttly_background(url_longo: str, msg_id_origem: int):
-    conn = aiohttp.TCPConnector(ssl=False)
-    async with aiohttp.ClientSession(connector=conn) as sessao:
-        for tent in range(10):
-            await asyncio.sleep(45)
-            try:
-                short = await _cuttly(url_longo, sessao)
-                if short:
-                    loop    = asyncio.get_event_loop()
-                    mapa    = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-                    id_dest = mapa.get(str(msg_id_origem))
-                    if id_dest:
-                        try:
-                            msg_atual = await client.get_messages(GRUPO_DESTINO, ids=id_dest)
-                            if msg_atual and msg_atual.text:
-                                novo = msg_atual.text.replace(url_longo, short)
-                                if novo != msg_atual.text:
-                                    await client.edit_message(
-                                        GRUPO_DESTINO, id_dest, novo, parse_mode="md")
-                                    log_nrm.info(f"  ✅ MGL BG editado: {id_dest}")
-                        except Exception as e:
-                            log_nrm.warning(f"  ⚠️ MGL BG edit: {e}")
-                    _set_final(url_longo, short)
-                    db_set_link(url_longo, short, "magalu")
-                    return
-            except Exception as e:
-                log_nrm.warning(f"  ⚠️ MGL BG t={tent}: {e}")
-
-async def _afiliar_magalu(url: str, sessao: aiohttp.ClientSession,
-                           msg_id: int = 0) -> Optional[str]:
+async def _afiliar_magalu(
+    url: str, sessao: aiohttp.ClientSession, msg_id: int = 0
+) -> Optional[str]:
     """
-    Magalu reforçado:
-    cutt.ly com ou sem 'magalu' no nome → desencurta sempre via GET.
-    Após desencurtar → valida domínio Magalu → aplica afiliação.
+    Fluxo Magalu:
+    1. Cache
+    2. Desencurtar se necessário (cutt.ly, maga.lu, encurtadores)
+    3. Validar que é Magalu após expansão
+    4. Aplicar afiliação (não altera path)
+    5. Tentar encurtar via Cuttly
+    6. Fallback: envia longo afiliado + agenda background
     """
     url = _sanitizar_url(url)
     log_nrm.debug(f"▶ MGL: {url[:80]}")
+
     cached = _get_final(url)
     if cached: return cached
     cached = db_get_link(url)
@@ -1162,30 +1168,40 @@ async def _afiliar_magalu(url: str, sessao: aiohttp.ClientSession,
 
     nl = _netloc(url)
 
-    # Desencurta cutt.ly, maga.lu e qualquer encurtador
+    # Passo 2: desencurtar se necessário
     if nl == "cutt.ly" or nl == "maga.lu" or nl in _ENCURTADORES:
         log_nrm.debug(f"  MGL desencurtando: {url[:60]}")
         try:
             async with _SEM_HTTP:
                 url_exp = await desencurtar(url, sessao)
             log_nrm.debug(f"  MGL expandido: {url_exp[:80]}")
+            # Passo 3: validar que é Magalu após expansão
             if not _eh_magalu_url(url_exp):
-                log_nrm.debug(f"  MGL pós-expand não é Magalu: {_netloc(url_exp)}")
+                log_nrm.debug(
+                    f"  MGL pós-expand não é Magalu: {_netloc(url_exp)}"
+                )
                 return None
             url = url_exp
         except Exception as e:
-            log_nrm.error(f"  ❌ MGL desencurtar: {e}"); return None
+            log_nrm.error(f"  ❌ MGL desencurtar: {e}")
+            return None
 
     cl = _classificar_cached(url)
     if cl.plat != "magalu" or cl.tipo == "invalido":
-        log_nrm.debug(f"  MGL descartado: plat={cl.plat} tipo={cl.tipo}"); return None
+        log_nrm.debug(
+            f"  MGL descartado: plat={cl.plat} tipo={cl.tipo}"
+        )
+        return None
 
+    # Passo 4: aplica afiliação sem alterar path
     afiliado = _afiliar_url_magalu(url)
     if not afiliado or (
         "magalu" not in afiliado and "magazineluiza" not in afiliado
     ):
-        log_nrm.warning("  ⚠️ MGL validação falhou"); return None
+        log_nrm.warning("  ⚠️ MGL validação falhou")
+        return None
 
+    # Passo 5: tenta encurtar
     short = await _cuttly(afiliado, sessao)
     if short:
         _set_final(url, short)
@@ -1193,6 +1209,7 @@ async def _afiliar_magalu(url: str, sessao: aiohttp.ClientSession,
         log_nrm.info(f"  ✅ MGL curto: {short}")
         return short
 
+    # Passo 6: fallback longo + agenda background
     log_nrm.warning("  ⚠️ Cuttly falhou → longo afiliado")
     _set_final(url, afiliado)
     db_set_link(url, afiliado, "magalu")
@@ -1668,35 +1685,29 @@ async def preparar_imagem_url(url: str) -> Optional[object]:
         log_fmt.warning(f"⚠️ preparar_img_url: {e}")
     return None
 
-
 async def _resolver_imagem(norm: MensagemNormalizada) -> object:
     """
-    Regras isoladas por plataforma:
-    1. Mídia original → sempre primeira opção.
-    2. Sem mídia + qualquer link → busca og:image do link afiliado.
-    3. Sem imagem encontrada + cupom → fallback da plataforma correta.
-    4. Sem nada → None.
+    Regra isolada por tipo de conteúdo:
+
+    CUPOM → usa imagem original do Telegram (se veio) ou fallback da plataforma.
+             NUNCA busca og:image. Cupom tem sua própria imagem.
+
+    OFERTA (produto com link) →
+        1. Mídia original do grupo monitorado
+        2. Busca og:image do link afiliado
+        3. Fallback da plataforma se nenhuma encontrada
+
+    Imagens sempre vêm do produto, não do chat (exceto mídia original).
     """
-    # 1. Mídia original
-    if norm.tem_midia:
-        img = await preparar_imagem_tg(norm.media_obj)
-        if img:
-            log_fmt.debug("🖼 Usando mídia original")
-            return img
-
     eh_cupom = bool(norm.cupom or _KW_CUPOM.search(norm.texto_limpo))
+    tem_link_produto = bool(norm.mapa)
 
-    # 2. Qualquer link → tenta buscar imagem real do produto
-    if norm.mapa:
-        for link_afiliado in norm.mapa.values():
-            if not link_afiliado.startswith("http"): continue
-            img_url = await buscar_imagem_produto(link_afiliado)
-            if img_url:
-                img = await preparar_imagem_url(img_url)
-                if img: return img
-
-    # 3. Cupom sem imagem → fallback isolado por plataforma
-    if eh_cupom and not norm.tem_midia:
+    # ── CUPOM: não busca og:image ─────────────────────────────────────
+    if eh_cupom and not tem_link_produto:
+        if norm.tem_midia:
+            img = await preparar_imagem_tg(norm.media_obj)
+            if img: return img
+        # Fallback isolado por plataforma
         if norm.plat == "amazon" and os.path.exists(_IMG_AMZ):
             log_fmt.info("🖼 Fallback cupom Amazon")
             return _IMG_AMZ
@@ -1706,9 +1717,40 @@ async def _resolver_imagem(norm: MensagemNormalizada) -> object:
         if norm.plat == "magalu" and os.path.exists(_IMG_MGL):
             log_fmt.info("🖼 Fallback cupom Magalu")
             return _IMG_MGL
+        return None
+
+    # ── OFERTA: busca imagem do produto ──────────────────────────────
+
+    # 1. Mídia original (sempre primeira opção)
+    if norm.tem_midia:
+        img = await preparar_imagem_tg(norm.media_obj)
+        if img:
+            log_fmt.debug("🖼 Usando mídia original")
+            return img
+
+    # 2. Busca og:image do link afiliado (produto)
+    if tem_link_produto:
+        for link_afiliado in norm.mapa.values():
+            if not link_afiliado.startswith("http"): continue
+            img_url = await buscar_imagem_produto(link_afiliado)
+            if img_url:
+                img = await preparar_imagem_url(img_url)
+                if img:
+                    log_fmt.info(f"🖼 Imagem produto: {img_url[:60]}")
+                    return img
+
+    # 3. Fallback da plataforma
+    if norm.plat == "shopee" and os.path.exists(_IMG_SHP):
+        log_fmt.info("🖼 Fallback oferta Shopee")
+        return _IMG_SHP
+    if norm.plat == "amazon" and os.path.exists(_IMG_AMZ):
+        log_fmt.info("🖼 Fallback oferta Amazon")
+        return _IMG_AMZ
+    if norm.plat == "magalu" and os.path.exists(_IMG_MGL):
+        log_fmt.info("🖼 Fallback oferta Magalu")
+        return _IMG_MGL
 
     return None
-
 
 @dataclass
 class MensagemMontada:
@@ -1909,6 +1951,30 @@ async def _worker_loop():
             except Exception as e: log_sys.error(f"❌ Worker: {e}", exc_info=True)
             finally:
                 async with _w_lck: _w_ativos -= 1
+
+# ── Anti-saturação ────────────────────────────────────────────────────────────
+
+_SAT_MAX_PLAT  = 10
+_SAT_BURST_LIM = 6
+_SAT_BURST_JAN = 60
+_burst: List[float] = []
+_burst_lock: asyncio.Lock = None  # type: ignore
+
+# _KW_EVENTO definido aqui — antes de delay_saturacao que o usa
+_KW_EVENTO = re.compile(
+    r'\b(?:quiz|roleta|miss[aã]o|arena|girar|gire|roda|jogar|jogue|desafio)\b',
+    re.I
+)
+
+async def _burst_add():
+    async with _burst_lock:
+        agora = time.monotonic(); _burst.append(agora)
+        while _burst and agora - _burst[0] > _SAT_BURST_JAN: _burst.pop(0)
+
+async def _burst_count() -> int:
+    async with _burst_lock:
+        agora = time.monotonic()
+        return sum(1 for t in _burst if agora - t <= _SAT_BURST_JAN)
 
 async def delay_saturacao(plat: str, texto: str) -> float:
     if _KW_EVENTO.search(texto): return 0.0
