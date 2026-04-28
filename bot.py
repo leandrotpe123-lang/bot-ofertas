@@ -2144,17 +2144,20 @@ client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 async def _run():
     _init_globals()
     _init_db()
-    
     _KW_EVENTO = set()
+
     log_sys.info("🔌 Conectando...")
     await client.connect()
+
     if not await client.is_user_authorized():
-        log_sys.error("❌ Sessão inválida"); return False
+        log_sys.error("❌ Sessão inválida")
+        return False
+
     me = await client.get_me()
     log_sys.info(f"✅ {me.first_name} (@{me.username}) | ID={me.id}")
     log_sys.info(f"📡 {GRUPOS_ORIGEM} → {GRUPO_DESTINO}")
     log_sys.info(f"🟠 Amazon: {_AMZ_TAG} | 🟣 Shopee: {_SHP_APP_ID} | 🔵 Magalu: {_MGL_PROMOTER}/{_MGL_SLUG}")
-    log_sys.info(f"🖼  Pillow: {'OK' if _PIL_OK else 'OFF'}")
+    log_sys.info(f"🖼 Pillow: {'OK' if _PIL_OK else 'OFF'}")
     log_sys.info("🚀 FOGUETÃO v76.0 — ONLINE")
 
     @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
@@ -2166,6 +2169,13 @@ async def _run():
     async def on_edit(event):
         try: await processar(event, is_edit=True)
         except Exception as e: log_sys.error(f"❌ on_edit: {e}", exc_info=True)
+
+    asyncio.create_task(_health_check())
+    asyncio.create_task(_iniciar_orchestrator())
+    asyncio.create_task(_iniciar_servidor_web())
+
+    await client.run_until_disconnected()
+    return True
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SERVIDOR DE REDIRECT — encurtador próprio Magalu
@@ -2186,7 +2196,7 @@ async def _handle_health(request: aiohttp.web.Request) -> aiohttp.web.Response:
 
 async def _iniciar_servidor_web():
     app = aiohttp.web.Application()
-    app.router.add_get("/",       _handle_health)
+    app.router.add_get("/", _handle_health)
     app.router.add_get("/health", _handle_health)
     app.router.add_get("/{code}", _handle_redirect)
     runner = aiohttp.web.AppRunner(app)
@@ -2195,15 +2205,8 @@ async def _iniciar_servidor_web():
     site = aiohttp.web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     log_sys.info(
-        f"🌐 Servidor redirect ativo | porta={port} | "
-        f"base={_SHORT_BASE}"
+        f"🌐 Servidor redirect ativo | porta={port} | base={_SHORT_BASE}"
     )
-
-    asyncio.create_task(_health_check())
-asyncio.create_task(_iniciar_orchestrator())
-asyncio.create_task(_iniciar_servidor_web())  
-    await client.run_until_disconnected()
-    return True
 
 async def main():
     while True:
