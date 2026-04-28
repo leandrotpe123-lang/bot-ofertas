@@ -2000,6 +2000,7 @@ client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 async def _run():
     _init_globals()
     _init_db()
+    _KW_EVENTO = set()
     log_sys.info("🔌 Conectando...")
     await client.connect()
     if not await client.is_user_authorized():
