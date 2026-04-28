@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Tuple, Set
 from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 
 import aiohttp
+from aiohttp import web
 from bs4 import BeautifulSoup
 from telethon import TelegramClient, events
 from telethon.errors import (
@@ -2182,27 +2183,27 @@ async def _run():
 # Roda no mesmo processo do bot. Porta 8080.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def _handle_redirect(request: aiohttp.web.Request) -> aiohttp.web.Response:
+async def _handle_redirect(request: web.Request) -> web.Response:
     code = request.match_info.get("code", "").replace("-magalu", "")
     if not code:
-        return aiohttp.web.Response(status=404, text="Not found")
+        return web.Response(status=404, text="Not found")
     url_destino = await _resolver_short_magalu(code)
     if url_destino:
-        raise aiohttp.web.HTTPFound(location=url_destino)
-    return aiohttp.web.Response(status=404, text="Link não encontrado")
+        raise web.HTTPFound(location=url_destino)
+    return web.Response(status=404, text="Link não encontrado")
 
-async def _handle_health(request: aiohttp.web.Request) -> aiohttp.web.Response:
-    return aiohttp.web.Response(text="OK")
+async def _handle_health(request: web.Request) -> web.Response:
+    return web.Response(text="OK")
 
 async def _iniciar_servidor_web():
-    app = aiohttp.web.Application()
+    app = web.Application()
     app.router.add_get("/", _handle_health)
     app.router.add_get("/health", _handle_health)
     app.router.add_get("/{code}", _handle_redirect)
-    runner = aiohttp.web.AppRunner(app)
+    runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 8080))
-    site = aiohttp.web.TCPSite(runner, "0.0.0.0", port)
+    site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     log_sys.info(
         f"🌐 Servidor redirect ativo | porta={port} | base={_SHORT_BASE}"
