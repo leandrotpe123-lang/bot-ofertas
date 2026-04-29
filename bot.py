@@ -1602,8 +1602,7 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
 
     # Detecta estado do evento
 estado = EstadoEvento.NEW
-
-    if ids_globais:
+if ids_globais:
         estado = detectar_estado_evento(
         texto_limpo,
         ids_globais[0],
