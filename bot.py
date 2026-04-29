@@ -1590,27 +1590,27 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
     )
 
 # Coleta ids_globais
-ids_globais: List[str] = []
+    ids_globais: List[str] = []
 
-for orig in mapa:
-    lc = _classificar_cached(orig)
-    if lc.sku and lc.sku not in ids_globais:
-        ids_globais.append(lc.sku)
+    for orig in mapa:
+        lc = _classificar_cached(orig)
+        if lc.sku and lc.sku not in ids_globais:
+            ids_globais.append(lc.sku)
 
-if sku and sku not in ids_globais:
-    ids_globais.append(sku)
+    if sku and sku not in ids_globais:
+        ids_globais.append(sku)
 
-# Detecta estado do evento
+    # Detecta estado do evento
 estado = EstadoEvento.NEW
 
-if ids_globais:
-    estado = detectar_estado_evento(
+    if ids_globais:
+        estado = detectar_estado_evento(
         texto_limpo,
         ids_globais[0],
         plat_dom
     )
 
-elif cupom:
+    elif cupom:
     fp_cup = _fp_c3(f"cup_{cupom}", plat_dom)
     entrada = db_get_dedupe(fp_cup)
 
@@ -1623,15 +1623,15 @@ elif cupom:
             else EstadoEvento.EXPIRED
         )
 
-log_nrm.info(
+    log_nrm.info(
     f"✅ {len(mapa)}/{len(converter)} | "
     f"plat={plat_dom} cupom='{cupom}' sku={sku} "
     f"estado={estado.value} ids={ids_globais}"
 )
 
-_log_cache_stats()
+    _log_cache_stats()
 
-return MensagemNormalizada(
+    return MensagemNormalizada(
     msg_id=bruta.msg_id,
     chat=bruta.chat,
     texto_limpo=texto_limpo,
