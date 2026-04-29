@@ -1601,49 +1601,51 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
         ids_globais.append(sku)
 
     # Detecta estado do evento
-estado = EstadoEvento.NEW
-if ids_globais:
+    estado = EstadoEvento.NEW
+
+    if ids_globais:
         estado = detectar_estado_evento(
-        texto_limpo,
-        ids_globais[0],
-        plat_dom
-    )
-
-    elif cupom:
-    fp_cup = _fp_c3(f"cup_{cupom}", plat_dom)
-    entrada = db_get_dedupe(fp_cup)
-
-    if entrada:
-        delta = time.time() - entrada.get("ts", 0)
-        janela = _JANELA_C3.get(plat_dom, 120.0)
-        estado = (
-            EstadoEvento.SEEN
-            if delta < janela
-            else EstadoEvento.EXPIRED
+            texto_limpo,
+            ids_globais[0],
+            plat_dom
         )
 
+    elif cupom:
+        fp_cup = _fp_c3(f"cup_{cupom}", plat_dom)
+        entrada = db_get_dedupe(fp_cup)
+
+        if entrada:
+            delta = time.time() - entrada.get("ts", 0)
+            janela = _JANELA_C3.get(plat_dom, 120.0)
+
+            estado = (
+                EstadoEvento.SEEN
+                if delta < janela
+                else EstadoEvento.EXPIRED
+            )
+
     log_nrm.info(
-    f"✅ {len(mapa)}/{len(converter)} | "
-    f"plat={plat_dom} cupom='{cupom}' sku={sku} "
-    f"estado={estado.value} ids={ids_globais}"
-)
+        f"✅ {len(mapa)}/{len(converter)} | "
+        f"plat={plat_dom} cupom='{cupom}' sku={sku} "
+        f"estado={estado.value} ids={ids_globais}"
+    )
 
     _log_cache_stats()
 
     return MensagemNormalizada(
-    msg_id=bruta.msg_id,
-    chat=bruta.chat,
-    texto_limpo=texto_limpo,
-    mapa=mapa,
-    preservar=preservar_lst,
-    plat=plat_dom,
-    cupom=cupom,
-    sku=sku,
-    tem_midia=bruta.tem_midia,
-    media_obj=bruta.media_obj,
-    estado_evento=estado,
-    ids_globais=ids_globais,
-    )            
+        msg_id=bruta.msg_id,
+        chat=bruta.chat,
+        texto_limpo=texto_limpo,
+        mapa=mapa,
+        preservar=preservar_lst,
+        plat=plat_dom,
+        cupom=cupom,
+        sku=sku,
+        tem_midia=bruta.tem_midia,
+        media_obj=bruta.media_obj,
+        estado_evento=estado,
+        ids_globais=ids_globais,
+    )
             
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMADA 4 — DEDUPLICAÇÃO  (nível sênior)
