@@ -1465,20 +1465,69 @@ async def _normalizar_um(
         convertido = None
     return lc.url_original, convertido, plat
 
+# ── 3j. Estado do evento ─────────────────────────────────────────────────────
+
+from enum import Enum
+
+class EstadoEvento(Enum):
+    NEW       = "new"
+    SEEN      = "seen"
+    EXPIRED   = "expired"
+    RESTOCKED = "restocked"
+
+_RE_RESTOCK_C3 = re.compile(
+    r'voltou|restock|reativado|dispon[ií]vel\s+novamente|'
+    r'voltou\s+ao\s+estoque|de\s+volta|ativo\s+novamente|'
+    r'normalizou|voltando|voltou\s+cupom|relançamento',
+    re.I
+)
+_JANELA_C3: Dict[str, float] = {
+    "shopee": 60.0, "amazon": 300.0,
+    "magalu": 300.0, "default": 120.0,
+}
+_TTL_RESTOCK_C3: Dict[str, float] = {
+    "shopee": 3600.0, "amazon": 7200.0,
+    "magalu": 14400.0, "default": 3600.0,
+}
+
+def _fp_c3(id_global: str, plat: str) -> str:
+    return hashlib.sha256(f"{plat}|{id_global}".encode()).hexdigest()[:32]
+
+def detectar_estado_evento(texto: str, id_global: str, plat: str) -> EstadoEvento:
+    eh_restock = bool(_RE_RESTOCK_C3.search(texto))
+    entrada    = db_get_dedupe(_fp_c3(id_global, plat))
+    if not entrada:
+        return EstadoEvento.NEW
+    ts_ant = entrada.get("ts", 0)
+    delta  = time.time() - ts_ant
+    janela = _JANELA_C3.get(plat, _JANELA_C3["default"])
+    ttl    = _TTL_RESTOCK_C3.get(plat, _TTL_RESTOCK_C3["default"])
+    if delta < janela:
+        return EstadoEvento.SEEN
+    if eh_restock:
+        return EstadoEvento.RESTOCKED
+    if delta > ttl:
+        return EstadoEvento.EXPIRED
+    return EstadoEvento.SEEN
+
+# ── 3k. MensagemNormalizada ───────────────────────────────────────────────────
 
 @dataclass
 class MensagemNormalizada:
-    msg_id:      int
-    chat:        str
-    texto_limpo: str
-    mapa:        Dict[str, str]
-    preservar:   List[str]
-    plat:        str
-    cupom:       str
-    sku:         str
-    tem_midia:   bool
-    media_obj:   object
+    msg_id:        int
+    chat:          str
+    texto_limpo:   str
+    mapa:          Dict[str, str]
+    preservar:     List[str]
+    plat:          str
+    cupom:         str
+    sku:           str
+    tem_midia:     bool
+    media_obj:     object
+    estado_evento: EstadoEvento = EstadoEvento.NEW
+    ids_globais:   List[str]    = field(default_factory=list)
 
+# ── 3l. normalizar() ─────────────────────────────────────────────────────────
 
 async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
     if not bruta.texto.strip(): return None
@@ -1520,8 +1569,32 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
         or _extrair_asin_texto(texto_limpo, mapa)
         or _extrair_id_magalu(texto_limpo, mapa)
     )
+
+    # Coleta ids_globais
+    ids_globais: List[str] = []
+    for orig in mapa:
+        lc = _classificar_cached_c2(orig)
+        if lc.id_global and lc.id_global not in ids_globais:
+            ids_globais.append(lc.id_global)
+    if sku and sku not in ids_globais:
+        ids_globais.append(sku)
+
+    # Detecta estado do evento
+    estado = EstadoEvento.NEW
+    if ids_globais:
+        estado = detectar_estado_evento(texto_limpo, ids_globais[0], plat_dom)
+    elif cupom:
+        fp_cup = _fp_c3(f"cup_{cupom}", plat_dom)
+        entrada = db_get_dedupe(fp_cup)
+        if entrada:
+            delta  = time.time() - entrada.get("ts", 0)
+            janela = _JANELA_C3.get(plat_dom, 120.0)
+            estado = EstadoEvento.SEEN if delta < janela else EstadoEvento.EXPIRED
+
     log_nrm.info(
-        f"✅ {len(mapa)}/{len(converter)} | plat={plat_dom} cupom='{cupom}' sku={sku}"
+        f"✅ {len(mapa)}/{len(converter)} | "
+        f"plat={plat_dom} cupom='{cupom}' sku={sku} "
+        f"estado={estado.value} ids={ids_globais}"
     )
     _log_cache_stats()
     return MensagemNormalizada(
@@ -1530,8 +1603,9 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
         preservar=preservar_lst, plat=plat_dom,
         cupom=cupom, sku=sku,
         tem_midia=bruta.tem_midia, media_obj=bruta.media_obj,
-                )
-         
+        estado_evento=estado,
+        ids_globais=ids_globais,
+)        
             
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMADA 4 — DEDUPLICAÇÃO  (nível sênior)
