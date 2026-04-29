@@ -1573,7 +1573,7 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
     # Coleta ids_globais
     ids_globais: List[str] = []
     for orig in mapa:
-        lc = _classificar_cached_c2(orig)
+        lc = _classificar_cached(orig)
         if lc.id_global and lc.id_global not in ids_globais:
             ids_globais.append(lc.id_global)
     if sku and sku not in ids_globais:
