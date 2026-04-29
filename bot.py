@@ -115,67 +115,116 @@ salvar_mapa = lambda m: _gravar_json(ARQUIVO_MAPEAMENTO, m, _MAP_LOCK)
 _DB_PATH  = "foguetao.db"
 _db_conn: Optional[sqlite3.Connection] = None
 _db_lock  = Lock()
-CACHE_TTL = 86400
+CACHE_TTL     = 86400
 TTL_DEDUPE    = 86400
 TTL_SCHEDULER = 30 * 86400
+TTL_LINK_INATIVO = 7 * 86400
 
 def _init_db():
     global _db_conn
-    _db_conn = sqlite3.connect(_DB_PATH, check_same_thread=False, timeout=10, isolation_level=None)
-    for p in ["PRAGMA journal_mode=WAL","PRAGMA synchronous=NORMAL",
-              "PRAGMA cache_size=-16000","PRAGMA temp_store=MEMORY"]:
+    _db_conn = sqlite3.connect(
+        _DB_PATH, check_same_thread=False,
+        timeout=10, isolation_level=None
+    )
+    for p in [
+        "PRAGMA journal_mode=WAL",
+        "PRAGMA synchronous=NORMAL",
+        "PRAGMA cache_size=-16000",
+        "PRAGMA temp_store=MEMORY",
+        "PRAGMA busy_timeout=10000",
+    ]:
         _db_conn.execute(p)
+
     _db_conn.executescript("""
         CREATE TABLE IF NOT EXISTS links_cache(
-            url_orig TEXT PRIMARY KEY, url_conv TEXT NOT NULL,
-            plat TEXT NOT NULL, ts REAL NOT NULL);
+            url_orig TEXT PRIMARY KEY,
+            url_conv TEXT NOT NULL,
+            plat     TEXT NOT NULL,
+            ts       REAL NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS dedupe_temp(
-            fp TEXT PRIMARY KEY, plat TEXT NOT NULL,
-            cupons TEXT, alma TEXT, camp TEXT,
-            asin TEXT, id_prod TEXT, benef TEXT, ts REAL NOT NULL);
+            fp      TEXT PRIMARY KEY,
+            plat    TEXT NOT NULL,
+            cupons  TEXT,
+            alma    TEXT,
+            camp    TEXT,
+            asin    TEXT,
+            id_prod TEXT,
+            benef   TEXT,
+            ts      REAL NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS saturacao(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            plat TEXT NOT NULL, sku TEXT, ts REAL NOT NULL);
+            id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            plat TEXT    NOT NULL,
+            sku  TEXT,
+            ts   REAL    NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS scheduler(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            plat TEXT NOT NULL, hora INTEGER NOT NULL,
-            score REAL DEFAULT 1.0, ts REAL NOT NULL);
+            id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            plat  TEXT    NOT NULL,
+            hora  INTEGER NOT NULL,
+            score REAL    DEFAULT 1.0,
+            ts    REAL    NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS short_links(
             code TEXT PRIMARY KEY,
             url  TEXT NOT NULL,
             ts   REAL NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_sl_code ON short_links(code);
-        CREATE INDEX IF NOT EXISTS idx_lc_plat ON links_cache(plat);
-        CREATE INDEX IF NOT EXISTS idx_dt_plat ON dedupe_temp(plat,ts);
-        CREATE INDEX IF NOT EXISTS idx_dt_asin ON dedupe_temp(asin);
-        CREATE INDEX IF NOT EXISTS idx_dt_id   ON dedupe_temp(id_prod);
-        CREATE INDEX IF NOT EXISTS idx_sat     ON saturacao(plat,ts);
-        CREATE INDEX IF NOT EXISTS idx_sch     ON scheduler(plat,hora);
+        CREATE TABLE IF NOT EXISTS oferta_estado(
+            identity    TEXT    PRIMARY KEY,
+            msg_id_dest INTEGER NOT NULL,
+            score       INTEGER NOT NULL DEFAULT 0,
+            texto       TEXT    NOT NULL DEFAULT '',
+            plat        TEXT    NOT NULL DEFAULT '',
+            ts          REAL    NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_lc_plat    ON links_cache(plat);
+        CREATE INDEX IF NOT EXISTS idx_lc_ts      ON links_cache(ts);
+        CREATE INDEX IF NOT EXISTS idx_dt_plat    ON dedupe_temp(plat,ts);
+        CREATE INDEX IF NOT EXISTS idx_dt_asin    ON dedupe_temp(asin);
+        CREATE INDEX IF NOT EXISTS idx_dt_id      ON dedupe_temp(id_prod);
+        CREATE INDEX IF NOT EXISTS idx_sat        ON saturacao(plat,ts);
+        CREATE INDEX IF NOT EXISTS idx_sch        ON scheduler(plat,hora);
+        CREATE INDEX IF NOT EXISTS idx_sl_code    ON short_links(code);
+        CREATE INDEX IF NOT EXISTS idx_oe_identity ON oferta_estado(identity);
+        CREATE INDEX IF NOT EXISTS idx_oe_plat    ON oferta_estado(plat);
     """)
+
+    # Migração segura — adiciona colunas se não existirem
     for tabela, col, tipo in [
-        ("dedupe_temp","benef","TEXT"),
-        ("dedupe_temp","asin","TEXT"),
-        ("dedupe_temp","id_prod","TEXT"),
+        ("dedupe_temp", "benef",   "TEXT"),
+        ("dedupe_temp", "asin",    "TEXT"),
+        ("dedupe_temp", "id_prod", "TEXT"),
     ]:
-        try: _db_conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {col} {tipo}")
-        except sqlite3.OperationalError: pass
+        try:
+            _db_conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {col} {tipo}")
+        except sqlite3.OperationalError:
+            pass
+
     log_db.info(f"🗄 DB ON | {_DB_PATH}")
+
 
 @contextmanager
 def _db():
     with _db_lock:
-        try: yield _db_conn
-        except sqlite3.Error as e: log_db.error(f"❌ DB: {e}"); raise
+        try:
+            yield _db_conn
+        except sqlite3.Error as e:
+            log_db.error(f"❌ DB: {e}"); raise
+
+
+# ── links_cache ──────────────────────────────────────────────────────────────
 
 def db_get_link(url: str) -> Optional[str]:
     try:
+        url = _cache_key(url)
         with _db() as db:
             row = db.execute(
-                "SELECT url_conv FROM links_cache WHERE url_orig=?", (url,)
+                "SELECT url_conv FROM links_cache WHERE url_orig=?",
+                (url,)
             ).fetchone()
             if row:
-                # Renova timestamp — link ativo não some
                 db.execute(
                     "UPDATE links_cache SET ts=? WHERE url_orig=?",
                     (time.time(), url)
@@ -187,14 +236,18 @@ def db_get_link(url: str) -> Optional[str]:
 
 def db_set_link(url_orig: str, url_conv: str, plat: str):
     try:
+        url_orig = _cache_key(url_orig)
         with _db() as db:
             db.execute(
-                "INSERT OR REPLACE INTO links_cache(url_orig,url_conv,plat,ts)VALUES(?,?,?,?)",
+                "INSERT OR REPLACE INTO links_cache"
+                "(url_orig,url_conv,plat,ts) VALUES(?,?,?,?)",
                 (url_orig, url_conv, plat, time.time())
             )
     except Exception as e:
         log_db.error(f"❌ db_set_link: {e}")
 
+
+# ── dedupe_temp ──────────────────────────────────────────────────────────────
 
 def db_get_dedupe(fp: str) -> Optional[dict]:
     try:
@@ -205,85 +258,81 @@ def db_get_dedupe(fp: str) -> Optional[dict]:
                 "FROM dedupe_temp WHERE fp=? AND ts>=?",
                 (fp, limite)
             ).fetchone()
-
         if row:
             return {
-                "plat": row[0],
-                "cupons": json.loads(row[1] or "[]"),
-                "alma": row[2],
-                "camp": row[3],
-                "asin": row[4] or "",
+                "plat":    row[0],
+                "cupons":  json.loads(row[1] or "[]"),
+                "alma":    row[2],
+                "camp":    row[3],
+                "asin":    row[4] or "",
                 "id_prod": row[5] or "",
-                "benef": json.loads(row[6] or "[]"),
-                "ts": row[7],
+                "benef":   json.loads(row[6] or "[]"),
+                "ts":      row[7],
             }
     except Exception as e:
         log_db.error(f"❌ db_get_dedupe: {e}")
-
     return None
 
-
 def db_set_dedupe(fp: str, plat: str, cupons: list, alma: str,
-                  camp: str, asin: str = "", id_prod: str = "", benef: list = None):
+                  camp: str, asin: str = "", id_prod: str = "",
+                  benef: list = None):
     try:
         with _db() as db:
             db.execute(
-                "INSERT OR REPLACE INTO dedupe_temp "
-                "(fp,plat,cupons,alma,camp,asin,id_prod,benef,ts)VALUES(?,?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO dedupe_temp"
+                "(fp,plat,cupons,alma,camp,asin,id_prod,benef,ts)"
+                "VALUES(?,?,?,?,?,?,?,?,?)",
                 (
-                    fp,
-                    plat,
-                    json.dumps(cupons or []),
-                    alma or "",
-                    camp or "geral",
-                    asin or "",
+                    fp, plat,
+                    json.dumps(cupons  or []),
+                    alma   or "",
+                    camp   or "geral",
+                    asin   or "",
                     id_prod or "",
                     json.dumps(benef or []),
                     time.time(),
-                ),
+                )
             )
     except Exception as e:
         log_db.error(f"❌ db_set_dedupe: {e}")
 
-
-def db_buscar_janela_rapida(plat: str, janela: float = 600) -> list:
+def db_buscar_janela_rapida(plat: str, janela: float = 900) -> list:
     try:
         limite = time.time() - janela
         with _db() as db:
             rows = db.execute(
                 "SELECT fp,cupons,alma,asin,id_prod,benef,ts "
                 "FROM dedupe_temp WHERE plat=? AND ts>=? ORDER BY ts DESC",
-                (plat, limite),
+                (plat, limite)
             ).fetchall()
-
         return [
             {
-                "fp": r[0],
-                "cupons": json.loads(r[1] or "[]"),
-                "alma": r[2] or "",
-                "asin": r[3] or "",
+                "fp":      r[0],
+                "cupons":  json.loads(r[1] or "[]"),
+                "alma":    r[2] or "",
+                "asin":    r[3] or "",
                 "id_prod": r[4] or "",
-                "benef": json.loads(r[5] or "[]"),
-                "ts": r[6],
+                "benef":   json.loads(r[5] or "[]"),
+                "ts":      r[6],
             }
             for r in rows
         ]
-
     except Exception as e:
         log_db.error(f"❌ db_janela: {e}")
         return []
 
 
+# ── saturacao ────────────────────────────────────────────────────────────────
+
 def db_registrar_sat(plat: str, sku: str = ""):
     try:
         with _db() as db:
             db.execute(
-                "INSERT INTO saturacao(plat,sku,ts)VALUES(?,?,?)",
-                (plat, sku or "", time.time()),
+                "INSERT INTO saturacao(plat,sku,ts) VALUES(?,?,?)",
+                (plat, sku or "", time.time())
             )
     except Exception as e:
         log_db.error(f"❌ db_sat: {e}")
-
 
 def db_count_sat(plat: str, janela: float = 1800) -> int:
     try:
@@ -291,35 +340,114 @@ def db_count_sat(plat: str, janela: float = 1800) -> int:
         with _db() as db:
             row = db.execute(
                 "SELECT COUNT(*) FROM saturacao WHERE plat=? AND ts>=?",
-                (plat, limite),
+                (plat, limite)
             ).fetchone()
-
         return row[0] if row else 0
-
     except Exception as e:
         log_db.error(f"❌ db_count_sat: {e}")
         return 0
 
+
+# ── oferta_estado (sistema evolutivo) ────────────────────────────────────────
+
+def db_get_estado(identity: str) -> Optional[dict]:
+    try:
+        with _db() as db:
+            row = db.execute(
+                "SELECT msg_id_dest,score,texto,plat,ts "
+                "FROM oferta_estado WHERE identity=?",
+                (identity,)
+            ).fetchone()
+        if row:
+            return {
+                "msg_id_dest": row[0],
+                "score":       row[1],
+                "texto":       row[2],
+                "plat":        row[3],
+                "ts":          row[4],
+            }
+    except Exception as e:
+        log_db.error(f"❌ db_get_estado: {e}")
+    return None
+
+def db_set_estado(identity: str, msg_id_dest: int,
+                  score: int, texto: str, plat: str):
+    try:
+        with _db() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO oferta_estado"
+                "(identity,msg_id_dest,score,texto,plat,ts)"
+                "VALUES(?,?,?,?,?,?)",
+                (identity, msg_id_dest, score, texto, plat, time.time())
+            )
+    except Exception as e:
+        log_db.error(f"❌ db_set_estado: {e}")
+
+
+# ── short_links (encurtador próprio Magalu) ──────────────────────────────────
+
+def db_get_short(code: str) -> Optional[str]:
+    try:
+        with _db() as db:
+            row = db.execute(
+                "SELECT url FROM short_links WHERE code=?",
+                (code,)
+            ).fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        log_db.error(f"❌ db_get_short: {e}")
+    return None
+
+def db_set_short(code: str, url: str):
+    try:
+        with _db() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO short_links(code,url,ts) VALUES(?,?,?)",
+                (code, url, time.time())
+            )
+    except Exception as e:
+        log_db.error(f"❌ db_set_short: {e}")
+
+
+# ── limpeza geral ─────────────────────────────────────────────────────────────
+
 def db_limpar():
     try:
         agora = time.time()
-        TTL_LINK_INATIVO = 7 * 86400  # 7 dias sem uso → apaga
         with _db() as db:
-            db.execute("DELETE FROM dedupe_temp WHERE ts<?", (agora - TTL_DEDUPE,))
-            db.execute("DELETE FROM saturacao WHERE ts<?", (agora - TTL_DEDUPE,))
-            db.execute("DELETE FROM scheduler WHERE ts<?", (agora - TTL_SCHEDULER,))
-            # Links: apaga só os que não foram usados há 7 dias
-            db.execute("DELETE FROM links_cache WHERE ts<?", (agora - TTL_LINK_INATIVO,))
+            db.execute("DELETE FROM dedupe_temp  WHERE ts<?",
+                       (agora - TTL_DEDUPE,))
+            db.execute("DELETE FROM saturacao    WHERE ts<?",
+                       (agora - TTL_DEDUPE,))
+            db.execute("DELETE FROM scheduler    WHERE ts<?",
+                       (agora - TTL_SCHEDULER,))
+            db.execute("DELETE FROM links_cache  WHERE ts<?",
+                       (agora - TTL_LINK_INATIVO,))
+            db.execute("DELETE FROM oferta_estado WHERE ts<?",
+                       (agora - 30 * 86400,))
+
+        # Limita caches em memória
         global _raw_cache, _final_cache
         if len(_raw_cache) > 3000:
-            keys = list(_raw_cache.keys())[:1000]
-            for k in keys: del _raw_cache[k]
+            for k in list(_raw_cache.keys())[:1000]:
+                del _raw_cache[k]
         if len(_final_cache) > 3000:
-            keys = list(_final_cache.keys())[:1000]
-            for k in keys: del _final_cache[k]
+            for k in list(_final_cache.keys())[:1000]:
+                del _final_cache[k]
+
         log_db.debug("🗑 Limpeza temp OK")
     except Exception as e:
         log_db.error(f"❌ db_limpar: {e}")
+
+def _db_count_links() -> int:
+    try:
+        with _db() as db:
+            row = db.execute(
+                "SELECT COUNT(*) FROM links_cache"
+            ).fetchone()
+            return row[0] if row else 0
+    except Exception:
+        return 0
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMADA 1 — INGESTÃO / EXTRAÇÃO
@@ -1470,6 +1598,52 @@ def _normalizar_valor(t: str) -> str:
     vals = re.findall(r'r\$\s*([\d.,]+)', t, re.I)
     return "|".join(sorted(v.replace('.','').replace(',','.') for v in vals))
 
+# ── Score evolutivo ───────────────────────────────────────────────────────────
+
+def calcular_score(norm) -> int:
+    """
+    Calcula score de riqueza da mensagem.
+    Quanto maior, mais informação útil para o usuário.
+    Usado para decidir se edita mensagem já enviada.
+    """
+    texto = norm.texto_limpo
+    score = 0
+
+    # Link de produto presente
+    if norm.mapa:                                          score += 3
+    # Preço explícito
+    if re.search(r'r\$\s*[\d.,]+', texto, re.I):          score += 2
+    # Cupom com código
+    if norm.cupom:                                         score += 2
+    # Desconto percentual
+    if re.search(r'\d+\s*%\s*off', texto, re.I):          score += 2
+    # Valor de desconto explícito
+    if re.search(r'r\$\s*[\d.,]+\s*off', texto, re.I):    score += 2
+    # Mínimo de compra
+    if re.search(r'(acima|mínimo|min)\s+de\s+r\$', texto, re.I): score += 1
+    # Frete grátis
+    if re.search(r'frete\s+gr[aá]t', texto, re.I):        score += 1
+    # Imagem disponível
+    if norm.tem_midia:                                     score += 1
+    # Tem SKU identificado
+    if norm.sku:                                           score += 1
+
+    return score
+
+def identidade_canonica(norm) -> str:
+    """
+    Gera chave única e estável para a oferta.
+    Mesma oferta = mesma chave, independente de variação de texto ou link.
+    """
+    # Prioridade: ID estruturado > cupom > texto normalizado
+    if norm.ids_globais:
+        return f"{norm.plat}|{norm.ids_globais[0]}"
+    if norm.cupom:
+        return f"{norm.plat}|cup|{norm.cupom}"
+    # Fallback: hash do texto normalizado
+    alma_v = _alma(norm.texto_limpo)
+    return f"{norm.plat}|txt|{_fp4(alma_v)}"
+
 def deve_enviar(norm: MensagemNormalizada) -> bool:
     try:
         texto  = norm.texto_limpo
@@ -1869,113 +2043,214 @@ async def _resolver_imagem(norm: MensagemNormalizada) -> object:
     return None
     
 # ═══════════════════════════════════════════════════════════════════════════════
-# CAMADA 6 — ENVIO (OUTPUT)
-# Responsabilidade: enviar no Telegram. NÃO pensa em lógica nenhuma.
+# CAMADA 6 — ENVIO
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_RATE_LOCK:    asyncio.Lock = None  # type: ignore
+_SEM_ENVIO     = asyncio.Semaphore(3)
 _IDS_PROC:     set          = set()
 _IDS_LOCK:     asyncio.Lock = None  # type: ignore
+_RATE_LOCK:    asyncio.Lock = None  # type: ignore
 _ULTIMO_ENV_TS = 0.0
 
-def _intervalo_atual() -> float:
-    return 0.5 if 8 <= int(time.strftime("%H")) < 22 else 1.0
-
+# Rate limit removido — sem espera entre envios
 async def _rate_limit():
-    global _ULTIMO_ENV_TS
-    async with _RATE_LOCK:
-        agora  = time.monotonic()
-        espera = _intervalo_atual() - (agora - _ULTIMO_ENV_TS)
-        if espera > 0: await asyncio.sleep(espera)
-        _ULTIMO_ENV_TS = time.monotonic()
+    pass  # removido por solicitação
 
 async def _marcar(msg_id: int):
     async with _IDS_LOCK:
         _IDS_PROC.add(msg_id)
         if len(_IDS_PROC) > 5000:
-            for _ in range(len(_IDS_PROC) - 4000): _IDS_PROC.pop()
+            for _ in range(len(_IDS_PROC) - 4000):
+                _IDS_PROC.pop()
 
 async def _foi_processado(msg_id: int) -> bool:
     async with _IDS_LOCK: return msg_id in _IDS_PROC
-
 
 async def _enviar_msg(texto: str, img) -> object:
     if img:
         if len(texto) <= 1024:
             try:
-                return await client.send_file(GRUPO_DESTINO, img,
-                    caption=texto, parse_mode="md", force_document=False)
+                return await client.send_file(
+                    GRUPO_DESTINO, img,
+                    caption=texto, parse_mode="md",
+                    force_document=False
+                )
             except Exception as e:
                 log_out.warning(f"⚠️ send_file+caption: {e}")
                 try:
-                    await client.send_file(GRUPO_DESTINO, img, force_document=False)
-                    return await client.send_message(GRUPO_DESTINO, texto, parse_mode="md", link_preview=True)
-                except Exception as e2: log_out.warning(f"⚠️ send_file sem caption: {e2}")
+                    await client.send_file(
+                        GRUPO_DESTINO, img, force_document=False)
+                    return await client.send_message(
+                        GRUPO_DESTINO, texto,
+                        parse_mode="md", link_preview=True)
+                except Exception as e2:
+                    log_out.warning(f"⚠️ send_file sem caption: {e2}")
         else:
             try:
-                await client.send_file(GRUPO_DESTINO, img, force_document=False)
-                return await client.send_message(GRUPO_DESTINO, texto, parse_mode="md", link_preview=False)
-            except Exception as e: log_out.warning(f"⚠️ send_file longo: {e}")
-    return await client.send_message(GRUPO_DESTINO, texto, parse_mode="md", link_preview=True)
+                await client.send_file(
+                    GRUPO_DESTINO, img, force_document=False)
+                return await client.send_message(
+                    GRUPO_DESTINO, texto,
+                    parse_mode="md", link_preview=False)
+            except Exception as e:
+                log_out.warning(f"⚠️ send_file longo: {e}")
+    return await client.send_message(
+        GRUPO_DESTINO, texto,
+        parse_mode="md", link_preview=True)
 
+async def enviar(montada: MensagemMontada, norm=None) -> bool:
+    """
+    Envio com sistema evolutivo de score.
 
-async def enviar(montada: MensagemMontada) -> bool:
-    """Envia mensagem nova. Retorna True em sucesso."""
-    await _rate_limit()
+    Fluxo:
+    1. Calcula identidade canônica e score
+    2. Verifica estado existente no banco
+    3. Se não existe → envia normalmente
+    4. Se existe e score maior → edita mensagem anterior
+    5. Se existe e score menor/igual → ignora (não duplica)
+    """
     async with _SEM_ENVIO:
         loop = asyncio.get_event_loop()
-        sent = None
+
+        # Calcula identidade e score se norm disponível
+        identity = None
+        score    = 0
+        if norm is not None:
+            identity = identidade_canonica(norm)
+            score    = calcular_score(norm)
+
+            # Verifica estado evolutivo
+            estado = db_get_estado(identity)
+            if estado:
+                if score > estado["score"]:
+                    # Versão melhor chegou → edita mensagem existente
+                    log_out.info(
+                        f"✳️ [EVOLUI] {identity} "
+                        f"score {estado['score']}→{score}"
+                    )
+                    ok = await editar_por_id(
+                        estado["msg_id_dest"], montada.texto,
+                        montada.imagem
+                    )
+                    if ok:
+                        db_set_estado(
+                            identity, estado["msg_id_dest"],
+                            score, montada.texto, montada.plat
+                        )
+                    return ok
+                else:
+                    # Versão igual ou pior → ignora sem duplicar
+                    log_out.info(
+                        f"🔁 [SCORE IGUAL/MENOR] {identity} "
+                        f"score atual={score} salvo={estado['score']}"
+                    )
+                    return True
+
+        # Não existe estado → envia normalmente
         img  = montada.imagem
+        sent = None
         for t in range(1, 4):
-            try: sent = await _enviar_msg(montada.texto, img); break
-            except FloodWaitError as e: await asyncio.sleep(e.seconds)
+            try:
+                sent = await _enviar_msg(montada.texto, img)
+                break
+            except FloodWaitError as e:
+                await asyncio.sleep(e.seconds)
             except Exception as e:
                 log_out.error(f"❌ envio t={t}: {e}")
                 if t == 1: img = None
                 elif t < 3: await asyncio.sleep(2 ** t)
-        if not sent: log_out.error(f"❌ Envio falhou | @{montada.chat}"); return False
 
+        if not sent:
+            log_out.error(f"❌ Envio falhou | @{montada.chat}")
+            return False
+
+        # Salva mapa origem→destino
         mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
         mp[str(montada.msg_id)] = sent.id
-        try: await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
-        except Exception as e: log_sys.error(f"❌ salvar_mapa: {e}")
+        try:
+            await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
+        except Exception as e:
+            log_sys.error(f"❌ salvar_mapa: {e}")
 
         await _marcar(montada.msg_id)
         db_registrar_sat(montada.plat, montada.sku)
-        try: await _burst_add()
-        except Exception: pass
+        try:
+            await _burst_add()
+        except Exception:
+            pass
 
-        # Agendamento edição Magalu (link curto em background)
+        # Salva estado evolutivo
+        if identity is not None:
+            db_set_estado(identity, sent.id, score, montada.texto, montada.plat)
+
+        # Agenda encurtamento Magalu em background se necessário
         if montada.plat == "magalu" and montada.mapa:
             for orig, conv in montada.mapa.items():
-                if "partner_id" in conv and "cutt.ly" not in conv:
-                    try: asyncio.create_task(_cuttly_background(conv, montada.msg_id))
-                    except Exception: pass
+                if "partner_id" in conv and "leoind.com.br" not in conv:
+                    try:
+                        asyncio.create_task(
+                            _cuttly_background(conv, montada.msg_id))
+                    except Exception:
+                        pass
 
-        log_out.info(f"🚀 [OK] @{montada.chat}→{GRUPO_DESTINO} | {montada.msg_id}→{sent.id} | {montada.plat.upper()} sku={montada.sku}")
+        log_out.info(
+            f"🚀 [OK] @{montada.chat}→{GRUPO_DESTINO} | "
+            f"{montada.msg_id}→{sent.id} | "
+            f"{montada.plat.upper()} score={score} sku={montada.sku}"
+        )
         return True
 
 
 async def editar(msg_id_origem: int, texto_novo: str) -> bool:
-    """Edita mensagem já enviada."""
+    """Edita mensagem por ID de origem (usado pelo pipeline de edição)."""
     loop = asyncio.get_event_loop()
     mp   = await loop.run_in_executor(_EXECUTOR, ler_mapa)
     id_d = mp.get(str(msg_id_origem))
     if not id_d: return False
-    await _rate_limit()
+    return await editar_por_id(id_d, texto_novo)
+
+
+async def editar_por_id(
+    msg_id_dest: int,
+    texto_novo: str,
+    imagem_nova=None
+) -> bool:
+    """
+    Edita mensagem no grupo destino por ID de destino.
+    Suporta edição de texto e imagem.
+    """
     async with _SEM_ENVIO:
         for t in range(1, 4):
             try:
-                await client.edit_message(GRUPO_DESTINO, id_d, texto_novo, parse_mode="md")
-                log_out.info(f"✏️ Editado | dest_id={id_d}")
+                if imagem_nova:
+                    # Edita com nova imagem
+                    try:
+                        await client.edit_message(
+                            GRUPO_DESTINO, msg_id_dest,
+                            texto_novo, parse_mode="md",
+                            file=imagem_nova
+                        )
+                    except Exception:
+                        # Fallback: edita só texto
+                        await client.edit_message(
+                            GRUPO_DESTINO, msg_id_dest,
+                            texto_novo, parse_mode="md"
+                        )
+                else:
+                    await client.edit_message(
+                        GRUPO_DESTINO, msg_id_dest,
+                        texto_novo, parse_mode="md"
+                    )
+                log_out.info(f"✏️ Editado | dest_id={msg_id_dest}")
                 return True
-            except MessageNotModifiedError: return True
-            except FloodWaitError as e: await asyncio.sleep(e.seconds)
+            except MessageNotModifiedError:
+                return True
+            except FloodWaitError as e:
+                await asyncio.sleep(e.seconds)
             except Exception as e:
                 log_out.error(f"❌ edit t={t}: {e}")
                 if t < 3: await asyncio.sleep(2 ** t)
     return False
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ORCHESTRATOR + FILA
@@ -2091,37 +2366,57 @@ async def _pipeline(event, is_edit: bool = False):
         if str(msg_id) not in mp: return
 
     # ── Camada 1: Ingestão ──────────────────────────────────────────
-    try: bruta = ingerir(event)
-    except Exception as e: log_sys.error(f"❌ ingestao: {e}"); return
+    try:
+        bruta = ingerir(event)
+    except Exception as e:
+        log_sys.error(f"❌ ingestao: {e}"); return
 
-    log_sys.info(f"{'✏️' if is_edit else '📩'} @{bruta.chat} | id={msg_id} | q={len(_buf)} w={_w_ativos}")
+    log_sys.info(
+        f"{'✏️' if is_edit else '📩'} @{bruta.chat} | "
+        f"id={msg_id} | q={len(_buf)} w={_w_ativos}"
+    )
 
     # ── Camadas 2+3: Classificação + Normalização ───────────────────
-    try: norm = await normalizar(bruta)
-    except Exception as e: log_sys.error(f"❌ normalizar: {e}"); return
+    try:
+        norm = await normalizar(bruta)
+    except Exception as e:
+        log_sys.error(f"❌ normalizar: {e}"); return
     if norm is None: return
 
-    # ── Camada 4: Deduplicação ──────────────────────────────────────
+    # ── Camada 4: Deduplicação + Score evolutivo ────────────────────
     if not is_edit:
         try:
-            if not deve_enviar(norm): return
-        except Exception as e: log_sys.error(f"❌ deve_enviar: {e}"); return
+            if not await deve_enviar_async(norm): return
+        except Exception as e:
+            log_sys.error(f"❌ deve_enviar: {e}"); return
 
         try:
             delay = await delay_saturacao(norm.plat, norm.texto_limpo)
             if delay > 0: await asyncio.sleep(delay)
-        except Exception as e: log_sys.error(f"❌ saturacao: {e}")
+        except Exception as e:
+            log_sys.error(f"❌ saturacao: {e}")
 
     # ── Camada 5: Montagem ──────────────────────────────────────────
-    try: montada = await montar(norm)
-    except Exception as e: log_sys.error(f"❌ montar: {e}"); return
+    try:
+        montada = await montar(norm)
+    except Exception as e:
+        log_sys.error(f"❌ montar: {e}"); return
 
     # ── Camada 6: Envio ─────────────────────────────────────────────
     if is_edit:
+        # Edição: verifica se imagem também mudou
+        if norm.tem_midia:
+            img_nova = await preparar_imagem_tg(norm.media_obj)
+            if img_nova:
+                loop = asyncio.get_event_loop()
+                mp   = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+                id_d = mp.get(str(msg_id))
+                if id_d:
+                    await editar_por_id(id_d, montada.texto, img_nova)
+                    return
         await editar(msg_id, montada.texto)
     else:
-        await enviar(montada)
-
+        await enviar(montada, norm=norm)
 
 async def processar(event, is_edit: bool = False):
     await _enfileirar(event, is_edit)
@@ -2150,7 +2445,6 @@ async def _health_check():
                         f"anti-loop={len(_IDS_PROC)} | fila={len(_buf)} w={_w_ativos} | "
                         f"PIL={'OK' if _PIL_OK else 'OFF'}")
         except Exception as e: log_hc.error(f"❌ Health: {e}", exc_info=True)
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INICIALIZAÇÃO
