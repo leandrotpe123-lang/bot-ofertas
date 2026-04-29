@@ -556,10 +556,11 @@ _P_AMZ_ASIN=[
 
 @dataclass
 class LinkClassificado:
-    url_original:str
-    plat:Optional[str]
-    tipo:Optional[str]
-    sku:str
+    url_original: str
+    plat: Optional[str]
+    tipo: Optional[str]
+    sku: str
+    id_global: str = ""
 
 def _netloc(url:str)->str:
     try:
@@ -622,7 +623,13 @@ def classificar_url(url:str)->LinkClassificado:
                   "lista" if "/l/" in p.path else
                   "selecao" if "/selecao/" in p.path else
                   "campanha")
-            return LinkClassificado(url,"magalu",tipo,sku)
+            return LinkClassificado(
+    url_original=url,
+    plat="magalu",
+    tipo=tipo,
+    sku=sku,
+    id_global=f"mgl:{sku}" if sku else ""
+            )
 
     for d in _AMZ_DOMINIOS:
         if nl==d or nl.endswith("."+d):
@@ -633,14 +640,26 @@ def classificar_url(url:str)->LinkClassificado:
                   "busca" if re.search(r'/s[/?]|/deals|/b[/?]',p.path) else
                   "evento" if re.search(r'/events/|/stores/',p.path) else
                   "campanha")
-            return LinkClassificado(url,"amazon",tipo,asin)
+            return LinkClassificado(
+    url_original=url,
+    plat="amazon",
+    tipo=tipo,
+    sku=asin,
+    id_global=f"amz:{asin}" if asin else ""
+            )
 
     for d in _SHP_DOMINIOS:
         if nl==d or nl.endswith("."+d):
             if nl=="flapremios.com.br":
                 return LinkClassificado(url,"shopee","campanha","")
             sku=_extrair_sku_shopee(p)
-            return LinkClassificado(url,"shopee","produto" if sku else "busca",sku)
+            return LinkClassificado(
+    url_original=url,
+    plat="shopee",
+    tipo="produto" if sku else "busca",
+    sku=sku,
+    id_global=f"shp:{sku}" if sku else ""
+            )
 
     for d in _ENCURTADORES:
         if nl==d or nl.endswith("."+d):
@@ -1571,13 +1590,14 @@ async def normalizar(bruta: MensagemBruta) -> Optional[MensagemNormalizada]:
     )
 
     # Coleta ids_globais
-    ids_globais: List[str] = []
-    for orig in mapa:
-        lc = _classificar_cached(orig)
-        if lc.id_global and lc.id_global not in ids_globais:
-            ids_globais.append(lc.id_global)
-    if sku and sku not in ids_globais:
-        ids_globais.append(sku)
+ids_globais: List[str] = []
+for orig in mapa:
+    lc = _classificar_cached(orig)
+    if lc.sku and lc.sku not in ids_globais:
+        ids_globais.append(lc.sku)
+
+if sku and sku not in ids_globais:
+    ids_globais.append(sku)
 
     # Detecta estado do evento
     estado = EstadoEvento.NEW
