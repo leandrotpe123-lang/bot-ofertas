@@ -1987,15 +1987,19 @@ def montar_texto(norm: MensagemNormalizada) -> str:
     return "\n".join(saida).strip()
 
 @dataclass
-class MensagemMontada:
+class MensagemNormalizada:
     msg_id:        int
     chat:          str
-    plat:          str
-    sku:           str
-    texto:         str
-    imagem:        object
+    texto_limpo:   str
     mapa:          Dict[str, str]
-    msg_id_origem: int
+    preservar:     List[str]
+    plat:          str
+    cupom:         str
+    sku:           str
+    tem_midia:     bool
+    media_obj:     object
+    estado_evento: EstadoEvento   = EstadoEvento.NEW
+    ids_globais:   List[str]      = field(default_factory=list)
 
 async def montar(norm: MensagemNormalizada) -> MensagemMontada:
     texto  = montar_texto(norm)
@@ -2133,58 +2137,41 @@ async def preparar_imagem_url(url: str) -> Optional[object]:
     return None
 
 async def _resolver_imagem(norm: MensagemNormalizada) -> object:
-    eh_cupom      = bool(norm.cupom or _KW_CUPOM.search(norm.texto_limpo))
-    tem_link_prod = bool(norm.mapa)
+    """
+    Sistema evolutivo de imagem.
+    Não usa fallback de imagem padrão — o sistema de score/edição
+    trata isso automaticamente quando chegar versão melhor.
 
-    # ── CUPOM sem link de produto ─────────────────────────────────────
-    if eh_cupom and not tem_link_prod:
-        if norm.tem_midia:
-            img = await preparar_imagem_tg(norm.media_obj)
-            if img: return img
-        if norm.plat == "shopee" and os.path.exists(_IMG_SHP):
-            log_fmt.info("🖼 Fallback cupom Shopee")
-            return _IMG_SHP
-        if norm.plat == "amazon" and os.path.exists(_IMG_AMZ):
-            log_fmt.info("🖼 Fallback cupom Amazon")
-            return _IMG_AMZ
-        if norm.plat == "magalu" and os.path.exists(_IMG_MGL):
-            log_fmt.info("🖼 Fallback cupom Magalu")
-            return _IMG_MGL
-        log_fmt.warning(f"⚠️ Sem imagem fallback cupom {norm.plat}")
-        return None
+    OFERTA com mídia original → usa mídia
+    OFERTA com link → busca og:image
+    CUPOM com mídia original → usa mídia
+    CUPOM sem mídia → None (sem fallback — score evolutivo resolve)
+    """
+    eh_cupom = bool(norm.cupom or _KW_CUPOM.search(norm.texto_limpo))
 
-    # ── CUPOM com link de produto ─────────────────────────────────────
-    if eh_cupom and tem_link_prod:
-        if norm.tem_midia:
-            img = await preparar_imagem_tg(norm.media_obj)
-            if img: return img
-        for link in norm.mapa.values():
-            if not link.startswith("http"): continue
-            img_url = await buscar_imagem_produto(link)
-            if img_url:
-                img = await preparar_imagem_url(img_url)
-                if img: return img
-        if norm.plat == "shopee" and os.path.exists(_IMG_SHP): return _IMG_SHP
-        if norm.plat == "amazon" and os.path.exists(_IMG_AMZ): return _IMG_AMZ
-        if norm.plat == "magalu" and os.path.exists(_IMG_MGL): return _IMG_MGL
-        return None
-
-    # ── OFERTA (produto sem cupom) ────────────────────────────────────
+    # Mídia original sempre primeira opção para qualquer tipo
     if norm.tem_midia:
         img = await preparar_imagem_tg(norm.media_obj)
         if img:
             log_fmt.debug("🖼 Mídia original")
             return img
-    if tem_link_prod:
+
+    # Cupom sem mídia → None, score evolutivo vai editar quando chegar melhor
+    if eh_cupom:
+        log_fmt.debug("🖼 Cupom sem mídia → aguarda versão evolutiva")
+        return None
+
+    # Oferta com link → busca og:image
+    if norm.mapa:
         for link in norm.mapa.values():
             if not link.startswith("http"): continue
             img_url = await buscar_imagem_produto(link)
             if img_url:
                 img = await preparar_imagem_url(img_url)
-                if img: return img
-    if norm.plat == "shopee" and os.path.exists(_IMG_SHP): return _IMG_SHP
-    if norm.plat == "amazon" and os.path.exists(_IMG_AMZ): return _IMG_AMZ
-    if norm.plat == "magalu" and os.path.exists(_IMG_MGL): return _IMG_MGL
+                if img:
+                    log_fmt.info(f"🖼 og:image: {img_url[:60]}")
+                    return img
+
     return None
     
 # ═══════════════════════════════════════════════════════════════════════════════
