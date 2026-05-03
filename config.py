@@ -1,0 +1,77 @@
+"""Configuração central — variáveis de ambiente, constantes, grupos."""
+from __future__ import annotations
+import concurrent.futures
+import os
+from typing import Optional
+import asyncio
+
+# ── Telegram ──────────────────────────────────────────────────────
+API_ID         = int(os.environ.get("API_ID", 0))
+API_HASH       = os.environ.get("API_HASH", "")
+SESSION_STRING = os.environ.get("TELEGRAM_SESSION", "")
+GRUPOS_ORIGEM  = [
+    "promotom", "fumotom", "botofera", "fadadoscupons",
+    "SamuelF3lipePromo", "paraseubaby", "fadapromos",
+]
+GRUPO_DESTINO  = "@ofertap"
+
+# ── Afiliados ─────────────────────────────────────────────────────
+_AMZ_TAG     = os.environ.get("AMAZON_TAG",         "leo21073-20")
+_SHP_APP_ID  = os.environ.get("SHOPEE_APP_ID",      "18348480261")
+_SHP_SECRET  = os.environ.get("SHOPEE_SECRET",      "")
+_MGL_PARTNER = os.environ.get("MAGALU_PARTNER_ID",  "3440")
+_MGL_PROMOTER= os.environ.get("MAGALU_PROMOTER_ID", "5479317")
+_MGL_PID     = os.environ.get("MAGALU_PID",         "magazinevoce")
+_MGL_SLUG    = os.environ.get("MAGALU_SLUG",        "magazineleo12")
+_CUTTLY_KEY  = os.environ.get("CUTTLY_API_KEY",     "")
+
+# ── Encurtador próprio ────────────────────────────────────────────
+_RAILWAY_DOMAIN = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+_SHORT_BASE = f"https://{_RAILWAY_DOMAIN}" if _RAILWAY_DOMAIN else "https://leoind.com.br"
+
+# ── HTTP ──────────────────────────────────────────────────────────
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.3 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36",
+]
+
+# ── Executor ──────────────────────────────────────────────────────
+_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+# ── Semáforos (inicializados em globals._init_globals) ────────────
+# Declarados aqui como None; atribuídos no loop correto.
+_SEM_ENVIO: Optional[asyncio.Semaphore] = None
+_SEM_HTTP:  Optional[asyncio.Semaphore] = None
+
+# ── Persistência JSON ─────────────────────────────────────────────
+ARQUIVO_MAPEAMENTO = "map_mensagens.json"
+
+# ── DB ────────────────────────────────────────────────────────────
+_DB_PATH         = "foguetao.db"
+CACHE_TTL        = 86400
+TTL_DEDUPE       = 86400
+TTL_SCHEDULER    = 30 * 86400
+TTL_LINK_INATIVO = 7 * 86400
+
+# ── Pillow ────────────────────────────────────────────────────────
+try:
+    from PIL import Image  # noqa: F401
+    _PIL_OK = True
+except ImportError:
+    _PIL_OK = False
+
+# ── Constantes de publicação (usadas pelo orchestrator e publicacao) ─
+_JANELA_DISPUTA_S = 90.0   # janela de disputa entre grupos (segundos)
+_MAX_EDITS        = 2      # máximo de edições por evento
+
+# ── Código morto sinalizado (NÃO remover ainda) ───────────────────
+# _SHADOW_FRASES: lista de frases fixas de engajamento.
+# Substituída pela captura de comentários reais dos grupos.
+# Mantida aqui para referência histórica.
+_SHADOW_FRASES = [
+    "Precin 🔥", "Bom preço 👀", "Tá barato esse 🛒", "Queimando estoque 🚨",
+    "Melhor preço do mês 💥", "Relâmpago! ⚡", "Tá voando 🔥", "Imperdível esse 🎯",
+    "Preço absurdo 😱", "Que desconto 🤑",
+]
+
