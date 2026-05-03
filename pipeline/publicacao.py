@@ -127,38 +127,64 @@ async def enviar(montada: MensagemMontada,
             identity = identidade_canonica(norm)
             score    = calcular_score(norm)
             estado   = db_get_estado(identity)
+
             if estado:
                 agora       = time.time()
                 na_janela   = agora < (estado.get("janela_fim", 0) or 0)
                 lider_atual = estado.get("lider", "") or ""
                 edit_count  = estado.get("edit_count", 0) or 0
                 msg_id_dest = estado["msg_id_dest"]
+                texto_atual = estado.get("texto", "") or ""
 
+                # Líder travado fora da janela
                 if not na_janela and lider_atual and norm.chat != lider_atual:
-                    log_out.info(f"🔒 [LIDER_TRAVADO] {identity} lider={lider_atual} "
-                                 f"candidato={norm.chat}")
+                    log_out.info(f"🔒 [LIDER_TRAVADO] {identity} "
+                                 f"lider={lider_atual} candidato={norm.chat}")
                     return True
 
+                # Limite de edições
                 if edit_count >= _MAX_EDITS and not na_janela:
                     log_out.info(f"🔒 [MAX_EDITS] {identity} edits={edit_count}")
                     return True
 
+                # Score maior → EDITA (texto + imagem nova se houver)
                 if score > estado["score"]:
-                    log_out.info(f"✳️ [EVOLUI] {identity} score {estado['score']}→{score} "
-                                 f"{'(janela)' if na_janela else '(lider)'}")
-                    ok = await editar_por_id(msg_id_dest, montada.texto, montada.imagem)
+                    log_out.info(
+                        f"✳️ [EVOLUI] {identity} "
+                        f"score {estado['score']}→{score} "
+                        f"{'(janela)' if na_janela else '(lider)'} "
+                        f"chat={norm.chat} "
+                        f"img_nova={'sim' if montada.imagem else 'não'}"
+                    )
+                    ok = await editar_por_id(
+                        msg_id_dest, montada.texto, montada.imagem)
                     if ok:
-                        db_set_estado(identity, msg_id_dest, score, montada.texto,
-                                      montada.plat, norm.chat,
-                                      estado.get("janela_fim", 0), edit_count + 1,
-                                      estado.get("shadow_reply_id", 0))
+                        db_set_estado(
+                            identity, msg_id_dest, score, montada.texto,
+                            montada.plat, norm.chat,
+                            estado.get("janela_fim", 0), edit_count + 1,
+                            estado.get("shadow_reply_id", 0))
+                        log_out.info(f"✏️ [EDITADO_OK] {identity} novo_score={score}")
+                    else:
+                        log_out.warning(f"⚠️ [EDIT_FALHOU] {identity}")
                     return ok
-                else:
-                    log_out.info(f"🔁 [SCORE_IGUAL/MENOR] {identity} "
-                                 f"atual={score} salvo={estado['score']}")
-                    return True
 
-        # Novo envio
+                # Score igual + texto quase igual → ignora silenciosamente
+                if score == estado["score"]:
+                    from utils.textos import _alma, _sim
+                    sim_v = _sim(_alma(montada.texto), _alma(texto_atual))
+                    if sim_v > 0.85:
+                        log_out.debug(
+                            f"🔁 [DUP_SILENCIOSO] {identity} sim={sim_v:.2f}")
+                        return True
+
+                # Score menor ou igual mas texto diferente → ignora
+                log_out.info(
+                    f"🔁 [SCORE_IGUAL/MENOR] {identity} "
+                    f"atual={score} salvo={estado['score']} chat={norm.chat}")
+                return True
+
+        # Novo envio (não existe estado prévio)
         img = montada.imagem; sent = None
         for t in range(1, 4):
             try:
@@ -208,6 +234,8 @@ async def enviar(montada: MensagemMontada,
         log_out.info(
             f"🚀 [OK] @{montada.chat}→{GRUPO_DESTINO} | "
             f"{montada.msg_id}→{sent.id} | "
-            f"{montada.plat.upper()} score={score} sku={montada.sku}"
+            f"{montada.plat.upper()} score={score} sku={montada.sku} "
+            f"identity={identity}"
         )
         return True
+            
