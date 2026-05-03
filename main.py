@@ -1,8 +1,7 @@
 """
-FOGUETÃO v79.0 — Ponto de entrada.
+FOGUETÃO v80.0 — Ponto de entrada.
 
 Responsabilidades exclusivas deste módulo:
-  - Criar o TelegramClient
   - Inicializar globals, DB e orchestrator
   - Registrar handlers de eventos (NewMessage / MessageEdited)
   - Iniciar health check e servidor web
@@ -28,9 +27,6 @@ from globals import _init_globals, _IDS_PROC, _buf, _w_ativos
 from logger import log_sys, log_hc
 from pipeline.orchestrator import processar, _iniciar_orchestrator
 from web.redirect import _iniciar_servidor_web
-
-# ── Cliente Telegram (singleton global — importado pelos outros módulos) ──
-client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
 
 # ── Health check ──────────────────────────────────────────────────
@@ -82,7 +78,7 @@ async def _run() -> bool:
         f"🔵 Magalu: {_MGL_PROMOTER}/{_MGL_SLUG}"
     )
     log_sys.info(f"🖼 Pillow: {'OK' if _PIL_OK else 'OFF'}")
-    log_sys.info("🚀 FOGUETÃO v79.0 — ONLINE")
+    log_sys.info("🚀 FOGUETÃO v80.0 — ONLINE")
 
     # 4. Registra handlers de eventos
     @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
@@ -98,6 +94,15 @@ async def _run() -> bool:
             await processar(event, is_edit=True)
         except Exception as e:
             log_sys.error(f"❌ on_edit: {e}", exc_info=True)
+
+    # 4.5. Warmup do cache Magalu
+    # Carrega últimos 500 links já vistos do SQLite pra RAM
+    # Evita refazer desencurtar+afiliar após restart do Railway
+    try:
+        from plataformas.magalu import warmup_cache_magalu
+        await warmup_cache_magalu(limite=500)
+    except Exception as e:
+        log_sys.warning(f"⚠️ warmup_cache_magalu: {e}")
 
     # 5. Inicia tarefas de background
     asyncio.create_task(_health_check())
@@ -134,4 +139,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-
+              
