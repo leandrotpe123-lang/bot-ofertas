@@ -2,20 +2,12 @@
 from __future__ import annotations
 import asyncio
 import io
-import json
 import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-import aiohttp
-from bs4 import BeautifulSoup
-
-from config import USER_AGENTS
-from globals import _get_session
 from logger import log_enr
 from pipeline.normalizacao import MensagemNormalizada, _KW_CUPOM, _FALSO_CUPOM, _tem_emoji, _KW_EVENTO
-
-import random
 
 # ── Dataclass de saída ────────────────────────────────────────────
 @dataclass
@@ -59,6 +51,23 @@ def _contar_produtos(texto: str) -> int:
 
 def _eh_linha_cupom(linha: str) -> bool:
     return bool(_KW_DESCONTO.search(linha) or _KW_CUPOM.search(linha))
+
+
+def _proteger_url_md(url: str) -> str:
+    """
+    Protege URLs contra interpretação de Markdown do Telegram.
+    URLs longas Magalu/Amazon contêm '_' em parâmetros (partner_id,
+    promoter_id, utm_source etc.) que o parse_mode='md' interpreta
+    como itálico, quebrando o link. A solução é escapar os caracteres
+    especiais do Markdown que aparecem dentro de URLs.
+    """
+    # Escapa apenas dentro da URL (não no texto ao redor)
+    # Caracteres que o Markdown do Telegram interpreta: _ * ` [
+    return (url.replace('\\', '\\\\')
+               .replace('_', '\\_')
+               .replace('*', '\\*')
+               .replace('`', '\\`')
+               .replace('[', '\\['))
 
 def _emoji_linha(linha: str, eh_titulo: bool, is_multi: bool = False) -> Optional[str]:
     if _tem_emoji(linha): return None
@@ -106,13 +115,16 @@ def montar_texto(norm: MensagemNormalizada) -> str:
         if urls_na_linha and not sem_urls:
             for u in urls_na_linha:
                 uc = u.rstrip('.,;)>')
-                saida.append(mapa.get(uc, uc))   # BUG FIX: mantém URL original se não no mapa
+                url_final = mapa.get(uc, uc)
+                # Protege contra Markdown quebrar o link
+                saida.append(_proteger_url_md(url_final))
             continue
 
         # Linha mista — substitui URLs inline sem apagar
         def _sub_url(m: re.Match) -> str:
             u = m.group(0).rstrip('.,;)>')
-            return mapa.get(u, m.group(0))        # BUG FIX: mantém original se não no mapa
+            url_final = mapa.get(u, m.group(0))
+            return _proteger_url_md(url_final)
 
         l = _RE_URL_RENDER.sub(_sub_url, l).strip()
         if not l: continue
@@ -138,106 +150,69 @@ def montar_texto(norm: MensagemNormalizada) -> str:
     return "\n".join(saida).strip()
 
 # ── Imagens ───────────────────────────────────────────────────────
-async def buscar_imagem_produto(url: str) -> Optional[str]:
-    if not url or not url.startswith("http"): return None
-    sessao = await _get_session()
-    for t in range(1, 4):
-        try:
-            async with sessao.get(url, allow_redirects=True,
-                                  timeout=aiohttp.ClientTimeout(total=15)) as r:
-                ct = r.headers.get("content-type", "")
-                if "image" in ct: return str(r.url)
-                html = await r.text(errors="ignore")
-                soup = BeautifulSoup(html, "html.parser")
-                for attr in [{"property": "og:image"},
-                             {"property": "og:image:secure_url"},
-                             {"name": "twitter:image"}]:
-                    tag = soup.find("meta", attrs=attr)
-                    if not tag: continue
-                    img_url = tag.get("content", "")
-                    if not img_url.startswith("http"): continue
-                    img_url = re.sub(
-                        r'[?&](?:width|height|w|h|size|resize|fit|quality|q|'
-                        r'maxwidth|maxheight|format|auto|compress|crop|scale)=[^&]+',
-                        '', img_url).rstrip('?&')
-                    return img_url
-                for scr in soup.find_all("script", type="application/ld+json"):
-                    try:
-                        data  = json.loads(scr.string or "")
-                        items = data if isinstance(data, list) else [data]
-                        for item in items:
-                            img = item.get("image")
-                            if isinstance(img, str) and img.startswith("http"): return img
-                            if isinstance(img, list) and img:
-                                c = img[0]
-                                if isinstance(c, str): return c
-                                if isinstance(c, dict):
-                                    u2 = c.get("url", "")
-                                    if u2.startswith("http"): return u2
-                    except Exception:
-                        pass
-                melhor = None; melhor_area = 0
-                for img_tag in soup.find_all("img", src=True):
-                    src = img_tag.get("src", "")
-                    if not src.startswith("http"): continue
-                    if any(x in src.lower() for x in ["icon","logo","avatar","badge","spinner"]):
-                        continue
-                    try:
-                        w = int(img_tag.get("width", 0)); h = int(img_tag.get("height", 0))
-                        area = w * h
-                        if area > melhor_area: melhor_area = area; melhor = src
-                    except (ValueError, TypeError):
-                        if any(x in src.lower() for x in
-                               ["product","produto","item","image","foto","zoom","large","xl","hd"]):
-                            if not melhor: melhor = src
-                if melhor: return melhor
-        except asyncio.TimeoutError:
-            log_enr.warning(f"⏱ Timeout buscar_img t={t}")
-        except Exception as e:
-            log_enr.warning(f"⚠️ buscar_img t={t}: {e}")
-        if t < 3: await asyncio.sleep(1.0)
-    return None
+# A imagem usada é SEMPRE a que vem junto com a mensagem do Telegram
+# (mais rápida, vem direto dos servidores deles, não depende de site externo).
+# A busca de og:image em sites externos foi REMOVIDA porque consumia rede
+# e era a parte mais cara do bot. Quando uma oferta chega sem imagem, o
+# sistema publica só o texto. Se outro grupo mandar a mesma oferta com
+# imagem, o sistema reenvia o post com a imagem (lógica em publicacao.py).
 
 async def preparar_imagem_tg(media_obj) -> Optional[object]:
+    """
+    Baixa a imagem da mensagem original do Telegram para um buffer em memória.
+    Retorna BytesIO pronto pra reenviar via Telethon, ou None se falhar.
+
+    Protegido por timeout para não travar o worker infinitamente caso a
+    conexão com servidores do Telegram engasgue.
+    """
     from client import client
+    import config
+
     try:
         buf = io.BytesIO()
-        res = await client.download_media(media_obj, file=buf)
-        if res is None: return None
-        buf.seek(0)
-        if buf.getbuffer().nbytes < 500: return None
-        buf.name = "imagem.jpg"; return buf
-    except Exception as e:
-        log_enr.warning(f"⚠️ download_media: {e}"); return None
+        # Timeout protege contra trava infinita do download
+        try:
+            res = await asyncio.wait_for(
+                client.download_media(media_obj, file=buf),
+                timeout=config._TIMEOUT_DOWNLOAD_MIDIA,
+            )
+        except asyncio.TimeoutError:
+            log_enr.warning(
+                f"⏱ download_media timeout após "
+                f"{config._TIMEOUT_DOWNLOAD_MIDIA}s — pulando imagem"
+            )
+            return None
 
-async def preparar_imagem_url(url: str) -> Optional[object]:
-    try:
-        sessao = await _get_session()
-        async with sessao.get(url, timeout=aiohttp.ClientTimeout(total=20),
-                              allow_redirects=True) as r:
-            if r.status == 200:
-                data = await r.read()
-                if len(data) < 1000: return None
-                buf = io.BytesIO(data); buf.name = "produto.jpg"; return buf
+        if res is None:
+            return None
+        buf.seek(0)
+        if buf.getbuffer().nbytes < 500:
+            # Imagem corrompida ou muito pequena pra ser útil
+            return None
+        buf.name = "imagem.jpg"
+        return buf
     except Exception as e:
-        log_enr.warning(f"⚠️ preparar_img_url: {e}")
-    return None
+        log_enr.warning(f"⚠️ download_media: {e}")
+        return None
+
 
 async def _resolver_imagem(norm: MensagemNormalizada) -> object:
-    eh_cupom = bool(norm.cupom or _KW_CUPOM.search(norm.texto_limpo))
+    """
+    Resolve a imagem a anexar no post.
+
+    Estratégia simplificada (sem fallback HTTP):
+      - Se a mensagem original tem mídia → baixa do Telegram e usa
+      - Se não tem → retorna None (publica sem imagem)
+
+    Quando outro grupo mandar a mesma oferta com imagem, o sistema de
+    score/disputa em publicacao.py se encarrega de substituir o post.
+    """
     if norm.tem_midia:
         img = await preparar_imagem_tg(norm.media_obj)
-        if img: return img
-    if eh_cupom: return None
-    if norm.mapa:
-        for link in norm.mapa.values():
-            if not link.startswith("http"): continue
-            img_url = await buscar_imagem_produto(link)
-            if img_url:
-                img = await preparar_imagem_url(img_url)
-                if img:
-                    log_enr.info(f"🖼 og:image: {img_url[:60]}"); return img
+        if img:
+            return img
     return None
+
 
 async def montar(norm: MensagemNormalizada) -> MensagemMontada:
     texto  = montar_texto(norm)
@@ -247,4 +222,4 @@ async def montar(norm: MensagemNormalizada) -> MensagemMontada:
         sku=norm.sku, texto=texto, imagem=imagem,
         mapa=norm.mapa, msg_id_origem=norm.msg_id,
 )
-
+    
