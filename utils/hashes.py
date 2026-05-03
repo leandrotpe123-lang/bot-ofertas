@@ -1,0 +1,24 @@
+"""Utilitários de hash usados em deduplicação e encurtamento."""
+from __future__ import annotations
+import hashlib
+
+
+def _fp4(s: str) -> str:
+    """Hash SHA-256 truncado em 32 chars — fingerprint padrão."""
+    return hashlib.sha256(s.encode()).hexdigest()[:32]
+
+
+def _fp_c3(id_global: str, plat: str) -> str:
+    """Fingerprint para estado de evento (plataforma + id_global)."""
+    return hashlib.sha256(f"{plat}|{id_global}".encode()).hexdigest()[:32]
+
+
+def _fp_benef(id_global: str, plat: str, benef: frozenset) -> str:
+    """Fingerprint para conjunto de benefícios de uma oferta."""
+    return _fp4(f"{plat}|ben|{id_global}|{'|'.join(sorted(benef))}")
+
+
+def _gerar_code_magalu(url_afiliada: str) -> str:
+    """Código estável de 7 chars para o encurtador próprio Magalu."""
+    return hashlib.sha256(url_afiliada.encode()).hexdigest()[:7]
+  
