@@ -46,6 +46,7 @@ _P_AMZ_ASIN = [
     re.compile(r'/gp/product/([A-Z0-9]{10})', re.I),
     re.compile(r'[?&]asin=([A-Z0-9]{10})', re.I),
 ]
+_P_AMZ_PROMO = re.compile(r'/promotion/psp/([A-Z0-9]{8,16})', re.I)
 
 
 @dataclass
@@ -113,6 +114,12 @@ def classificar_url(url: str) -> LinkClassificado:
             asin = _extrair_asin(p)
             if _AMZ_PATHS_SEM_TAG.match(p.path):
                 return LinkClassificado(url, "amazon", "claims", "")
+            # Detecta promotion ID Amazon como identidade estável
+            mp = _P_AMZ_PROMO.search(p.path)
+            if mp and not asin:
+                promo_id = mp.group(1).upper()
+                return LinkClassificado(url, "amazon", "promocao",
+                                        promo_id, f"amz:promo_{promo_id}")
             tipo = ("produto" if asin else
                     "busca" if re.search(r'/s[/?]|/deals|/b[/?]', p.path) else
                     "evento" if re.search(r'/events/|/stores/', p.path) else "campanha")
@@ -157,4 +164,4 @@ def classificar_links(links: List[str]) -> List[LinkClassificado]:
     validos = [r for r in result if r.plat is not None]
     log_cls.debug(f"🔍 {len(validos)}/{len(links)} classificados")
     return result
-  
+
