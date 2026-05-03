@@ -164,4 +164,3 @@ def classificar_links(links: List[str]) -> List[LinkClassificado]:
     validos = [r for r in result if r.plat is not None]
     log_cls.debug(f"🔍 {len(validos)}/{len(links)} classificados")
     return result
-
