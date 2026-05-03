@@ -65,6 +65,31 @@ except ImportError:
 _JANELA_DISPUTA_S = 90.0   # janela de disputa entre grupos (segundos)
 _MAX_EDITS        = 2      # máximo de edições por evento
 
+# ── Estratégia de imagem ─────────────────────────────────────────
+# Grupos que mandam imagens de baixa qualidade — peso de mídia reduzido
+# no score (vale +1 em vez de +3). Se outro grupo mandar imagem boa, ela
+# vence o desempate. Se forem os ÚNICOS a mandar, usa a imagem feia mesmo.
+_GRUPOS_IMG_RUIM = frozenset({"promotom", "fumotom"})
+
+# Score de mídia
+_SCORE_MIDIA_NORMAL = 3   # mídia de grupo normal
+_SCORE_MIDIA_RUIM   = 1   # mídia de _GRUPOS_IMG_RUIM
+
+# Janela para "deletar+reenviar" quando chega imagem melhor
+# Se passou MAIS desse tempo desde o post original, edita só o texto
+# (não reenvia pra evitar notificar o grupo 2x desnecessariamente)
+_JANELA_REENVIO_MIDIA_S = 30.0
+
+# Timeout do download_media do Telethon (segundos)
+# Protege workers de travar infinito se Telegram engasgar
+_TIMEOUT_DOWNLOAD_MIDIA = 15.0
+
+# ── Reativação de ofertas ────────────────────────────────────────
+# Cooldown mínimo desde a última publicação. Posts com palavras como
+# "voltou", "reativou", "ativo novamente" só republicam se passou esse tempo.
+# Evita reativação acidental de cupons recém-postados.
+_COOLDOWN_REATIVACAO_S = 30 * 60   # 30 minutos
+
 # ── Código morto sinalizado (NÃO remover ainda) ───────────────────
 # _SHADOW_FRASES: lista de frases fixas de engajamento.
 # Substituída pela captura de comentários reais dos grupos.
@@ -74,4 +99,3 @@ _SHADOW_FRASES = [
     "Melhor preço do mês 💥", "Relâmpago! ⚡", "Tá voando 🔥", "Imperdível esse 🎯",
     "Preço absurdo 😱", "Que desconto 🤑",
 ]
-
