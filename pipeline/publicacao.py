@@ -118,6 +118,93 @@ async def editar(msg_id_origem: int, texto_novo: str) -> bool:
     if not id_d: return False
     return await editar_por_id(id_d, texto_novo)
 
+
+# ── Substituição com mídia (deletar + reenviar) ───────────────────
+# Usado quando chega versão melhor da oferta com imagem nova e o post
+# original ainda é "fresco" (< _JANELA_REENVIO_MIDIA_S desde envio).
+# O Telegram NÃO permite adicionar mídia em mensagem que foi enviada
+# como texto puro — por isso é necessário deletar+reenviar.
+async def _substituir_post_com_midia(
+    msg_id_dest_antigo: int, montada: MensagemMontada,
+) -> Optional[object]:
+    """
+    Apaga a mensagem antiga e reenvia com a imagem nova.
+    Retorna o novo objeto sent ou None se falhar.
+
+    O caller é responsável por atualizar mp e oferta_estado com o novo ID.
+    """
+    from client import client
+    try:
+        # 1. Apaga a mensagem antiga
+        try:
+            await client.delete_messages(GRUPO_DESTINO, msg_id_dest_antigo)
+        except Exception as e:
+            log_out.warning(f"⚠️ delete_messages: {e}")
+            # Se não conseguiu apagar, continua mesmo assim — vai duplicar
+            # mas é menos pior que perder a oferta inteira.
+
+        # 2. Reenvia com a imagem nova
+        sent = None
+        for t in range(1, 4):
+            try:
+                sent = await _enviar_msg(montada.texto, montada.imagem)
+                break
+            except FloodWaitError as e:
+                if e.seconds > 60:
+                    log_out.warning(
+                        f"⚠️ FloodWait longo {e.seconds}s — abortando reenvio"
+                    )
+                    return None
+                await asyncio.sleep(e.seconds)
+            except Exception as e:
+                log_out.error(f"❌ reenvio t={t}: {e}")
+                if t < 3:
+                    await asyncio.sleep(2 ** t)
+
+        if sent:
+            log_out.info(
+                f"🔄 [REENVIO_OK] {msg_id_dest_antigo} → {sent.id} "
+                f"@{montada.chat}"
+            )
+        return sent
+    except Exception as e:
+        log_out.error(f"❌ _substituir_post_com_midia: {e}", exc_info=True)
+        return None
+
+
+def _midia_grupo_ruim(chat: str) -> bool:
+    """Verifica se o chat está na lista de grupos com imagem feia."""
+    return (chat or "").lower() in config._GRUPOS_IMG_RUIM
+
+
+def _deve_substituir_post(
+    chat_atual: str, chat_novo: str, tem_midia_nova: bool,
+    ts_post_antigo: float,
+) -> bool:
+    """
+    Decide se devemos deletar+reenviar (em vez de apenas editar).
+
+    Critérios:
+      1. A nova mensagem TEM mídia (senão não há ganho)
+      2. Post original < _JANELA_REENVIO_MIDIA_S de idade (não notifica 2x se já passou tempo)
+      3. Pelo menos uma das condições:
+         - Post original NÃO tem mídia (texto puro não pode receber mídia editada)
+         - Post original veio de grupo ruim E novo veio de grupo bom (substitui imagem feia)
+    """
+    if not tem_midia_nova:
+        return False
+
+    delta = time.time() - ts_post_antigo
+    if delta > config._JANELA_REENVIO_MIDIA_S:
+        return False
+
+    # Se post original veio de grupo ruim e o novo de grupo bom: troca
+    if _midia_grupo_ruim(chat_atual) and not _midia_grupo_ruim(chat_novo):
+        return True
+
+    return True   # mídia nova + dentro da janela = sempre substitui
+
+
 async def enviar(montada: MensagemMontada,
                  norm: Optional[MensagemNormalizada] = None) -> bool:
     async with config._SEM_ENVIO:
@@ -136,6 +223,8 @@ async def enviar(montada: MensagemMontada,
                 edit_count  = estado.get("edit_count", 0) or 0
                 msg_id_dest = estado["msg_id_dest"]
                 texto_atual = estado.get("texto", "") or ""
+                ts_anterior = estado.get("ts", 0) or 0
+                score_atual = estado["score"]
 
                 # Líder travado fora da janela
                 if not na_janela and lider_atual and norm.chat != lider_atual:
@@ -148,11 +237,50 @@ async def enviar(montada: MensagemMontada,
                     log_out.info(f"🔒 [MAX_EDITS] {identity} edits={edit_count}")
                     return True
 
-                # Score maior → EDITA (texto + imagem nova se houver)
-                if score > estado["score"]:
+                # ── DECISÃO 1: Score MAIOR — sempre processa ────────
+                if score > score_atual:
+                    # Se passou pouco tempo + tem mídia nova → DELETAR + REENVIAR
+                    # (resolve o caso de Telegram não aceitar adicionar mídia
+                    # em mensagem que foi enviada como texto puro)
+                    if _deve_substituir_post(
+                        lider_atual, norm.chat, bool(montada.imagem), ts_anterior
+                    ):
+                        log_out.info(
+                            f"🔄 [SUBSTITUI_MIDIA] {identity} "
+                            f"score {score_atual}→{score} chat={norm.chat} "
+                            f"delta={int(agora - ts_anterior)}s"
+                        )
+                        sent = await _substituir_post_com_midia(
+                            msg_id_dest, montada
+                        )
+                        if sent:
+                            # Atualiza mapa e estado com novo ID
+                            mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+                            mp[str(montada.msg_id)] = sent.id
+                            try:
+                                await loop.run_in_executor(
+                                    _EXECUTOR, salvar_mapa, mp
+                                )
+                            except Exception as e:
+                                log_sys.error(f"❌ salvar_mapa: {e}")
+
+                            db_set_estado(
+                                identity, sent.id, score, montada.texto,
+                                montada.plat, norm.chat,
+                                estado.get("janela_fim", 0), edit_count + 1,
+                                estado.get("shadow_reply_id", 0),
+                            )
+                            log_out.info(
+                                f"✅ [SUBSTITUIDO_OK] {identity} "
+                                f"novo_id={sent.id} score={score}"
+                            )
+                            return True
+                        # Se falhou a substituição, cai pra edição comum
+
+                    # Edição normal (texto + opcionalmente imagem)
                     log_out.info(
                         f"✳️ [EVOLUI] {identity} "
-                        f"score {estado['score']}→{score} "
+                        f"score {score_atual}→{score} "
                         f"{'(janela)' if na_janela else '(lider)'} "
                         f"chat={norm.chat} "
                         f"img_nova={'sim' if montada.imagem else 'não'}"
@@ -170,8 +298,45 @@ async def enviar(montada: MensagemMontada,
                         log_out.warning(f"⚠️ [EDIT_FALHOU] {identity}")
                     return ok
 
-                # Score igual + texto quase igual → ignora silenciosamente
-                if score == estado["score"]:
+                # ── DECISÃO 2: Score IGUAL ──────────────────────────
+                if score == score_atual:
+                    # Sub-caso: troca de imagem feia → boa
+                    # Se o post atual veio de grupo ruim E novo é de grupo bom
+                    # E novo tem mídia → substitui mesmo com score igual
+                    if (_midia_grupo_ruim(lider_atual)
+                            and not _midia_grupo_ruim(norm.chat)
+                            and montada.imagem
+                            and (agora - ts_anterior) < config._JANELA_REENVIO_MIDIA_S):
+                        log_out.info(
+                            f"🖼 [TROCA_IMG_BOA] {identity} "
+                            f"de {lider_atual} (ruim) → {norm.chat} (bom) "
+                            f"delta={int(agora - ts_anterior)}s"
+                        )
+                        sent = await _substituir_post_com_midia(
+                            msg_id_dest, montada
+                        )
+                        if sent:
+                            mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+                            mp[str(montada.msg_id)] = sent.id
+                            try:
+                                await loop.run_in_executor(
+                                    _EXECUTOR, salvar_mapa, mp
+                                )
+                            except Exception as e:
+                                log_sys.error(f"❌ salvar_mapa: {e}")
+
+                            db_set_estado(
+                                identity, sent.id, score, montada.texto,
+                                montada.plat, norm.chat,
+                                estado.get("janela_fim", 0), edit_count + 1,
+                                estado.get("shadow_reply_id", 0),
+                            )
+                            log_out.info(
+                                f"✅ [IMG_TROCADA_OK] {identity}"
+                            )
+                            return True
+
+                    # Texto quase igual → ignora silenciosamente
                     from utils.textos import _alma, _sim
                     sim_v = _sim(_alma(montada.texto), _alma(texto_atual))
                     if sim_v > 0.85:
@@ -179,13 +344,13 @@ async def enviar(montada: MensagemMontada,
                             f"🔁 [DUP_SILENCIOSO] {identity} sim={sim_v:.2f}")
                         return True
 
-                # Score menor ou igual mas texto diferente → ignora
+                # ── DECISÃO 3: Score menor — ignora ─────────────────
                 log_out.info(
                     f"🔁 [SCORE_IGUAL/MENOR] {identity} "
-                    f"atual={score} salvo={estado['score']} chat={norm.chat}")
+                    f"atual={score} salvo={score_atual} chat={norm.chat}")
                 return True
 
-        # Novo envio (não existe estado prévio)
+        # ─── Novo envio (não existe estado prévio) ──────────────────
         img = montada.imagem; sent = None
         for t in range(1, 4):
             try:
@@ -239,4 +404,3 @@ async def enviar(montada: MensagemMontada,
             f"identity={identity}"
         )
         return True
-                
