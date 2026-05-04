@@ -5,7 +5,7 @@ import unicodedata
 from difflib import SequenceMatcher
 from typing import Optional
 
-from config import _JANELA_C3  # importado de pipeline.normalizacao via config
+# _JANELA_C3 importado lazy dentro de _janela() para evitar import circular
 
 # ── Constantes de deduplicação ────────────────────────────────────
 _RUIDO_NORM = frozenset({
@@ -85,3 +85,4 @@ def _sim(a: str, b: str) -> float:
 def _normalizar_valor(t: str) -> str:
     vals = re.findall(r'r\$\s*([\d.,]+)', t, re.I)
     return "|".join(sorted(v.replace('.', '').replace(',', '.') for v in vals))
+    
