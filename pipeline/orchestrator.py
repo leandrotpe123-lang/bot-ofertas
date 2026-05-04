@@ -21,10 +21,8 @@ import time
 from typing import Optional
 
 from config import _EXECUTOR
-from globals import (
-    _buf, _buf_lck, _buf_evt, _w_lck, _w_ativos,
-    _IDS_LOCK, _IDS_PROC,
-)
+import globals as g
+# g._buf, g._IDS_PROC acessados via g.
 from logger import log_sys
 from pipeline.deduplicacao import deve_enviar_async
 from pipeline.ingestao import ingerir
@@ -62,38 +60,36 @@ async def _enfileirar(event, is_edit: bool) -> None:
     texto = event.message.text or ""
     if not texto.strip(): return
     fp = _fp_r(texto); agora = time.monotonic()
-    async with _buf_lck:
+    async with g._buf_lck:
         from globals import _coal
         if not is_edit and agora - _coal.get(fp, 0.0) < _COALESCE_MS / 1000:
             return
         _coal[fp] = agora
-        if len(_buf) >= _FILA_MAX:
+        if len(g._buf) >= _FILA_MAX:
             log_sys.warning(f"⚠️ Fila cheia | id={event.message.id}")
             return
-        heapq.heappush(_buf, (0 if is_edit else _prio(texto), agora, event, is_edit))
-    _buf_evt.set()
+        heapq.heappush(g._buf, (0 if is_edit else _prio(texto), agora, event, is_edit))
+    g._buf_evt.set()
 
 
 async def _worker_loop() -> None:
-    from globals import _w_ativos as _wa
-    import globals as g
     while True:
-        await _buf_evt.wait()
+        await g._buf_evt.wait()
         while True:
             item = None
-            async with _buf_lck:
-                if _buf:
-                    item = heapq.heappop(_buf)
+            async with g._buf_lck:
+                if g._buf:
+                    item = heapq.heappop(g._buf)
                 else:
-                    _buf_evt.clear()
+                    g._buf_evt.clear()
                     break
             if item is None: break
             prio, ts, event, is_edit = item
-            async with _w_lck:
+            async with g._w_lck:
                 if g._w_ativos >= _WORKERS_MAX:
-                    async with _buf_lck:
-                        heapq.heappush(_buf, item)
-                        _buf_evt.set()
+                    async with g._buf_lck:
+                        heapq.heappush(g._buf, item)
+                        g._buf_evt.set()
                     await asyncio.sleep(0.5)
                     break
                 g._w_ativos += 1
@@ -105,7 +101,7 @@ async def _worker_loop() -> None:
             except Exception as e:
                 log_sys.error(f"❌ Worker: {e}", exc_info=True)
             finally:
-                async with _w_lck:
+                async with g._w_lck:
                     g._w_ativos -= 1
 
 
@@ -135,7 +131,7 @@ async def _pipeline(event, is_edit: bool = False) -> None:
 
     log_sys.info(
         f"{'✏️' if is_edit else '📩'} @{bruta.chat} | "
-        f"id={msg_id} | q={len(_buf)} w={_get_w_ativos()}"
+        f"id={msg_id} | q={len(g._buf)} w={_get_w_ativos()}"
     )
 
     # ── Camadas 2+3: Classificação + Normalização ─────────────────
@@ -215,4 +211,4 @@ async def _iniciar_orchestrator() -> None:
         f"max_edits={_MAX_EDITS}"
     )
     asyncio.create_task(_worker_loop())
-  
+      
