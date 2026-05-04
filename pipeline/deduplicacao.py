@@ -22,7 +22,8 @@ import config
 from database import (
     db_get_dedupe, db_set_dedupe, db_buscar_janela_rapida, db_get_estado,
 )
-from globals import _atomic_lck_obj, _atomic_mem
+import globals as g
+# g._atomic_mem acessado via g.
 from logger import log_ded
 from pipeline.normalizacao import EstadoEvento, MensagemNormalizada
 from utils.hashes import _fp4, _fp_benef
@@ -121,25 +122,25 @@ def _host_canonico_campanha(mapa: dict) -> str:
 # Atomic locks (in-memory, evita race entre workers)
 # ─────────────────────────────────────────────────────────────────
 async def _get_atomic_lck():
-    return _atomic_lck_obj
+    return g._atomic_lck_obj
 
 
 async def _atomic_check(fp: str) -> Optional[float]:
     async with (await _get_atomic_lck()):
-        return _atomic_mem.get(fp)
+        return g._atomic_mem.get(fp)
 
 
 async def _atomic_claim(fp: str) -> bool:
     async with (await _get_atomic_lck()):
-        if fp in _atomic_mem:
+        if fp in g._atomic_mem:
             return False
-        _atomic_mem[fp] = time.monotonic()
+        g._atomic_mem[fp] = time.monotonic()
         return True
 
 
 async def _atomic_release(fp: str):
     async with (await _get_atomic_lck()):
-        _atomic_mem.pop(fp, None)
+        g._atomic_mem.pop(fp, None)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -478,4 +479,3 @@ async def deve_enviar_async(norm: MensagemNormalizada) -> bool:
         # que perder oferta boa.
         log_ded.error(f"❌ ERRO DEDUPE: {e}", exc_info=True)
         return True
-
