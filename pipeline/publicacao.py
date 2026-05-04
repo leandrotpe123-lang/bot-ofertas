@@ -9,7 +9,8 @@ from telethon.errors import FloodWaitError, MessageNotModifiedError
 import config
 from config import GRUPO_DESTINO, _EXECUTOR, _JANELA_DISPUTA_S, _MAX_EDITS
 from database import db_get_estado, db_set_estado, db_registrar_sat
-from globals import _IDS_LOCK, _IDS_PROC, _BURST_LOCK, _burst
+import globals as g
+# g._IDS_PROC, g._burst acessados via g.
 from logger import log_out, log_sys
 from pipeline.deduplicacao import calcular_score, identidade_canonica
 from pipeline.montagem import MensagemMontada, preparar_imagem_tg
@@ -23,26 +24,26 @@ _SAT_BURST_JAN = 60
 
 
 async def _marcar(msg_id: int):
-    async with _IDS_LOCK:
-        _IDS_PROC.add(msg_id)
-        if len(_IDS_PROC) > 5000:
-            for _ in range(len(_IDS_PROC) - 4000):
-                _IDS_PROC.pop()
+    async with g._IDS_LOCK:
+        g._IDS_PROC.add(msg_id)
+        if len(g._IDS_PROC) > 5000:
+            for _ in range(len(g._IDS_PROC) - 4000):
+                g._IDS_PROC.pop()
 
 async def _foi_processado(msg_id: int) -> bool:
-    async with _IDS_LOCK:
-        return msg_id in _IDS_PROC
+    async with g._IDS_LOCK:
+        return msg_id in g._IDS_PROC
 
 async def _burst_add():
-    async with _BURST_LOCK:
-        agora = time.monotonic(); _burst.append(agora)
-        while _burst and agora - _burst[0] > _SAT_BURST_JAN:
-            _burst.pop(0)
+    async with g._BURST_LOCK:
+        agora = time.monotonic(); g._burst.append(agora)
+        while g._burst and agora - g._burst[0] > _SAT_BURST_JAN:
+            g._burst.pop(0)
 
 async def _burst_count() -> int:
-    async with _BURST_LOCK:
+    async with g._BURST_LOCK:
         agora = time.monotonic()
-        return sum(1 for t in _burst if agora - t <= _SAT_BURST_JAN)
+        return sum(1 for t in g._burst if agora - t <= _SAT_BURST_JAN)
 
 async def delay_saturacao(plat: str, texto: str) -> float:
     from database import db_count_sat
@@ -238,4 +239,4 @@ async def enviar(montada: MensagemMontada,
             f"identity={identity}"
         )
         return True
-            
+                
