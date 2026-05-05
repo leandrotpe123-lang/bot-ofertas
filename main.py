@@ -57,7 +57,7 @@ async def _health_check() -> None:
 # ── Startup ───────────────────────────────────────────────────────
 async def _run() -> bool:
     # 1. Inicializa locks, semáforos e caches no loop correto
-    _init_globals()
+    init_globals()
 
     # 2. Inicializa banco de dados
     _init_db()
