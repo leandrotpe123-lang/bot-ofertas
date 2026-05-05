@@ -54,19 +54,41 @@ async def _get_session() -> aiohttp.ClientSession:
     return _http_session
 
 # ── Inicialização de todos os globals async ───────────────────────
-def init_globals() -> None:          # ← mudei o nome (sem underline)
-    """Inicializa todos os objetos globais. Deve ser chamado no startup."""
-    global _buf_lck, _buf_evt, _w_lck, _buf, _coal, _w_ativos
-    global _IDS_LOCK, _BURST_LOCK, _atomic_lck_obj, _atomic_mem
-    global _IDS_PROC, _burst, _pending_lock
+def _init_globals():
+    """
+    Inicializa locks/eventos asyncio + zera caches em memória.
 
+    REGRA IMPORTANTE (v80.2):
+      - Para containers mutáveis (_buf, _IDS_PROC, _burst, _atomic_mem,
+        _coal): usa .clear() pra MANTER o mesmo objeto.
+        Isso evita o bug de outros módulos (que importaram com `from
+        globals import _buf`) ficarem apontando pra objeto antigo.
+
+      - Para LOCKS asyncio (que começam None): tem que reassignar
+        com asyncio.Lock(). Por isso TODOS os consumidores DEVEM usar
+        o padrão `import globals as g` + `g._buf_lck` (acessam o
+        atributo dinamicamente, não o valor capturado no import).
+
+      - Para _w_ativos (int): mantém reassign — int é imutável,
+        consumidores usam `g._w_ativos` (sempre lê o valor atual).
+    """
+    global _buf_lck, _buf_evt, _w_lck, _w_ativos
+    global _IDS_LOCK, _BURST_LOCK, _atomic_lck_obj
+    global _pending_lock
+    import config as _cfg
+
+    # Containers mutáveis: clear() pra manter mesmo objeto
+    # (evita problema de import direto em outros módulos)
     _buf.clear()
     _coal.clear()
+    _IDS_PROC.clear()
     _burst.clear()
     _atomic_mem.clear()
-    _IDS_PROC.clear()
+
+    # Contador int: reassign (consumidores usam g._w_ativos)
     _w_ativos = 0
 
+    # Locks asyncio: criar instâncias novas (necessário — começam None)
     _buf_lck        = asyncio.Lock()
     _buf_evt        = asyncio.Event()
     _w_lck          = asyncio.Lock()
@@ -75,12 +97,11 @@ def init_globals() -> None:          # ← mudei o nome (sem underline)
     _atomic_lck_obj = asyncio.Lock()
     _pending_lock   = asyncio.Lock()
 
-    # Semáforos no config
-    import config as _cfg
+    # Semáforos do config (só podem ser criados dentro do loop async)
     _cfg._SEM_ENVIO = asyncio.Semaphore(3)
     _cfg._SEM_HTTP  = asyncio.Semaphore(20)
 
-    log_db.info("✅ Globals inicializados com sucesso")
+    log_db.debug("🔧 _init_globals OK")
 
 # ── Helpers de cache ─────────────────────────────────────────────
 def _set_raw(url: str, valor: str):
@@ -116,5 +137,5 @@ def _log_cache_stats():
     log_db.debug(
         f"📦 Cache | raw={len(_raw_cache)} final={len(_final_cache)} "
         f"cls={len(_cls_cache)} db_links={_db_count_links()}"
-)
-      
+        )
+    
