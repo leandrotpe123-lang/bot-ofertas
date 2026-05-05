@@ -21,10 +21,8 @@ import time
 from typing import Optional
 
 from config import _EXECUTOR
-from globals import (
-    _buf, _buf_lck, _buf_evt, _w_lck, _w_ativos,
-    _IDS_LOCK, _IDS_PROC,
-)
+import globals as g
+from globals import _buf, _IDS_LOCK, _IDS_PROC
 from logger import log_sys
 from pipeline.deduplicacao import deve_enviar_async
 from pipeline.ingestao import ingerir
@@ -62,7 +60,7 @@ async def _enfileirar(event, is_edit: bool) -> None:
     texto = event.message.text or ""
     if not texto.strip(): return
     fp = _fp_r(texto); agora = time.monotonic()
-    async with _buf_lck:
+    async with g._buf_lck:
         from globals import _coal
         if not is_edit and agora - _coal.get(fp, 0.0) < _COALESCE_MS / 1000:
             return
@@ -71,65 +69,41 @@ async def _enfileirar(event, is_edit: bool) -> None:
             log_sys.warning(f"⚠️ Fila cheia | id={event.message.id}")
             return
         heapq.heappush(_buf, (0 if is_edit else _prio(texto), agora, event, is_edit))
-    _buf_evt.set()
+    g._buf_evt.set()
 
 
 async def _worker_loop() -> None:
-    """Worker principal com proteção robusta contra inicialização incompleta"""
-    from globals import _buf_evt, _buf_lck, _buf, _w_lck, _w_ativos
     import globals as g
-    import heapq
-    import time
-
     while True:
-        try:
-            # Proteção extra contra None
-            if _buf_evt is None or _buf_lck is None:
-                log_sys.warning("⚠️ Globals None no worker → forçando reinicialização")
-                from globals import init_globals
-                init_globals()
-                # Reimporta após init
-                from globals import _buf_evt, _buf_lck, _buf, _w_lck, _w_ativos
-
-            await _buf_evt.wait()
-
-            while True:
-                item = None
-                async with _buf_lck:
-                    if _buf:
-                        item = heapq.heappop(_buf)
-                    else:
-                        _buf_evt.clear()
-                        break
-                if item is None:
+        await g._buf_evt.wait()
+        while True:
+            item = None
+            async with g._buf_lck:
+                if _buf:
+                    item = heapq.heappop(_buf)
+                else:
+                    g._buf_evt.clear()
                     break
-
-                prio, ts, event, is_edit = item
-
-                # Controle de workers
-                async with _w_lck:
-                    if g._w_ativos >= _WORKERS_MAX:
-                        async with _buf_lck:
-                            heapq.heappush(_buf, item)
-                            _buf_evt.set()
-                        await asyncio.sleep(0.5)
-                        break
-                    g._w_ativos += 1
-
-                try:
-                    if time.monotonic() - ts > 60:
-                        log_sys.warning(f"⏱ Expirado | id={event.message.id}")
-                        continue
-                    await _pipeline(event, is_edit)
-                except Exception as e:
-                    log_sys.error(f"❌ Worker: {e}", exc_info=True)
-                finally:
-                    async with _w_lck:
-                        g._w_ativos -= 1
-
-        except Exception as e:
-            log_sys.error(f"💥 Erro no worker_loop: {e}", exc_info=True)
-            await asyncio.sleep(1)
+            if item is None: break
+            prio, ts, event, is_edit = item
+            async with g._w_lck:
+                if g._w_ativos >= _WORKERS_MAX:
+                    async with g._buf_lck:
+                        heapq.heappush(_buf, item)
+                        g._buf_evt.set()
+                    await asyncio.sleep(0.5)
+                    break
+                g._w_ativos += 1
+            try:
+                if time.monotonic() - ts > 60:
+                    log_sys.warning(f"⏱ Expirado | id={event.message.id}")
+                    continue
+                await _pipeline(event, is_edit)
+            except Exception as e:
+                log_sys.error(f"❌ Worker: {e}", exc_info=True)
+            finally:
+                async with g._w_lck:
+                    g._w_ativos -= 1
 
 
 async def _pipeline(event, is_edit: bool = False) -> None:
@@ -294,10 +268,7 @@ async def processar(event, is_edit: bool = False) -> None:
 
 
 async def _iniciar_orchestrator() -> None:
-    from globals import init_globals
-    init_globals()   
-
-    from config import _JANELA_DISPUTA_S
+    from config import _JANELA_DISPUTA_S  # noqa — apenas para log
     log_sys.info(
         f"🎛 Orchestrator | workers={_WORKERS_MAX} fila={_FILA_MAX} "
         f"coalesce={_COALESCE_MS}ms "
