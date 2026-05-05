@@ -1,11 +1,25 @@
 """
-FOGUETÃO v80.0 — Ponto de entrada.
+FOGUETÃO v80.2 — Ponto de entrada.
 
 Responsabilidades exclusivas deste módulo:
   - Inicializar globals, DB e orchestrator
   - Registrar handlers de eventos (NewMessage / MessageEdited)
   - Iniciar health check e servidor web
   - Loop de restart com tratamento de erros fatais
+
+═══════════════════════════════════════════════════════════════════
+Mudanças v80.2 (em relação a v80.0):
+  • Detecção de cupom em 4 níveis de confiança (crases, formato
+    profissional, palavra-chave, fallback)
+  • Captura de entidades CODE/PRE do Telegram (cupom em crases)
+  • Identidade canônica respeita cupom no produto
+    (mesmo produto + cupom diferente = ofertas distintas)
+  • Janelas por TIPO (cupom 30min, produto 60min, evento 20min)
+  • _MAX_EDITS=1 (1 edição estética entre grupos)
+  • Edição do grupo original (correção) NÃO conta no limite
+  • Lock atômico por identidade (resolve race condition)
+  • Magalu: desencurtador agressivo até a alma + Opção A
+═══════════════════════════════════════════════════════════════════
 """
 from __future__ import annotations
 
@@ -23,7 +37,8 @@ from config import (
     _PIL_OK, _EXECUTOR,
 )
 from database import _init_db, _db, db_limpar
-from globals import init_globals, _IDS_PROC, _buf, _w_ativos
+import globals as g
+from globals import _init_globals
 from logger import log_sys, log_hc
 from pipeline.orchestrator import processar, _iniciar_orchestrator
 from web.redirect import _iniciar_servidor_web
@@ -45,11 +60,10 @@ async def _health_check() -> None:
                         "SELECT COUNT(*) FROM saturacao").fetchone()[0]
             except Exception:
                 n_links = n_dedup = n_sat = "?"
-
             log_hc.info(
                 f"💚 links={n_links} | dedupe={n_dedup} | sat={n_sat} | "
-                f"anti-loop={len(_IDS_PROC)} | fila={len(_buf)} "
-                f"w={_w_ativos} | PIL={'OK' if _PIL_OK else 'OFF'}"
+                f"anti-loop={len(g._IDS_PROC)} | fila={len(g._buf)} "
+                f"w={g._w_ativos} | PIL={'OK' if _PIL_OK else 'OFF'}"
             )
         except Exception as e:
             log_hc.error(f"❌ Health: {e}", exc_info=True)
@@ -57,75 +71,62 @@ async def _health_check() -> None:
 
 # ── Startup ───────────────────────────────────────────────────────
 async def _run() -> bool:
-    try:
-        # 1. Inicializa locks, semáforos e caches
-        log_sys.info("🔧 Inicializando globals...")
-        init_globals()
-        log_sys.info("✅ Globals OK")
+    # 1. Inicializa locks, semáforos e caches no loop correto
+    _init_globals()
 
-        # 2. Inicializa banco de dados
-        log_sys.info("🗄 Inicializando banco de dados...")
-        _init_db()
-        log_sys.info("✅ DB OK")
+    # 2. Inicializa banco de dados
+    _init_db()
 
-        # 3. Conecta ao Telegram
-        log_sys.info("🔌 Conectando ao Telegram...")
-        await client.connect()
-        log_sys.info("✅ Conexão estabelecida")
+    # 3. Conecta ao Telegram
+    log_sys.info("🔌 Conectando...")
+    await client.connect()
+    if not await client.is_user_authorized():
+        log_sys.error("❌ Sessão inválida")
+        return False
 
-        if not await client.is_user_authorized():
-            log_sys.error("❌ Sessão inválida")
-            return False
+    me = await client.get_me()
+    log_sys.info(f"✅ {me.first_name} (@{me.username}) | ID={me.id}")
+    log_sys.info(f"📡 {GRUPOS_ORIGEM} → {GRUPO_DESTINO}")
+    log_sys.info(
+        f"🟠 Amazon: {_AMZ_TAG} | "
+        f"🟣 Shopee: {_SHP_APP_ID} | "
+        f"🔵 Magalu: {_MGL_PROMOTER}/{_MGL_SLUG}"
+    )
+    log_sys.info(f"🖼 Pillow: {'OK' if _PIL_OK else 'OFF'}")
+    log_sys.info("🚀 FOGUETÃO v80.2 — ONLINE")
 
-        me = await client.get_me()
-        log_sys.info(f"✅ Logado como {me.first_name} (@{me.username}) | ID={me.id}")
-        log_sys.info(f"📡 Monitorando: {GRUPOS_ORIGEM} → {GRUPO_DESTINO}")
-
-        log_sys.info(
-            f"🟠 Amazon: {_AMZ_TAG} | "
-            f"🟣 Shopee: {_SHP_APP_ID} | "
-            f"🔵 Magalu: {_MGL_PROMOTER}/{_MGL_SLUG}"
-        )
-        log_sys.info(f"🖼 Pillow: {'OK' if _PIL_OK else 'OFF'}")
-
-        # 4. Registra handlers
-        @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
-        async def on_new(event):
-            try:
-                await processar(event, is_edit=False)
-            except Exception as e:
-                log_sys.error(f"❌ on_new: {e}", exc_info=True)
-
-        @client.on(events.MessageEdited(chats=GRUPOS_ORIGEM))
-        async def on_edit(event):
-            try:
-                await processar(event, is_edit=True)
-            except Exception as e:
-                log_sys.error(f"❌ on_edit: {e}", exc_info=True)
-
-        log_sys.info("✅ Handlers registrados")
-
-        # 5. Warmup (temporariamente reduzido/comentado se estiver lento)
+    # 4. Registra handlers de eventos
+    @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
+    async def on_new(event):
         try:
-            from plataformas.magalu import warmup_cache_magalu
-            log_sys.info("🔥 Iniciando warmup Magalu...")
-            await warmup_cache_magalu(limite=200)   # reduzi para ficar mais rápido
-            log_sys.info("✅ Warmup Magalu concluído")
+            await processar(event, is_edit=False)
         except Exception as e:
-            log_sys.warning(f"⚠️ warmup_cache_magalu: {e}")
+            log_sys.error(f"❌ on_new: {e}", exc_info=True)
 
-        # 6. Inicia tarefas de background
-        asyncio.create_task(_health_check())
-        asyncio.create_task(_iniciar_orchestrator())
-        asyncio.create_task(_iniciar_servidor_web())
+    @client.on(events.MessageEdited(chats=GRUPOS_ORIGEM))
+    async def on_edit(event):
+        try:
+            await processar(event, is_edit=True)
+        except Exception as e:
+            log_sys.error(f"❌ on_edit: {e}", exc_info=True)
 
-        log_sys.info("🚀 FOGUETÃO v80.0 — ONLINE")
-        await client.run_until_disconnected()
-        return True
-
+    # 4.5. Warmup do cache Magalu
+    # Carrega últimos 500 links já vistos do SQLite pra RAM
+    # Evita refazer desencurtar+afiliar após restart do Railway
+    try:
+        from plataformas.magalu import warmup_cache_magalu
+        await warmup_cache_magalu(limite=500)
     except Exception as e:
-        log_sys.error(f"💥 Erro crítico no startup: {e}", exc_info=True)
-        raise
+        log_sys.warning(f"⚠️ warmup_cache_magalu: {e}")
+
+    # 5. Inicia tarefas de background
+    asyncio.create_task(_health_check())
+    asyncio.create_task(_iniciar_orchestrator())
+    asyncio.create_task(_iniciar_servidor_web())
+
+    # 6. Aguarda desconexão
+    await client.run_until_disconnected()
+    return True
 
 
 # ── Loop principal com restart automático ────────────────────────
@@ -153,3 +154,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+                      
