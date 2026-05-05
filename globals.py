@@ -54,13 +54,19 @@ async def _get_session() -> aiohttp.ClientSession:
     return _http_session
 
 # ── Inicialização de todos os globals async ───────────────────────
-def _init_globals():
+def init_globals() -> None:          # ← mudei o nome (sem underline)
+    """Inicializa todos os objetos globais. Deve ser chamado no startup."""
     global _buf_lck, _buf_evt, _w_lck, _buf, _coal, _w_ativos
     global _IDS_LOCK, _BURST_LOCK, _atomic_lck_obj, _atomic_mem
     global _IDS_PROC, _burst, _pending_lock
-    import config as _cfg
-    _buf = []; _coal = {}; _w_ativos = 0
-    _IDS_PROC = set(); _burst = []; _atomic_mem = {}
+
+    _buf.clear()
+    _coal.clear()
+    _burst.clear()
+    _atomic_mem.clear()
+    _IDS_PROC.clear()
+    _w_ativos = 0
+
     _buf_lck        = asyncio.Lock()
     _buf_evt        = asyncio.Event()
     _w_lck          = asyncio.Lock()
@@ -68,9 +74,13 @@ def _init_globals():
     _BURST_LOCK     = asyncio.Lock()
     _atomic_lck_obj = asyncio.Lock()
     _pending_lock   = asyncio.Lock()
+
+    # Semáforos no config
+    import config as _cfg
     _cfg._SEM_ENVIO = asyncio.Semaphore(3)
     _cfg._SEM_HTTP  = asyncio.Semaphore(20)
-    log_db.debug("🔧 _init_globals OK")
+
+    log_db.info("✅ Globals inicializados com sucesso")
 
 # ── Helpers de cache ─────────────────────────────────────────────
 def _set_raw(url: str, valor: str):
