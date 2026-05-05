@@ -146,6 +146,31 @@ async def _get_atomic_lck():
     return g._atomic_lck_obj
 
 
+# Limpeza periódica de _atomic_mem (v80.3): entradas mais velhas que
+# o maior timeout possível (janela cupom/produto + folga) são removidas
+# automaticamente pra evitar memory leak.
+_ATOMIC_TTL_MAX = 4 * 60 * 60      # 4h (maior que qualquer janela)
+_ATOMIC_CLEANUP_THRESHOLD = 500    # rodar cleanup quando dict > 500 entradas
+
+
+def _cleanup_atomic_mem_locked() -> int:
+    """
+    Remove entradas antigas de g._atomic_mem.
+    DEVE ser chamado com g._atomic_lck_obj já adquirido.
+    Retorna número de entradas removidas.
+    """
+    if len(g._atomic_mem) <= _ATOMIC_CLEANUP_THRESHOLD:
+        return 0
+    agora = time.monotonic()
+    antigos = [
+        k for k, ts in g._atomic_mem.items()
+        if agora - ts > _ATOMIC_TTL_MAX
+    ]
+    for k in antigos:
+        g._atomic_mem.pop(k, None)
+    return len(antigos)
+
+
 async def _atomic_check(fp: str) -> Optional[float]:
     async with (await _get_atomic_lck()):
         return g._atomic_mem.get(fp)
@@ -153,6 +178,13 @@ async def _atomic_check(fp: str) -> Optional[float]:
 
 async def _atomic_claim(fp: str) -> bool:
     async with (await _get_atomic_lck()):
+        # Cleanup oportunista (não bloqueia o caminho normal)
+        removidos = _cleanup_atomic_mem_locked()
+        if removidos:
+            log_ded.debug(
+                f"🧹 _atomic_mem cleanup: removidos {removidos} | "
+                f"restam {len(g._atomic_mem)}"
+            )
         if fp in g._atomic_mem:
             return False
         g._atomic_mem[fp] = time.monotonic()
@@ -474,4 +506,3 @@ async def deve_enviar_async(norm: MensagemNormalizada) -> bool:
         # duplicar 1x do que perder oferta boa.
         log_ded.error(f"❌ ERRO DEDUPE: {e}", exc_info=True)
         return True
-              
