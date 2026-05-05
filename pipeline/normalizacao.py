@@ -341,29 +341,38 @@ class MensagemNormalizada:
 # ── 3g. normalizar() ─────────────────────────────────────────────
 async def _normalizar_um(lc: LinkClassificado, sessao: aiohttp.ClientSession,
                          msg_id: int = 0) -> Tuple[str, Optional[str], str]:
+    """
+    BUG FIX (v80.1): preserva a URL ORIGINAL que estava no texto da mensagem.
+    Antes, quando 'lc' era reatribuído após desencurtar (linha do 'lc =
+    _classificar_cached(url)'), a url_original retornada virava a URL
+    DESENCURTADA — e o mapa de substituição em montagem.py não conseguia
+    achar a URL original (cutt.ly/maga.lu/etc) no texto.
+    Resultado: o link do grupo monitorado vazava pro grupo destino.
+    """
     from plataformas.affiliate_router import rotear_afiliacao
     plat = lc.plat
-    if plat == "mundial":   return lc.url_original, lc.url_original, "mundial"
-    if plat == "preservar": return lc.url_original, lc.url_original, "preservar"
+    url_original_real = lc.url_original          # ← SALVA ANTES DE QUALQUER MUDANÇA
+    if plat == "mundial":   return url_original_real, url_original_real, "mundial"
+    if plat == "preservar": return url_original_real, url_original_real, "preservar"
     if plat is None or lc.tipo in ("invalido", "bloqueado", "grupo_externo", "desconhecido"):
-        return lc.url_original, None, plat or "none"
+        return url_original_real, None, plat or "none"
     if plat == "amazon" and lc.tipo == "claims":
-        return lc.url_original, lc.url_original, "amazon"
-    cached = _get_final(lc.url_original) or db_get_link(lc.url_original)
-    if cached: return lc.url_original, cached, plat
-    url = lc.url_original
+        return url_original_real, url_original_real, "amazon"
+    cached = _get_final(url_original_real) or db_get_link(url_original_real)
+    if cached: return url_original_real, cached, plat
+    url = url_original_real
     if plat == "expandir":
         try: url = await desencurtar(url, sessao)
-        except Exception: return lc.url_original, None, "none"
+        except Exception: return url_original_real, None, "none"
         lc = _classificar_cached(url); plat = lc.plat
-        if plat is None:      return lc.url_original, None, "none"
-        if plat == "mundial": return lc.url_original, url, "mundial"
+        if plat is None:      return url_original_real, None, "none"
+        if plat == "mundial": return url_original_real, url, "mundial"
         if plat == "amazon" and lc.tipo == "claims":
-            return lc.url_original, url, "amazon"
+            return url_original_real, url, "amazon"
         cached = _get_final(url) or db_get_link(url)
-        if cached: return lc.url_original, cached, plat
+        if cached: return url_original_real, cached, plat
     convertido = await rotear_afiliacao(plat, url, sessao, msg_id)
-    return lc.url_original, convertido, plat
+    return url_original_real, convertido, plat
 
 
 async def normalizar(bruta: MensagemBruta,
@@ -429,5 +438,4 @@ async def normalizar(bruta: MensagemBruta,
         estado_evento=estado, ids_globais=ids_globais,
         is_reply=bruta.is_reply, reply_to=bruta.reply_to,
         is_override=is_override,
-      )
-
+)
