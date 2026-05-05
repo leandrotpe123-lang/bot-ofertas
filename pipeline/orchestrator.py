@@ -21,8 +21,10 @@ import time
 from typing import Optional
 
 from config import _EXECUTOR
-import globals as g
-# g._buf, g._IDS_PROC acessados via g.
+from globals import (
+    _buf, _buf_lck, _buf_evt, _w_lck, _w_ativos,
+    _IDS_LOCK, _IDS_PROC,
+)
 from logger import log_sys
 from pipeline.deduplicacao import deve_enviar_async
 from pipeline.ingestao import ingerir
@@ -60,36 +62,38 @@ async def _enfileirar(event, is_edit: bool) -> None:
     texto = event.message.text or ""
     if not texto.strip(): return
     fp = _fp_r(texto); agora = time.monotonic()
-    async with g._buf_lck:
+    async with _buf_lck:
         from globals import _coal
         if not is_edit and agora - _coal.get(fp, 0.0) < _COALESCE_MS / 1000:
             return
         _coal[fp] = agora
-        if len(g._buf) >= _FILA_MAX:
+        if len(_buf) >= _FILA_MAX:
             log_sys.warning(f"⚠️ Fila cheia | id={event.message.id}")
             return
-        heapq.heappush(g._buf, (0 if is_edit else _prio(texto), agora, event, is_edit))
-    g._buf_evt.set()
+        heapq.heappush(_buf, (0 if is_edit else _prio(texto), agora, event, is_edit))
+    _buf_evt.set()
 
 
 async def _worker_loop() -> None:
+    from globals import _w_ativos as _wa
+    import globals as g
     while True:
-        await g._buf_evt.wait()
+        await _buf_evt.wait()
         while True:
             item = None
-            async with g._buf_lck:
-                if g._buf:
-                    item = heapq.heappop(g._buf)
+            async with _buf_lck:
+                if _buf:
+                    item = heapq.heappop(_buf)
                 else:
-                    g._buf_evt.clear()
+                    _buf_evt.clear()
                     break
             if item is None: break
             prio, ts, event, is_edit = item
-            async with g._w_lck:
+            async with _w_lck:
                 if g._w_ativos >= _WORKERS_MAX:
-                    async with g._buf_lck:
-                        heapq.heappush(g._buf, item)
-                        g._buf_evt.set()
+                    async with _buf_lck:
+                        heapq.heappush(_buf, item)
+                        _buf_evt.set()
                     await asyncio.sleep(0.5)
                     break
                 g._w_ativos += 1
@@ -101,7 +105,7 @@ async def _worker_loop() -> None:
             except Exception as e:
                 log_sys.error(f"❌ Worker: {e}", exc_info=True)
             finally:
-                async with g._w_lck:
+                async with _w_lck:
                     g._w_ativos -= 1
 
 
@@ -131,7 +135,7 @@ async def _pipeline(event, is_edit: bool = False) -> None:
 
     log_sys.info(
         f"{'✏️' if is_edit else '📩'} @{bruta.chat} | "
-        f"id={msg_id} | q={len(g._buf)} w={_get_w_ativos()}"
+        f"id={msg_id} | q={len(_buf)} w={_get_w_ativos()}"
     )
 
     # ── Camadas 2+3: Classificação + Normalização ─────────────────
@@ -162,33 +166,97 @@ async def _pipeline(event, is_edit: bool = False) -> None:
 
     # ── Camada 6: Publicação ──────────────────────────────────────
     if is_edit:
-        # Edição: verifica se tem imagem nova, respeita líder e limite
+        # ┄ EDIÇÃO DA MENSAGEM ORIGINAL no grupo monitorado ┄
+        # Esse é o caso onde o divulgador postou bagunçado, depois
+        # editou e (geralmente) colocou o código entre crases.
+        # → Re-extrai e atualiza o post no @ofertap.
+        loop = asyncio.get_running_loop()
+        mp   = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+        id_d = mp.get(str(msg_id))
+        if not id_d:
+            return  # mensagem não foi publicada — ignora edição
+        id_d = int(id_d)
+
+        identity = identidade_canonica(norm)
+        estado   = db_get_estado(identity)
+
+        # Tenta também buscar pelo msg_id de destino (caso identity tenha mudado)
+        if not estado:
+            try:
+                from database import _db
+                with _db() as db:
+                    row = db.execute(
+                        "SELECT identity, score, texto, plat, lider, "
+                        "janela_fim, edit_count, shadow_reply_id "
+                        "FROM oferta_estado WHERE msg_id_dest=?",
+                        (id_d,),
+                    ).fetchone()
+                if row:
+                    estado = dict(zip(
+                        ["identity","score","texto","plat","lider",
+                         "janela_fim","edit_count","shadow_reply_id"],
+                        row,
+                    ))
+            except Exception as e:
+                log_sys.warning(f"⚠️ buscar estado por msg_id: {e}")
+
+        edit_count_atual = (estado or {}).get("edit_count", 0) or 0
+        lider_atual      = (estado or {}).get("lider", "") or ""
+        score_atual      = (estado or {}).get("score", 0) or 0
+        janela_fim       = (estado or {}).get("janela_fim", 0) or 0
+
+        # Edição do mesmo grupo que publicou: SEMPRE permite
+        # (correção do divulgador, não conta como edição estética)
+        eh_correcao_original = (not lider_atual) or (norm.chat == lider_atual)
+
+        # Se for correção do original: edita SEM contar no _MAX_EDITS
+        # Se for de outro grupo (estético): respeita _MAX_EDITS
+        if not eh_correcao_original and edit_count_atual >= _MAX_EDITS:
+            log_sys.info(
+                f"🔒 [EDIT_BLOQ_MAX] msg={id_d} edits={edit_count_atual}"
+            )
+            return
+
+        # Tenta capturar imagem nova se houver
+        img_nova = None
         if norm.tem_midia:
-            img_nova = await preparar_imagem_tg(norm.media_obj)
-            if img_nova:
-                loop = asyncio.get_running_loop()
-                mp   = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-                id_d = mp.get(str(msg_id))
-                if id_d:
-                    identity   = identidade_canonica(norm)
-                    estado     = db_get_estado(identity)
-                    if estado:
-                        lider      = estado.get("lider", "") or ""
-                        edit_count = estado.get("edit_count", 0) or 0
-                        na_janela  = time.time() < (estado.get("janela_fim", 0) or 0)
-                        if (
-                            (not lider or norm.chat == lider or na_janela)
-                            and edit_count < _MAX_EDITS
-                        ):
-                            await editar_por_id(int(id_d), montada.texto, img_nova)
-                            db_set_estado(
-                                identity, int(id_d), estado["score"],
-                                montada.texto, montada.plat, lider,
-                                estado.get("janela_fim", 0), edit_count + 1,
-                                estado.get("shadow_reply_id", 0),
-                            )
-                    return
-        await editar(msg_id, montada.texto)
+            try:
+                img_nova = await preparar_imagem_tg(norm.media_obj)
+            except Exception as e:
+                log_sys.warning(f"⚠️ preparar_imagem (edit): {e}")
+
+        # Edita post no @ofertap
+        try:
+            ok = await editar_por_id(id_d, montada.texto, img_nova)
+        except Exception as e:
+            log_sys.error(f"❌ editar_por_id (edit): {e}")
+            return
+
+        if not ok:
+            log_sys.warning(f"⚠️ editar_por_id retornou False | msg={id_d}")
+            return
+
+        # Atualiza estado no DB com NOVO texto/cupom/identity
+        # IMPORTANTE: usa identity NOVA (cupom pode ter mudado!)
+        novo_score = max(score_atual, 0)
+        novo_edit_count = (
+            edit_count_atual if eh_correcao_original
+            else edit_count_atual + 1
+        )
+        try:
+            db_set_estado(
+                identity, id_d, novo_score, montada.texto,
+                montada.plat, lider_atual or norm.chat,
+                janela_fim, novo_edit_count,
+                (estado or {}).get("shadow_reply_id", 0),
+            )
+            log_sys.info(
+                f"✏️ [EDIT_OK] msg={id_d} identity={identity} "
+                f"correcao_original={eh_correcao_original}"
+            )
+        except Exception as e:
+            log_sys.warning(f"⚠️ db_set_estado (edit): {e}")
+        return
     else:
         await enviar(montada, norm=norm)
 
@@ -211,4 +279,4 @@ async def _iniciar_orchestrator() -> None:
         f"max_edits={_MAX_EDITS}"
     )
     asyncio.create_task(_worker_loop())
-      
+          
