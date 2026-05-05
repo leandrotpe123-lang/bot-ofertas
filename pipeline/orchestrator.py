@@ -22,7 +22,6 @@ from typing import Optional
 
 from config import _EXECUTOR
 import globals as g
-from globals import _buf, _IDS_LOCK, _IDS_PROC
 from logger import log_sys
 from pipeline.deduplicacao import deve_enviar_async
 from pipeline.ingestao import ingerir
@@ -61,26 +60,24 @@ async def _enfileirar(event, is_edit: bool) -> None:
     if not texto.strip(): return
     fp = _fp_r(texto); agora = time.monotonic()
     async with g._buf_lck:
-        from globals import _coal
-        if not is_edit and agora - _coal.get(fp, 0.0) < _COALESCE_MS / 1000:
+        if not is_edit and agora - g._coal.get(fp, 0.0) < _COALESCE_MS / 1000:
             return
-        _coal[fp] = agora
-        if len(_buf) >= _FILA_MAX:
+        g._coal[fp] = agora
+        if len(g._buf) >= _FILA_MAX:
             log_sys.warning(f"⚠️ Fila cheia | id={event.message.id}")
             return
-        heapq.heappush(_buf, (0 if is_edit else _prio(texto), agora, event, is_edit))
+        heapq.heappush(g._buf, (0 if is_edit else _prio(texto), agora, event, is_edit))
     g._buf_evt.set()
 
 
 async def _worker_loop() -> None:
-    import globals as g
     while True:
         await g._buf_evt.wait()
         while True:
             item = None
             async with g._buf_lck:
-                if _buf:
-                    item = heapq.heappop(_buf)
+                if g._buf:
+                    item = heapq.heappop(g._buf)
                 else:
                     g._buf_evt.clear()
                     break
@@ -89,7 +86,7 @@ async def _worker_loop() -> None:
             async with g._w_lck:
                 if g._w_ativos >= _WORKERS_MAX:
                     async with g._buf_lck:
-                        heapq.heappush(_buf, item)
+                        heapq.heappush(g._buf, item)
                         g._buf_evt.set()
                     await asyncio.sleep(0.5)
                     break
@@ -132,7 +129,7 @@ async def _pipeline(event, is_edit: bool = False) -> None:
 
     log_sys.info(
         f"{'✏️' if is_edit else '📩'} @{bruta.chat} | "
-        f"id={msg_id} | q={len(_buf)} w={_get_w_ativos()}"
+        f"id={msg_id} | q={len(g._buf)} w={_get_w_ativos()}"
     )
 
     # ── Camadas 2+3: Classificação + Normalização ─────────────────
@@ -259,7 +256,6 @@ async def _pipeline(event, is_edit: bool = False) -> None:
 
 
 def _get_w_ativos() -> int:
-    import globals as g
     return g._w_ativos
 
 
@@ -276,4 +272,4 @@ async def _iniciar_orchestrator() -> None:
         f"max_edits={_MAX_EDITS}"
     )
     asyncio.create_task(_worker_loop())
-          
+    
