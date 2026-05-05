@@ -1,10 +1,10 @@
 """Camada 1 — Ingestão. Extrai dados crus da mensagem. Zero lógica de negócio."""
 from __future__ import annotations
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 
-from telethon.tl.types import MessageMediaWebPage
+from telethon.tl.types import MessageMediaWebPage, MessageEntityCode, MessageEntityPre
 
 from logger import log_ing
 
@@ -21,6 +21,47 @@ class MensagemBruta:
     media_obj: object
     is_reply:  bool = False
     reply_to:  int  = 0
+    # Trechos do texto que vieram entre crases simples (`code`) ou
+    # crases triplas (```pre```). São CANDIDATOS DE ALTA CONFIANÇA
+    # para cupom-code, porque divulgadores profissionais sempre formatam
+    # códigos de cupom assim no Telegram pra ficarem clicáveis/copiáveis.
+    code_entities: List[str] = field(default_factory=list)
+
+
+def _extrair_code_entities(message) -> List[str]:
+    """
+    Extrai trechos formatados como `código` ou ```bloco``` no Telegram.
+    Retorna lista de strings (sem deduplicar — preserva ordem de aparição).
+    """
+    try:
+        texto = message.text or getattr(message, "message", "") or ""
+        if not texto:
+            return []
+        entidades = getattr(message, "entities", None) or []
+        resultados: List[str] = []
+        for ent in entidades:
+            if not isinstance(ent, (MessageEntityCode, MessageEntityPre)):
+                continue
+            try:
+                offset = int(ent.offset)
+                length = int(ent.length)
+                # Telegram envia offsets em UTF-16. Converte para UTF-16 e
+                # extrai o trecho correto. Se falhar, usa offset direto
+                # (suficiente pra ASCII, que é o caso de cupons).
+                try:
+                    utf16 = texto.encode("utf-16-le")
+                    trecho_bytes = utf16[offset * 2:(offset + length) * 2]
+                    trecho = trecho_bytes.decode("utf-16-le", errors="ignore")
+                except Exception:
+                    trecho = texto[offset:offset + length]
+                trecho = trecho.strip()
+                if trecho:
+                    resultados.append(trecho)
+            except Exception:
+                continue
+        return resultados
+    except Exception:
+        return []
 
 
 def ingerir(event) -> MensagemBruta:
@@ -31,6 +72,8 @@ def ingerir(event) -> MensagemBruta:
         event.message.media is not None
         and not isinstance(event.message.media, MessageMediaWebPage)
     )
+    code_entities = _extrair_code_entities(event.message)
+
     try:
         chat_obj = getattr(event, "_chat", None)
         username = getattr(chat_obj, "username", None)
@@ -48,11 +91,13 @@ def ingerir(event) -> MensagemBruta:
 
     log_ing.debug(
         f"📩 id={event.message.id} chat={chat} "
-        f"links={len(links)} midia={tem_midia} reply={is_reply}"
+        f"links={len(links)} midia={tem_midia} reply={is_reply} "
+        f"codes={len(code_entities)}"
     )
     return MensagemBruta(
         msg_id=event.message.id, chat=chat, texto=texto,
         links=links, tem_midia=tem_midia, media_obj=event.message,
         is_reply=is_reply, reply_to=reply_to,
-  )
-  
+        code_entities=code_entities,
+                    )
+            
