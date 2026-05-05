@@ -23,6 +23,64 @@ _SAT_BURST_LIM = 6
 _SAT_BURST_JAN = 60
 
 
+# ─────────────────────────────────────────────────────────────────
+# LOCK PESSIMISTA POR IDENTIDADE (v80.3) — resolve race condition
+# ─────────────────────────────────────────────────────────────────
+# Problema: 2 workers podem entrar em enviar() ao mesmo tempo com a
+# MESMA identidade. Ambos leem db_get_estado=None e ambos publicam,
+# causando DUPLICATA no @ofertap.
+#
+# Solução: dict de asyncio.Lock por identidade. Lock é criado lazy.
+# Um worker que adquire o lock garante que só ele lê/grava o estado
+# daquela identidade naquele momento. O 2º espera, lê o estado já
+# gravado pelo 1º, e cai no fluxo de edição/ignorar.
+#
+# Cleanup: locks são descartados após N segundos sem uso (memory mgmt).
+# ─────────────────────────────────────────────────────────────────
+_IDENTITY_LOCKS: dict = {}        # identity -> asyncio.Lock
+_IDENTITY_LOCKS_TS: dict = {}     # identity -> last_access_monotonic
+_IDENTITY_LOCKS_LCK: Optional[asyncio.Lock] = None  # lock do dict
+_IDENTITY_LOCK_TTL = 600.0        # 10 min sem uso → descarta
+
+
+async def _get_identity_lock(identity: str) -> asyncio.Lock:
+    """
+    Retorna (criando se necessário) um asyncio.Lock dedicado pra essa
+    identidade. Garante exclusão mútua entre workers processando o
+    mesmo cupom/produto/evento.
+    """
+    global _IDENTITY_LOCKS_LCK
+    if _IDENTITY_LOCKS_LCK is None:
+        _IDENTITY_LOCKS_LCK = asyncio.Lock()
+
+    async with _IDENTITY_LOCKS_LCK:
+        lock = _IDENTITY_LOCKS.get(identity)
+        if lock is None:
+            lock = asyncio.Lock()
+            _IDENTITY_LOCKS[identity] = lock
+        _IDENTITY_LOCKS_TS[identity] = time.monotonic()
+
+        # Cleanup oportunista: se o dict cresceu muito, varre antigos
+        if len(_IDENTITY_LOCKS) > 200:
+            agora = time.monotonic()
+            antigos = [
+                k for k, ts in _IDENTITY_LOCKS_TS.items()
+                if agora - ts > _IDENTITY_LOCK_TTL
+            ]
+            for k in antigos:
+                # Só remove se o lock não estiver em uso
+                lk = _IDENTITY_LOCKS.get(k)
+                if lk is not None and not lk.locked():
+                    _IDENTITY_LOCKS.pop(k, None)
+                    _IDENTITY_LOCKS_TS.pop(k, None)
+            if antigos:
+                log_sys.debug(
+                    f"🧹 identity_locks cleanup: removidos {len(antigos)} | "
+                    f"restam {len(_IDENTITY_LOCKS)}"
+                )
+        return lock
+
+
 async def _marcar(msg_id: int):
     async with g._IDS_LOCK:
         g._IDS_PROC.add(msg_id)
@@ -207,13 +265,43 @@ def _deve_substituir_post(
 
 async def enviar(montada: MensagemMontada,
                  norm: Optional[MensagemNormalizada] = None) -> bool:
+    """
+    Publica ou edita mensagem no @ofertap.
+
+    LOCK PESSIMISTA POR IDENTIDADE (v80.3):
+    Se norm tem identidade canônica, adquire lock dedicado dela ANTES
+    de ler/gravar estado. Isso elimina race condition: 2 workers
+    processando o mesmo cupom serializam aqui — o 2º espera o 1º
+    terminar (publicar + db_set_estado), depois lê o estado já gravado
+    e cai no fluxo de edição/ignorar.
+    """
+    # Calcula identity ANTES de pegar semáforos pra adquirir lock
+    # adequado. Se norm=None, identity=None e não há lock por identity.
+    identity: Optional[str] = None
+    score: int = 0
+    if norm is not None:
+        identity = identidade_canonica(norm)
+        score    = calcular_score(norm)
+
+    # Adquire lock por identidade (cria se não existir)
+    if identity is not None:
+        ident_lock = await _get_identity_lock(identity)
+        async with ident_lock:
+            return await _enviar_inner(montada, norm, identity, score)
+
+    # Sem identidade: segue direto sem lock por identidade
+    return await _enviar_inner(montada, norm, identity, score)
+
+
+async def _enviar_inner(montada: MensagemMontada,
+                        norm: Optional[MensagemNormalizada],
+                        identity: Optional[str],
+                        score: int) -> bool:
+    """Corpo real de enviar() — chamado dentro do lock por identidade."""
     async with config._SEM_ENVIO:
         loop     = asyncio.get_running_loop()
-        identity = None; score = 0
 
         if norm is not None:
-            identity = identidade_canonica(norm)
-            score    = calcular_score(norm)
             estado   = db_get_estado(identity)
 
             if estado:
