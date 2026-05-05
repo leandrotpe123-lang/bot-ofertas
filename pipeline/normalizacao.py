@@ -32,7 +32,7 @@ _FILTRO_TEXTO = [
     "Monitor Samsung","Fonte Mancer","Placa de video","Monitor LG",
     "PC home Essential","Suporte articulado","VHAGAR","Superframe","AM5","AM4","GTX",
     "Placa de Vídeo","DDR5","DDR4","Dram","Monitor Safe","Monitor Redragon","CL18","CL16",
-    "CL32","MT/s","MHz","RX 580","Ryzen","Placa Mãe","Gabinete Gamer",
+    "CL32","MT/s","MHz","RX 580","Ryzen","Monitor Gamer","Placa Mãe","Gabinete Gamer",
     "Water Cooler","Monitor Dell","Monitor Gamer","Air Cooler",
 ]
 _RE_MERCADO_LIVRE = re.compile(r'\b(?:mercado\s*livre|mercadolivre|mercado\s*pago)\b', re.I)
@@ -144,8 +144,17 @@ def limpar_texto(texto: str) -> str:
 
 
 # ── 3c. Extração cupom / SKU ─────────────────────────────────────
+# Sistema em 3 NÍVEIS DE CONFIANÇA:
+#   ALTA  : código entre crases (`CODIGO`) — 100% certeza, vem do Telegram
+#           formatado como CODE entity. Divulgadores profissionais usam isso.
+#   MÉDIA : código próximo à palavra-chave (Cupom: CODIGO, Código: CODIGO)
+#   BAIXA : código solto em maiúsculas no texto (heurística, pode falhar)
+#
+# Quando há crases, SEMPRE prefere a confiança ALTA (mesmo que outra
+# regex pegue diferente). Esse é o sinal mais forte que existe.
 _KW_CUPOM    = re.compile(r'\b(?:cupom|cupon|c[oó]digo|coupon|resgate|cod)\b', re.I)
 _KW_COD      = re.compile(r'\b([A-Z][A-Z0-9_-]{3,19})\b')
+_RE_COD_PURO = re.compile(r'^[A-Z][A-Z0-9_-]{3,19}$')
 _FALSO_CUPOM = frozenset({
     "FRETE","GRÁTIS","GRATIS","AMAZON","SHOPEE","MAGALU","LINK","CLIQUE","ACESSE",
     "CONFIRA","HOJE","AGORA","PROMO","BLACK","SUPER","MEGA","ULTRA","VIP","NOVO",
@@ -155,38 +164,146 @@ _FALSO_CUPOM = frozenset({
     "XIAOMI","PHILIPS","OSTER","MONDIAL","ARNO","BRAUN","LENOVO","LOGITECH",
     "NESTLÉ","NESTLE","ALPINO","PAMPERS","POSITIVO","INTELBRAS","LG","MALIBU",
     "OFF","VOLTA","ATIVO","VOLTOU","RENOVADO","NORMALIZOU",
+    # Comuns em texto promocional
+    "RESGATE","TESTE","CONFIRA","COMPRE","CLIQUE","ATIVAR","USAR","COPIE",
+    "OFERTA","OFERTAS","SUPER","MEGA","SOMENTE",
 })
 _RE_LISTA_CUPONS = re.compile(
     r'(?:r\$\s*\d+\s+off\s+em\s+r\$\s*\d+\s*:\s*[A-Z0-9]{4,}|'
     r'cupons?\s+(?:ainda\s+)?ativos?\s*:|ainda\s+ativos?\s*:)', re.I)
 
 
-def extrair_cupom(texto: str) -> str:
+def _eh_cupom_valido(c: str) -> bool:
+    """Valida se uma string parece um código de cupom real."""
+    if not c or len(c) < 4 or len(c) > 20:
+        return False
+    if c in _FALSO_CUPOM:
+        return False
+    if not _RE_COD_PURO.match(c):
+        return False
+    # Tem que ter pelo menos 1 dígito OU ser misto/curto+padrão típico
+    # Códigos só com letras (BOMDIA, MASTER) também são válidos se >= 5 chars
+    return True
+
+
+def extrair_cupom_de_codes(code_entities: list) -> str:
+    """
+    NÍVEL ALTA — Procura código de cupom entre os trechos formatados como
+    CODE entity no Telegram (texto entre crases). Confiança máxima.
+
+    Retorna string vazia se nenhum trecho parece código de cupom.
+    """
+    if not code_entities:
+        return ""
+    for trecho in code_entities:
+        # Limpa espaços e caracteres não-código
+        candidato = trecho.strip()
+        if _eh_cupom_valido(candidato):
+            return candidato
+        # Pode ter mais de uma palavra dentro da entidade — testa cada uma
+        for palavra in re.findall(r'[A-Z][A-Z0-9_-]{3,19}', candidato):
+            if _eh_cupom_valido(palavra):
+                return palavra
+    return ""
+
+
+def extrair_cupom(texto: str, code_entities: list = None) -> str:
+    """
+    Extrai o código de cupom do texto. Prioriza:
+      1. Trecho entre crases (CONFIANÇA ALTA)
+      2. Padrão "OFF: CODIGO" ou ": CODIGO" (lista de cupons profissional)
+      3. Código após palavra-chave "Cupom:", "Código:", etc. (MÉDIA)
+      4. Se texto MENCIONA cupom em qualquer linha, procura código
+         em todo o texto (BAIXA — fallback)
+
+    Retorna string vazia se não achar nada confiável.
+    """
+    # NÍVEL ALTA — entre crases
+    if code_entities:
+        c = extrair_cupom_de_codes(code_entities)
+        if c:
+            return c
+
+    # NÍVEL MÉDIA-ALTA — lista de cupons "R$ X off em R$ Y: CODIGO"
     if _RE_LISTA_CUPONS.search(texto):
         for linha in texto.splitlines():
             m = re.search(r':\s*([A-Z][A-Z0-9_-]{3,19})\b', linha)
             if m:
                 c = m.group(1)
-                if c not in _FALSO_CUPOM and len(c) >= 4: return c
+                if _eh_cupom_valido(c):
+                    return c
+
+    # NÍVEL MÉDIA — padrão "PALAVRA: CODIGO" ou "OFF: CODIGO" em qualquer linha
+    # Esse é o formato mais comum em divulgadores profissionais.
+    # Ex: "🎟 15% OFF em R$ 150, Limite de R$ 100 OFF: MASTER15OFF"
+    for m in re.finditer(
+        r'(?:OFF|cupom|cupons|c[oó]digo|coupon)\s*[:=]\s*([A-Z][A-Z0-9_-]{3,19})\b',
+        texto, re.I,
+    ):
+        c = m.group(1)
+        if _eh_cupom_valido(c):
+            return c
+
+    # NÍVEL MÉDIA-BAIXA — código após palavra-chave na MESMA linha
     for linha in texto.splitlines():
-        if not _KW_CUPOM.search(linha): continue
+        if not _KW_CUPOM.search(linha):
+            continue
+        # Texto após a palavra-chave
+        m_kw = _KW_CUPOM.search(linha)
+        if m_kw:
+            depois = linha[m_kw.end():]
+            for m in _KW_COD.finditer(depois):
+                c = m.group(1)
+                if _eh_cupom_valido(c):
+                    return c
+        # Códigos em qualquer parte da linha
         for m in _KW_COD.finditer(linha):
             c = m.group(1)
-            if c not in _FALSO_CUPOM and len(c) >= 4: return c
+            if _eh_cupom_valido(c):
+                return c
+
+    # NÍVEL BAIXO (fallback) — se texto MENCIONA cupom mas o código não
+    # está na mesma linha, procura código no texto inteiro PRÓXIMO
+    # à mensão de cupom (até 3 linhas após a palavra-chave)
+    if _KW_CUPOM.search(texto):
+        linhas = texto.splitlines()
+        for i, linha in enumerate(linhas):
+            if not _KW_CUPOM.search(linha):
+                continue
+            # Procura código em até 3 linhas seguintes
+            for j in range(i, min(i + 4, len(linhas))):
+                for m in _KW_COD.finditer(linhas[j]):
+                    c = m.group(1)
+                    if _eh_cupom_valido(c):
+                        return c
+
     return ""
 
 
-def extrair_todos_cupons(texto: str) -> List[str]:
+def extrair_todos_cupons(texto: str, code_entities: list = None) -> List[str]:
+    """Extrai TODOS os códigos de cupom (em crases + lista + linhas com kw)."""
     encontrados: List[str] = []
+
+    # NÍVEL ALTA — todos os trechos em crases
+    if code_entities:
+        for trecho in code_entities:
+            for palavra in re.findall(r'[A-Z][A-Z0-9_-]{3,19}', trecho):
+                if _eh_cupom_valido(palavra) and palavra not in encontrados:
+                    encontrados.append(palavra)
+
+    # Lista (R$ X off em R$ Y: CODIGO)
     for m in re.finditer(r':\s*([A-Z][A-Z0-9_-]{4,19})\b', texto):
         c = m.group(1)
-        if c not in _FALSO_CUPOM and c not in encontrados:
+        if _eh_cupom_valido(c) and c not in encontrados:
             encontrados.append(c)
+
+    # Linhas com palavra-chave
     for linha in texto.splitlines():
-        if not _KW_CUPOM.search(linha): continue
+        if not _KW_CUPOM.search(linha):
+            continue
         for m in _KW_COD.finditer(linha):
             c = m.group(1)
-            if c not in _FALSO_CUPOM and len(c) >= 4 and c not in encontrados:
+            if _eh_cupom_valido(c) and c not in encontrados:
                 encontrados.append(c)
     return encontrados
 
@@ -405,7 +522,7 @@ async def normalizar(bruta: MensagemBruta,
     if converter and not mapa and not preservar_lst:
         log_nrm.warning(f"🚫 Zero links convertidos | @{bruta.chat}"); return None
     plat_dom    = max(set(plats), key=plats.count) if plats else "amazon"
-    cupom       = extrair_cupom(texto_limpo)
+    cupom       = extrair_cupom(texto_limpo, getattr(bruta, "code_entities", None))
     sku         = (
         next((f"{lc.plat[:3]}_{lc.sku}" for lc in classificados if lc.sku), "")
         or _extrair_asin_texto(texto_limpo, mapa)
