@@ -63,7 +63,16 @@ except ImportError:
 
 # ── Constantes de publicação (usadas pelo orchestrator e publicacao) ─
 _JANELA_DISPUTA_S = 90.0   # janela de disputa entre grupos (segundos)
-_MAX_EDITS        = 2      # máximo de edições por evento
+_MAX_EDITS        = 1      # máximo de edições estéticas (entre grupos)
+                            # Edições por mudança no original NÃO contam.
+
+# ── Janelas por TIPO DE OFERTA (independente de plataforma) ───────
+# Define por quanto tempo a mesma oferta é considerada "duplicata".
+# Após esse tempo, mesma oferta pode ser publicada de novo (a fonte
+# ainda está divulgando = ainda é válida).
+_JANELA_CUPOM_S    = 30 * 60    # 30 min — cupom code
+_JANELA_PRODUTO_S  = 60 * 60    # 60 min — produto com ASIN/SKU
+_JANELA_EVENTO_S   = 20 * 60    # 20 min — campanha/evento
 
 # ── Estratégia de imagem ─────────────────────────────────────────
 # Grupos que mandam imagens de baixa qualidade — peso de mídia reduzido
