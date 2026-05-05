@@ -66,20 +66,41 @@ _HOSTS_CAMPANHA = frozenset({
 
 def _eh_post_cupom(texto: str) -> bool:
     """
-    Detecta se o post é 'tipo cupom' — onde o cupom é o assunto principal,
-    não um produto específico. Nesse caso o ASIN/produto é só exemplo.
-    Heurística: olha as primeiras 3 linhas (geralmente título + descrição).
+    Detecta se o post é 'tipo cupom' — onde o cupom é o ASSUNTO PRINCIPAL,
+    não um produto específico.
+
+    REGRA (v80.2): SOMENTE a 1ª linha não-vazia (o TÍTULO) é considerada.
+    Se a palavra 'cupom'/'cupons'/'código' está no título → post-cupom.
+
+    Antes considerávamos as 3 primeiras linhas, mas isso causava falso
+    positivo: posts de PRODUTO frequentemente mencionam 'Cupom: XXX' na
+    linha 3 (após título e preço), o que não os torna posts-cupom.
+
+    Posts-cupom reais SEMPRE têm a palavra no título:
+      ✅ "🔥 Cupom Amazon APP"        → True  (post-cupom)
+      ✅ "🔥 Cupons Magalu SOMENTE"   → True  (post-cupom)
+      ✅ "Cupom: BOMDIA10"            → True  (post-cupom)
+      ❌ "🔥 Smart TV Samsung 55"
+         "R$ 1899"
+         "Cupom: BOMDIA10"            → False (post-PRODUTO com cupom)
     """
-    primeiras_linhas = texto.strip().split("\n")[:3]
-    bloco_inicial = " ".join(primeiras_linhas)
-    return bool(_RE_TITULO_CUPOM.search(bloco_inicial))
+    linhas = [l for l in texto.strip().split("\n") if l.strip()]
+    if not linhas:
+        return False
+    titulo = linhas[0]
+    return bool(_RE_TITULO_CUPOM.search(titulo))
 
 
 def _eh_post_cashback(texto: str) -> bool:
-    """Detecta se o post é especificamente sobre cashback (sem cupom code)."""
-    primeiras_linhas = texto.strip().split("\n")[:3]
-    bloco_inicial = " ".join(primeiras_linhas)
-    return bool(_RE_TITULO_CASHBACK.search(bloco_inicial))
+    """
+    Detecta se o post é especificamente sobre cashback (sem cupom code).
+    Mesma lógica do _eh_post_cupom: só olha o TÍTULO (1ª linha não-vazia).
+    """
+    linhas = [l for l in texto.strip().split("\n") if l.strip()]
+    if not linhas:
+        return False
+    titulo = linhas[0]
+    return bool(_RE_TITULO_CASHBACK.search(titulo))
 
 
 def _eh_post_evento(texto: str, mapa: dict) -> bool:
@@ -250,25 +271,33 @@ def identidade_canonica(norm: MensagemNormalizada) -> str:
     """
     Chave estável da oferta. Hierarquia em 7 níveis:
 
-      1. Post-cupom    → plat|cup|CODIGO          (BOMDIA10 vence ASIN)
-      2. Post-cashback → plat|cash|VALOR%         (cashback Shopee 30%)
-      3. Produto/ASIN  → plat|asin                (mesmo produto entre grupos)
-      4. Campanha      → plat|camp|host           (flapremios)
-      5. Cupom genérico→ plat|cup|CODIGO          (cupom dentro de oferta)
-      6. URL canônica  → plat|url|cache_key       (mesma URL)
-      7. Texto         → plat|txt|hash            (último recurso)
+      1. Post-cupom    → plat|cup|CODIGO              (cupom domina título)
+      2. Post-cashback → plat|cash|VALOR%             (cashback Shopee 30%)
+      3. Produto/ASIN  → plat|asin[|cup|CODIGO]       (produto, opcional cupom)
+      4. Campanha      → plat|camp|host               (flapremios)
+      5. Cupom genérico→ plat|cup|CODIGO              (cupom dentro de oferta)
+      6. URL canônica  → plat|url|cache_key           (mesma URL)
+      7. Texto         → plat|txt|hash                (último recurso)
 
-    Exemplos:
-      - "Cupom BOMDIA10" + ASIN1 → amazon|cup|BOMDIA10
-      - "Cupom BOMDIA10" + ASIN2 → amazon|cup|BOMDIA10  (MESMA chave!)
-      - "Cashback 30% moedas"    → shopee|cash|30
-      - "Roleta Flamengo" raiz   → shopee|camp|flapremios.com.br
-      - "Roleta Flamengo" /sub   → shopee|camp|flapremios.com.br (MESMA!)
+    REGRA NÍVEL 3 (atualizada v80.2):
+    Mesmo produto com cupom DIFERENTE = ofertas DIFERENTES (não deduplica).
+    Mesmo produto com mesmo cupom OU sem cupom em ambos = mesma oferta.
+
+    Exemplos NÍVEL 3:
+      - Smart TV B0XYZ sem cupom         → "amazon|B0XYZ"
+      - Smart TV B0XYZ cupom BOMDIA10    → "amazon|B0XYZ|cup|BOMDIA10"
+      - Smart TV B0XYZ cupom SUPER50     → "amazon|B0XYZ|cup|SUPER50"  (diferente!)
+      - Mesmo TV+BOMDIA10 outro grupo    → "amazon|B0XYZ|cup|BOMDIA10" (mesma)
+
+    Exemplos NÍVEL 1 (não muda):
+      - "Cupom BOMDIA10" + qualquer ASIN → "amazon|cup|BOMDIA10"
+        (post-cupom: o cupom é o foco, ASIN é só ilustrativo)
     """
     texto = norm.texto_limpo
     plat  = norm.plat
 
     # NÍVEL 1: Post-cupom — cupom no título manda no produto
+    # (cupom é o foco, ASIN é apenas ilustrativo)
     if _eh_post_cupom(texto) and norm.cupom:
         return f"{plat}|cup|{norm.cupom.upper()}"
 
@@ -278,9 +307,14 @@ def identidade_canonica(norm: MensagemNormalizada) -> str:
         if pct:
             return f"{plat}|cash|{pct}"
 
-    # NÍVEL 3: Produto com ASIN/SKU
+    # NÍVEL 3: Produto com ASIN/SKU (com cupom opcional)
+    # Mesmo produto + cupom diferente = oferta diferente (passa).
+    # Mesmo produto + mesmo cupom (ou ambos sem) = mesma oferta (deduplica).
     if norm.ids_globais:
-        return f"{plat}|{norm.ids_globais[0]}"
+        sufixo_cupom = (
+            f"|cup|{norm.cupom.upper()}" if norm.cupom else ""
+        )
+        return f"{plat}|{norm.ids_globais[0]}{sufixo_cupom}"
 
     # NÍVEL 4: Campanha/evento (sem ASIN, host de campanha)
     if _eh_post_evento(texto, norm.mapa):
@@ -440,3 +474,4 @@ async def deve_enviar_async(norm: MensagemNormalizada) -> bool:
         # duplicar 1x do que perder oferta boa.
         log_ded.error(f"❌ ERRO DEDUPE: {e}", exc_info=True)
         return True
+              
