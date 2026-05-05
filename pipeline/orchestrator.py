@@ -75,38 +75,61 @@ async def _enfileirar(event, is_edit: bool) -> None:
 
 
 async def _worker_loop() -> None:
-    from globals import _w_ativos as _wa
+    """Worker principal com proteção robusta contra inicialização incompleta"""
+    from globals import _buf_evt, _buf_lck, _buf, _w_lck, _w_ativos
     import globals as g
+    import heapq
+    import time
+
     while True:
-        await _buf_evt.wait()
-        while True:
-            item = None
-            async with _buf_lck:
-                if _buf:
-                    item = heapq.heappop(_buf)
-                else:
-                    _buf_evt.clear()
+        try:
+            # Proteção extra contra None
+            if _buf_evt is None or _buf_lck is None:
+                log_sys.warning("⚠️ Globals None no worker → forçando reinicialização")
+                from globals import init_globals
+                init_globals()
+                # Reimporta após init
+                from globals import _buf_evt, _buf_lck, _buf, _w_lck, _w_ativos
+
+            await _buf_evt.wait()
+
+            while True:
+                item = None
+                async with _buf_lck:
+                    if _buf:
+                        item = heapq.heappop(_buf)
+                    else:
+                        _buf_evt.clear()
+                        break
+                if item is None:
                     break
-            if item is None: break
-            prio, ts, event, is_edit = item
-            async with _w_lck:
-                if g._w_ativos >= _WORKERS_MAX:
-                    async with _buf_lck:
-                        heapq.heappush(_buf, item)
-                        _buf_evt.set()
-                    await asyncio.sleep(0.5)
-                    break
-                g._w_ativos += 1
-            try:
-                if time.monotonic() - ts > 60:
-                    log_sys.warning(f"⏱ Expirado | id={event.message.id}")
-                    continue
-                await _pipeline(event, is_edit)
-            except Exception as e:
-                log_sys.error(f"❌ Worker: {e}", exc_info=True)
-            finally:
+
+                prio, ts, event, is_edit = item
+
+                # Controle de workers
                 async with _w_lck:
-                    g._w_ativos -= 1
+                    if g._w_ativos >= _WORKERS_MAX:
+                        async with _buf_lck:
+                            heapq.heappush(_buf, item)
+                            _buf_evt.set()
+                        await asyncio.sleep(0.5)
+                        break
+                    g._w_ativos += 1
+
+                try:
+                    if time.monotonic() - ts > 60:
+                        log_sys.warning(f"⏱ Expirado | id={event.message.id}")
+                        continue
+                    await _pipeline(event, is_edit)
+                except Exception as e:
+                    log_sys.error(f"❌ Worker: {e}", exc_info=True)
+                finally:
+                    async with _w_lck:
+                        g._w_ativos -= 1
+
+        except Exception as e:
+            log_sys.error(f"💥 Erro no worker_loop: {e}", exc_info=True)
+            await asyncio.sleep(1)
 
 
 async def _pipeline(event, is_edit: bool = False) -> None:
