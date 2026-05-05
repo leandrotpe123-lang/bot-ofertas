@@ -187,6 +187,65 @@ def calcular_score(norm: MensagemNormalizada) -> int:
 # ─────────────────────────────────────────────────────────────────
 # IDENTIDADE CANÔNICA — coração do sistema anti-duplicação
 # ─────────────────────────────────────────────────────────────────
+def _detectar_tipo_oferta(norm: MensagemNormalizada) -> str:
+    """
+    Detecta o TIPO da oferta (independente de plataforma):
+      - "cupom"   : tem cupom code claro E é post centrado em cupom
+      - "produto" : tem ID de produto (ASIN, SKU, ItemID)
+      - "evento"  : campanha/roleta/sem ID claro
+
+    Esse tipo determina:
+      - A janela de deduplicação (30min/60min/20min)
+      - A identidade canônica (cupom/produto/host)
+
+    PRIORIDADE:
+      1. Tem ID de produto SEM cupom-no-título → produto
+      2. É post-cupom (cupom dominando o título) → cupom
+      3. Tem cupom mas sem ID de produto → cupom standalone
+      4. Cashback sem cupom → evento
+      5. Campanha (host de evento) → evento
+      6. Fallback: tem cupom = cupom, senão evento
+    """
+    texto = norm.texto_limpo
+
+    # PRIORIDADE 1: tem ID de produto, NÃO é post-cupom → produto
+    # (o cupom mencionado é secundário; o foco é o produto)
+    if norm.ids_globais and not _eh_post_cupom(texto):
+        return "produto"
+
+    # PRIORIDADE 2: é post-cupom (cupom domina o título)
+    if norm.cupom and _eh_post_cupom(texto):
+        return "cupom"
+
+    # PRIORIDADE 3: tem cupom mas sem ID — cupom standalone
+    if norm.cupom and not norm.ids_globais:
+        return "cupom"
+
+    # PRIORIDADE 4: tem ID de produto (caso restante — produto puro)
+    if norm.ids_globais:
+        return "produto"
+
+    # PRIORIDADE 5: cashback sem cupom code
+    if _eh_post_cashback(texto):
+        return "evento"
+
+    # PRIORIDADE 6: campanha/evento
+    if _eh_post_evento(texto, norm.mapa):
+        return "evento"
+
+    # Fallback
+    if norm.cupom:
+        return "cupom"
+    return "evento"
+
+
+def _janela_por_tipo(tipo: str) -> float:
+    """Retorna a janela de dedupe em segundos pelo tipo da oferta."""
+    if tipo == "cupom":   return float(config._JANELA_CUPOM_S)
+    if tipo == "produto": return float(config._JANELA_PRODUTO_S)
+    return float(config._JANELA_EVENTO_S)
+
+
 def identidade_canonica(norm: MensagemNormalizada) -> str:
     """
     Chave estável da oferta. Hierarquia em 7 níveis:
@@ -255,40 +314,14 @@ async def _checar_reativacao(norm: MensagemNormalizada) -> bool:
     """
     Verifica se o post é uma reativação válida.
 
-    Condições para reativação:
-      1. Texto tem palavra-chave de retorno ("voltou", "reativado" etc.)
-      2. Existe estado prévio dessa identidade no banco
-      3. Última publicação foi há MAIS de _COOLDOWN_REATIVACAO_S (30min)
+    Regra (atualizada): qualquer cupom/oferta que chegar com palavras
+    de retorno ("voltou", "reativado") é tratado como reativação válida
+    e reseta a janela de dedupe — pode publicar de novo.
 
-    Retorna True = é reativação legítima, deve republicar.
-    Retorna False = não é reativação OU está dentro do cooldown.
+    Retorna True = é reativação, deve republicar.
     """
     if not _eh_reativacao(norm.texto_limpo):
         return False
-
-    identity = identidade_canonica(norm)
-    estado   = db_get_estado(identity)
-    if not estado:
-        # Sem estado prévio: trata como oferta nova normal
-        return False
-
-    ts_anterior = estado.get("ts", 0) or 0
-    delta       = time.time() - ts_anterior
-
-    if delta < config._COOLDOWN_REATIVACAO_S:
-        # Cooldown ainda ativo — provavelmente é spam de "voltou"
-        # logo após o post original. Bloqueia.
-        log_ded.info(
-            f"⏳ [REATIVACAO_COOLDOWN] {identity} "
-            f"delta={int(delta)}s < {int(config._COOLDOWN_REATIVACAO_S)}s"
-        )
-        return False
-
-    # Reativação legítima: o sistema vai tratar como nova oferta
-    log_ded.info(
-        f"♻️ [REATIVACAO_OK] {identity} "
-        f"delta={int(delta/60)}min — liberando republicação"
-    )
     return True
 
 
@@ -299,183 +332,111 @@ async def deve_enviar_async(norm: MensagemNormalizada) -> bool:
     """
     Decide se a mensagem prossegue pra montagem/publicação.
 
-    Lógica:
-      • Reativação detectada (voltou/reativou) E cooldown OK → PASSA
-      • Mesma oferta + mesmo grupo em janela curta → BLOQUEIA
-      • Mesma oferta + grupo diferente → PASSA (enviar() decide via score)
-      • Oferta nova → registra e PASSA
+    REGRA UNIFICADA (v80.2):
 
-    A camada 6 (enviar) é quem decide via score:
-      - Publicar como nova
-      - Editar versão anterior se score maior
+    1. Detecta TIPO da oferta (cupom/produto/evento)
+    2. Calcula identidade canônica (mesma oferta = mesma chave,
+       não importa de qual grupo veio)
+    3. Lock atômico por IDENTIDADE — só 1 worker processa cada
+       identidade por vez (resolve race condition entre workers)
+    4. Se identidade já foi vista dentro da janela do tipo:
+       → DEIXA PASSAR pra enviar() decidir (publicar/editar/ignorar
+         pelo score)
+    5. Se reativação detectada ("voltou"): reseta janela e PASSA
+    6. Se identidade NUNCA foi vista: PASSA pra enviar() publicar
+
+    A camada 6 (enviar em publicacao.py) é quem decide via score:
+      - Publicar como nova (1ª aparição da identidade)
+      - Editar versão anterior se score maior (1 vez só, _MAX_EDITS=1)
       - Ignorar se score igual/menor
+
+    Janelas por tipo:
+      - Cupom    : 30 min (_JANELA_CUPOM_S)
+      - Produto  : 60 min (_JANELA_PRODUTO_S)
+      - Evento   : 20 min (_JANELA_EVENTO_S)
     """
     try:
         texto       = norm.texto_limpo
         plat        = norm.plat
-        estado      = norm.estado_evento
         ids_globais = norm.ids_globais
         cupons      = _cupons_set(texto)
         alma_v      = _alma(texto)
         benef       = _benef_set(texto)
-        valores     = _normalizar_valor(texto)
-        janela      = _janela(plat)
         chat        = (norm.chat or "").lower()
 
-        # ── REATIVAÇÃO: passa direto sem checar dedupe ────────────
+        # ── TIPO + IDENTIDADE + JANELA ────────────────────────────
+        tipo     = _detectar_tipo_oferta(norm)
+        identity = identidade_canonica(norm)
+        janela   = _janela_por_tipo(tipo)
+
+        # ── REATIVAÇÃO: passa direto e reseta janela ─────────────
+        # Qualquer cupom/oferta que chegar com palavras "voltou",
+        # "reativado" etc. é tratado como nova chance — reseta o
+        # tempo da janela e libera republicação.
         if await _checar_reativacao(norm):
             log_ded.info(
-                f"♻️ [PASSOU_REATIVACAO] chat={chat} → enviar() decide"
+                f"♻️ [REATIVACAO_OK] {identity} tipo={tipo} "
+                f"chat={chat} → enviar() decide"
             )
             return True
 
-        # ── RESTOCK clássico (do detectar_estado_evento) ──────────
-        if estado == EstadoEvento.RESTOCKED:
-            if ids_globais:
-                fp_rst = _fp4(
-                    f"{plat}|{ids_globais[0]}|restock|{int(time.time()//60)}"
-                )
-                ok = await _atomic_claim(fp_rst)
-                if not ok:
-                    log_ded.info(f"🔁 [BLOQ_RESTOCK] {ids_globais[0]}")
-                    return False
-                db_set_dedupe(
-                    _fp4(f"{plat}|{ids_globais[0]}"), plat, list(cupons),
-                    alma_v, "restock", ids_globais[0], ids_globais[0],
-                    list(benef),
-                )
-                log_ded.info(f"♻️ [PASSOU_RESTOCK] {ids_globais[0]}")
-            return True
-
-        # ── SEEN: já vista recentemente, bloqueia ──────────────────
-        if estado == EstadoEvento.SEEN:
-            log_ded.info(f"🔁 [BLOQ_SEEN] ids={ids_globais}")
-            return False
-
-        # ── EXPIRED: viu há tempo, libera se benefício novo ───────
-        if estado == EstadoEvento.EXPIRED:
-            if ids_globais:
-                fp_base = _fp4(f"{plat}|{ids_globais[0]}")
-                entrada = db_get_dedupe(fp_base)
-                if entrada:
-                    benef_ant = frozenset(entrada.get("benef", []))
-                    if benef and benef != benef_ant:
-                        fp_ben = _fp_benef(ids_globais[0], plat, benef)
-                        ok = await _atomic_claim(fp_ben)
-                        if not ok:
-                            return False
-                        db_set_dedupe(
-                            fp_base, plat, list(cupons), alma_v, "benef",
-                            ids_globais[0], ids_globais[0], list(benef),
-                        )
-                        log_ded.info(
-                            f"✳️ [PASSOU_BENEF_NOVO] {ids_globais[0]}"
-                        )
-                        return True
-            return False
-
-        # ──────────────────────────────────────────────────────────
-        # DEDUPE PRINCIPAL — por (id_global + chat)
-        #
-        # Princípio:
-        #   - Mesma oferta + mesmo grupo em janela = BLOQUEIA (spam)
-        #   - Mesma oferta + grupo diferente = PASSA pra enviar()
-        #     decidir via score (publica/edita/ignora)
-        # ──────────────────────────────────────────────────────────
-        for id_global in ids_globais:
-            fp_chat = _fp4(f"{plat}|{id_global}|{chat}")
-            ts_mem  = await _atomic_check(fp_chat)
-            if ts_mem is not None and (time.monotonic() - ts_mem) < janela:
-                log_ded.info(
-                    f"🔁 [BLOQ_MESMO_GRUPO] {id_global} chat={chat}"
-                )
-                return False
-            ok = await _atomic_claim(fp_chat)
-            if not ok:
-                log_ded.info(f"🔁 [BLOQ_RACE] {id_global} chat={chat}")
-                return False
-            entrada_db = db_get_dedupe(fp_chat)
-            if entrada_db:
-                delta = time.time() - entrada_db.get("ts", 0)
-                if delta < janela:
-                    await _atomic_release(fp_chat)
-                    log_ded.info(
-                        f"🔁 [BLOQ_DB_MESMO_GRUPO] {id_global} chat={chat}"
-                    )
-                    return False
-            db_set_dedupe(
-                fp_chat, plat, list(cupons), alma_v, "id",
-                id_global, id_global, list(benef),
-            )
+        # ── LOCK ATÔMICO POR IDENTIDADE ──────────────────────────
+        # Resolve race condition: sem isso, 2 workers podem ler
+        # db_get_estado=None ao mesmo tempo e ambos publicarem como novo.
+        # Com lock, só 1 worker processa a identidade por vez.
+        fp_identity = _fp4(f"identity|{identity}")
+        ts_lock = await _atomic_check(fp_identity)
+        if ts_lock is not None and (time.monotonic() - ts_lock) < janela:
+            # Identidade já está sendo processada/foi processada
+            # recentemente. DEIXA PASSAR — a camada 6 (enviar) vai
+            # decidir via score se edita ou ignora.
             log_ded.info(
-                f"✅ [PASSOU] {id_global} chat={chat} → enviar() decide"
+                f"🔄 [IDENTITY_NA_JANELA] {identity} tipo={tipo} "
+                f"delta={int(time.monotonic() - ts_lock)}s "
+                f"chat={chat} → enviar() decide"
+            )
+            # Atualiza timestamp pra estender a janela (mantém
+            # identidade ativa enquanto receber posts dela)
+            return True
+
+        # Primeira vez vendo essa identidade na janela — claim
+        ok = await _atomic_claim(fp_identity)
+        if not ok:
+            # Outro worker pegou exatamente nesse momento —
+            # passa também (vai cair no caso acima na próxima)
+            log_ded.info(
+                f"🔄 [IDENTITY_RACE] {identity} chat={chat} → enviar() decide"
             )
             return True
 
-        # ── Cupom standalone (sem id_global) ──────────────────────
-        if norm.cupom:
-            fp_cup = _fp4(f"{plat}|cup|{norm.cupom}|{chat}")
-            ts_mem = await _atomic_check(fp_cup)
-            if ts_mem is not None and (time.monotonic() - ts_mem) < janela:
-                log_ded.info(
-                    f"🔁 [BLOQ_CUP_MESMO_GRUPO] {norm.cupom} chat={chat}"
-                )
-                return False
-            ok = await _atomic_claim(fp_cup)
-            if not ok:
-                log_ded.info(f"🔁 [BLOQ_CUP_RACE] {norm.cupom}")
-                return False
-            entrada_db = db_get_dedupe(fp_cup)
-            if entrada_db:
-                delta = time.time() - entrada_db.get("ts", 0)
-                if delta < janela:
-                    await _atomic_release(fp_cup)
-                    log_ded.info(f"🔁 [BLOQ_CUP_DB_MESMO_GRUPO]")
-                    return False
+        # ── DEDUPE PRINCIPAL — passou todas verificações ──────────
+        # Registra no DB pra histórico/análise
+        if ids_globais:
+            id_principal = ids_globais[0]
             db_set_dedupe(
-                fp_cup, plat, list(cupons), alma_v, "cup",
+                fp_identity, plat, list(cupons), alma_v, tipo,
+                id_principal, id_principal, list(benef),
+            )
+        elif norm.cupom:
+            db_set_dedupe(
+                fp_identity, plat, list(cupons), alma_v, tipo,
                 "", "", list(benef),
             )
-            log_ded.info(
-                f"✅ [PASSOU_CUP] {norm.cupom} chat={chat} → enviar() decide"
+        else:
+            db_set_dedupe(
+                fp_identity, plat, list(cupons), alma_v, tipo,
+                "", "", list(benef),
             )
-            return True
 
-        # ── Texto-base (último recurso): similaridade semântica ───
-        # Calcula fingerprint do texto + valores para detectar
-        # "mesmo post de outro grupo com texto levemente diferente"
-        fp_txt = _fp4(
-            f"{plat}|{alma_v}|{chat}|{'|'.join(sorted(benef))}|{valores}"
+        log_ded.info(
+            f"✅ [PASSOU] {identity} tipo={tipo} chat={chat} "
+            f"→ enviar() decide"
         )
-        ok = await _atomic_claim(fp_txt)
-        if not ok:
-            log_ded.info(f"🔁 [BLOQ_TEXTO_RACE]")
-            return False
-
-        # Verifica similaridade com posts recentes do MESMO grupo
-        # (evita falso positivo entre grupos diferentes — esses já são
-        # tratados pela identidade_canonica em enviar())
-        for e in db_buscar_janela_rapida(plat, janela=max(janela, 900)):
-            alma_ant = e.get("alma", "")
-            if not alma_ant:
-                continue
-            if _sim(alma_v, alma_ant) > _SIM_FORTE:
-                fp_ant = e.get("fp", "")
-                if chat and chat in (fp_ant or ""):
-                    await _atomic_release(fp_txt)
-                    log_ded.info(f"🔁 [BLOQ_SIM_MESMO_GRUPO]")
-                    return False
-
-        db_set_dedupe(
-            fp_txt, plat, list(cupons), alma_v, "gen",
-            "", "", list(benef),
-        )
-        log_ded.info(f"✅ [PASSOU_TEXTO] chat={chat} → enviar() decide")
         return True
 
     except Exception as e:
-        # Em caso de erro inesperado, deixa passar pra não bloquear ofertas
-        # legítimas. Erros aqui são raros — vale o risco de duplicar 1x do
-        # que perder oferta boa.
+        # Em caso de erro inesperado, deixa passar pra não bloquear
+        # ofertas legítimas. Erros aqui são raros — vale o risco de
+        # duplicar 1x do que perder oferta boa.
         log_ded.error(f"❌ ERRO DEDUPE: {e}", exc_info=True)
         return True
