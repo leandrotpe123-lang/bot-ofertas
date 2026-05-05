@@ -271,7 +271,10 @@ async def processar(event, is_edit: bool = False) -> None:
 
 
 async def _iniciar_orchestrator() -> None:
-    from config import _JANELA_DISPUTA_S  # noqa — apenas para log
+    from globals import init_globals
+    init_globals()   
+
+    from config import _JANELA_DISPUTA_S
     log_sys.info(
         f"🎛 Orchestrator | workers={_WORKERS_MAX} fila={_FILA_MAX} "
         f"coalesce={_COALESCE_MS}ms "
