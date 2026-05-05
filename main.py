@@ -23,7 +23,7 @@ from config import (
     _PIL_OK, _EXECUTOR,
 )
 from database import _init_db, _db, db_limpar
-from globals import _init_globals, _IDS_PROC, _buf, _w_ativos
+from globals import init_globals, _IDS_PROC, _buf, _w_ativos
 from logger import log_sys, log_hc
 from pipeline.orchestrator import processar, _iniciar_orchestrator
 from web.redirect import _iniciar_servidor_web
