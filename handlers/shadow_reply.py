@@ -1,18 +1,14 @@
-"""Shadow reply engine — captura e filtra comentários dos grupos monitorados.
-
-═══════════════════════════════════════════════════════════════════
-v80.4 — Auditoria sênior aplicada
-═══════════════════════════════════════════════════════════════════
-Cirurgias incluídas:
-  • Cirurgia 13 (Bug #52)  — restock DELETE com fp correto (era LIKE
-    '%chave%' que NUNCA batia em nada porque fp é hash hex)
-  • Cirurgia 21 (Bug #50)  — _spawn_task gerencia tasks (não órfãs)
-═══════════════════════════════════════════════════════════════════
 """
+Shadow Reply Engine v81.0 — Master Edition (Final)
+"""
+
 from __future__ import annotations
 import asyncio
 import re
-from typing import Optional
+import time
+from collections import defaultdict
+from dataclasses import dataclass
+from typing import Callable, Dict, Any
 
 import globals as g
 from config import GRUPO_DESTINO, _EXECUTOR
@@ -20,185 +16,213 @@ from database import db_get_estado, db_set_estado, _db
 from logger import log_out
 from pipeline.publicacao import editar_por_id, _MAX_EDITS
 from utils.helpers import ler_mapa
-from utils.hashes import _fp4   # ← Cirurgia 13
+from utils.hashes import _fp4
 
 
-# ─────────────────────────────────────────────────────────────────
-# CIRURGIA 21 (Bug #50): tasks gerenciadas (não órfãs)
-# ─────────────────────────────────────────────────────────────────
-# Antes: asyncio.create_task(...) sem guardar referência. Tasks
-# órfãs podiam ser GC'd antes de terminar, ou erros desapareciam
-# silenciosamente.
-# ─────────────────────────────────────────────────────────────────
-_tasks_ativas: set = set()
+# ==================== TASK MANAGEMENT ====================
+_tasks_ativas: set[asyncio.Task] = set()
 
-
-def _spawn_task(coro):
-    """Cria task gerenciada com cleanup automático."""
+def _spawn_task(coro) -> asyncio.Task:
+    """Cria task gerenciada."""
     task = asyncio.create_task(coro)
     _tasks_ativas.add(task)
     task.add_done_callback(_tasks_ativas.discard)
     return task
 
 
-# ── Filtros de bloco / positivo ───────────────────────────────────
-_RE_SHADOW_BLOCK = re.compile(
-    r'https?://|t\.me/|telegram\.me/|telegram\.org/|'
-    r'whatsapp\.com|wa\.me|'
-    r'\bgrupo\b|\bcanal\b|\bcomunidade\b|\blink\b|\bencaminhado\b|'
-    r'@\w+|#\w+',
-    re.I,
-)
-_RE_SHADOW_POSITIVO = re.compile(
-    r'\b(?:precin|barato|bom\s*pre[cç]o|pre[cç]o\s*bom|imperd[ií]vel|'
-    r'absurdo|relâmpago|relampago|voando|queimando|escald|'
-    r'dá\s*pra\s*usar|voltando|testem|conseguiram|'
-    r'ainda\s*ativo|ativo\s*ainda|'
-    r'durou\s*em|foi\s*r[aá]pido|corr[ae]|cupom\s*ativo|'
-    r'que\s*desconto|que\s*pre[cç]o|mds|caramba|nossa)\b',
-    re.I,
-)
-_RE_LINHA_CUPOM_LISTA = re.compile(
-    r'r\$\s*\d+\s+off\s+em\s+r\$\s*\d+\s*:\s*[A-Z0-9]{4,}|'
-    r'cupons?\s+(?:ainda\s+)?ativos?\s*:|ainda\s+ativos?\s*:',
-    re.I,
-)
+# ==================== MEMÓRIA DE CONTEXTO ====================
+_context_memory: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+    "last_restock": 0.0,
+    "last_cupons": 0.0,
+    "reply_count": 0,
+    "last_activity": 0.0,
+    "ignored_count": 0
+})
+
+def _get_context(identity: str) -> Dict[str, Any]:
+    return _context_memory[identity]
 
 
-def _classificar_shadow(texto: str) -> str:
+def _update_context(identity: str, **kwargs) -> None:
+    ctx = _get_context(identity)
+    ctx.update(kwargs)
+    ctx["last_activity"] = time.time()
+
+
+# ==================== PIPELINE PLUGÁVEL ====================
+@dataclass(frozen=True)
+class ShadowContext:
+    texto: str
+    identity: str
+    msg_dest: int
+    row: tuple
+    score: int
+    tipo: str
+    bruta: Any
+
+
+HandlerFunc = Callable[[ShadowContext], Any]
+PIPELINE: Dict[str, HandlerFunc] = {}
+
+
+def register_handler(tipo: str):
+    def decorator(func: HandlerFunc):
+        PIPELINE[tipo] = func
+        return func
+    return decorator
+
+
+# ==================== SCORING ====================
+_BLOCK_KEYWORDS = {"grupo", "canal", "comunidade", "pix", "link", "t.me", "http"}
+_POSITIVE_WORDS = {"funcionou", "funciona", "consegui", "conseguiram", "testem", "deu certo",
+                   "ótimo", "top", "melhor", "bom", "barato", "precin", "imperdível", "absurdo",
+                   "relâmpago", "voando", "queimando", "valeu", "ativo ainda"}
+
+_RESTOCK_WORDS = {"voltando", "voltou", "reativou", "reabasteceu", "restock", "de volta",
+                  "voltei", "ativo de novo", "reabastecido", "retornou", "volta"}
+
+
+def _calcular_score_semantico(texto: str) -> tuple[str, int]:
+    if not texto or len(texto.strip()) < 4:
+        return 'bloquear', 0
+
     t = texto.strip()
-    if not t: return 'bloquear'
-    if _RE_SHADOW_BLOCK.search(t): return 'bloquear'
-    linhas = [l.strip() for l in t.splitlines() if l.strip()]
-    cupons_na_lista = sum(1 for l in linhas if _RE_LINHA_CUPOM_LISTA.search(l))
-    if cupons_na_lista >= 1: return 'edicao_cupons'
-    if re.search(r'\b(?:voltando|voltou|reativou|ativo\s+de\s+novo|de\s+volta|'
-                 r'testem|conseguiram\s+usar)\b', t, re.I):
-        return 'edicao_restock'
-    palavras = t.split()
-    if len(palavras) <= 8 and len(linhas) <= 2:
-        if _RE_SHADOW_POSITIVO.search(t): return 'humanizado'
-        if len(t) < 5: return 'bloquear'
-        if re.fullmatch(r'[\s\U0001F300-\U0001FAFF\U00002600-\U000027BF'
-                        r'\U0001F900-\U0001F9FF\u2B50\u2B55]+', t):
-            return 'humanizado'
-        return 'humanizado'
-    return 'bloquear'
+    t_lower = t.lower()
+    palavras = [p.lower().strip() for p in t.split()]
+    num_palavras = len(palavras)
+    num_linhas = len([l for l in t.splitlines() if l.strip()])
+
+    if any(kw in t_lower for kw in _BLOCK_KEYWORDS) or re.search(r'https?://|t\.me/', t_lower):
+        return 'bloquear', -999
+
+    if re.search(r'cupom|cupons?|r\$\s*\d+\s*off', t_lower):
+        return 'edicao_cupons', 100
+
+    if any(word in t_lower for word in _RESTOCK_WORDS):
+        return 'edicao_restock', 95
+
+    score = sum(18 for p in palavras if p in _POSITIVE_WORDS)
+    score += 25 if 5 <= num_palavras <= 16 and num_linhas <= 5 else -10
+    score += 15 if "ainda" in t_lower and "ativo" in t_lower else 0
+
+    if num_palavras > 25 or num_linhas > 8:
+        score -= 45
+
+    return ('humanizado' if score >= 48 else 'bloquear', max(score, 0))
 
 
-async def _postar_reply_original(texto: str, msg_dest: int,
-                                  identity: str, row) -> bool:
-    from client import client
-    linhas_limpas = [l for l in texto.strip().splitlines()
-                     if not _RE_SHADOW_BLOCK.search(l)]
-    texto_final = "\n".join(linhas_limpas).strip()
-    if not texto_final: return False
+# ==================== HANDLERS ====================
+@register_handler("edicao_cupons")
+async def handle_cupons(ctx: ShadowContext):
+    # ... (mesma lógica da versão anterior)
+    texto_atual = ctx.row[3] or ""
+    edit_count = ctx.row[7] or 0
+    if edit_count >= _MAX_EDITS:
+        return
+
+    bloco_novo = "\n".join(line.strip() for line in ctx.texto.splitlines() if line.strip() and not re.search(r'https?://', line)).strip()
+    if not bloco_novo:
+        return
+
+    texto_final = f"{texto_atual.rstrip()}\n\n{bloco_novo}"
+    ok = await editar_por_id(int(ctx.msg_dest), texto_final)
+    if ok:
+        db_set_estado(ctx.identity, int(ctx.msg_dest), (ctx.row[2] or 0) + 1, texto_final,
+                      ctx.row[4] or "", ctx.row[5] or "", ctx.row[6] or 0.0, edit_count + 1, ctx.row[1] or 0)
+        _update_context(ctx.identity, last_cupons=time.time())
+        log_out.info(f"✏️ [CUPONS_OK] {ctx.identity}")
+
+
+@register_handler("edicao_restock")
+async def handle_restock(ctx: ShadowContext):
+    await _safe_restock(ctx.identity)
+    _update_context(ctx.identity, last_restock=time.time())
+
+
+@register_handler("humanizado")
+async def handle_humanizado(ctx: ShadowContext):
+    if ctx.row[1] and ctx.row[1] > 0:
+        return
+    await _postar_reply_original(ctx.texto, ctx.msg_dest, ctx.identity, ctx.row)
+
+
+# ==================== AUXILIARES ====================
+async def _safe_restock(identity: str):
     try:
-        sent = await client.send_message(
-            GRUPO_DESTINO, texto_final,
-            reply_to=msg_dest, parse_mode="md")
-        db_set_estado(
-            identity, msg_dest,
-            row[2] or 0, row[3] or "",
-            row[4] or "", row[5] or "",
-            row[6] or 0.0, row[7] or 0,
-            shadow_reply_id=sent.id)
-        log_out.info(f"💬 [SHADOW_OK] {texto_final!r} → reply {msg_dest}")
+        fp = _fp4(f"identity|{identity}")
+        with _db() as db:
+            db.execute("DELETE FROM dedupe_temp WHERE fp = ?", (fp,))
+
+        if hasattr(g, '_atomic_lck_obj') and g._atomic_lck_obj:
+            async with g._atomic_lck_obj:
+                g._atomic_mem.pop(fp, None)
+        log_out.info(f"♻️ [RESTOCK] {identity}")
+    except Exception as e:
+        log_out.warning(f"Restock falhou {identity}: {e}")
+
+
+async def _postar_reply_original(texto: str, msg_dest: int, identity: str, row: tuple) -> bool:
+    from client import client
+    try:
+        linhas = [l.strip() for l in texto.splitlines() if l.strip() and not re.search(r'https?://', l)]
+        texto_final = "\n".join(linhas).strip()
+        if not texto_final: return False
+
+        sent = await client.send_message(GRUPO_DESTINO, texto_final, reply_to=msg_dest, parse_mode="md")
+        db_set_estado(identity, msg_dest, row[2] or 0, row[3] or "", row[4] or "", row[5] or "", row[6] or 0.0, row[7] or 0, sent.id)
+        _update_context(identity, reply_count=_get_context(identity)["reply_count"] + 1)
+        log_out.info(f"💬 [SHADOW_OK] {identity}")
         return True
     except Exception as e:
-        log_out.error(f"❌ Shadow reply: {e}"); return False
-
-
-async def processar_shadow_reply(bruta) -> bool:
-    if not bruta.is_reply or not bruta.reply_to: return False
-
-    tipo = _classificar_shadow(bruta.texto)
-    if tipo == 'bloquear':
-        log_out.debug(f"🔇 Shadow bloqueado | {bruta.texto[:50]!r}")
+        log_out.error(f"Shadow reply falhou {identity}: {e}")
         return False
 
-    # Verifica se libera post pendente
-    if tipo in ('humanizado', 'edicao_restock'):
-        from handlers.pending import _tentar_liberar_pending, _processar_post_liberado
-        from handlers.pending import _RE_COMENTARIO_BOM_PRECO
-        if _RE_COMENTARIO_BOM_PRECO.search(bruta.texto):
-            bruta_liberada = await _tentar_liberar_pending(bruta.reply_to, bruta.texto)
-            if bruta_liberada:
-                log_out.info(f"🔓 Post bloqueado liberado | id={bruta_liberada.msg_id}")
-                # CIRURGIA 21: task gerenciada (não órfã)
-                _spawn_task(_processar_post_liberado(bruta_liberada, bruta.texto))
 
-    loop     = asyncio.get_running_loop()
-    mp       = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-    msg_dest = mp.get(str(bruta.reply_to))
-    if not msg_dest: return False
+# ==================== MAIN ====================
+async def processar_shadow_reply(bruta) -> bool:
+    if not getattr(bruta, 'is_reply', False) or not getattr(bruta, 'reply_to', None):
+        return False
 
     try:
+        tipo, score = _calcular_score_semantico(bruta.texto)
+        log_out.debug(f"[SHADOW] Score={score:3d} | Tipo={tipo:12s} | {bruta.texto[:65]!r}")
+
+        if tipo == 'bloquear':
+            return False
+
+        loop = asyncio.get_running_loop()
+        mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+        msg_dest = mp.get(str(bruta.reply_to))
+        if not msg_dest:
+            return False
+
         with _db() as db:
             row = db.execute(
-                "SELECT identity,shadow_reply_id,score,texto,plat,"
-                "lider,janela_fim,edit_count "
-                "FROM oferta_estado WHERE msg_id_dest=?",
-                (int(msg_dest),)).fetchone()
-    except Exception:
+                "SELECT identity,shadow_reply_id,score,texto,plat,lider,janela_fim,edit_count "
+                "FROM oferta_estado WHERE msg_id_dest=?", (int(msg_dest),)
+            ).fetchone()
+
+        if not row:
+            return False
+
+        ctx = ShadowContext(bruta.texto, row[0], int(msg_dest), row, score, tipo, bruta)
+
+        if tipo in ('humanizado', 'edicao_restock'):
+            try:
+                from handlers.pending import _tentar_liberar_pending, _processar_post_liberado
+                liberada = await _tentar_liberar_pending(bruta.reply_to, bruta.texto)
+                if liberada:
+                    _spawn_task(_processar_post_liberado(liberada, bruta.texto))
+            except Exception as e:
+                log_out.warning(f"Pending via shadow: {e}")
+
+        handler = PIPELINE.get(tipo)
+        if handler:
+            await handler(ctx) if asyncio.iscoroutinefunction(handler) else handler(ctx)
+            return True
+
         return False
-    if not row: return False
 
-    identity   = row[0]; shadow_id  = row[1] or 0
-    score_at   = row[2] or 0; texto_at = row[3] or ""
-    plat_at    = row[4] or ""; lider   = row[5] or ""
-    janela_fim = row[6] or 0.0; edit_ct = row[7] or 0
-
-    if tipo == 'edicao_cupons':
-        log_out.info(f"📋 [SHADOW_CUPONS] Enriquecendo | identity={identity}")
-        bloco_limpo = "\n".join(
-            l for l in bruta.texto.strip().splitlines()
-            if not _RE_SHADOW_BLOCK.search(l)
-        ).strip()
-        if not bloco_limpo: return True
-        texto_novo = texto_at.rstrip() + "\n\n" + bloco_limpo
-        if edit_ct < _MAX_EDITS:
-            ok = await editar_por_id(int(msg_dest), texto_novo)
-            if ok:
-                db_set_estado(identity, int(msg_dest), score_at + 1,
-                              texto_novo, plat_at, lider, janela_fim,
-                              edit_ct + 1, shadow_id)
-                log_out.info(f"✏️ [CUPONS_OK] identity={identity}")
-        return True
-
-    if tipo == 'edicao_restock':
-        log_out.info(f"♻️ [SHADOW_RESTOCK] identity={identity}")
-        # ═════════════════════════════════════════════════════════
-        # CIRURGIA 13 (Bug #52): DELETE com fp CORRETO
-        # ═════════════════════════════════════════════════════════
-        # Antes: DELETE WHERE fp LIKE '%chave%' onde chave era um
-        # pedaço da identity em texto. fp é hash SHA-256 hex — não
-        # contém o texto. Resultado: DELETE NUNCA bateu nada.
-        # Restock NUNCA funcionou.
-        # Agora: calcula fp_identity correto (mesma fórmula do dedupe).
-        # ═════════════════════════════════════════════════════════
-        try:
-            fp_identity = _fp4(f"identity|{identity}")
-            with _db() as db:
-                db.execute(
-                    "DELETE FROM dedupe_temp WHERE fp=?", (fp_identity,)
-                )
-            # Também limpa do _atomic_mem em RAM (evita IDENTITY_NA_JANELA)
-            async with g._atomic_lck_obj:
-                g._atomic_mem.pop(fp_identity, None)
-            log_out.info(f"♻️ Dedupe limpo pra identity={identity}")
-        except Exception as e:
-            log_out.warning(f"⚠️ Restock cleanup: {e}")
-
-        palavras = bruta.texto.strip().split()
-        if len(palavras) <= 6 and shadow_id == 0:
-            return await _postar_reply_original(bruta.texto, int(msg_dest), identity, row)
-        return True
-
-    # humanizado
-    if shadow_id and shadow_id > 0:
-        log_out.debug(f"🔇 Shadow já enviado para {identity}"); return False
-    palavras = bruta.texto.strip().split()
-    if len(palavras) > 12:
-        log_out.debug(f"🔇 Shadow longo: {len(palavras)} palavras"); return False
-    return await _postar_reply_original(bruta.texto, int(msg_dest), identity, row)
+    except Exception as e:
+        log_out.error(f"💥 Erro no Shadow Reply: {e}", exc_info=True)
+        return False
