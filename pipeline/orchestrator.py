@@ -1,6 +1,13 @@
 """
 Orchestrator — fila de prioridade, workers e pipeline principal.
 
+═══════════════════════════════════════════════════════════════════
+v80.4 — Auditoria sênior aplicada
+═══════════════════════════════════════════════════════════════════
+Cirurgias incluídas:
+  • Cirurgia 18 (Bug #38) — cleanup periódico de _coal (memory leak)
+═══════════════════════════════════════════════════════════════════
+
 Ordem do pipeline (preservada):
   1. Ingestão        (pipeline.ingestao)
   2. Shadow reply    (handlers.shadow_reply)  ← só se is_reply
@@ -35,10 +42,16 @@ from pipeline.deduplicacao import calcular_score, identidade_canonica
 from database import db_get_estado, db_set_estado
 from utils.helpers import ler_mapa
 
+
 # ── Constantes do orchestrator ────────────────────────────────────
 _WORKERS_MAX = 4
 _FILA_MAX    = 200
 _COALESCE_MS = 800
+
+# CIRURGIA 18 (Bug #38): cleanup de _coal pra evitar memory leak.
+# Antes: dict crescia sem limite indefinidamente.
+_COAL_TTL = 60.0      # entradas mais velhas que isso podem ser removidas
+_COAL_LIMITE = 1000   # threshold pra disparar cleanup
 
 
 def _prio(texto: str) -> int:
@@ -60,6 +73,20 @@ async def _enfileirar(event, is_edit: bool) -> None:
     if not texto.strip(): return
     fp = _fp_r(texto); agora = time.monotonic()
     async with g._buf_lck:
+        # CIRURGIA 18: cleanup oportunista de _coal
+        if len(g._coal) > _COAL_LIMITE:
+            antigos = [
+                k for k, ts in g._coal.items()
+                if agora - ts > _COAL_TTL
+            ]
+            for k in antigos:
+                del g._coal[k]
+            if antigos:
+                log_sys.debug(
+                    f"🧹 _coal cleanup: removidos {len(antigos)} | "
+                    f"restam {len(g._coal)}"
+                )
+
         if not is_edit and agora - g._coal.get(fp, 0.0) < _COALESCE_MS / 1000:
             return
         g._coal[fp] = agora
@@ -161,20 +188,16 @@ async def _pipeline(event, is_edit: bool = False) -> None:
     # ── Camada 6: Publicação ──────────────────────────────────────
     if is_edit:
         # ┄ EDIÇÃO DA MENSAGEM ORIGINAL no grupo monitorado ┄
-        # Esse é o caso onde o divulgador postou bagunçado, depois
-        # editou e (geralmente) colocou o código entre crases.
-        # → Re-extrai e atualiza o post no @ofertap.
         loop = asyncio.get_running_loop()
         mp   = await loop.run_in_executor(_EXECUTOR, ler_mapa)
         id_d = mp.get(str(msg_id))
         if not id_d:
-            return  # mensagem não foi publicada — ignora edição
+            return
         id_d = int(id_d)
 
         identity = identidade_canonica(norm)
         estado   = db_get_estado(identity)
 
-        # Tenta também buscar pelo msg_id de destino (caso identity tenha mudado)
         if not estado:
             try:
                 from database import _db
@@ -199,19 +222,14 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         score_atual      = (estado or {}).get("score", 0) or 0
         janela_fim       = (estado or {}).get("janela_fim", 0) or 0
 
-        # Edição do mesmo grupo que publicou: SEMPRE permite
-        # (correção do divulgador, não conta como edição estética)
         eh_correcao_original = (not lider_atual) or (norm.chat == lider_atual)
 
-        # Se for correção do original: edita SEM contar no _MAX_EDITS
-        # Se for de outro grupo (estético): respeita _MAX_EDITS
         if not eh_correcao_original and edit_count_atual >= _MAX_EDITS:
             log_sys.info(
                 f"🔒 [EDIT_BLOQ_MAX] msg={id_d} edits={edit_count_atual}"
             )
             return
 
-        # Tenta capturar imagem nova se houver
         img_nova = None
         if norm.tem_midia:
             try:
@@ -219,7 +237,6 @@ async def _pipeline(event, is_edit: bool = False) -> None:
             except Exception as e:
                 log_sys.warning(f"⚠️ preparar_imagem (edit): {e}")
 
-        # Edita post no @ofertap
         try:
             ok = await editar_por_id(id_d, montada.texto, img_nova)
         except Exception as e:
@@ -230,8 +247,6 @@ async def _pipeline(event, is_edit: bool = False) -> None:
             log_sys.warning(f"⚠️ editar_por_id retornou False | msg={id_d}")
             return
 
-        # Atualiza estado no DB com NOVO texto/cupom/identity
-        # IMPORTANTE: usa identity NOVA (cupom pode ter mudado!)
         novo_score = max(score_atual, 0)
         novo_edit_count = (
             edit_count_atual if eh_correcao_original
@@ -264,7 +279,7 @@ async def processar(event, is_edit: bool = False) -> None:
 
 
 async def _iniciar_orchestrator() -> None:
-    from config import _JANELA_DISPUTA_S  # noqa — apenas para log
+    from config import _JANELA_DISPUTA_S
     log_sys.info(
         f"🎛 Orchestrator | workers={_WORKERS_MAX} fila={_FILA_MAX} "
         f"coalesce={_COALESCE_MS}ms "
@@ -272,4 +287,4 @@ async def _iniciar_orchestrator() -> None:
         f"max_edits={_MAX_EDITS}"
     )
     asyncio.create_task(_worker_loop())
-    
+
