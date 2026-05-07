@@ -1,4 +1,13 @@
-"""Estados globais, locks, caches in-memory, HTTP session singleton."""
+"""Estados globais, locks, caches in-memory, HTTP session singleton.
+
+═══════════════════════════════════════════════════════════════════
+v80.4 — Auditoria sênior aplicada
+═══════════════════════════════════════════════════════════════════
+Cirurgias incluídas:
+  • Cirurgia 11 (Bug #24)  — _identity_locks_lck inicializado aqui
+  • Cirurgia 20 (Bug #34)  — _session_lock protege _get_session
+═══════════════════════════════════════════════════════════════════
+"""
 from __future__ import annotations
 import asyncio
 import random
@@ -31,6 +40,15 @@ _BURST_LOCK:     Optional[asyncio.Lock]  = None
 _atomic_lck_obj: Optional[asyncio.Lock]  = None
 _pending_lock:   Optional[asyncio.Lock]  = None
 
+# CIRURGIA 11 (Bug #24): lock global pra _IDENTITY_LOCKS em publicacao.py.
+# Antes era inicializado lazy DENTRO de publicacao._get_identity_lock,
+# com race possível (2 tasks ambas viam None e ambas criavam Lock —
+# último wins, primeiro fica órfão).
+_identity_locks_lck: Optional[asyncio.Lock] = None
+
+# CIRURGIA 20 (Bug #34): lock pra proteger lazy init de _http_session
+_session_lock: Optional[asyncio.Lock] = None
+
 # ── Estado do orchestrator ────────────────────────────────────────
 _buf:      list       = []
 _coal:     dict       = {}
@@ -42,66 +60,78 @@ _atomic_mem: Dict[str, float] = {}
 # ── HTTP Session singleton ────────────────────────────────────────
 _http_session: Optional[aiohttp.ClientSession] = None
 
+
 async def _get_session() -> aiohttp.ClientSession:
-    global _http_session
-    if _http_session is None or _http_session.closed:
-        conn = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300, ssl=False)
-        _http_session = aiohttp.ClientSession(
-            connector=conn,
-            timeout=aiohttp.ClientTimeout(total=40, connect=8),
-            headers={"User-Agent": random.choice(config.USER_AGENTS)},
-        )
-    return _http_session
+    """
+    Retorna a session singleton, criando-a sob lock se não existir.
+
+    CIRURGIA 20 (Bug #34): antes era lazy init sem lock — duas tasks
+    podiam ver `_http_session is None` simultaneamente e criar duas
+    sessions, segunda sobrescreve primeira (memory leak da órfã).
+    """
+    global _http_session, _session_lock
+    if _session_lock is None:
+        _session_lock = asyncio.Lock()
+    async with _session_lock:
+        if _http_session is None or _http_session.closed:
+            conn = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300, ssl=False)
+            _http_session = aiohttp.ClientSession(
+                connector=conn,
+                timeout=aiohttp.ClientTimeout(total=40, connect=8),
+                headers={"User-Agent": random.choice(config.USER_AGENTS)},
+            )
+        return _http_session
+
 
 # ── Inicialização de todos os globals async ───────────────────────
 def _init_globals():
     """
     Inicializa locks/eventos asyncio + zera caches em memória.
 
-    REGRA IMPORTANTE (v80.2):
-      - Para containers mutáveis (_buf, _IDS_PROC, _burst, _atomic_mem,
-        _coal): usa .clear() pra MANTER o mesmo objeto.
-        Isso evita o bug de outros módulos (que importaram com `from
-        globals import _buf`) ficarem apontando pra objeto antigo.
+    REGRAS:
+      - Containers mutáveis (_buf, _IDS_PROC, _burst, _atomic_mem,
+        _coal): usa .clear() pra MANTER o mesmo objeto (evita bug
+        de outros módulos que importaram com `from globals import _buf`
+        ficarem apontando pra objeto antigo).
 
-      - Para LOCKS asyncio (que começam None): tem que reassignar
-        com asyncio.Lock(). Por isso TODOS os consumidores DEVEM usar
-        o padrão `import globals as g` + `g._buf_lck` (acessam o
-        atributo dinamicamente, não o valor capturado no import).
+      - Locks asyncio (que começam None): tem que reassignar com
+        asyncio.Lock(). Por isso TODOS os consumidores DEVEM usar
+        `import globals as g` + `g._buf_lck` (acessam dinamicamente).
 
-      - Para _w_ativos (int): mantém reassign — int é imutável,
-        consumidores usam `g._w_ativos` (sempre lê o valor atual).
+      - _w_ativos (int): mantém reassign — int é imutável.
     """
     global _buf_lck, _buf_evt, _w_lck, _w_ativos
     global _IDS_LOCK, _BURST_LOCK, _atomic_lck_obj
-    global _pending_lock
+    global _pending_lock, _identity_locks_lck, _session_lock
     import config as _cfg
 
     # Containers mutáveis: clear() pra manter mesmo objeto
-    # (evita problema de import direto em outros módulos)
     _buf.clear()
     _coal.clear()
     _IDS_PROC.clear()
     _burst.clear()
     _atomic_mem.clear()
 
-    # Contador int: reassign (consumidores usam g._w_ativos)
+    # Contador int: reassign
     _w_ativos = 0
 
-    # Locks asyncio: criar instâncias novas (necessário — começam None)
-    _buf_lck        = asyncio.Lock()
-    _buf_evt        = asyncio.Event()
-    _w_lck          = asyncio.Lock()
-    _IDS_LOCK       = asyncio.Lock()
-    _BURST_LOCK     = asyncio.Lock()
-    _atomic_lck_obj = asyncio.Lock()
-    _pending_lock   = asyncio.Lock()
+    # Locks asyncio
+    _buf_lck            = asyncio.Lock()
+    _buf_evt            = asyncio.Event()
+    _w_lck              = asyncio.Lock()
+    _IDS_LOCK           = asyncio.Lock()
+    _BURST_LOCK         = asyncio.Lock()
+    _atomic_lck_obj     = asyncio.Lock()
+    _pending_lock       = asyncio.Lock()
+    _identity_locks_lck = asyncio.Lock()   # ← Cirurgia 11
+    _session_lock       = asyncio.Lock()   # ← Cirurgia 20
 
     # Semáforos do config (só podem ser criados dentro do loop async)
     _cfg._SEM_ENVIO = asyncio.Semaphore(3)
     _cfg._SEM_HTTP  = asyncio.Semaphore(20)
 
     log_db.debug("🔧 _init_globals OK")
+
 
 # ── Helpers de cache ─────────────────────────────────────────────
 def _set_raw(url: str, valor: str):
@@ -113,6 +143,7 @@ def _set_raw(url: str, valor: str):
         if len(_raw_cache) > _CACHE_LIMIT:
             _raw_cache.popitem(last=False)
 
+
 def _set_final(url: str, valor: str):
     from utils.urls import _cache_key
     key = _cache_key(url)
@@ -122,20 +153,23 @@ def _set_final(url: str, valor: str):
         if len(_final_cache) > _CACHE_LIMIT:
             _final_cache.popitem(last=False)
 
+
 def _get_raw(url: str) -> Optional[str]:
     from utils.urls import _cache_key
     with _cache_lock:
         return _raw_cache.get(_cache_key(url))
+
 
 def _get_final(url: str) -> Optional[str]:
     from utils.urls import _cache_key
     with _cache_lock:
         return _final_cache.get(_cache_key(url))
 
+
 def _log_cache_stats():
     from database import _db_count_links
     log_db.debug(
         f"📦 Cache | raw={len(_raw_cache)} final={len(_final_cache)} "
         f"cls={len(_cls_cache)} db_links={_db_count_links()}"
-        )
+)
     
