@@ -1,14 +1,45 @@
-"""Shadow reply engine — captura e filtra comentários dos grupos monitorados."""
+"""Shadow reply engine — captura e filtra comentários dos grupos monitorados.
+
+═══════════════════════════════════════════════════════════════════
+v80.4 — Auditoria sênior aplicada
+═══════════════════════════════════════════════════════════════════
+Cirurgias incluídas:
+  • Cirurgia 13 (Bug #52)  — restock DELETE com fp correto (era LIKE
+    '%chave%' que NUNCA batia em nada porque fp é hash hex)
+  • Cirurgia 21 (Bug #50)  — _spawn_task gerencia tasks (não órfãs)
+═══════════════════════════════════════════════════════════════════
+"""
 from __future__ import annotations
 import asyncio
 import re
 from typing import Optional
 
+import globals as g
 from config import GRUPO_DESTINO, _EXECUTOR
 from database import db_get_estado, db_set_estado, _db
 from logger import log_out
 from pipeline.publicacao import editar_por_id, _MAX_EDITS
 from utils.helpers import ler_mapa
+from utils.hashes import _fp4   # ← Cirurgia 13
+
+
+# ─────────────────────────────────────────────────────────────────
+# CIRURGIA 21 (Bug #50): tasks gerenciadas (não órfãs)
+# ─────────────────────────────────────────────────────────────────
+# Antes: asyncio.create_task(...) sem guardar referência. Tasks
+# órfãs podiam ser GC'd antes de terminar, ou erros desapareciam
+# silenciosamente.
+# ─────────────────────────────────────────────────────────────────
+_tasks_ativas: set = set()
+
+
+def _spawn_task(coro):
+    """Cria task gerenciada com cleanup automático."""
+    task = asyncio.create_task(coro)
+    _tasks_ativas.add(task)
+    task.add_done_callback(_tasks_ativas.discard)
+    return task
+
 
 # ── Filtros de bloco / positivo ───────────────────────────────────
 _RE_SHADOW_BLOCK = re.compile(
@@ -94,7 +125,8 @@ async def processar_shadow_reply(bruta) -> bool:
             bruta_liberada = await _tentar_liberar_pending(bruta.reply_to, bruta.texto)
             if bruta_liberada:
                 log_out.info(f"🔓 Post bloqueado liberado | id={bruta_liberada.msg_id}")
-                asyncio.create_task(_processar_post_liberado(bruta_liberada, bruta.texto))
+                # CIRURGIA 21: task gerenciada (não órfã)
+                _spawn_task(_processar_post_liberado(bruta_liberada, bruta.texto))
 
     loop     = asyncio.get_running_loop()
     mp       = await loop.run_in_executor(_EXECUTOR, ler_mapa)
@@ -136,13 +168,28 @@ async def processar_shadow_reply(bruta) -> bool:
 
     if tipo == 'edicao_restock':
         log_out.info(f"♻️ [SHADOW_RESTOCK] identity={identity}")
+        # ═════════════════════════════════════════════════════════
+        # CIRURGIA 13 (Bug #52): DELETE com fp CORRETO
+        # ═════════════════════════════════════════════════════════
+        # Antes: DELETE WHERE fp LIKE '%chave%' onde chave era um
+        # pedaço da identity em texto. fp é hash SHA-256 hex — não
+        # contém o texto. Resultado: DELETE NUNCA bateu nada.
+        # Restock NUNCA funcionou.
+        # Agora: calcula fp_identity correto (mesma fórmula do dedupe).
+        # ═════════════════════════════════════════════════════════
         try:
-            chave = identity.split('|', 1)[-1][:20]
+            fp_identity = _fp4(f"identity|{identity}")
             with _db() as db:
-                db.execute("DELETE FROM dedupe_temp WHERE fp LIKE ?",
-                           (f"%{chave}%",))
-        except Exception:
-            pass
+                db.execute(
+                    "DELETE FROM dedupe_temp WHERE fp=?", (fp_identity,)
+                )
+            # Também limpa do _atomic_mem em RAM (evita IDENTITY_NA_JANELA)
+            async with g._atomic_lck_obj:
+                g._atomic_mem.pop(fp_identity, None)
+            log_out.info(f"♻️ Dedupe limpo pra identity={identity}")
+        except Exception as e:
+            log_out.warning(f"⚠️ Restock cleanup: {e}")
+
         palavras = bruta.texto.strip().split()
         if len(palavras) <= 6 and shadow_id == 0:
             return await _postar_reply_original(bruta.texto, int(msg_dest), identity, row)
@@ -155,4 +202,3 @@ async def processar_shadow_reply(bruta) -> bool:
     if len(palavras) > 12:
         log_out.debug(f"🔇 Shadow longo: {len(palavras)} palavras"); return False
     return await _postar_reply_original(bruta.texto, int(msg_dest), identity, row)
-              
