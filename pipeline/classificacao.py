@@ -10,7 +10,7 @@ from globals import _cls_cache, _cls_lock, _CACHE_LIMIT
 from logger import log_cls
 from utils.urls import _cache_key, _netloc
 
-# ==================== VARIÁVEIS EXPORTADAS (para compatibilidade) ====================
+# ==================== VARIÁVEIS EXPORTADAS (compatibilidade) ====================
 _MUNDIAIS = frozenset({
     "store.epicgames.com", "epicgames.com", "store.steampowered.com",
     "steampowered.com", "gaming.amazon.com", "twitch.tv", "gog.com",
@@ -37,7 +37,7 @@ _MGL_DOMINIOS = frozenset({
 })
 _MGL_DOMINIOS_SET = frozenset({*_MGL_DOMINIOS, "m.magazineluiza.com.br"})
 
-# ==================== MERCADO LIVRE ====================
+# Mercado Livre (agora suportado)
 _ML_DOMINIOS = frozenset({
     "mercadolivre.com.br", "www.mercadolivre.com.br", "produto.mercadolivre.com.br",
     "lista.mercadolivre.com.br", "mercadolivre.com", "mercadolibre.com", "meli.la"
@@ -51,6 +51,11 @@ _ENCURTADORES = frozenset({
 
 _PRESERVE = frozenset({"wa.me", "api.whatsapp.com"})
 _DELETAR = frozenset({"t.me", "telegram.me", "telegram.org", "chat.whatsapp.com"})
+
+_FORCA_GET = frozenset({  # Mantido para compatibilidade
+    "amzlink.to", "amzn.to", "a.co", "amzn.com", "bit.ly", "cutt.ly",
+    "tinyurl.com", "rb.gy", "is.gd", "ow.ly", "buff.ly", "maga.lu", "tidd.ly", "meli.la"
+})
 
 
 # ── Padrões de extração ───────────────────────────────────────────
@@ -151,7 +156,7 @@ def classificar_url(url: str) -> LinkClassificado:
 
     # Mercado Livre
     if _eh_mercadolivre_url(url):
-        return LinkClassificado(url, "mercadolivre", "geral", "", f"ml:{url[:60]}")
+        return LinkClassificado(url, "mercadolivre", "geral", "", f"ml:{url[:80]}")
 
     # Amazon
     if any(nl == d or nl.endswith("." + d) for d in _AMZ_DOMINIOS):
