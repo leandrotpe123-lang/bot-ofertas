@@ -45,7 +45,7 @@ _ML_DOMINIOS = frozenset({
 
 _ENCURTADORES = frozenset({
     "bit.ly", "cutt.ly", "tinyurl.com", "t.co", "ow.ly", "goo.gl",
-    "rb.gy", "is.gd", "tiny.cc", "buff.ly", "short.io", "bl.ink",
+    "rb.gy", "is.gd","meli.la", "tiny.cc", "buff.ly", "short.io", "bl.ink",
     "rebrand.ly", "shorturl.at", "tidd.ly"
 })
 
@@ -53,7 +53,7 @@ _PRESERVE = frozenset({"wa.me", "api.whatsapp.com"})
 _DELETAR = frozenset({"t.me", "telegram.me", "telegram.org", "chat.whatsapp.com"})
 
 _FORCA_GET = frozenset({  # Mantido para compatibilidade
-    "amzlink.to", "amzn.to", "a.co", "amzn.com", "bit.ly", "cutt.ly",
+    "amzlink.to","meli.la", "amzn.to", "a.co", "amzn.com", "bit.ly", "cutt.ly",
     "tinyurl.com", "rb.gy", "is.gd", "ow.ly", "buff.ly", "maga.lu", "tidd.ly", "meli.la"
 })
 
