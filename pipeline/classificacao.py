@@ -13,8 +13,7 @@ from utils.urls import _cache_key, _netloc
 # ── Domínios por categoria ────────────────────────────────────────
 _MUNDIAIS   = frozenset({"store.epicgames.com","epicgames.com","store.steampowered.com",
     "steampowered.com","gaming.amazon.com","twitch.tv","gog.com","humblebundle.com","itch.io"})
-_BLOQUEADOS = frozenset({"mercadolivre.com.br","mercadopago.com.br","mercadolivre.com",
-    "meli.com","ml.com.br","pelando.com.br","promobit.com.br","cuponomia.com.br",
+_BLOQUEADOS = frozenset({"pelando.com.br","promobit.com.br","cuponomia.com.br",
     "zoom.com.br","buscape.com.br","bondfaro.com.br","ofertasbrasil.com.br"})
 _AMZ_DOMINIOS = frozenset({"amazon.com.br","amazon.com","amzn.to","amzn.com",
     "a.co","amzlink.to","amzn.eu"})
@@ -23,12 +22,16 @@ _SHP_DOMINIOS = frozenset({"shopee.com.br","s.shopee.com.br","shopee.com",
 _MGL_DOMINIOS = frozenset({"magazineluiza.com.br","sacola.magazineluiza.com.br",
     "magazinevoce.com.br","maga.lu","divulgador.magalu.com"})
 _MGL_DOMINIOS_SET = frozenset({*_MGL_DOMINIOS, "m.magazineluiza.com.br"})
-_ENCURTADORES = frozenset({"bit.ly","cutt.ly","tinyurl.com","t.co","ow.ly","goo.gl",
+_ML_DOMINIOS = frozenset({"mercadolivre.com.br","www.mercadolivre.com.br","produto.mercadolivre.com.br",
+    "lista.mercadolivre.com.br","articulo.mercadolivre.com.br","item.mercadolivre.com.br",
+    "mercadolivre.com","mercadolibre.com"
+})
+_ENCURTADORES = frozenset({"bit.ly","meli.la","cutt.ly","tinyurl.com","t.co","ow.ly","goo.gl",
     "rb.gy","is.gd","tiny.cc","buff.ly","short.io","bl.ink","rebrand.ly","shorturl.at",
     "tidd.ly"})
 _PRESERVE = frozenset({"wa.me","api.whatsapp.com"})
 _DELETAR  = frozenset({"t.me","telegram.me","telegram.org","chat.whatsapp.com"})
-_FORCA_GET = frozenset({"amzlink.to","amzn.to","a.co","amzn.com","bit.ly","cutt.ly",
+_FORCA_GET = frozenset({"amzlink.to","amzn.to","meli.la","a.co","amzn.com","bit.ly","cutt.ly",
     "tinyurl.com","rb.gy","is.gd","ow.ly","buff.ly","maga.lu","tidd.ly"})
 
 # ── Padrões de extração ───────────────────────────────────────────
@@ -47,7 +50,10 @@ _P_AMZ_ASIN = [
     re.compile(r'[?&]asin=([A-Z0-9]{10})', re.I),
 ]
 _P_AMZ_PROMO = re.compile(r'/promotion/psp/([A-Z0-9]{8,16})', re.I)
-
+_P_ML = re.compile(
+    r'/(?:p/)?(?:MLB|mlb)[-]?\d{6,12}(?:/|$|[?#])',
+    re.I
+)
 
 @dataclass
 class LinkClassificado:
@@ -71,6 +77,16 @@ def _extrair_sku_shopee(p) -> str:
     for pat in _P_SHP:
         m = pat.search(text)
         if m: return f"{m.group(1)}.{m.group(2)}"
+    return ""
+
+
+def _extrair_sku_mercadolivre(p) -> str:
+    text = p.path + "?" + p.query
+
+    m = _P_ML.search(text)
+    if m:
+        return m.group(0).upper()
+
     return ""
 
 
@@ -131,6 +147,20 @@ def classificar_url(url: str) -> LinkClassificado:
             sku = _extrair_sku_shopee(p)
             return LinkClassificado(url, "shopee", "produto" if sku else "busca",
                                     sku, f"shp:{sku}" if sku else "")
+
+    for d in _ML_DOMINIOS:
+    if nl == d or nl.endswith("." + d):
+        sku = _extrair_sku_mercadolivre(p)
+
+        if "/p/" in p.path and not sku:
+            return LinkClassificado(url, "mercadolivre", "invalido", "")
+
+        tipo = (
+            "produto" if sku else
+            "busca" if "/busca" in p.path or "/search" in p.path else
+            "campanha"
+        )
+    
     for d in _ENCURTADORES:
         if nl == d or nl.endswith("." + d):
             return LinkClassificado(url, "expandir", "encurtado", "")
