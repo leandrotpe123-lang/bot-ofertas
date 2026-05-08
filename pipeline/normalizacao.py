@@ -28,9 +28,20 @@ from database import db_get_dedupe, db_get_link, db_set_link
 from globals import _get_session, _get_raw, _get_final, _set_raw, _log_cache_stats
 from logger import log_cls, log_nrm
 from pipeline.classificacao import (
-    LinkClassificado, _AMZ_DOMINIOS, _ENCURTADORES, _FORCA_GET,
-    _MGL_DOMINIOS, _SHP_DOMINIOS, _P_AMZ_ASIN, _P_MGL, _P_SHP,
-    _AMZ_PATHS_SEM_TAG, _classificar_cached, classificar_links,
+    LinkClassificado,
+    _AMZ_DOMINIOS,
+    _ML_DOMINIOS,
+    _ENCURTADORES,
+    _FORCA_GET,
+    _MGL_DOMINIOS,
+    _SHP_DOMINIOS,
+    _P_AMZ_ASIN,
+    _P_MGL,
+    _P_ML,
+    _P_SHP,
+    _AMZ_PATHS_SEM_TAG,
+    _classificar_cached,
+    classificar_links,
     _eh_magalu_url,
 )
 from pipeline.ingestao import MensagemBruta
@@ -38,9 +49,22 @@ from utils.hashes import _fp_c3
 from utils.urls import _netloc, _sanitizar_url
 
 # ── Janelas de deduplicação por plataforma (legado, usado em estado) ─
-_JANELA_C3: Dict[str, float]    = {"shopee":60.0, "amazon":300.0, "magalu":300.0, "default":120.0}
-_TTL_RESTOCK_C3: Dict[str, float] = {"shopee":3600.0, "amazon":7200.0, "magalu":14400.0, "default":3600.0}
+# ── Janelas de deduplicação por plataforma (legado, usado em estado) ─
+_JANELA_C3 = {
+    "shopee": 60.0,
+    "amazon": 300.0,
+    "magalu": 300.0,
+    "mercadolivre": 300.0,
+    "default": 120.0,
+}
 
+_TTL_RESTOCK_C3 = {
+    "shopee": 3600.0,
+    "amazon": 7200.0,
+    "magalu": 14400.0,
+    "mercadolivre": 14400.0,
+    "default": 3600.0,
+}
 # ── 3a. Filtro de texto ───────────────────────────────────────────
 _FILTRO_TEXTO = [
     "Monitor Samsung","Fonte Mancer","Placa de video","Monitor LG",
@@ -166,7 +190,7 @@ def _tem_link_plataforma_real(texto: str) -> bool:
         return False
     for url in urls:
         nl = netloc(url)
-        for d in (*_AMZ_DOMINIOS, *_SHP_DOMINIOS, *_MGL_DOMINIOS,
+        for d in (*_AMZ_DOMINIOS, *_ML_DOMINIOS, *_SHP_DOMINIOS, *_MGL_DOMINIOS,
                   *_ENCURTADORES, *_FORCA_GET):
             if nl == d or nl.endswith("." + d):
                 return True
@@ -495,8 +519,13 @@ def _extrair_id_magalu(texto: str, mapa: dict) -> str:
         if m: return m.group(1)
     return ""
 
+def _extrair_id_mercadolivre(texto: str, mapa: dict) -> str:
+    for u in list(mapa.values()) + [texto]:
+        m = _P_ML.search(u)
+        if m:
+            return m.group(1)
+    return ""
 
-# CIRURGIA 3 (Bug #6): extrator Shopee — antes faltava (só tinha Amazon e Magalu)
 def _extrair_id_shopee_texto(texto: str, mapa: dict) -> str:
     """
     Extrai SHOPID.ITEMID de URLs Shopee (URLs convertidas/expandidas).
@@ -808,10 +837,11 @@ async def normalizar(bruta: MensagemBruta,
     # mesmo quando a original era encurtador.
     # ═════════════════════════════════════════════════════════════
     sku = (
-        next((f"{lc.plat[:3]}_{lc.sku}" for lc in classificados if lc.sku), "")
-        or _extrair_asin_texto(texto_limpo, mapa)
-        or _extrair_id_magalu(texto_limpo, mapa)
-        or _extrair_id_shopee_texto(texto_limpo, mapa)   # ← NOVO
+    next((f"{lc.plat[:3]}_{lc.sku}" for lc in classificados if lc.sku), "")
+    or _extrair_asin_texto(texto_limpo, mapa)
+    or _extrair_id_magalu(texto_limpo, mapa)
+    or _extrair_id_mercadolivre(texto_limpo, mapa)
+    or _extrair_id_shopee_texto(texto_limpo, mapa)
     )
 
     # CIRURGIA 3: re-classifica TANTO original quanto CONVERTIDA
