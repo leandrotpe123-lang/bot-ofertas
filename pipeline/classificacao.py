@@ -240,13 +240,18 @@ def classificar_url(url: str) -> LinkClassificado:
 
     return LinkClassificado(url, None, "desconhecido", "")
 
-# ── COMPATIBILIDADE LEGACY ─────────────────────────────
-# Mantém compatibilidade com módulos antigos que ainda usam _classificar_cached
+
+# ─────────────────────────────────────────────
+# COMPATIBILIDADE LEGACY TOTAL (PIPELINE ANTIGO)
+# ─────────────────────────────────────────────
 
 def _classificar_cached(url: str):
-    """
-    Alias de compatibilidade.
-    Mantém funcionamento dos módulos antigos sem precisar refatorar o pipeline inteiro.
-    """
+    """Compatibilidade com pipeline antigo."""
     return classificar_url(url)
 
+
+def classificar_links(links: list):
+    """
+    Compatibilidade com módulos antigos que ainda esperam batch classification.
+    """
+    return [_classificar_cached(url) for url in links]
