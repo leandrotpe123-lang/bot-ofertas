@@ -1,11 +1,8 @@
-"""Camada 2 — Classificação de links por plataforma.
-Versão Sênior: alta performance, extensível e robusta.
-"""
+"""Camada 2 — Classificação de links por plataforma."""
 
 from __future__ import annotations
 import re
 from dataclasses import dataclass
-from threading import Lock
 from typing import List, Optional, Set
 from urllib.parse import urlparse
 
@@ -13,52 +10,50 @@ from globals import _cls_cache, _cls_lock, _CACHE_LIMIT
 from logger import log_cls
 from utils.urls import _cache_key, _netloc
 
+# ==================== VARIÁVEIS EXPORTADAS (para compatibilidade) ====================
+_MUNDIAIS = frozenset({
+    "store.epicgames.com", "epicgames.com", "store.steampowered.com",
+    "steampowered.com", "gaming.amazon.com", "twitch.tv", "gog.com",
+    "humblebundle.com", "itch.io"
+})
 
-# ==================== CONFIGURAÇÃO DE PLATAFORMAS ====================
-class PlatformConfig:
-    """Configuração centralizada de plataformas."""
+_BLOQUEADOS = frozenset({
+    "pelando.com.br", "promobit.com.br", "cuponomia.com.br",
+    "zoom.com.br", "buscape.com.br", "bondfaro.com.br", "ofertasbrasil.com.br"
+})
 
-    MUNDIAIS = frozenset({
-        "store.epicgames.com", "epicgames.com", "store.steampowered.com",
-        "steampowered.com", "gaming.amazon.com", "twitch.tv", "gog.com",
-        "humblebundle.com", "itch.io"
-    })
+_AMZ_DOMINIOS = frozenset({
+    "amazon.com.br", "amazon.com", "amzn.to", "amzn.com",
+    "a.co", "amzlink.to", "amzn.eu"
+})
 
-    BLOQUEADOS = frozenset({
-        "pelando.com.br", "promobit.com.br", "cuponomia.com.br",
-        "zoom.com.br", "buscape.com.br", "bondfaro.com.br", "ofertasbrasil.com.br"
-    })
+_SHP_DOMINIOS = frozenset({
+    "shopee.com.br", "s.shopee.com.br", "shopee.com", "shope.ee", "flapremios.com.br"
+})
 
-    AMAZON = frozenset({
-        "amazon.com.br", "amazon.com", "amzn.to", "amzn.com",
-        "a.co", "amzlink.to", "amzn.eu"
-    })
+_MGL_DOMINIOS = frozenset({
+    "magazineluiza.com.br", "sacola.magazineluiza.com.br",
+    "magazinevoce.com.br", "maga.lu", "divulgador.magalu.com"
+})
+_MGL_DOMINIOS_SET = frozenset({*_MGL_DOMINIOS, "m.magazineluiza.com.br"})
 
-    SHOPEE = frozenset({
-        "shopee.com.br", "s.shopee.com.br", "shopee.com", "shope.ee", "flapremios.com.br"
-    })
+# ==================== MERCADO LIVRE ====================
+_ML_DOMINIOS = frozenset({
+    "mercadolivre.com.br", "www.mercadolivre.com.br", "produto.mercadolivre.com.br",
+    "lista.mercadolivre.com.br", "mercadolivre.com", "mercadolibre.com", "meli.la"
+})
 
-    MAGALU = frozenset({
-        "magazineluiza.com.br", "sacola.magazineluiza.com.br",
-        "magazinevoce.com.br", "maga.lu", "divulgador.magalu.com", "m.magazineluiza.com.br"
-    })
+_ENCURTADORES = frozenset({
+    "bit.ly", "cutt.ly", "tinyurl.com", "t.co", "ow.ly", "goo.gl",
+    "rb.gy", "is.gd", "tiny.cc", "buff.ly", "short.io", "bl.ink",
+    "rebrand.ly", "shorturl.at", "tidd.ly"
+})
 
-    MERCADOLIVRE = frozenset({
-        "mercadolivre.com.br", "www.mercadolivre.com.br", "produto.mercadolivre.com.br",
-        "lista.mercadolivre.com.br", "mercadolivre.com", "mercadolibre.com", "meli.la"
-    })
-
-    ENCURTADORES = frozenset({
-        "bit.ly", "cutt.ly", "tinyurl.com", "t.co", "ow.ly", "goo.gl",
-        "rb.gy", "is.gd", "tiny.cc", "buff.ly", "short.io", "bl.ink",
-        "rebrand.ly", "shorturl.at", "tidd.ly"
-    })
-
-    PRESERVE = frozenset({"wa.me", "api.whatsapp.com"})
-    DELETAR = frozenset({"t.me", "telegram.me", "telegram.org", "chat.whatsapp.com"})
+_PRESERVE = frozenset({"wa.me", "api.whatsapp.com"})
+_DELETAR = frozenset({"t.me", "telegram.me", "telegram.org", "chat.whatsapp.com"})
 
 
-# ==================== PADRÕES DE EXTRAÇÃO ====================
+# ── Padrões de extração ───────────────────────────────────────────
 _AMZ_PATHS_SEM_TAG = re.compile(
     r'^/(?:gaming|claims|gp/yourstore|gp/css|gp/help|gp/cart|wishlist|hz/|ap/|gp/registry)', re.I)
 
@@ -88,19 +83,17 @@ class LinkClassificado:
 
 # ==================== FUNÇÕES AUXILIARES ====================
 def _eh_magalu_url(url: str) -> bool:
-    """Usado por outros módulos (normalizacao.py)."""
     if not url:
         return False
     nl = _netloc(url)
-    return any(nl == d or nl.endswith("." + d) for d in PlatformConfig.MAGALU)
+    return any(nl == d or nl.endswith("." + d) for d in _MGL_DOMINIOS_SET)
 
 
 def _eh_mercadolivre_url(url: str) -> bool:
-    """Suporte ao Mercado Livre."""
     if not url:
         return False
     nl = _netloc(url)
-    return any(nl == d or nl.endswith("." + d) for d in PlatformConfig.MERCADOLIVRE)
+    return any(nl == d or nl.endswith("." + d) for d in _ML_DOMINIOS)
 
 
 def _extrair_asin(p) -> str:
@@ -137,17 +130,17 @@ def classificar_url(url: str) -> LinkClassificado:
         return LinkClassificado(url, None, "invalido", "")
 
     # Mundiais
-    if any(nl == d or nl.endswith("." + d) for d in PlatformConfig.MUNDIAIS):
+    if any(nl == d or nl.endswith("." + d) for d in _MUNDIAIS):
         return LinkClassificado(url, "mundial", "mundial", "")
 
-    # Bloqueados (sem Mercado Livre)
-    if any(nl == d or nl.endswith("." + d) for d in PlatformConfig.BLOQUEADOS):
+    # Bloqueados
+    if any(nl == d or nl.endswith("." + d) for d in _BLOQUEADOS):
         return LinkClassificado(url, None, "bloqueado", "")
 
     # Deletar / Preservar
-    if any(nl == d or nl.endswith("." + d) for d in PlatformConfig.DELETAR):
+    if any(nl == d or nl.endswith("." + d) for d in _DELETAR):
         return LinkClassificado(url, None, "grupo_externo", "")
-    if any(nl == d or nl.endswith("." + d) for d in PlatformConfig.PRESERVE):
+    if any(nl == d or nl.endswith("." + d) for d in _PRESERVE):
         return LinkClassificado(url, "preservar", "preservar", "")
 
     # Magalu
@@ -158,10 +151,10 @@ def classificar_url(url: str) -> LinkClassificado:
 
     # Mercado Livre
     if _eh_mercadolivre_url(url):
-        return LinkClassificado(url, "mercadolivre", "produto", "", f"ml:{url[:60]}")
+        return LinkClassificado(url, "mercadolivre", "geral", "", f"ml:{url[:60]}")
 
     # Amazon
-    if any(nl == d or nl.endswith("." + d) for d in PlatformConfig.AMAZON):
+    if any(nl == d or nl.endswith("." + d) for d in _AMZ_DOMINIOS):
         asin = _extrair_asin(p)
         if _AMZ_PATHS_SEM_TAG.match(p.path):
             return LinkClassificado(url, "amazon", "claims", "")
@@ -169,12 +162,12 @@ def classificar_url(url: str) -> LinkClassificado:
         return LinkClassificado(url, "amazon", tipo, asin, f"amz:{asin}" if asin else "")
 
     # Shopee
-    if any(nl == d or nl.endswith("." + d) for d in PlatformConfig.SHOPEE):
+    if any(nl == d or nl.endswith("." + d) for d in _SHP_DOMINIOS):
         sku = _extrair_sku_shopee(p)
         return LinkClassificado(url, "shopee", "produto" if sku else "busca", sku, f"shp:{sku}" if sku else "")
 
     # Encurtadores
-    if any(nl == d or nl.endswith("." + d) for d in PlatformConfig.ENCURTADORES):
+    if any(nl == d or nl.endswith("." + d) for d in _ENCURTADORES):
         return LinkClassificado(url, "expandir", "encurtado", "")
 
     return LinkClassificado(url, None, "desconhecido", "")
@@ -211,5 +204,5 @@ def classificar_links(links: List[str]) -> List[LinkClassificado]:
         result.append(_classificar_cached(u))
 
     validos = sum(1 for r in result if r.plat is not None)
-    log_cls.debug(f"🔍 Classificados: {validos}/{len(links)} links")
+    log_cls.debug(f"🔍 {validos}/{len(links)} classificados")
     return result
