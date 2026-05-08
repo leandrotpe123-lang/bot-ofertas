@@ -77,7 +77,7 @@ def _tem_link_plataforma(links: List[str]) -> bool:
     from utils.urls import _netloc as netloc
     for u in links:
         nl = netloc(u)
-        for d in (*_AMZ_DOMINIOS, *_SHP_DOMINIOS, *_MGL_DOMINIOS,
+        for d in (*_AMZ_DOMINIOS, *_ML_DOMINIOS, *_SHP_DOMINIOS, *_MGL_DOMINIOS,
                   *_ENCURTADORES, *_FORCA_GET):
             if nl == d or nl.endswith("." + d):
                 return True
@@ -86,16 +86,20 @@ def _tem_link_plataforma(links: List[str]) -> bool:
 
 def texto_bloqueado(texto: str) -> Tuple[bool, bool]:
     """Retorna (bloqueado, is_override)."""
-    if _RE_MERCADO_LIVRE.search(texto):
-        log_cls.debug("🚫 Mercado Livre"); return True, False
-    if _eh_multi_produto(texto): return False, False
+    if _eh_multi_produto(texto):
+        return False, False
+
     tl = texto.lower()
+
     for p in _FILTRO_TEXTO:
         if p.lower() in tl:
             if _tem_sinal_preco_forte(texto):
                 log_cls.debug(f"⚡ Override filtro '{p}' — cupom+preço forte detectado")
                 return False, True
-            log_cls.debug(f"🚫 Filtro: '{p}'"); return True, False
+
+            log_cls.debug(f"🚫 Filtro: '{p}'")
+            return True, False
+
     return False, False
 
 
