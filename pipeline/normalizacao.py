@@ -1,19 +1,6 @@
-"""
-Camada 3 — Normalização: filtro, limpeza, cupom, estado, desencurtamento.
-
-═══════════════════════════════════════════════════════════════════
-v80.4 — Auditoria sênior aplicada
-═══════════════════════════════════════════════════════════════════
-Cirurgias incluídas:
-  • Cirurgia 3 (Bugs #3, #6) — extrator Shopee em normalizar() +
-    re-classificar URL convertida pra capturar SKU
-  • Cirurgia 4 (Bug #5)      — expansão antecipada de encurtadores
-    Shopee/Magalu antes da afiliação
-  • Cirurgia 14 (Bug #19)    — _RE_CUPOM_FORTE aceita dígito inicial
-  • Cirurgia 17 (Bug #14)    — _FALSO_CUPOM expandido
-═══════════════════════════════════════════════════════════════════
-"""
+"""Camada 3 — Normalização: filtro, limpeza, cupom, estado, desencurtamento."""
 from __future__ import annotations
+
 import asyncio
 import re
 from dataclasses import dataclass, field
@@ -30,14 +17,12 @@ from logger import log_cls, log_nrm
 from pipeline.classificacao import (
     LinkClassificado,
     _AMZ_DOMINIOS,
-    _ML_DOMINIOS,
     _ENCURTADORES,
     _FORCA_GET,
     _MGL_DOMINIOS,
     _SHP_DOMINIOS,
     _P_AMZ_ASIN,
     _P_MGL,
-    _P_ML,
     _P_SHP,
     _AMZ_PATHS_SEM_TAG,
     _classificar_cached,
@@ -48,24 +33,33 @@ from pipeline.ingestao import MensagemBruta
 from utils.hashes import _fp_c3
 from utils.urls import _netloc, _sanitizar_url
 
-# ── Janelas de deduplicação por plataforma (legado, usado em estado) ─
-# ── Janelas de deduplicação por plataforma (legado, usado em estado) ─
+
+# ─────────────────────────────────────────────────────────────────
+# Janelas de deduplicação por plataforma (usadas em detectar_estado_evento)
+# ─────────────────────────────────────────────────────────────────
 _JANELA_C3 = {
-    "shopee": 60.0,
-    "amazon": 300.0,
-    "magalu": 300.0,
-    "mercadolivre": 300.0,
+    "shopee":  60.0,
+    "amazon":  300.0,
+    "magalu":  300.0,
     "default": 120.0,
 }
 
 _TTL_RESTOCK_C3 = {
-    "shopee": 3600.0,
-    "amazon": 7200.0,
-    "magalu": 14400.0,
-    "mercadolivre": 14400.0,
+    "shopee":  3600.0,
+    "amazon":  7200.0,
+    "magalu":  14400.0,
     "default": 3600.0,
 }
-# ── 3a. Filtro de texto ───────────────────────────────────────────
+
+
+# Canais cujas mensagens podem prosseguir mesmo sem links de produto
+# (postam códigos de cupom puros, sem URL afiliável).
+_CHATS_CUPOM_PURO = frozenset({"fadadoscupons"})
+
+
+# ─────────────────────────────────────────────────────────────────
+# Filtro de texto (produtos/categorias indesejáveis)
+# ─────────────────────────────────────────────────────────────────
 _FILTRO_TEXTO = [
     "Monitor Samsung","Fonte Mancer","Placa de video","Monitor LG",
     "PC home Essential","Suporte articulado","VHAGAR","Superframe","AM5","AM4","GTX",
@@ -73,7 +67,6 @@ _FILTRO_TEXTO = [
     "CL32","MT/s","MHz","RX 580","Ryzen","Placa Mãe","Gabinete Gamer",
     "Water Cooler","Monitor Dell","Monitor Gamer","Air Cooler",
 ]
-_RE_MERCADO_LIVRE = re.compile(r'\b(?:mercado\s*livre|mercadolivre|mercado\s*pago)\b', re.I)
 _RE_MULTI_OFERTA  = re.compile(
     r'\b(?:ofertas?|promoções?)\s+(?:na\s+|no\s+|da\s+)?'
     r'(?:shopee|amazon|magalu|magazine\s*luiza)\b', re.I)
@@ -81,8 +74,6 @@ _RE_PRECO_LINHA   = re.compile(r'R\$\s?[\d.,]+')
 _RE_URL_COUNT     = re.compile(r'https?://')
 _RE_PRECO_FORTE   = re.compile(
     r'(?:r\$\s*\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?\b|\d+\s*%\s*off|r\$\s*\d+\s*off)', re.I)
-
-# CIRURGIA 14 (Bug #19): aceita cupom começando com dígito (5D05PRAVOCE etc.)
 _RE_CUPOM_FORTE = re.compile(
     r'\b(?:cupom|coupon|c[oó]digo)\b.*\b[A-Z0-9][A-Z0-9_-]{3,19}\b', re.I)
 
@@ -101,7 +92,7 @@ def _tem_link_plataforma(links: List[str]) -> bool:
     from utils.urls import _netloc as netloc
     for u in links:
         nl = netloc(u)
-        for d in (*_AMZ_DOMINIOS, *_ML_DOMINIOS, *_SHP_DOMINIOS, *_MGL_DOMINIOS,
+        for d in (*_AMZ_DOMINIOS, *_SHP_DOMINIOS, *_MGL_DOMINIOS,
                   *_ENCURTADORES, *_FORCA_GET):
             if nl == d or nl.endswith("." + d):
                 return True
@@ -128,7 +119,7 @@ def texto_bloqueado(texto: str) -> Tuple[bool, bool]:
 
 
 # ─────────────────────────────────────────────────────────────────
-# FILTROS DE POST INDESEJADO (qualitativos)
+# Filtros de post indesejado (qualitativos)
 # ─────────────────────────────────────────────────────────────────
 _RE_EXCLUSIVO_CANAL = re.compile(
     r'\b(?:exclusivo|exclusiva|s[oó]|somente|apenas)\s+'
@@ -190,7 +181,7 @@ def _tem_link_plataforma_real(texto: str) -> bool:
         return False
     for url in urls:
         nl = netloc(url)
-        for d in (*_AMZ_DOMINIOS, *_ML_DOMINIOS, *_SHP_DOMINIOS, *_MGL_DOMINIOS,
+        for d in (*_AMZ_DOMINIOS, *_SHP_DOMINIOS, *_MGL_DOMINIOS,
                   *_ENCURTADORES, *_FORCA_GET):
             if nl == d or nl.endswith("." + d):
                 return True
@@ -213,13 +204,15 @@ def _eh_post_indesejado(texto: str) -> Tuple[bool, str]:
     return False, ""
 
 
-# ── 3b. Limpeza de ruído textual ─────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# Limpeza de ruído textual
+# ─────────────────────────────────────────────────────────────────
 _RE_INVISIVEIS  = re.compile(r'[\u200b\u200c\u200d\u00a0\u2060\ufeff]')
 _RE_GRUPO_EXT   = re.compile(
     r'https?://(?:t\.me|telegram\.me|telegram\.org|chat\.whatsapp\.com)[^\s]*', re.I)
 _RE_LIXO_STRUCT = re.compile(
     r'^\s*(?:-?\s*An[uú]ncio|Publicidade|:::+|---+|===+|'
-    r'[-–—]\s*(?:ML|MG|AMZ)|(?:ML|MG|AMZ)\s*:)\s*$', re.I)
+    r'[-–—]\s*(?:MG|AMZ)|(?:MG|AMZ)\s*:)\s*$', re.I)
 _RE_CTA = re.compile(
     r'^\s*(?:link\s+(?:do\s+)?produto|link\s+da\s+oferta|resgate\s+aqui|'
     r'clique\s+aqui|acesse\s+aqui|compre\s+aqui|grupo\s+vip|'
@@ -274,7 +267,7 @@ def limpar_texto(texto: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────
-# EXTRAÇÃO DE CUPOM — Sistema em 5 níveis
+# Extração de cupom — sistema em 5 níveis
 # ─────────────────────────────────────────────────────────────────
 _KW_CUPOM = re.compile(
     r'\b(?:cupom|cupons|c[oó]digo|c[oó]digos|coupon|coupons|voucher|vouchers)\b',
@@ -285,7 +278,6 @@ _RE_COD_PURO = re.compile(r'^[A-Z0-9][A-Z0-9_-]{3,19}$')
 _RE_TEM_LETRA = re.compile(r'[A-Z]')
 _RE_TEM_DIGITO = re.compile(r'[0-9]')
 
-# CIRURGIA 17 (Bug #14): _FALSO_CUPOM expandido com termos de marketing
 _FALSO_CUPOM = frozenset({
     # ── Palavras óbvias ──
     "CUPOM", "CUPONS", "CODIGO", "CÓDIGO", "COUPON", "COUPONS",
@@ -301,7 +293,7 @@ _FALSO_CUPOM = frozenset({
     "VOLTA", "VOLTOU", "RENOVADO", "REATIVADO", "NORMALIZOU",
     "RECUPERADO", "DISPONIVEL", "DISPONÍVEL", "VALIDA", "VÁLIDA",
     "VALIDO", "VÁLIDO", "EXPIRADO", "EXPIROU",
-    # CIRURGIA 17: termos de marketing/condições
+    # ── Termos de marketing / condições ──
     "VALIDADE", "VENCIMENTO", "DURACAO", "DURAÇÃO", "QUANTIDADE",
     "LIMITE", "LIMITES", "LIMITADO", "LIMITADA", "ILIMITADO",
     "IMPERDIVEL", "IMPERDÍVEL", "INCRIVEL", "INCRÍVEL",
@@ -503,7 +495,7 @@ def extrair_todos_cupons(texto: str, code_entities: list = None) -> List[str]:
 
 
 # ─────────────────────────────────────────────────────────────────
-# EXTRATORES DE ID POR PLATAFORMA
+# Extratores de ID por plataforma
 # ─────────────────────────────────────────────────────────────────
 def _extrair_asin_texto(texto: str, mapa: dict) -> str:
     for u in list(mapa.values()) + [texto]:
@@ -519,12 +511,6 @@ def _extrair_id_magalu(texto: str, mapa: dict) -> str:
         if m: return m.group(1)
     return ""
 
-def _extrair_id_mercadolivre(texto: str, mapa: dict) -> str:
-    for u in list(mapa.values()) + [texto]:
-        m = _P_ML.search(u)
-        if m:
-            return m.group(1)
-    return ""
 
 def _extrair_id_shopee_texto(texto: str, mapa: dict) -> str:
     """
@@ -556,7 +542,9 @@ def tem_contexto(texto: str) -> bool:
     return len(total) > 20
 
 
-# ── 3d. Estado do evento ─────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# Estado do evento
+# ─────────────────────────────────────────────────────────────────
 class EstadoEvento(Enum):
     NEW       = "new"
     SEEN      = "seen"
@@ -583,7 +571,9 @@ def detectar_estado_evento(texto: str, id_global: str, plat: str) -> EstadoEvent
     return EstadoEvento.SEEN
 
 
-# ── 3e. Desencurtador (legado, com cache compartilhado) ──────────
+# ─────────────────────────────────────────────────────────────────
+# Desencurtador (legado, com cache compartilhado)
+# ─────────────────────────────────────────────────────────────────
 async def desencurtar(url: str, sessao: aiohttp.ClientSession, depth: int = 0) -> str:
     """
     Desencurtador legado — mantido pra compat. Código novo deveria
@@ -656,7 +646,9 @@ async def desencurtar(url: str, sessao: aiohttp.ClientSession, depth: int = 0) -
         log_nrm.error(f"❌ desencurtar d={depth}: {e}"); return url
 
 
-# ── 3f. Dataclasses ──────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# Dataclasses
+# ─────────────────────────────────────────────────────────────────
 @dataclass
 class MensagemNormalizada:
     msg_id:        int
@@ -677,12 +669,12 @@ class MensagemNormalizada:
 
 
 # ─────────────────────────────────────────────────────────────────
-# CIRURGIA 4 (Bug #5): EXPANSÃO ANTECIPADA pra encurtadores
-# ─────────────────────────────────────────────────────────────────
-# Hosts que SEMPRE precisam ser expandidos antes de afiliar.
-# Sem isso, o SKU não é extraível da URL original e o sistema cai
-# em fallback (NÍVEL 6 da identidade), gerando identidades diferentes
-# pro mesmo produto quando o link de "resgate de cupons" muda.
+# Expansão antecipada de encurtadores
+#
+# Hosts que precisam ser expandidos antes da afiliação. Sem isso, o
+# SKU não é extraível da URL original e o sistema cai em fallback de
+# identidade, gerando IDs diferentes pro mesmo produto quando o link
+# de "resgate de cupons" varia.
 # ─────────────────────────────────────────────────────────────────
 _ENCURTADORES_SHOPEE = frozenset({
     "s.shopee.com.br", "shope.ee", "s.shopee.com",
@@ -696,13 +688,10 @@ _ENCURTADORES_MAGALU_GENERICOS = frozenset({
 async def _normalizar_um(lc: LinkClassificado, sessao: aiohttp.ClientSession,
                          msg_id: int = 0) -> Tuple[str, Optional[str], str]:
     """
-    BUG FIX (v80.4): expansão antecipada de encurtadores Shopee/Magalu
-    antes da afiliação. Garante que ids_globais possa ser extraído da
-    URL real do produto, não do encurtador.
-
-    Também preserva url_original_real (Bug v80.1) — quando 'lc' é
-    reatribuído após desencurtar, a URL original retornada não vira
-    a URL DESENCURTADA.
+    Processa um link classificado:
+      - expande encurtadores que escondem o ID do produto antes da afiliação
+      - preserva a URL original (não é substituída pela expandida no retorno)
+      - retorna (url_original, url_convertida, plat)
     """
     from plataformas.affiliate_router import rotear_afiliacao
 
@@ -722,9 +711,7 @@ async def _normalizar_um(lc: LinkClassificado, sessao: aiohttp.ClientSession,
     url = url_original_real
     nl = _netloc(url)
 
-    # ═════════════════════════════════════════════════════════════
-    # CIRURGIA 4: EXPANSÃO ANTECIPADA
-    # ═════════════════════════════════════════════════════════════
+    # ── Expansão antecipada ──────────────────────────────────────
     eh_encurtador_shopee = nl in _ENCURTADORES_SHOPEE
     eh_encurtador_magalu = nl in _ENCURTADORES_MAGALU_GENERICOS
     precisa_expandir = (
@@ -740,7 +727,7 @@ async def _normalizar_um(lc: LinkClassificado, sessao: aiohttp.ClientSession,
                 lc = _classificar_cached(url)
                 if lc.plat:
                     plat = lc.plat
-                # Validação anti-loop (Bug #10): se virou nada útil, descarta
+                # Validação anti-loop: se virou nada útil, descarta
                 if plat is None or plat in ("expandir", "none"):
                     log_nrm.warning(
                         f"🚫 expansão não revelou plataforma final: {url[:80]}"
@@ -803,7 +790,8 @@ async def normalizar(bruta: MensagemBruta,
     converter     = [lc for lc in classificados if lc.plat not in ("preservar", None)]
     preservar_lst = [lc.url_original for lc in classificados if lc.plat == "preservar"]
     if not converter and not preservar_lst:
-        if "fadadoscupons" not in bruta.chat: return None
+        if not any(c in bruta.chat for c in _CHATS_CUPOM_PURO):
+            return None
 
     sessao = await _get_session()
     resultados = await asyncio.gather(
@@ -811,7 +799,6 @@ async def normalizar(bruta: MensagemBruta,
         return_exceptions=True,
     )
 
-    # CIRURGIA: anotação correta (Bug #17)
     mapa: Dict[str, str] = {}
     plats: List[str] = []
     for res in resultados:
@@ -831,21 +818,15 @@ async def normalizar(bruta: MensagemBruta,
     plat_dom = max(set(plats), key=plats.count) if plats else "amazon"
     cupom    = extrair_cupom(texto_limpo, getattr(bruta, "code_entities", None))
 
-    # ═════════════════════════════════════════════════════════════
-    # CIRURGIA 3 (Bugs #3, #6): cadeia de extração de SKU expandida
-    # Inclui Shopee + re-classifica URL CONVERTIDA pra capturar SKU
-    # mesmo quando a original era encurtador.
-    # ═════════════════════════════════════════════════════════════
+    # Cadeia de extração de SKU — usa classificação, depois extratores
+    # por texto/mapa, re-classifica URL convertida (cobre encurtador → produto)
     sku = (
-    next((f"{lc.plat[:3]}_{lc.sku}" for lc in classificados if lc.sku), "")
-    or _extrair_asin_texto(texto_limpo, mapa)
-    or _extrair_id_magalu(texto_limpo, mapa)
-    or _extrair_id_mercadolivre(texto_limpo, mapa)
-    or _extrair_id_shopee_texto(texto_limpo, mapa)
+        next((f"{lc.plat[:3]}_{lc.sku}" for lc in classificados if lc.sku), "")
+        or _extrair_asin_texto(texto_limpo, mapa)
+        or _extrair_id_magalu(texto_limpo, mapa)
+        or _extrair_id_shopee_texto(texto_limpo, mapa)
     )
 
-    # CIRURGIA 3: re-classifica TANTO original quanto CONVERTIDA
-    # A convertida costuma ter SKU mesmo quando a original era encurtador.
     ids_globais: List[str] = []
     for orig, conv in mapa.items():
         lc_orig = _classificar_cached(orig)
@@ -883,4 +864,4 @@ async def normalizar(bruta: MensagemBruta,
         estado_evento=estado, ids_globais=ids_globais,
         is_reply=bruta.is_reply, reply_to=bruta.reply_to,
         is_override=is_override,
-)
+  )
