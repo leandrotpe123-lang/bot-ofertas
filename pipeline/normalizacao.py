@@ -52,11 +52,6 @@ _TTL_RESTOCK_C3 = {
 }
 
 
-# Canais cujas mensagens podem prosseguir mesmo sem links de produto
-# (postam códigos de cupom puros, sem URL afiliável).
-_CHATS_CUPOM_PURO = frozenset({"fadadoscupons"})
-
-
 # ─────────────────────────────────────────────────────────────────
 # Filtro de texto (produtos/categorias indesejáveis)
 # ─────────────────────────────────────────────────────────────────
@@ -72,6 +67,11 @@ _RE_MULTI_OFERTA  = re.compile(
     r'(?:shopee|amazon|magalu|magazine\s*luiza)\b', re.I)
 _RE_PRECO_LINHA   = re.compile(r'R\$\s?[\d.,]+')
 _RE_URL_COUNT     = re.compile(r'https?://')
+
+# Sinal SOCIAL forte — reação humana/comunitária que justifica
+# override do filtro de blacklist. Preço/cupom NÃO entram aqui:
+# o filtro foi feito justamente pra barrar produtos comerciais
+# normais; só passa por reação real ("CORRE", "ESGOTA", "INSANO").
 _RE_SINAL_FORTE = re.compile(
     r'\b(?:'
     r'esgota\s+r[aá]pido|'
@@ -121,9 +121,13 @@ def texto_bloqueado(
     """
     Retorna (bloqueado, is_override).
 
-    O override SÓ ativa por sinal social forte vindo em contexto_extra
-    (ex: reply, mensagens próximas do mesmo grupo). Preço/cupom no texto
-    principal NÃO é mais override — blacklist tem prioridade.
+    Override SÓ ativa por sinal social forte presente em `contexto_extra`
+    (ex: 'CORRE', 'VAI ESGOTAR', 'INSANO'). Preço/cupom NÃO é override —
+    blacklist tem prioridade pra produtos comerciais comuns.
+
+    `contexto_extra` pode ser o próprio texto da mensagem (Caso A:
+    sinal social na própria oferta) ou texto de comentários/replies
+    relacionados (Caso B: liberação por reação posterior).
     """
     if _eh_multi_produto(texto):
         return False, False
@@ -396,30 +400,21 @@ _RE_LINHA_CUPOM_LISTA = re.compile(
 
 def _eh_cupom_valido(c: str) -> bool:
     """Validação STRICT de candidato a cupom."""
-
     if not c:
         return False
-
-    c_upper = c.upper().strip()
-
-    if len(c_upper) < 4 or len(c_upper) > 20:
+    if len(c) < 4 or len(c) > 20:
         return False
-
+    c_upper = c.upper()
     if c_upper in _FALSO_CUPOM:
         return False
-
     if not _RE_COD_PURO.match(c_upper):
         return False
-
     tem_letra = bool(_RE_TEM_LETRA.search(c_upper))
     tem_digito = bool(_RE_TEM_DIGITO.search(c_upper))
-
     if not tem_letra:
         return False
-
     if not tem_digito and len(c_upper) < 5:
         return False
-
     return True
 
 
@@ -801,14 +796,38 @@ async def _normalizar_um(lc: LinkClassificado, sessao: aiohttp.ClientSession,
     return url_original_real, convertido, plat
 
 
+async def _registrar_pending_safe(bruta: MensagemBruta) -> None:
+    """
+    Registra mensagem bloqueada no pending. Comentário posterior do tipo
+    'CORRE/precinho' via shadow_reply pode liberar o post dentro do TTL.
+
+    Lazy import + try/except: se handlers.pending sumir ou falhar, a
+    normalização continua funcionando — só o Caso B fica desligado.
+    """
+    try:
+        from handlers.pending import _registrar_pending
+        await _registrar_pending(bruta)
+    except Exception as e:
+        log_nrm.warning(f"⚠️ registrar pending: {e}")
+
+
 async def normalizar(bruta: MensagemBruta,
                      is_override: bool = False) -> Optional[MensagemNormalizada]:
     """Normaliza a mensagem bruta — limpeza + expansão + afiliação + extração."""
     import time
     if not bruta.texto.strip(): return None
     if not is_override:
-        bloqueado, override_flag = texto_bloqueado(bruta.texto)
-        if bloqueado: return None
+        # Override SOMENTE por sinal social forte. Caso A (sinal no próprio
+        # texto da oferta) é coberto passando bruta.texto como contexto.
+        # Caso B (sinal em comentário posterior) fica armado via pending:
+        # quando bloquear, registra; shadow_reply libera se houver reação.
+        bloqueado, override_flag = texto_bloqueado(
+            bruta.texto,
+            contexto_extra=bruta.texto,
+        )
+        if bloqueado:
+            await _registrar_pending_safe(bruta)
+            return None
         is_override = override_flag
 
     indesejado, motivo = _eh_post_indesejado(bruta.texto)
@@ -823,8 +842,7 @@ async def normalizar(bruta: MensagemBruta,
     converter     = [lc for lc in classificados if lc.plat not in ("preservar", None)]
     preservar_lst = [lc.url_original for lc in classificados if lc.plat == "preservar"]
     if not converter and not preservar_lst:
-        if not any(c and c in bruta.chat for c in _CHATS_CUPOM_PURO):
-            return None
+        return None
 
     sessao = await _get_session()
     resultados = await asyncio.gather(
@@ -897,4 +915,4 @@ async def normalizar(bruta: MensagemBruta,
         estado_evento=estado, ids_globais=ids_globais,
         is_reply=bruta.is_reply, reply_to=bruta.reply_to,
         is_override=is_override,
-  )
+    )
