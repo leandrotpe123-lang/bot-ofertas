@@ -72,14 +72,29 @@ _RE_MULTI_OFERTA  = re.compile(
     r'(?:shopee|amazon|magalu|magazine\s*luiza)\b', re.I)
 _RE_PRECO_LINHA   = re.compile(r'R\$\s?[\d.,]+')
 _RE_URL_COUNT     = re.compile(r'https?://')
-_RE_PRECO_FORTE   = re.compile(
-    r'(?:r\$\s*\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?\b|\d+\s*%\s*off|r\$\s*\d+\s*off)', re.I)
-_RE_CUPOM_FORTE = re.compile(
-    r'\b(?:cupom|coupon|c[oó]digo)\b.*\b[A-Z0-9][A-Z0-9_-]{3,19}\b', re.I)
+_RE_SINAL_FORTE = re.compile(
+    r'\b(?:'
+    r'esgota\s+r[aá]pido|'
+    r'corre|'
+    r'voa|'
+    r'pega\s+logo|'
+    r'quem\s+pegou\s+pegou|'
+    r'acaba\s+r[aá]pido|'
+    r'poucas?\s+unidades?|'
+    r'bug|'
+    r'erro\s+de\s+pre[cç]o|'
+    r'j[aá]\s+era|'
+    r'insano'
+    r')\b',
+    re.I,
+)
 
 
-def _tem_sinal_preco_forte(texto: str) -> bool:
-    return bool(_RE_PRECO_FORTE.search(texto)) and bool(_RE_CUPOM_FORTE.search(texto))
+def _tem_sinal_social_forte(texto: str) -> bool:
+    """Detecta reação social/comunitária forte ('CORRE', 'ESGOTA', etc)."""
+    if not texto:
+        return False
+    return bool(_RE_SINAL_FORTE.search(texto))
 
 
 def _eh_multi_produto(texto: str) -> bool:
@@ -99,17 +114,26 @@ def _tem_link_plataforma(links: List[str]) -> bool:
     return False
 
 
-def texto_bloqueado(texto: str) -> Tuple[bool, bool]:
-    """Retorna (bloqueado, is_override)."""
+def texto_bloqueado(
+    texto: str,
+    contexto_extra: str = "",
+) -> Tuple[bool, bool]:
+    """
+    Retorna (bloqueado, is_override).
+
+    O override SÓ ativa por sinal social forte vindo em contexto_extra
+    (ex: reply, mensagens próximas do mesmo grupo). Preço/cupom no texto
+    principal NÃO é mais override — blacklist tem prioridade.
+    """
     if _eh_multi_produto(texto):
         return False, False
 
-    tl = texto.lower()
+    tl = texto.casefold()
 
     for p in _FILTRO_TEXTO:
-        if p.lower() in tl:
-            if _tem_sinal_preco_forte(texto):
-                log_cls.debug(f"⚡ Override filtro '{p}' — cupom+preço forte detectado")
+        if p.casefold() in tl:
+            if _tem_sinal_social_forte(contexto_extra):
+                log_cls.debug(f"⚡ Override social '{p}'")
                 return False, True
 
             log_cls.debug(f"🚫 Filtro: '{p}'")
