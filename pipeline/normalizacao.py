@@ -372,21 +372,30 @@ _RE_LINHA_CUPOM_LISTA = re.compile(
 
 def _eh_cupom_valido(c: str) -> bool:
     """Validação STRICT de candidato a cupom."""
+
     if not c:
         return False
-    if len(c) < 4 or len(c) > 20:
+
+    c_upper = c.upper().strip()
+
+    if len(c_upper) < 4 or len(c_upper) > 20:
         return False
-    c_upper = c.upper()
+
     if c_upper in _FALSO_CUPOM:
         return False
+
     if not _RE_COD_PURO.match(c_upper):
         return False
+
     tem_letra = bool(_RE_TEM_LETRA.search(c_upper))
     tem_digito = bool(_RE_TEM_DIGITO.search(c_upper))
+
     if not tem_letra:
         return False
+
     if not tem_digito and len(c_upper) < 5:
         return False
+
     return True
 
 
