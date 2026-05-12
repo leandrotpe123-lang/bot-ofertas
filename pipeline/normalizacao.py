@@ -823,8 +823,8 @@ async def normalizar(bruta: MensagemBruta,
     converter     = [lc for lc in classificados if lc.plat not in ("preservar", None)]
     preservar_lst = [lc.url_original for lc in classificados if lc.plat == "preservar"]
     if not converter and not preservar_lst:
-    if not any(c and c in bruta.chat for c in _CHATS_CUPOM_PURO):
-        return None
+        if not any(c and c in bruta.chat for c in _CHATS_CUPOM_PURO):
+            return None
 
     sessao = await _get_session()
     resultados = await asyncio.gather(
