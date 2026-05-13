@@ -1,22 +1,10 @@
-"""
-Camada 4 — Deduplicação inteligente, score evolutivo e identidade canônica.
-
-═══════════════════════════════════════════════════════════════════
-v80.4 — Auditoria sênior aplicada
-═══════════════════════════════════════════════════════════════════
-Cirurgias incluídas:
-  • Cirurgia 1 (Bug #1)  — `return True` (era 'true' minúsculo)
-  • Cirurgia 2 (Bug #2)  — NÍVEL 3 sem sufixo cupom (mesmo produto = mesma identidade)
-  • Cirurgia 5 (Bug #4)  — _eh_post_cupom detecta cashback Shopee
-  • Cirurgia 12 (Bug #7) — _atomic_check_and_claim atômico (era racy)
-  • Cirurgia 16 (Bug #13)— separar asin/id_prod por plataforma no DB
-═══════════════════════════════════════════════════════════════════
-"""
+"""Camada 4 — Deduplicação inteligente, score evolutivo e identidade canônica."""
 from __future__ import annotations
 import asyncio
 import re
 import time
 from typing import Optional, Tuple
+from urllib.parse import urlparse
 
 import config
 from database import (
@@ -28,13 +16,20 @@ from pipeline.normalizacao import (
     EstadoEvento,
     MensagemNormalizada,
     extrair_todos_cupons,
-    _KW_CUPOM,        # ← Cirurgia 5: pra caso (d)
+    _KW_CUPOM,
 )
 from utils.hashes import _fp4, _fp_benef
 from utils.textos import (
     _alma, _cupons_set, _benef_set, _janela, _normalizar_valor, _sim, _SIM_FORTE,
 )
 from utils.urls import _cache_key, _netloc
+
+
+# ── Constantes ───────────────────────────────────────────────────
+# Janela curta usada APENAS pra reativação ("voltou", "reativado").
+# Permite uma reativação legítima passar mas bloqueia flood quando
+# múltiplos grupos mandam "voltou" do mesmo evento em sequência.
+_JANELA_REATIVACAO_S = 30.0
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -79,8 +74,8 @@ _RE_TITULO_OFF_COD = re.compile(
     re.I,
 )
 
-# CIRURGIA 5 (Bug #4): linha de cashback (sem precisar de "OFF" literal)
-# Usado pra detectar posts Shopee de cashback como post-cupom.
+# Linha de cashback (sem precisar de "OFF" literal). Usado pra
+# detectar posts Shopee de cashback como post-cupom.
 _RE_CASHBACK_LINHA = re.compile(
     r'\d+\s*%\s+cash\s*back',
     re.I,
@@ -104,17 +99,15 @@ def _eh_post_cupom(texto: str) -> bool:
     """
     Detecta se o post é 'tipo cupom' — onde o cupom é o ASSUNTO PRINCIPAL.
 
-    REGRA (v80.4 — casos a-e):
+    Casos cobertos:
       a) palavra "cupom"/"cupons"/"código" no título
       b) título já é "R$ X OFF: CODIGO" / "X% OFF: CODIGO"
-      c) 2+ linhas formato lista de cupons (delegada a _eh_lista_cupons,
-         resolve Bug #11 ao mesmo tempo)
-      d) NOVO: cashback nas primeiras linhas + código presente
-      e) NOVO: linha "X% Cashback ... : CODIGO" (mesmo sem palavra cupom)
+      c) 2+ linhas formato lista de cupons (delegada a _eh_lista_cupons)
+      d) cashback nas primeiras linhas + código presente
+      e) linha "X% Cashback ... : CODIGO" (mesmo sem palavra cupom)
 
-    Casos novos resolvem o bug das imagens 1 e 2: cards Shopee com título
-    genérico ("Leo Indica / Ofertas Insanas") + linha "🎟️ 50% Cashback
-    ... : BRUIANHEZ10". Antes não era detectado como post-cupom.
+    Casos (d) e (e) cobrem cards Shopee com título genérico ("Leo Indica
+    / Ofertas Insanas") + linha "🎟️ 50% Cashback ... : BRUIANHEZ10".
     """
     linhas = [l for l in texto.strip().split("\n") if l.strip()]
     if not linhas:
@@ -133,14 +126,14 @@ def _eh_post_cupom(texto: str) -> bool:
     if _eh_lista_cupons(texto):
         return True
 
-    # Caso (d) NOVO: cashback presente nas primeiras 5 linhas + cupom
+    # Caso (d): cashback presente nas primeiras 5 linhas + cupom
     # mencionado no texto inteiro
     primeiras = "\n".join(linhas[:5])
     if (_RE_CASHBACK_LINHA.search(primeiras)
             and _KW_CUPOM.search(texto)):
         return True
 
-    # Caso (e) NOVO: linha "X% Cashback ... : CODIGO" no formato KV
+    # Caso (e): linha "X% Cashback ... : CODIGO" no formato KV
     for linha in linhas[:6]:
         if (_RE_CASHBACK_LINHA.search(linha)
                 and re.search(r':\s*[A-Z0-9][A-Z0-9_-]{3,19}\b', linha)):
@@ -183,11 +176,31 @@ def _extrair_pct_cashback(texto: str) -> str:
 
 
 def _host_canonico_campanha(mapa: dict) -> str:
-    """Para campanhas, extrai o host base ignorando subpaths."""
+    """
+    Para campanhas, extrai uma chave canônica = host + path (sem
+    query string). Garante que campanhas diferentes no mesmo
+    domínio não colidam.
+
+    Ex:
+      shopee.com.br/m/roleta-shopee         → "shopee.com.br/m/roleta-shopee"
+      shopee.com.br/m/promocao-relampago    → "shopee.com.br/m/promocao-relampago"
+      shopee.com.br/m/missao-pix            → "shopee.com.br/m/missao-pix"
+    """
     for url in mapa.values():
-        host = _netloc(url)
-        if host:
-            return host
+        try:
+            p = urlparse(url)
+            host = (p.netloc or "").lower()
+            if not host:
+                continue
+            # Remove "www." e porta
+            if host.startswith("www."):
+                host = host[4:]
+            host = host.split(":")[0]
+            # Path sem trailing slash duplicado
+            path = (p.path or "").rstrip("/")
+            return f"{host}{path}" if path else host
+        except Exception:
+            continue
     return ""
 
 
@@ -219,20 +232,15 @@ def _cleanup_atomic_mem_locked() -> int:
     return len(antigos)
 
 
-# ═══════════════════════════════════════════════════════════════════
-# CIRURGIA 12 (Bug #7): _atomic_check_and_claim atômico
-# ═══════════════════════════════════════════════════════════════════
-# Antes: _atomic_check + _atomic_claim em locks SEPARADOS — race entre
-# eles permitia 2 workers ambos passarem como "primeira vez".
-# Agora: tudo em UM lock + atualiza timestamp ao reentrar (Bug #8).
-# ═══════════════════════════════════════════════════════════════════
-
 async def _atomic_check_and_claim(fp: str, janela: float) -> Tuple[bool, Optional[float]]:
     """
     Atômico: verifica se fp existe DENTRO da janela e, se não, faz claim.
     Retorna (na_janela, ts_existente).
       - na_janela=True  → identidade já está sendo processada/foi recente
       - na_janela=False → claim feito agora, primeira vez nessa janela
+
+    Tudo em UM lock pra evitar race entre check e claim. Ao reentrar
+    dentro da janela, atualiza o timestamp pra estender.
     """
     async with (await _get_atomic_lck()):
         agora = time.monotonic()
@@ -245,7 +253,7 @@ async def _atomic_check_and_claim(fp: str, janela: float) -> Tuple[bool, Optiona
             )
         ts = g._atomic_mem.get(fp)
         if ts is not None and (agora - ts) < janela:
-            # Atualiza pra estender (cumpre o que comentário antigo prometia)
+            # Atualiza pra estender
             g._atomic_mem[fp] = agora
             return True, ts
         # Claim
@@ -355,20 +363,21 @@ def identidade_canonica(norm: MensagemNormalizada) -> str:
       0. Lista de cupons → plat|cuplist|hash(sorted(cupons))
       1. Post-cupom      → plat|cup|CODIGO
       2. Post-cashback   → plat|cash|VALOR%
-      3. Produto/ASIN    → plat|asin                          ← v80.4: SEM cupom
-      4. Campanha        → plat|camp|host
+      3. Produto/ASIN    → plat|min(ids_globais)        ← determinístico
+      4. Campanha        → plat|camp|host+path          ← path evita colisão
       5. Cupom genérico  → plat|cup|CODIGO
       6. URL canônica    → plat|url|cache_key
       7. Texto           → plat|txt|hash
 
-    ═══════════════════════════════════════════════════════════════
-    CIRURGIA 2 (Bug #2): NÍVEL 3 SEM SUFIXO CUPOM
-    ═══════════════════════════════════════════════════════════════
-    Antes: amazon|B0X|cup|MASTER15 ≠ amazon|B0X (mesmo produto, cupons
-    diferentes geravam IDENTIDADES diferentes — duplicação).
-    Agora: amazon|B0X em ambos. Cupom vira melhoria avaliada por SCORE
-    em enviar(). Mesmo produto + cupom novo = EDIT, não duplicação.
-    ═══════════════════════════════════════════════════════════════
+    NÍVEL 3 — Produto/ASIN: usa o MENOR id_global (alfabético) em vez
+    do primeiro. Garante que a mesma oferta vinda de grupos diferentes
+    (que podem montar mapa em ordens diferentes) produza a MESMA
+    identidade. Cupom diferente no mesmo produto = melhoria avaliada
+    por SCORE em enviar(), não duplicação.
+
+    NÍVEL 4 — Campanha: usa host+path canônico (não só host). Sem path,
+    campanhas diferentes no mesmo domínio (ex: 3 campanhas Shopee em
+    shopee.com.br/m/*) colidiriam como duplicata.
     """
     texto = norm.texto_limpo
     plat  = norm.plat
@@ -393,16 +402,16 @@ def identidade_canonica(norm: MensagemNormalizada) -> str:
         if pct:
             return f"{plat}|cash|{pct}"
 
-    # NÍVEL 3: Produto com ASIN/SKU — IDENTIDADE APENAS pelo product_id
-    # Cupom diferente = melhoria, decidida por SCORE em enviar().
+    # NÍVEL 3: Produto com ASIN/SKU — id menor (determinístico)
     if norm.ids_globais:
-        return f"{plat}|{norm.ids_globais[0]}"
+        id_menor = min(norm.ids_globais)
+        return f"{plat}|{id_menor}"
 
-    # NÍVEL 4: Campanha/evento
+    # NÍVEL 4: Campanha/evento — host+path pra não colidir
     if _eh_post_evento(texto, norm.mapa):
-        host = _host_canonico_campanha(norm.mapa)
-        if host:
-            return f"{plat}|camp|{host}"
+        host_path = _host_canonico_campanha(norm.mapa)
+        if host_path:
+            return f"{plat}|camp|{host_path}"
         m = _RE_EVENTO_CAMPANHA.search(texto[:200])
         if m:
             return f"{plat}|camp|{m.group(0).lower()}"
@@ -461,8 +470,11 @@ async def deve_enviar_async(norm: MensagemNormalizada) -> bool:
     """
     Decide se a mensagem prossegue pra montagem/publicação.
 
-    Sempre retorna True quando há identidade — a camada 6 (enviar)
-    decide via score se publica nova, edita ou ignora.
+    Retorna True quando há identidade — a camada 6 (enviar) decide
+    via score se publica, edita ou ignora.
+
+    Retorna False APENAS pra bloquear flood de reativação (múltiplas
+    mensagens "voltou" do mesmo evento em sequência).
     """
     try:
         texto       = norm.texto_limpo
@@ -478,15 +490,29 @@ async def deve_enviar_async(norm: MensagemNormalizada) -> bool:
         identity = identidade_canonica(norm)
         janela   = _janela_por_tipo(tipo)
 
-        # ── REATIVAÇÃO: passa direto e reseta janela ─────────────
+        # ── REATIVAÇÃO ────────────────────────────────────────────
+        # Permite a reativação real passar (uma vez por evento), mas
+        # bloqueia flood quando múltiplos grupos mandam "voltou" do
+        # mesmo evento dentro de _JANELA_REATIVACAO_S.
         if await _checar_reativacao(norm):
+            fp_reativ = _fp4(f"reativ|{identity}")
+            na_janela, ts_ant = await _atomic_check_and_claim(
+                fp_reativ, _JANELA_REATIVACAO_S,
+            )
+            if na_janela:
+                delta = int(time.monotonic() - ts_ant) if ts_ant else 0
+                log_ded.info(
+                    f"♻️ [REATIVACAO_FLOOD] {identity} delta={delta}s "
+                    f"chat={chat} → bloqueada (já reativou recente)"
+                )
+                return False
             log_ded.info(
                 f"♻️ [REATIVACAO_OK] {identity} tipo={tipo} "
                 f"chat={chat} → enviar() decide"
             )
             return True
 
-        # ── CHECK + CLAIM ATÔMICO (Cirurgia 12) ──────────────────
+        # ── CHECK + CLAIM ATÔMICO ────────────────────────────────
         fp_identity = _fp4(f"identity|{identity}")
         na_janela, ts_anterior = await _atomic_check_and_claim(
             fp_identity, janela,
@@ -499,12 +525,7 @@ async def deve_enviar_async(norm: MensagemNormalizada) -> bool:
             )
             return True
 
-        # ═════════════════════════════════════════════════════════
-        # CIRURGIA 16 (Bug #13): separar asin de id_prod por plataforma
-        # Antes: asin=id_principal E id_prod=id_principal (perdia tipo)
-        # Agora: asin só para Amazon, id_prod só pra Shopee/Magalu.
-        # Mapeamento isolado em _persistir_dedupe (wrapping de schema).
-        # ═════════════════════════════════════════════════════════
+        # ── PERSISTÊNCIA ─────────────────────────────────────────
         _persistir_dedupe(
             fp_identity, plat, list(cupons), alma_v, tipo,
             ids_globais, list(benef),
@@ -520,6 +541,4 @@ async def deve_enviar_async(norm: MensagemNormalizada) -> bool:
         # Em caso de erro inesperado, deixa passar pra não bloquear
         # ofertas legítimas.
         log_ded.error(f"❌ ERRO DEDUPE: {e}", exc_info=True)
-        # CIRURGIA 1 (Bug #1): era 'true' minúsculo (NameError silenciado).
-        # Agora True com T maiúsculo, Python correto.
         return True
