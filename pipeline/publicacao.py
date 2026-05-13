@@ -1,17 +1,4 @@
-"""
-Camada 6 — Publicação: envio, edição, controle de saturação e disputa.
-
-═══════════════════════════════════════════════════════════════════
-v80.4 — Auditoria sênior aplicada
-═══════════════════════════════════════════════════════════════════
-Cirurgias incluídas:
-  • Cirurgia 2 parte (Bug #33) — LIDER_TRAVADO permite override por score maior
-  • Cirurgia 8  (Bug #32)      — _editar_inner_no_sem evita deadlock de semáforo
-  • Cirurgia 9  (Bug #27)      — db_set_estado IMEDIATAMENTE após envio
-  • Cirurgia 10 (Bug #29)      — substituição com mídia: aborta se delete falha
-  • Cirurgia 11 (Bug #24)      — usa g._identity_locks_lck (lock global)
-═══════════════════════════════════════════════════════════════════
-"""
+"""Camada 6 — Publicação: envio, edição, controle de saturação e disputa."""
 from __future__ import annotations
 import asyncio
 import time
@@ -25,7 +12,7 @@ from database import db_get_estado, db_set_estado, db_registrar_sat
 import globals as g
 from logger import log_out, log_sys
 from pipeline.deduplicacao import calcular_score, identidade_canonica
-from pipeline.montagem import MensagemMontada, preparar_imagem_tg
+from pipeline.montagem import MensagemMontada
 from pipeline.normalizacao import MensagemNormalizada, _KW_EVENTO
 from utils.helpers import ler_mapa, salvar_mapa
 
@@ -37,11 +24,8 @@ _SAT_BURST_JAN = 60
 
 
 # ─────────────────────────────────────────────────────────────────
-# LOCK PESSIMISTA POR IDENTIDADE
-# ─────────────────────────────────────────────────────────────────
-# CIRURGIA 11 (Bug #24): _IDENTITY_LOCKS_LCK era inicializado lazy
-# (race possível). Agora usa g._identity_locks_lck inicializado
-# em globals._init_globals().
+# Lock pessimista por identidade
+# Garante exclusão mútua entre tasks processando a mesma oferta.
 # ─────────────────────────────────────────────────────────────────
 _IDENTITY_LOCKS: dict = {}        # identity -> asyncio.Lock
 _IDENTITY_LOCKS_TS: dict = {}     # identity -> last_access_monotonic
@@ -49,11 +33,9 @@ _IDENTITY_LOCK_TTL = 600.0        # 10 min sem uso → descarta
 
 
 async def _get_identity_lock(identity: str) -> asyncio.Lock:
-    """
-    Retorna lock dedicado pra essa identidade. Garante exclusão mútua
-    entre tasks processando o mesmo cupom/produto/evento.
-    """
-    async with g._identity_locks_lck:   # ← Cirurgia 11
+    """Lock dedicado por identidade. Garante exclusão mútua entre
+    tasks processando o mesmo cupom/produto/evento."""
+    async with g._identity_locks_lck:
         lock = _IDENTITY_LOCKS.get(identity)
         if lock is None:
             lock = asyncio.Lock()
@@ -138,29 +120,23 @@ async def _enviar_msg(texto: str, img) -> object:
                                                  parse_mode="md", link_preview=False)
             except Exception as e:
                 log_out.warning(f"⚠️ send_file longo: {e}")
-    from client import client as _client
-    return await _client.send_message(GRUPO_DESTINO, texto,
-                                      parse_mode="md", link_preview=True)
+    return await client.send_message(GRUPO_DESTINO, texto,
+                                     parse_mode="md", link_preview=True)
 
 
-# ═══════════════════════════════════════════════════════════════════
-# CIRURGIA 8 (Bug #32): EDIT SEM DEADLOCK
-# ═══════════════════════════════════════════════════════════════════
-# Antes: _enviar_inner adquiria _SEM_ENVIO e CHAMAVA editar_por_id
-# que tentava o MESMO _SEM_ENVIO (asyncio.Semaphore não é reentrante).
-# 3 workers simultâneos = 3 permits ocupados = deadlock total.
-# Solução: 2 versões.
-#   - _editar_inner_no_sem: SEM semáforo, pra uso DENTRO de _enviar_inner
-#   - editar_por_id: COM semáforo, pra callers EXTERNOS
-# ═══════════════════════════════════════════════════════════════════
-
+# ─────────────────────────────────────────────────────────────────
+# Edição sem deadlock de semáforo
+#
+# asyncio.Semaphore não é reentrante: se uma função que já segura
+# _SEM_ENVIO chamar editar_por_id (que tenta o mesmo semáforo),
+# trava. Por isso há duas versões:
+#   - _editar_inner_no_sem: SEM semáforo, uso interno apenas
+#   - editar_por_id:        COM semáforo, callers externos
+# ─────────────────────────────────────────────────────────────────
 async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
                                 imagem_nova=None) -> bool:
-    """
-    Versão SEM semáforo de edição. Use APENAS de dentro de funções
-    que JÁ seguram _SEM_ENVIO (como _enviar_inner). Pra callers
-    externos use editar_por_id().
-    """
+    """Edita mensagem sem adquirir _SEM_ENVIO. Use APENAS dentro de
+    funções que já seguram o semáforo."""
     from client import client
     for t in range(1, 4):
         try:
@@ -200,10 +176,8 @@ async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
 
 async def editar_por_id(msg_id_dest: int, texto_novo: str,
                         imagem_nova=None) -> bool:
-    """
-    Versão pública (com semáforo). Pra callers EXTERNOS que não
-    seguram _SEM_ENVIO. Internamente delega pra _editar_inner_no_sem.
-    """
+    """Versão pública (com semáforo) pra callers externos que não
+    seguram _SEM_ENVIO. Delega pra _editar_inner_no_sem."""
     async with config._SEM_ENVIO:
         return await _editar_inner_no_sem(
             msg_id_dest, texto_novo, imagem_nova
@@ -220,17 +194,14 @@ async def editar(msg_id_origem: int, texto_novo: str) -> bool:
 
 # ─────────────────────────────────────────────────────────────────
 # Substituição com mídia (deletar + reenviar)
+#
+# Se delete falha, ABORTA (retorna None). O caller cai pra edição
+# comum (que não duplica). Sem essa proteção, o canal duplicaria.
 # ─────────────────────────────────────────────────────────────────
 async def _substituir_post_com_midia(
     msg_id_dest_antigo: int, montada: MensagemMontada,
 ) -> Optional[object]:
-    """
-    Apaga a mensagem antiga e reenvia com a imagem nova.
-
-    CIRURGIA 10 (Bug #29): se delete falha, ABORTA (retorna None).
-    O caller cai pra edição comum (que não duplica). Antes seguia
-    e duplicava no canal de destino.
-    """
+    """Apaga a mensagem antiga e reenvia com a imagem nova."""
     from client import client
     try:
         # 1. Apaga a mensagem antiga
@@ -259,7 +230,7 @@ async def _substituir_post_com_midia(
                 f"⚠️ delete_messages: {e} — abortando substituição "
                 f"(caller cai pra edição)"
             )
-            return None  # NÃO duplica
+            return None
 
         # 2. Reenvia com a imagem nova
         sent = None
@@ -310,6 +281,32 @@ def _deve_substituir_post(
     return True
 
 
+# ─────────────────────────────────────────────────────────────────
+# Hook pós-publicação por plataforma
+#
+# Pós-processamento específico que algumas plataformas precisam
+# (encurtamento background de URLs longas, etc).
+#
+# DÉBITO ARQUITETURAL: este hook conhece a plataforma "magalu" e
+# deveria viver em plataformas/magalu.py, sendo invocado via uma
+# API genérica no affiliate_router. Migrar quando o router ganhar
+# `pos_publicacao(montada)`.
+# ─────────────────────────────────────────────────────────────────
+async def _hook_pos_envio(montada: MensagemMontada) -> None:
+    if montada.plat != "magalu" or not montada.mapa:
+        return
+    try:
+        from plataformas.magalu import _cuttly_background
+    except Exception:
+        return
+    for orig, conv in montada.mapa.items():
+        if "partner_id" in conv and "leoind.com.br" not in conv:
+            try:
+                asyncio.create_task(_cuttly_background(conv, montada.msg_id))
+            except Exception:
+                pass
+
+
 async def enviar(montada: MensagemMontada,
                  norm: Optional[MensagemNormalizada] = None) -> bool:
     """
@@ -351,15 +348,9 @@ async def _enviar_inner(montada: MensagemMontada,
                 ts_anterior = estado.get("ts", 0) or 0
                 score_atual = estado["score"]
 
-                # ═════════════════════════════════════════════════════
-                # CIRURGIA 2 parte (Bug #33): override de líder por score
-                # ═════════════════════════════════════════════════════
-                # Antes: bloqueava SEMPRE outros grupos fora da janela.
-                # Resultado: post com cupom MELHOR de outro grupo era
-                # silenciado (caso da imagem 11 — Colchão Emma).
-                # Agora: bloqueia APENAS se score igual ou menor.
-                # Score maior = melhoria genuína (cupom novo, preço melhor).
-                # ═════════════════════════════════════════════════════
+                # Override de líder por score: outro grupo só substitui
+                # se trouxer cupom/preço melhor (score MAIOR). Score
+                # igual ou menor fora da janela é bloqueado.
                 if (not na_janela and lider_atual and norm.chat != lider_atual
                         and score <= score_atual):
                     log_out.info(
@@ -410,7 +401,6 @@ async def _enviar_inner(montada: MensagemMontada,
                             return True
                         # Fallback: cai pra edição comum
 
-                    # CIRURGIA 8: usa _editar_inner_no_sem (sem deadlock)
                     log_out.info(
                         f"✳️ [EVOLUI] {identity} "
                         f"score {score_atual}→{score} "
@@ -482,7 +472,6 @@ async def _enviar_inner(montada: MensagemMontada,
 
         # ═════════════════════════════════════════════════════════════
         # NOVO ENVIO (sem estado prévio)
-        # CIRURGIA 9 (Bug #27): db_set_estado IMEDIATAMENTE após envio
         # ═════════════════════════════════════════════════════════════
         img = montada.imagem
         sent = None
@@ -500,10 +489,9 @@ async def _enviar_inner(montada: MensagemMontada,
             log_out.error(f"❌ Envio falhou | @{montada.chat}")
             return False
 
-        # ─── CRÍTICO: gravar estado IMEDIATAMENTE após envio ────
-        # Antes era a ÚLTIMA coisa do método. Falha intermediária
-        # (salvar_mapa, db_registrar_sat, _burst_add) causava
-        # duplicata silenciosa (estado não gravado).
+        # Gravar estado IMEDIATAMENTE após envio. Falhas em operações
+        # secundárias (mapa, sat, burst) NÃO devem deixar o estado
+        # ausente — senão um próximo post pode duplicar silenciosamente.
         if identity is not None:
             try:
                 janela_fim = time.time() + _JANELA_DISPUTA_S
@@ -516,8 +504,8 @@ async def _enviar_inner(montada: MensagemMontada,
                 log_sys.error(
                     f"❌ db_set_estado FALHOU pós-envio: {e}", exc_info=True
                 )
-                # Não falha o post — já foi enviado. Próximo post
-                # pode duplicar (raro), mas é menos pior.
+                # Não falha o post — já foi enviado. Próximo post pode
+                # duplicar (raro), mas é menos pior.
 
         # Operações secundárias — falhas individuais não revogam estado
         try:
@@ -545,15 +533,11 @@ async def _enviar_inner(montada: MensagemMontada,
         if norm is not None and norm.is_override:
             log_out.info(f"🔓 [OVERRIDE_OK] Post liberado publicado | id={sent.id}")
 
-        # Background pra encurtar URLs Magalu longas
-        if montada.plat == "magalu" and montada.mapa:
-            from plataformas.magalu import _cuttly_background
-            for orig, conv in montada.mapa.items():
-                if "partner_id" in conv and "leoind.com.br" not in conv:
-                    try:
-                        asyncio.create_task(_cuttly_background(conv, montada.msg_id))
-                    except Exception:
-                        pass
+        # Hook por plataforma (encurtamento, etc) — falhas não revogam envio
+        try:
+            await _hook_pos_envio(montada)
+        except Exception as e:
+            log_sys.warning(f"⚠️ _hook_pos_envio: {e}")
 
         log_out.info(
             f"🚀 [OK] @{montada.chat}→{GRUPO_DESTINO} | "
