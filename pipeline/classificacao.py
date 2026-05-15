@@ -23,13 +23,20 @@ _SHP_DOMINIOS = frozenset({"shopee.com.br","s.shopee.com.br","shopee.com",
 _MGL_DOMINIOS = frozenset({"magazineluiza.com.br","sacola.magazineluiza.com.br",
     "magazinevoce.com.br","maga.lu","divulgador.magalu.com"})
 _MGL_DOMINIOS_SET = frozenset({*_MGL_DOMINIOS, "m.magazineluiza.com.br"})
-_ENCURTADORES = frozenset({"bit.ly","cutt.ly","tinyurl.com","t.co","ow.ly","goo.gl",
+ML_DOMINIOS = {
+    "mercadolivre.com.br",
+    "www.mercadolivre.com.br",
+    "produto.mercadolivre.com.br",
+    "lista.mercadolivre.com.br",
+    "meli.la",
+}
+_ENCURTADORES = frozenset({"bit.ly","cutt.ly","meli.la","tinyurl.com","t.co","ow.ly","goo.gl",
     "rb.gy","is.gd","tiny.cc","buff.ly","short.io","bl.ink","rebrand.ly","shorturl.at",
     "tidd.ly"})
 _PRESERVE = frozenset({"wa.me","api.whatsapp.com"})
 _DELETAR  = frozenset({"t.me","telegram.me","telegram.org","chat.whatsapp.com"})
 _FORCA_GET = frozenset({"amzlink.to","amzn.to","a.co","amzn.com","bit.ly","cutt.ly",
-    "tinyurl.com","rb.gy","is.gd","ow.ly","buff.ly","maga.lu","tidd.ly"})
+    "tinyurl.com","rb.gy","is.gd","ow.ly","meli.la","buff.ly","maga.lu","tidd.ly"})
 
 # ── Padrões de extração ───────────────────────────────────────────
 _AMZ_PATHS_SEM_TAG = re.compile(
@@ -48,6 +55,27 @@ _P_AMZ_ASIN = [
 ]
 _P_AMZ_PROMO = re.compile(r'/promotion/psp/([A-Z0-9]{8,16})', re.I)
 
+# ── Mercado Livre ────────────────────────────────────────────────
+
+_P_ML_SHORT = [
+    re.compile(r'^https?://(?:www\.)?meli\.la/', re.I),
+    re.compile(r'^https?://(?:www\.)?mercadolivre\.com\.br/sec/', re.I),
+]
+
+_P_ML_SOCIAL = re.compile(
+    r'/social/([a-zA-Z0-9_\-]+)',
+    re.I
+)
+
+_P_ML_PRODUCT = [
+    re.compile(r'/MLB-?(\d+)', re.I),
+    re.compile(r'/p/MLB(\d+)', re.I),
+]
+
+_P_ML_CAMPAIGN = [
+    re.compile(r'/_Container_([0-9\-]+)', re.I),
+    re.compile(r'[?&]coupon_campaign_id=(\d+)', re.I),
+]
 
 @dataclass
 class LinkClassificado:
@@ -82,6 +110,45 @@ def _extrair_sku_magalu(p) -> str:
 def _eh_magalu_url(url: str) -> bool:
     nl = _netloc(url)
     return any(nl == d or nl.endswith("." + d) for d in _MGL_DOMINIOS_SET)
+
+def _extrair_sku_mercadolivre(url: str) -> str | None:
+    """
+    Extrai identificador principal do Mercado Livre.
+
+    Retorna:
+        MLB1234567890   -> produto
+        CONTAINER_xxx   -> campanha/lista
+        social_username -> social
+        None            -> não identificado
+    """
+
+    if not url:
+        return None
+
+    u = url.lower()
+
+    # ── Produto ───────────────────────────────────────────────
+    for p in _P_ML_PRODUCT:
+        m = p.search(u)
+        if m:
+            return f"MLB{m.group(1)}"
+
+    # ── Campanha / Lista ─────────────────────────────────────
+    for p in _P_ML_CAMPAIGN:
+        m = p.search(u)
+        if m:
+            return f"CONTAINER_{m.group(1)}"
+
+    # ── Social ───────────────────────────────────────────────
+    m = _P_ML_SOCIAL.search(u)
+    if m:
+        return f"social_{m.group(1)}"
+
+    # ── Short links ──────────────────────────────────────────
+    if any(p.search(u) for p in _P_ML_SHORT):
+        return "SHORT_LINK"
+
+    return None
 
 
 def classificar_url(url: str) -> LinkClassificado:
