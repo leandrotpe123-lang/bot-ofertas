@@ -23,7 +23,6 @@ _SHP_DOMINIOS = frozenset({"shopee.com.br","s.shopee.com.br","shopee.com",
 _MGL_DOMINIOS = frozenset({"magazineluiza.com.br","sacola.magazineluiza.com.br",
     "magazinevoce.com.br","maga.lu","divulgador.magalu.com"})
 _MGL_DOMINIOS_SET = frozenset({*_MGL_DOMINIOS, "m.magazineluiza.com.br"})
-}
 _ENCURTADORES = frozenset({"bit.ly","cutt.ly","meli.la","tinyurl.com","t.co","ow.ly","goo.gl",
     "rb.gy","is.gd","tiny.cc","buff.ly","short.io","bl.ink","rebrand.ly","shorturl.at",
     "tidd.ly"})
