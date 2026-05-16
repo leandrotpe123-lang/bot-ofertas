@@ -1,195 +1,76 @@
-"""Camada 3 — Normalização."""
+"""
+Camada 3 — Normalização.
+
+Responsabilidade única: transformar uma MensagemBruta em uma
+MensagemNormalizada, orquestrando a resolução e a afiliação dos
+links contidos na mensagem, e produzindo os metadados derivados
+necessários às camadas seguintes.
+
+Operações que constituem a normalização:
+  - limpeza estrutural do texto (limpar_texto)
+  - verificação de viabilidade do texto (tem_contexto)
+  - resolução e afiliação de links (via url_resolver e affiliate_router)
+  - derivação de plataforma dominante, cupom, SKU e identificadores
+
+NÃO faz:
+  - filtragem de conteúdo (responsabilidade de pipeline.filtros)
+  - detecção/validação de cupom (responsabilidade de utils.cupom)
+  - classificação de estado de evento (responsabilidade de
+    pipeline.estado_evento)
+  - resolução de URL via rede (responsabilidade de utils.url_resolver)
+  - registro de posts pendentes (responsabilidade do orquestrador)
+
+REEXPORTAÇÕES TEMPORÁRIAS DE COMPATIBILIDADE:
+  Os símbolos _KW_CUPOM, _FALSO_CUPOM, extrair_todos_cupons,
+  EstadoEvento e _JANELA_C3 são reexportados a partir de suas novas
+  origens para não quebrar montagem e deduplicação antes da revisão
+  desses módulos. Estas reexportações devem ser removidas quando
+  montagem e deduplicação tiverem seus imports corrigidos.
+"""
 from __future__ import annotations
 
 import asyncio
 import re
+import time
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 import aiohttp
-from bs4 import BeautifulSoup
 
-import config
 from database import db_get_dedupe, db_get_link
-from globals import _get_session, _get_raw, _get_final, _set_raw, _log_cache_stats
-from logger import log_cls, log_nrm
+from globals import _get_session, _get_final, _log_cache_stats
+from logger import log_nrm
 from pipeline.classificacao import (
     LinkClassificado,
-    _ENCURTADORES_POR_PLAT,
     _classificar_cached,
     classificar_links,
 )
+from pipeline.estado_evento import (
+    EstadoEvento,
+    detectar_estado_evento,
+    _JANELA_C3,
+)
 from pipeline.ingestao import MensagemBruta
+from utils.cupom import _FALSO_CUPOM, _KW_CUPOM, extrair_cupom, extrair_todos_cupons
 from utils.hashes import _fp_c3
-from utils.urls import _netloc, _sanitizar_url
+from utils.url_resolver import desencurtar
 
-
-_PLAT_COMERCIAL = frozenset(_ENCURTADORES_POR_PLAT.keys()) | {"expandir"}
-
-
-# ── Janelas de deduplicação ──────────────────────────────────────
-_JANELA_C3 = {
-    "shopee":  60.0,
-    "amazon":  300.0,
-    "magalu":  300.0,
-    "default": 120.0,
-}
-_TTL_RESTOCK_C3 = {
-    "shopee":  3600.0,
-    "amazon":  7200.0,
-    "magalu":  14400.0,
-    "default": 3600.0,
-}
-
-
-# ── Filtro de texto ──────────────────────────────────────────────
-_FILTRO_TEXTO = [
-    "Monitor Samsung","Fonte Mancer","Placa de video","Monitor LG",
-    "PC home Essential","Suporte articulado","VHAGAR","Superframe","AM5","AM4","GTX",
-    "Placa de Vídeo","DDR5","DDR4","Dram","Monitor Safe","Monitor Redragon","CL18","CL16",
-    "CL32","MT/s","MHz","RX 580","Ryzen","Placa Mãe","Gabinete Gamer",
-    "Water Cooler","Monitor Dell","Monitor Gamer","Air Cooler",
+# ── Reexportações temporárias de compatibilidade ──────────────────
+# Consumidos hoje por montagem e deduplicação a partir deste módulo.
+# Remover quando esses módulos forem revisados em suas fases.
+__all__ = [
+    "MensagemNormalizada", "normalizar", "limpar_texto", "tem_contexto",
+    "EstadoEvento", "detectar_estado_evento", "_JANELA_C3",
+    "_KW_CUPOM", "_FALSO_CUPOM", "extrair_cupom", "extrair_todos_cupons",
+    "_tem_emoji", "desencurtar",
 ]
-_RE_MULTI_OFERTA = re.compile(
-    r'\b(?:ofertas?|promoções?)\s+(?:na\s+|no\s+|da\s+)?'
-    r'(?:shopee|amazon|magalu|magazine\s*luiza)\b', re.I,
-)
-_RE_PRECO_LINHA = re.compile(r'R\$\s?[\d.,]+')
-_RE_URL_COUNT   = re.compile(r'https?://')
-
-_RE_SINAL_FORTE = re.compile(
-    r'\b(?:'
-    r'esgota\s+r[aá]pido|'
-    r'corre|'
-    r'voa|'
-    r'pega\s+logo|'
-    r'quem\s+pegou\s+pegou|'
-    r'acaba\s+r[aá]pido|'
-    r'poucas?\s+unidades?|'
-    r'bug|'
-    r'erro\s+de\s+pre[cç]o|'
-    r'j[aá]\s+era|'
-    r'insano'
-    r')\b',
-    re.I,
-)
 
 
-def _tem_sinal_social_forte(texto: str) -> bool:
-    if not texto:
-        return False
-    return bool(_RE_SINAL_FORTE.search(texto))
-
-
-def _eh_multi_produto(texto: str) -> bool:
-    if _RE_MULTI_OFERTA.search(texto):
-        return True
-    linhas_preco = sum(
-        1 for l in texto.splitlines() if _RE_PRECO_LINHA.search(l)
-    )
-    return linhas_preco >= 2 or len(_RE_URL_COUNT.findall(texto)) >= 3
-
-
-def texto_bloqueado(
-    texto: str,
-    contexto_extra: str = "",
-) -> Tuple[bool, bool]:
-    """Retorna (bloqueado, is_override)."""
-    if _eh_multi_produto(texto):
-        return False, False
-
-    tl = texto.casefold()
-    for p in _FILTRO_TEXTO:
-        if p.casefold() in tl:
-            if _tem_sinal_social_forte(contexto_extra):
-                log_cls.debug(f"⚡ Override social '{p}'")
-                return False, True
-            log_cls.debug(f"🚫 Filtro: '{p}'")
-            return True, False
-    return False, False
-
-
-# ── Filtros de post indesejado ───────────────────────────────────
-_RE_EXCLUSIVO_CANAL = re.compile(
-    r'\b(?:exclusivo|exclusiva|s[oó]|somente|apenas)\s+'
-    r'(?:do|da|de|para|pra|p/|pro|pros)\s+'
-    r'(?:canal|grupo|membros?|seguidores?|@\w+)',
-    re.I,
-)
-_RE_PEDE_LINK = re.compile(
-    r'\b(?:envie?|mande|manda|envia|coloque|cole|cola|passe|passa)\s+'
-    r'(?:o\s+|seu\s+|os\s+|aí\s+(?:o\s+)?)?link',
-    re.I,
-)
-_RE_VIA_CHAT_SITE = re.compile(
-    r'\b(?:no\s+chat|pelo\s+(?:nosso\s+)?site|aqui\s+no\s+grupo|'
-    r'aqui\s+no\s+canal|aqui\s+embaixo|abaixo|aba\s+de)\b',
-    re.I,
-)
-_RE_SHOPEE_VIDEO = re.compile(
-    r'https?://(?:[a-z0-9-]+\.)?shopee\.com\.br/'
-    r'(?:v|vt|live|video)/',
-    re.I,
-)
-_DOMINIOS_CONCORRENTES = frozenset({
-    "fadadoscupons.com", "fadadoscupons.com.br",
-    "pelando.com.br", "pelando.com",
-    "promobit.com.br", "promobit.com",
-    "savvii.com.br",
-    "tecmundo.com.br/promobit",
-    "buscape.com.br/cupom",
-    "meliuz.com.br",
-    "cuponomia.com.br",
-    "cuponeria.com.br",
-    "picodi.com",
-    "cupomvalido.com.br",
-})
-_RE_TELEGRAM_LINK = re.compile(
-    r'https?://(?:t\.me|telegram\.me|telegram\.org)/',
-    re.I,
-)
-
-
-def _tem_link_concorrente(texto: str) -> bool:
-    urls = re.findall(r'https?://[^\s\)>\]\}",;]+', texto)
-    for url in urls:
-        nl = _netloc(url)
-        if nl in _DOMINIOS_CONCORRENTES:
-            return True
-        for d in _DOMINIOS_CONCORRENTES:
-            if nl.endswith("." + d):
-                return True
-    return False
-
-
-def _tem_link_plataforma_real(texto: str) -> bool:
-    urls = re.findall(r'https?://[^\s\)>\]\}",;]+', texto)
-    if not urls:
-        return False
-    for url in urls:
-        lc = _classificar_cached(url)
-        if lc.plat in _PLAT_COMERCIAL:
-            return True
-    return False
-
-
-def _eh_post_indesejado(texto: str) -> Tuple[bool, str]:
-    if _RE_EXCLUSIVO_CANAL.search(texto):
-        return True, "exclusivo_canal"
-    if _RE_SHOPEE_VIDEO.search(texto):
-        return True, "shopee_video"
-    if _RE_PEDE_LINK.search(texto) and _RE_VIA_CHAT_SITE.search(texto):
-        return True, "pede_link_servico"
-    if _tem_link_concorrente(texto) and not _tem_link_plataforma_real(texto):
-        return True, "link_concorrente_sem_plataforma"
-    if (_RE_TELEGRAM_LINK.search(texto)
-            and not _tem_link_plataforma_real(texto)):
-        return True, "encaminha_telegram"
-    return False, ""
-
-
-# ── Limpeza textual ──────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# LIMPEZA DE TEXTO
+# Transformação estrutural do texto bruto. Permanece na normalização
+# por ser operação intrínseca à transformação, com consumidor único.
+# ─────────────────────────────────────────────────────────────────
 _RE_INVISIVEIS = re.compile(r'[\u200b\u200c\u200d\u00a0\u2060\ufeff]')
 _RE_GRUPO_EXT  = re.compile(
     r'https?://(?:t\.me|telegram\.me|telegram\.org|chat\.whatsapp\.com)[^\s]*',
@@ -215,10 +96,6 @@ _RE_ROTULO    = re.compile(r'^\s*[-–•]\s*\w[\w\s]{0,30}:\s*$')
 _RE_EMOJI_CHK = re.compile(
     r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF\u2B50\u2B55]"
 )
-_KW_EVENTO = re.compile(
-    r'\b(?:quiz|roleta|miss[aã]o|arena|girar|gire|roda|jogar|jogue|desafio)\b',
-    re.I,
-)
 
 
 def _tem_emoji(s: str) -> bool:
@@ -237,7 +114,16 @@ def _eh_header_canal(linha: str) -> bool:
 
 
 def limpar_texto(texto: str) -> str:
-    texto = _RE_INVISIVEIS.sub(" ", texto).replace("\r\n", "\n").replace("\r", "\n")
+    """
+    Remove ruído estrutural do texto: caracteres invisíveis, headers
+    de canal, blocos de redes sociais, chamadas para ação vazias e
+    links para grupos externos. Preserva o conteúdo promocional.
+    """
+    texto = (
+        _RE_INVISIVEIS.sub(" ", texto)
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+    )
     linhas = texto.split("\n")
     saida: List[str] = []
     vazio = False
@@ -276,210 +162,17 @@ def limpar_texto(texto: str) -> str:
     return "\n".join(saida).strip()
 
 
-# ── Extração de cupom ────────────────────────────────────────────
-_KW_CUPOM = re.compile(
-    r'\b(?:cupom|cupons|c[oó]digo|c[oó]digos|coupon|coupons|voucher|vouchers)\b',
-    re.I,
-)
-_KW_COD       = re.compile(r'\b([A-Z0-9][A-Z0-9_-]{3,19})\b')
-_RE_COD_PURO  = re.compile(r'^[A-Z0-9][A-Z0-9_-]{3,19}$')
-_RE_TEM_LETRA = re.compile(r'[A-Z]')
-_RE_TEM_DIGITO = re.compile(r'[0-9]')
-
-_FALSO_CUPOM = frozenset({
-    "CUPOM", "CUPONS", "CODIGO", "CÓDIGO", "COUPON", "COUPONS",
-    "VOUCHER", "VOUCHERS", "DESCONTO", "DESCONTOS", "PROMO",
-    "PROMOÇÃO", "PROMOCAO", "OFERTA", "OFERTAS", "EXCLUSIVO",
-    "EXCLUSIVA", "OFICIAL", "RESGATE", "RESGATES", "GRÁTIS",
-    "GRATIS", "FRETE", "FRETES", "COMPRA", "COMPRE", "PAGUE",
-    "ATIVO", "ATIVAR", "USAR", "CLIQUE", "ACESSE", "CONFIRA",
-    "COPIE", "AGORA", "HOJE", "NOVO", "NOVA", "MEGA", "ULTRA",
-    "SUPER", "TOP", "PREMIUM", "BLACK", "FRIDAY", "CYBER",
-    "SOMENTE", "APENAS", "BRASIL", "BRASILEIRO", "MUNDO",
-    "TESTE", "DEMO", "BETA", "AJUDA", "HELP", "MAIS", "MENOS",
-    "VOLTA", "VOLTOU", "RENOVADO", "REATIVADO", "NORMALIZOU",
-    "RECUPERADO", "DISPONIVEL", "DISPONÍVEL", "VALIDA", "VÁLIDA",
-    "VALIDO", "VÁLIDO", "EXPIRADO", "EXPIROU",
-    "VALIDADE", "VENCIMENTO", "DURACAO", "DURAÇÃO", "QUANTIDADE",
-    "LIMITE", "LIMITES", "LIMITADO", "LIMITADA", "ILIMITADO",
-    "IMPERDIVEL", "IMPERDÍVEL", "INCRIVEL", "INCRÍVEL",
-    "MAXIMO", "MÁXIMO", "MINIMO", "MÍNIMO", "ENTREGA",
-    "RAPIDA", "RÁPIDA", "RAPIDO", "RÁPIDO",
-    "PARCIAL", "INTEGRAL", "PARCELADO", "AVISTA", "AVÍSTA",
-    "VARIOS", "VÁRIOS", "VARIAS", "VÁRIAS", "TODOS", "TODAS",
-    "AMAZON", "AMZN", "SHOPEE", "MAGALU", "MAGAZINE", "LUIZA",
-    "ALIEXPRESS", "ALIBABA", "MERCADO", "LIVRE", "AMERICANAS",
-    "CASAS", "BAHIA", "EXTRA", "CARREFOUR", "PAODE", "ACUCAR",
-    "SUBMARINO", "DAFITI", "NETSHOES", "CENTAURO", "RIACHUELO",
-    "RENNER", "SAMSUNG", "APPLE", "PHILIPS", "XIAOMI", "MOTOROLA",
-    "NOKIA", "MICROSOFT", "INTEL", "AMD", "NVIDIA", "ASUS", "ACER",
-    "DELL", "LENOVO", "LG", "SONY", "PANASONIC", "BOSCH", "BRASTEMP",
-    "CONSUL", "ELETROLUX", "ELECTROLUX", "CADENCE", "MONDIAL", "ARNO",
-    "OSTER", "BRAUN", "FAGOR", "ITATIAIA", "TRAMONTINA", "POLISHOP",
-    "PHILCO", "LATINA", "DECKER", "MAKITA", "BRITANIA",
-    "BRITÂNIA", "ALPINO", "PAMPERS", "NESTLE", "NESTLÉ", "POSITIVO",
-    "INTELBRAS", "MALIBU", "LOGITECH", "RAZER", "REDRAGON", "HYPER",
-    "CORSAIR", "KINGSTON", "WESTERN", "DIGITAL", "SEAGATE", "SANDISK",
-    "TOSHIBA", "HUAWEI", "VIVO", "CLARO", "TIM",
-    "NETFLIX", "DISNEY", "DISNEYPLUS", "GLOBOPLAY", "PRIME", "VIDEO",
-    "PARAMOUNT", "HBOMAX", "STAR", "APPLETV", "YOUTUBE", "SPOTIFY",
-    "DEEZER", "TWITCH", "STEAM", "EPIC", "GOG", "PLAYSTATION", "NINTENDO",
-    "XBOX", "PSN", "PSPLUS",
-    "GAMING", "GAMER", "OFFICE", "HOMEOFFICE", "WORK", "PRO", "MAX",
-    "PLUS", "LITE", "MINI", "AIR", "PROMAX", "STANDARD", "BASIC",
-    "OUTLET", "DUTYFREE", "FREESHIP", "FREE", "PAID",
-    "USD", "BRL", "EUR", "USB", "HDMI", "BLE", "WIFI", "GPS", "NFC",
-    "IPS", "OLED", "LCD", "LED", "ATX", "ITX", "ITV", "IPTV", "OTT",
-    "P2P", "B2B", "B2C", "KPI", "KYC", "CPU", "GPU", "RAM", "ROM",
-    "SSD", "HDD", "FPS", "HZ", "GHZ", "MHZ",
-    "RGB", "HDR", "SDR", "PWM", "PCIE", "SATA", "DDR", "DDR4", "DDR5",
-    "NVME", "RJ45", "VGA", "DVI", "TYPE", "TYPEC",
-    "PS3", "PS4", "PS5", "WII", "DEX", "API", "SDK", "URL", "URI",
-    "JSON", "XML", "HTTP", "HTTPS", "TCP", "UDP", "DNS", "SQL",
-    "ETL", "OCR", "VPN", "SSO", "MFA", "OTP", "ASTRO",
-    "SLIM", "GRAN", "TURISMO", "PACOTE",
-    "PIX", "BOLETO", "CARTAO", "CARTÃO", "MASTER", "MASTERCARD",
-    "VISA", "AMEX", "ELO", "HIPERCARD", "CREDITO", "CRÉDITO",
-    "CREDIT", "DEBITO", "DÉBITO", "DEBIT", "MOEDA", "MOEDAS",
-    "JURO", "JUROS", "PARCELA", "PARCELAS", "REAL", "REAIS",
-    "DOLAR", "DÓLAR", "DOLLAR", "EURO", "VALOR", "VALORES",
-    "PRECO", "PREÇO", "PRECOS", "PREÇOS", "BARATO", "BARATA",
-    "CASHBACK", "CASH", "BACK", "PONTOS", "PONTO", "MILHAS", "MILHA",
-    "ROLETA", "GIRO", "GIROS", "ARENA", "QUIZ", "MISSAO", "MISSÃO",
-    "DESAFIO", "SORTEIO", "PREMIO", "PRÊMIO", "PREMIOS", "PRÊMIOS",
-    "EVENTO", "EVENTOS", "CAMPANHA", "CAMPANHAS",
-    "OFF", "ON", "OK", "GO", "STOP", "PAUSE", "PLAY",
-    "STARS", "FIRE", "HOT", "COLD", "WARM",
-})
-
-_RE_LISTA_CUPONS = re.compile(
-    r'(?:r\$\s*\d+\s+off\s+em\s+r\$\s*\d+\s*:\s*[A-Z0-9]{4,}|'
-    r'cupons?\s+(?:ainda\s+)?ativos?\s*:|ainda\s+ativos?\s*:)',
-    re.I,
-)
-_RE_KV_CUPOM = re.compile(
-    r'(?:OFF|cupom|cupons|c[oó]digo|c[oó]digos|coupon|voucher)\s*[:=]\s*'
-    r'([A-Z0-9][A-Z0-9_-]{3,19})\b',
-    re.I,
-)
-_RE_LINHA_CUPOM_LISTA = re.compile(
-    r'(?:r\$\s*\d+|\d+\s*%)\s+off(?:\s+em\s+r\$\s*\d+)?\s*:\s*[A-Z0-9][A-Z0-9_-]{3,19}',
-    re.I,
-)
-
-
-def _eh_cupom_valido(c: str) -> bool:
-    if not c:
-        return False
-    if len(c) < 4 or len(c) > 20:
-        return False
-    c_upper = c.upper()
-    if c_upper in _FALSO_CUPOM:
-        return False
-    if not _RE_COD_PURO.match(c_upper):
-        return False
-    tem_letra  = bool(_RE_TEM_LETRA.search(c_upper))
-    tem_digito = bool(_RE_TEM_DIGITO.search(c_upper))
-    if not tem_letra:
-        return False
-    if not tem_digito and len(c_upper) < 5:
-        return False
-    return True
-
-
-def _filtrar_codes_validos(code_entities: list) -> List[str]:
-    if not code_entities:
-        return []
-    validos: List[str] = []
-    for trecho in code_entities:
-        candidato = trecho.strip()
-        if _eh_cupom_valido(candidato):
-            validos.append(candidato.upper())
-            continue
-        for palavra in re.findall(r'[A-Z0-9][A-Z0-9_-]{3,19}', candidato):
-            if _eh_cupom_valido(palavra):
-                validos.append(palavra.upper())
-    return validos
-
-
-def extrair_cupom_de_codes(code_entities: list) -> str:
-    validos = _filtrar_codes_validos(code_entities)
-    return validos[0] if validos else ""
-
-
-def extrair_cupom(texto: str, code_entities: list = None) -> str:
-    if code_entities:
-        c = extrair_cupom_de_codes(code_entities)
-        if c:
-            return c
-
-    if _RE_LISTA_CUPONS.search(texto):
-        for linha in texto.splitlines():
-            m = re.search(r':\s*([A-Z0-9][A-Z0-9_-]{3,19})\b', linha)
-            if m:
-                c = m.group(1).upper()
-                if _eh_cupom_valido(c):
-                    return c
-
-    for m in _RE_KV_CUPOM.finditer(texto):
-        c = m.group(1).upper()
-        if _eh_cupom_valido(c):
-            return c
-
-    if _KW_CUPOM.search(texto):
-        linhas = texto.splitlines()
-        for i, linha in enumerate(linhas):
-            if not _KW_CUPOM.search(linha):
-                continue
-            for j in range(i, min(i + 4, len(linhas))):
-                for m in _KW_COD.finditer(linhas[j]):
-                    c = m.group(1).upper()
-                    if _eh_cupom_valido(c):
-                        return c
-    return ""
-
-
-def extrair_todos_cupons(texto: str, code_entities: list = None) -> List[str]:
-    encontrados: List[str] = []
-    visto = set()
-
-    def add(c: str):
-        cu = c.upper()
-        if cu not in visto and _eh_cupom_valido(cu):
-            visto.add(cu)
-            encontrados.append(cu)
-
-    for c in _filtrar_codes_validos(code_entities or []):
-        add(c)
-
-    for m in _RE_KV_CUPOM.finditer(texto):
-        add(m.group(1))
-
-    if _RE_LISTA_CUPONS.search(texto):
-        for linha in texto.splitlines():
-            m = re.search(r':\s*([A-Z0-9][A-Z0-9_-]{3,19})\b', linha)
-            if m:
-                add(m.group(1))
-
-    linhas_lista = [
-        l for l in texto.splitlines() if _RE_LINHA_CUPOM_LISTA.search(l)
-    ]
-    if len(linhas_lista) >= 2:
-        for linha in linhas_lista:
-            for m in re.finditer(r'\b([A-Z0-9][A-Z0-9_-]{3,19})\b', linha):
-                add(m.group(1))
-
-    if _KW_CUPOM.search(texto):
-        for linha in texto.splitlines():
-            if _KW_CUPOM.search(linha):
-                for m in _KW_COD.finditer(linha):
-                    add(m.group(1))
-
-    return encontrados
-
-
-# ── Contexto e estado do evento ──────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# VIABILIDADE DO TEXTO
+# Verificação intrínseca: o texto possui substância promocional
+# mínima para justificar o processamento? Não é política de filtro.
+# ─────────────────────────────────────────────────────────────────
 def tem_contexto(texto: str) -> bool:
+    """
+    Verifica se o texto possui conteúdo promocional relevante o
+    suficiente para prosseguir. Avalia indicadores promocionais
+    (percentuais, preços, palavras-chave) ou comprimento mínimo.
+    """
     linhas = [
         l.strip() for l in texto.splitlines()
         if l.strip() and not re.match(r'https?://', l.strip())
@@ -499,125 +192,9 @@ def tem_contexto(texto: str) -> bool:
     return len(total) > 20
 
 
-class EstadoEvento(Enum):
-    NEW       = "new"
-    SEEN      = "seen"
-    EXPIRED   = "expired"
-    RESTOCKED = "restocked"
-
-
-_RE_RESTOCK_C3 = re.compile(
-    r'voltou|restock|reativado|dispon[ií]vel\s+novamente|voltou\s+ao\s+estoque|'
-    r'de\s+volta|ativo\s+novamente|normalizou|voltando|voltou\s+cupom|relançamento',
-    re.I,
-)
-
-
-def detectar_estado_evento(texto: str, id_global: str, plat: str) -> EstadoEvento:
-    eh_restock = bool(_RE_RESTOCK_C3.search(texto))
-    entrada    = db_get_dedupe(_fp_c3(id_global, plat))
-    if not entrada:
-        return EstadoEvento.NEW
-    ts_ant = entrada.get("ts", 0)
-    delta  = __import__('time').time() - ts_ant
-    janela = _JANELA_C3.get(plat, _JANELA_C3["default"])
-    ttl    = _TTL_RESTOCK_C3.get(plat, _TTL_RESTOCK_C3["default"])
-    if delta < janela:
-        return EstadoEvento.SEEN
-    if eh_restock:
-        return EstadoEvento.RESTOCKED
-    if delta > ttl:
-        return EstadoEvento.EXPIRED
-    return EstadoEvento.SEEN
-
-
-# ── Desencurtador ────────────────────────────────────────────────
-async def desencurtar(
-    url: str, sessao: aiohttp.ClientSession, depth: int = 0,
-) -> str:
-    import random
-    from config import USER_AGENTS
-    from pipeline.classificacao import _FORCA_GET
-    if depth > 15:
-        return url
-    url = _sanitizar_url(url)
-    if not url.startswith(("http://", "https://")):
-        return url
-    nl = _netloc(url)
-    if depth > 0 and nl == "cutt.ly":
-        return url
-    cached = _get_raw(url)
-    if cached:
-        return cached
-    hdrs = {
-        "User-Agent":      random.choice(USER_AGENTS),
-        "Accept":          "text/html,application/xhtml+xml,*/*;q=0.9",
-        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-    }
-    try:
-        usar_head = (
-            nl not in _FORCA_GET
-            and not any(nl.endswith("." + d) for d in _FORCA_GET)
-        )
-        if usar_head:
-            try:
-                async with sessao.head(
-                    url, headers=hdrs, allow_redirects=True,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                    max_redirects=20,
-                ) as r:
-                    final = str(r.url)
-                    if final != url:
-                        _set_raw(url, final)
-                        return await desencurtar(final, sessao, depth + 1)
-            except Exception:
-                pass
-        async with sessao.get(
-            url, headers=hdrs, allow_redirects=True,
-            timeout=aiohttp.ClientTimeout(total=20),
-            max_redirects=20,
-        ) as r:
-            pos = str(r.url)
-            if pos != url:
-                _set_raw(url, pos)
-                return await desencurtar(pos, sessao, depth + 1)
-            html = await r.text(errors="ignore")
-            if len(html) > 500_000:
-                _set_raw(url, pos)
-                return pos
-            soup = BeautifulSoup(html, "html.parser")
-            ref = soup.find("meta", attrs={"http-equiv": re.compile("refresh", re.I)})
-            if ref and ref.get("content"):
-                m = re.search(r"url[=\s]*([^\s;\"']+)", ref["content"], re.I)
-                if m:
-                    novo = m.group(1).strip().strip("'\"")
-                    if novo.startswith("http"):
-                        return await desencurtar(novo, sessao, depth + 1)
-            for pat in [
-                r'window\.location(?:\.href)?\s*=\s*["\']([^"\']{15,})["\']',
-                r'location\.replace\s*\(\s*["\']([^"\']{15,})["\']\s*\)',
-                r'location\.href\s*=\s*["\']([^"\']{15,})["\']',
-            ]:
-                mj = re.search(pat, html)
-                if mj and mj.group(1).startswith("http"):
-                    return await desencurtar(mj.group(1), sessao, depth + 1)
-            og = soup.find("meta", attrs={"property": "og:url"})
-            if og and og.get("content", "").startswith("http") and og["content"] != url:
-                return await desencurtar(og["content"], sessao, depth + 1)
-            canon = soup.find("link", rel="canonical")
-            if canon and canon.get("href", "").startswith("http") and canon["href"] != url:
-                return await desencurtar(canon["href"], sessao, depth + 1)
-            _set_raw(url, pos)
-            return pos
-    except asyncio.TimeoutError:
-        log_nrm.warning(f"⏱ Timeout desencurtar d={depth}: {url[:60]}")
-        return url
-    except Exception as e:
-        log_nrm.error(f"❌ desencurtar d={depth}: {e}")
-        return url
-
-
-# ── Dataclass ────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# CONTRATO DE SAÍDA
+# ─────────────────────────────────────────────────────────────────
 @dataclass
 class MensagemNormalizada:
     msg_id:        int
@@ -637,12 +214,19 @@ class MensagemNormalizada:
     is_override:   bool         = False
 
 
-# ── Núcleo da normalização ───────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# RESOLUÇÃO E AFILIAÇÃO DE UM LINK
+# ─────────────────────────────────────────────────────────────────
 async def _normalizar_um(
     lc: LinkClassificado,
     sessao: aiohttp.ClientSession,
     msg_id: int = 0,
 ) -> Tuple[str, Optional[str], str]:
+    """
+    Resolve e afilia um único link classificado. Devolve a tupla
+    (url_original, url_convertida, plataforma). A url_convertida é
+    None quando o link não pôde ser afiliado ou não é aproveitável.
+    """
     from plataformas.affiliate_router import rotear_afiliacao
 
     plat = lc.plat
@@ -698,35 +282,24 @@ async def _normalizar_um(
     return url_original, convertido, plat
 
 
-async def _registrar_pending_safe(bruta: MensagemBruta) -> None:
-    try:
-        from handlers.pending import _registrar_pending
-        await _registrar_pending(bruta)
-    except Exception as e:
-        log_nrm.warning(f"⚠️ registrar pending: {e}")
-
-
+# ─────────────────────────────────────────────────────────────────
+# ENTRYPOINT — NORMALIZAÇÃO
+# ─────────────────────────────────────────────────────────────────
 async def normalizar(
     bruta: MensagemBruta,
     is_override: bool = False,
 ) -> Optional[MensagemNormalizada]:
-    import time
+    """
+    Transforma uma MensagemBruta em uma MensagemNormalizada.
 
+    O parâmetro is_override é fornecido pelo orquestrador a partir do
+    resultado da avaliação de filtros; a normalização apenas o propaga
+    para a estrutura de saída.
+
+    Retorna None quando a mensagem não é normalizável: texto vazio,
+    ausência de contexto promocional, ou ausência de links aproveitáveis.
+    """
     if not bruta.texto.strip():
-        return None
-
-    if not is_override:
-        bloqueado, override_flag = texto_bloqueado(
-            bruta.texto, contexto_extra=bruta.texto,
-        )
-        if bloqueado:
-            await _registrar_pending_safe(bruta)
-            return None
-        is_override = override_flag
-
-    indesejado, motivo = _eh_post_indesejado(bruta.texto)
-    if indesejado:
-        log_nrm.info(f"🚫 Post bloqueado [{motivo}] | @{bruta.chat}")
         return None
 
     texto_limpo = limpar_texto(bruta.texto)
@@ -734,8 +307,12 @@ async def normalizar(
         return None
 
     classificados = classificar_links(bruta.links)
-    converter     = [lc for lc in classificados if lc.plat not in ("preservar", None)]
-    preservar_lst = [lc.url_original for lc in classificados if lc.plat == "preservar"]
+    converter     = [
+        lc for lc in classificados if lc.plat not in ("preservar", None)
+    ]
+    preservar_lst = [
+        lc.url_original for lc in classificados if lc.plat == "preservar"
+    ]
     if not converter and not preservar_lst:
         return None
 
