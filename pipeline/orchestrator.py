@@ -1,88 +1,68 @@
 """
-Orchestrator — fila de prioridade, workers e pipeline principal.
+Camada 2 — Orquestração.
 
-Ordem do pipeline (preservada):
-  1. Ingestão        (pipeline.ingestao)
-  2. Shadow reply    (handlers.shadow_reply)  ← só se is_reply
-  3. Pending check   (handlers.pending)       ← via shadow reply
-  4. Normalização    (pipeline.normalizacao)
-  5. Deduplicação    (pipeline.deduplicacao)
-  6. Saturação       (pipeline.publicacao)
-  7. Montagem        (pipeline.montagem)
-  8. Publicação      (pipeline.publicacao)
+Responsabilidade única: coordenar o fluxo entre as camadas da pipeline.
+Recebe eventos do Telegram, enfileira com prioridade, gerencia workers
+e chama cada camada na ordem correta.
+
+Camadas chamadas em sequência:
+    1. Ingestão       → pipeline.ingestao.ingerir
+    2. Idempotência   → pipeline.idempotencia.ja_processado
+    3. Coalescing     → pipeline.coalescing.deve_coalescer
+    4. Shadow reply   → handlers.shadow_reply (condicional)
+    5. Normalização   → pipeline.normalizacao.normalizar
+    6. Deduplicação   → pipeline.deduplicacao.deve_enviar_async
+    7. Saturação      → pipeline.publicacao.delay_saturacao
+    8. Montagem       → pipeline.montagem.montar
+    9. Publicação     → pipeline.publicacao.enviar (com is_edit)
+
+NÃO faz:
+  - leitura de texto do evento (ingestão é a fonte oficial)
+  - decisão de coalescing (camada própria)
+  - controle de idempotência (camada própria)
+  - decisão de edição (publicação resolve)
+  - acesso a banco
+  - lógica de plataforma
 """
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import heapq
-import re
 import time
-from typing import Optional
 
-from config import _EXECUTOR
 import globals as g
 from logger import log_sys
 from pipeline.deduplicacao import deve_enviar_async
+from pipeline.idempotencia import ja_processado, marcar_processado
 from pipeline.ingestao import ingerir
-from pipeline.montagem import montar, preparar_imagem_tg
+from pipeline.montagem import montar
 from pipeline.normalizacao import normalizar
-from pipeline.publicacao import (
-    _foi_processado, delay_saturacao, editar, editar_por_id, enviar,
-    _MAX_EDITS,
-)
-from pipeline.deduplicacao import calcular_score, identidade_canonica
-from database import db_get_estado, db_set_estado
-from utils.helpers import ler_mapa
+from pipeline.publicacao import delay_saturacao, enviar
 
-# ── Constantes do orchestrator ────────────────────────────────────
+
+# ── Parâmetros operacionais ───────────────────────────────────────
 _WORKERS_MAX = 4
 _FILA_MAX    = 200
-_COALESCE_MS = 800
+_TTL_FILA_S  = 60
 
 # Prioridades da heap (menor = mais prioritário).
-# Edits aplicam correção do divulgador — processam antes de mensagens
-# novas. Não há diferenciação por plataforma: todas as mensagens novas
-# têm a mesma prioridade e processam em ordem FIFO.
+# Edições são correção do divulgador e processam antes de novas.
 _PRIO_EDIT = 0
 _PRIO_NOVA = 1
 
 
-def _fp_r(texto: str) -> str:
-    return hashlib.sha256(
-        re.sub(r'\s+', '', texto.lower())[:80].encode()
-    ).hexdigest()[:12]
-
-
-def _extrair_texto(event) -> str:
-    """
-    Lê texto da mensagem. Telethon entrega caption de mensagens-só-mídia
-    em `message.message` — usa fallback pra não descartar essas mensagens
-    no enqueue. Mesma lógica do `ingerir()`.
-    """
-    return (
-        event.message.text
-        or getattr(event.message, "message", "")
-        or ""
-    )
-
-
+# ── Fila de entrada ───────────────────────────────────────────────
 async def _enfileirar(event, is_edit: bool) -> None:
-    texto = _extrair_texto(event)
-    if not texto.strip(): return
-    fp = _fp_r(texto); agora = time.monotonic()
     async with g._buf_lck:
-        if not is_edit and agora - g._coal.get(fp, 0.0) < _COALESCE_MS / 1000:
-            return
-        g._coal[fp] = agora
         if len(g._buf) >= _FILA_MAX:
             log_sys.warning(f"⚠️ Fila cheia | id={event.message.id}")
             return
         prio = _PRIO_EDIT if is_edit else _PRIO_NOVA
-        heapq.heappush(g._buf, (prio, agora, event, is_edit))
+        heapq.heappush(g._buf, (prio, time.monotonic(), event, is_edit))
     g._buf_evt.set()
 
 
+# ── Workers ───────────────────────────────────────────────────────
 async def _worker_loop() -> None:
     while True:
         await g._buf_evt.wait()
@@ -94,8 +74,11 @@ async def _worker_loop() -> None:
                 else:
                     g._buf_evt.clear()
                     break
-            if item is None: break
+            if item is None:
+                break
+
             prio, ts, event, is_edit = item
+
             async with g._w_lck:
                 if g._w_ativos >= _WORKERS_MAX:
                     async with g._buf_lck:
@@ -104,9 +87,12 @@ async def _worker_loop() -> None:
                     await asyncio.sleep(0.5)
                     break
                 g._w_ativos += 1
+
             try:
-                if time.monotonic() - ts > 60:
-                    log_sys.warning(f"⏱ Expirado | id={event.message.id}")
+                if time.monotonic() - ts > _TTL_FILA_S:
+                    log_sys.warning(
+                        f"⏱ Expirado | id={event.message.id}"
+                    )
                     continue
                 await _pipeline(event, is_edit)
             except Exception as e:
@@ -116,52 +102,59 @@ async def _worker_loop() -> None:
                     g._w_ativos -= 1
 
 
+# ── Pipeline principal ────────────────────────────────────────────
 async def _pipeline(event, is_edit: bool = False) -> None:
+    """
+    Fluxo da pipeline. Chama cada camada na ordem e propaga is_edit
+    até a publicação. Não toma decisão de negócio.
+    """
     msg_id = event.message.id
 
-    # Anti-loop
-    if not is_edit:
-        if await _foi_processado(msg_id): return
-    else:
-        loop = asyncio.get_running_loop()
-        mp   = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-        if str(msg_id) not in mp: return
+    # ── Idempotência (somente novas) ──────────────────────────────
+    if not is_edit and await ja_processado(msg_id):
+        return
 
     # ── Camada 1: Ingestão ────────────────────────────────────────
     try:
         bruta = ingerir(event)
     except Exception as e:
-        log_sys.error(f"❌ ingestao: {e}"); return
+        log_sys.error(f"❌ ingestao: {e}")
+        return
 
-    # ── Shadow reply / pending (só em mensagens novas) ────────────
+    # ── Shadow reply (somente mensagens novas que são reply) ──────
     if bruta.is_reply and bruta.reply_to > 0 and not is_edit:
         from handlers.shadow_reply import processar_shadow_reply
         handled = await processar_shadow_reply(bruta)
         if handled:
-            return   # shadow reply tratado — encerra aqui
+            return
 
     log_sys.info(
         f"{'✏️' if is_edit else '📩'} @{bruta.chat} | "
-        f"id={msg_id} | q={len(g._buf)} w={_get_w_ativos()}"
+        f"id={msg_id} | q={len(g._buf)} w={g._w_ativos}"
     )
 
     # ── Camada 2: Normalização ────────────────────────────────────
     try:
         norm = await normalizar(bruta)
     except Exception as e:
-        log_sys.error(f"❌ normalizar: {e}"); return
-    if norm is None: return
+        log_sys.error(f"❌ normalizar: {e}")
+        return
+    if norm is None:
+        return
 
-    # ── Camada 3: Deduplicação ────────────────────────────────────
+    # ── Camada 3: Deduplicação + saturação (somente novas) ───────
     if not is_edit:
         try:
-            if not await deve_enviar_async(norm): return
+            if not await deve_enviar_async(norm):
+                return
         except Exception as e:
-            log_sys.error(f"❌ deve_enviar: {e}"); return
+            log_sys.error(f"❌ deve_enviar: {e}")
+            return
 
         try:
             delay = await delay_saturacao(norm.plat, norm.texto_limpo)
-            if delay > 0: await asyncio.sleep(delay)
+            if delay > 0:
+                await asyncio.sleep(delay)
         except Exception as e:
             log_sys.error(f"❌ saturacao: {e}")
 
@@ -169,120 +162,26 @@ async def _pipeline(event, is_edit: bool = False) -> None:
     try:
         montada = await montar(norm)
     except Exception as e:
-        log_sys.error(f"❌ montar: {e}"); return
+        log_sys.error(f"❌ montar: {e}")
+        return
 
     # ── Camada 5: Publicação ──────────────────────────────────────
-    if is_edit:
-        # ┄ EDIÇÃO DA MENSAGEM ORIGINAL no grupo monitorado ┄
-        # Esse é o caso onde o divulgador postou bagunçado, depois
-        # editou e (geralmente) colocou o código entre crases.
-        # → Re-extrai e atualiza o post no @ofertap.
-        loop = asyncio.get_running_loop()
-        mp   = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-        id_d = mp.get(str(msg_id))
-        if not id_d:
-            return  # mensagem não foi publicada — ignora edição
-        id_d = int(id_d)
-
-        identity = identidade_canonica(norm)
-        estado   = db_get_estado(identity)
-
-        # Tenta também buscar pelo msg_id de destino (caso identity tenha mudado)
-        if not estado:
-            try:
-                from database import _db
-                with _db() as db:
-                    row = db.execute(
-                        "SELECT identity, score, texto, plat, lider, "
-                        "janela_fim, edit_count, shadow_reply_id "
-                        "FROM oferta_estado WHERE msg_id_dest=?",
-                        (id_d,),
-                    ).fetchone()
-                if row:
-                    estado = dict(zip(
-                        ["identity","score","texto","plat","lider",
-                         "janela_fim","edit_count","shadow_reply_id"],
-                        row,
-                    ))
-            except Exception as e:
-                log_sys.warning(f"⚠️ buscar estado por msg_id: {e}")
-
-        edit_count_atual = (estado or {}).get("edit_count", 0) or 0
-        lider_atual      = (estado or {}).get("lider", "") or ""
-        score_atual      = (estado or {}).get("score", 0) or 0
-        janela_fim       = (estado or {}).get("janela_fim", 0) or 0
-
-        # Edição do mesmo grupo que publicou: SEMPRE permite
-        # (correção do divulgador, não conta como edição estética)
-        eh_correcao_original = (not lider_atual) or (norm.chat == lider_atual)
-
-        # Se for correção do original: edita SEM contar no _MAX_EDITS
-        # Se for de outro grupo (estético): respeita _MAX_EDITS
-        if not eh_correcao_original and edit_count_atual >= _MAX_EDITS:
-            log_sys.info(
-                f"🔒 [EDIT_BLOQ_MAX] msg={id_d} edits={edit_count_atual}"
-            )
-            return
-
-        # Tenta capturar imagem nova se houver
-        img_nova = None
-        if norm.tem_midia:
-            try:
-                img_nova = await preparar_imagem_tg(norm.media_obj)
-            except Exception as e:
-                log_sys.warning(f"⚠️ preparar_imagem (edit): {e}")
-
-        # Edita post no @ofertap
-        try:
-            ok = await editar_por_id(id_d, montada.texto, img_nova)
-        except Exception as e:
-            log_sys.error(f"❌ editar_por_id (edit): {e}")
-            return
-
-        if not ok:
-            log_sys.warning(f"⚠️ editar_por_id retornou False | msg={id_d}")
-            return
-
-        # Atualiza estado no DB com NOVO texto/cupom/identity
-        # IMPORTANTE: usa identity NOVA (cupom pode ter mudado!)
-        novo_score = max(score_atual, 0)
-        novo_edit_count = (
-            edit_count_atual if eh_correcao_original
-            else edit_count_atual + 1
-        )
-        try:
-            db_set_estado(
-                identity, id_d, novo_score, montada.texto,
-                montada.plat, lider_atual or norm.chat,
-                janela_fim, novo_edit_count,
-                (estado or {}).get("shadow_reply_id", 0),
-            )
-            log_sys.info(
-                f"✏️ [EDIT_OK] msg={id_d} identity={identity} "
-                f"correcao_original={eh_correcao_original}"
-            )
-        except Exception as e:
-            log_sys.warning(f"⚠️ db_set_estado (edit): {e}")
-        return
-    else:
-        await enviar(montada, norm=norm)
+    if not is_edit:
+        await marcar_processado(msg_id)
+    await enviar(montada, norm=norm, is_edit=is_edit)
 
 
-def _get_w_ativos() -> int:
-    return g._w_ativos
-
-
+# ── Entrypoint público ────────────────────────────────────────────
 async def processar(event, is_edit: bool = False) -> None:
+    """Chamado pelos handlers do Telethon em `main.py`."""
     await _enfileirar(event, is_edit)
 
 
 async def _iniciar_orchestrator() -> None:
-    from config import _JANELA_DISPUTA_S  # noqa — apenas para log
+    from config import _JANELA_DISPUTA_S, _MAX_EDITS  # noqa: log only
     log_sys.info(
         f"🎛 Orchestrator | workers={_WORKERS_MAX} fila={_FILA_MAX} "
-        f"coalesce={_COALESCE_MS}ms "
         f"janela_disputa={_JANELA_DISPUTA_S}s "
         f"max_edits={_MAX_EDITS}"
     )
     asyncio.create_task(_worker_loop())
-
