@@ -17,7 +17,10 @@ inicialização.
 
 Baseline arquitetural: Documento 2 — Especificação do Registry.
 """
+
 from __future__ import annotations
+
+import os
 
 from typing import Dict, Optional
 
@@ -88,8 +91,13 @@ def cadastrar(plataforma: Plataforma) -> None:
         f"contrato=v{plataforma.versao_contrato}"
     )
 
+# ── Modo de execução ──────────────────────────────────────────────
+# Em desenvolvimento, uma falha em reconhece() é defeito de contrato
+# e deve interromper a resolução, ficando explícita. Em produção, a
+# falha é registrada e isolada para preservar a continuidade.
+_MODO_PRODUCAO = os.environ.get("REGISTRY_ENV", "dev").lower() == "prod"
 
-# ── Função 2: resolução ───────────────────────────────────────────
+
 def resolver(url: str) -> Optional[Plataforma]:
     """
     Determina qual plataforma reconhece uma URL.
@@ -103,10 +111,16 @@ def resolver(url: str) -> Optional[Plataforma]:
     reconhecimento, que o contrato define como puras. Não acessa
     rede, banco ou cache.
 
+    Comportamento em caso de exceção em reconhece(): como a
+    capacidade foi especificada como não-falhável, uma exceção é
+    sempre defeito estrutural da plataforma.
+      - desenvolvimento: a exceção é propagada e interrompe a
+        resolução, tornando o defeito explícito;
+      - produção: a exceção é registrada e isolada, e a resolução
+        prossegue com as demais plataformas.
+
     Retorna a plataforma correspondente, ou None quando nenhuma
-    plataforma reconhece a URL. None é o resultado de não
-    reconhecimento; a política de fallback de três estágios é
-    decidida pelo core.
+    plataforma reconhece a URL.
     """
     if not url:
         return None
@@ -115,15 +129,12 @@ def resolver(url: str) -> Optional[Plataforma]:
             if plataforma.reconhece(url):
                 return plataforma
         except Exception as e:
-            # Uma capacidade de reconhecimento conforme ao contrato
-            # não falha. Uma falha aqui indica plataforma fora de
-            # conformidade; é registrada e a resolução prossegue,
-            # para não derrubar o processamento por defeito de uma
-            # única plataforma.
             log_sys.error(
-                f"❌ reconhece() falhou | plataforma="
-                f"{plataforma.identificador}: {e}"
+                f"❌ reconhece() falhou — defeito de contrato | "
+                f"plataforma={plataforma.identificador}: {e}"
             )
+            if not _MODO_PRODUCAO:
+                raise
     return None
 
 
