@@ -1,18 +1,18 @@
 """
-Contrato de Plataforma — definição formal.
+Contrato de Plataforma.
 
-Este módulo define a estrutura que toda plataforma deve cumprir para
-ser integrada à pipeline. É a camada neutra entre o core e as
-plataformas: o core depende deste contrato, cada plataforma depende
-deste contrato, e nenhum dos dois depende do outro diretamente.
+Camada neutra entre o core e as plataformas. O core depende deste
+contrato; cada plataforma depende deste contrato; nenhum depende do
+outro diretamente.
 
-Este módulo não contém nenhuma plataforma concreta e não contém
-lógica de pipeline. Define apenas a forma do contrato, o conjunto
-fechado de tipos de link, o sentinela de ausência explícita e a
-versão suportada.
+Define a estrutura que uma plataforma deve cumprir, o conjunto
+fechado de tipos de link, o sentinela de ausência e a versão.
+Não contém plataforma concreta nem lógica de pipeline. Permanece
+declarativo: lógica, helpers e validações comportamentais não
+pertencem a este módulo.
 
-Baseline arquitetural: documentos de especificação do contrato,
-do registry e dos testes de arquitetura.
+Detalhamento das capacidades, garantias e invariantes: ver os
+documentos de especificação do contrato e do registry.
 """
 from __future__ import annotations
 
@@ -22,32 +22,28 @@ from typing import Awaitable, Callable, Optional
 
 
 # ── Versão do contrato ────────────────────────────────────────────
-# Inteiro simples. Incrementado apenas em mudança não aditiva do
-# contrato. Capacidades novas entram como opcionais e NÃO exigem
-# incremento de versão.
+# Inteiro simples. Incrementado apenas em mudança não aditiva.
+# Capacidades opcionais novas são aditivas e não exigem incremento.
 CONTRACT_VERSION = 1
 
 
 # ── Tipo de link: conjunto fechado ────────────────────────────────
-# Conjunto fechado por decisão de design: o tipo de link influencia
-# deduplicação, filtros e score. Uma plataforma deve classificar
-# todos os seus links exclusivamente dentro deste conjunto. A
-# introdução de uma categoria nova é alteração de contrato e exige
+# Conjunto fechado: o tipo de link influencia deduplicação, filtros
+# e score. Uma categoria nova é alteração de contrato e exige
 # decisão arquitetural formal.
 class TipoLink(Enum):
     PRODUTO   = "produto"     # item individual identificável
-    BUSCA     = "busca"       # listagem ou pesquisa, sem produto único
-    CAMPANHA  = "campanha"    # campanha promocional ou página institucional
+    BUSCA     = "busca"       # listagem ou pesquisa
+    CAMPANHA  = "campanha"    # campanha ou página institucional
     EVENTO    = "evento"      # evento interativo (missão, roleta)
-    ENCURTADO = "encurtado"   # URL não expandida, natureza ainda desconhecida
+    ENCURTADO = "encurtado"   # URL não expandida, natureza desconhecida
     INVALIDO  = "invalido"    # pertence ao domínio mas não é aproveitável
 
 
 # ── Sentinela de ausência explícita ───────────────────────────────
-# Representa um resultado legítimo e bem-sucedido cujo valor é a
-# inexistência de um dado. É categoricamente distinto de falha.
-# Toda capacidade que pode não ter um dado a devolver usa este
-# mesmo sentinela, e o core o reconhece de forma uniforme.
+# Resultado legítimo cujo valor é a inexistência de um dado.
+# Distinto de falha. Usado por toda capacidade que pode não ter um
+# dado a devolver, e reconhecido de forma uniforme pelo core.
 class _Ausente:
     """Tipo do sentinela de ausência explícita. Uso interno."""
     _instancia: Optional["_Ausente"] = None
@@ -68,38 +64,30 @@ class _Ausente:
 AUSENTE = _Ausente()
 
 
-# ── Resultado da extração de identidade do produto ────────────────
+# ── Resultado da extração de identidade ───────────────────────────
 @dataclass(frozen=True)
 class IdentidadeProduto:
     """
     Resultado da capacidade de extração de identidade.
 
-    Campos obrigatórios:
-      - tipo_link        : sempre presente, valor do conjunto TipoLink
-      - id_produto       : sempre presente como campo; o valor é uma
-                           string não vazia, ou AUSENTE quando a URL
-                           não corresponde a um produto individual
-
-    Campo opcional:
-      - id_global        : chave única de sistema (plataforma + produto);
-                           presente apenas quando id_produto está presente
+      - tipo_link  : obrigatório; valor do conjunto TipoLink.
+      - id_produto : obrigatório como campo; valor é string não
+                     vazia, ou AUSENTE quando não há produto único.
+      - id_global  : opcional; chave de sistema (plataforma+produto),
+                     presente apenas quando id_produto está presente.
     """
     tipo_link:  TipoLink
-    id_produto: object                       # str | _Ausente (AUSENTE)
+    id_produto: object                       # str | _Ausente
     id_global:  Optional[str] = None
 
 
-# ── Capacidades opcionais: parâmetros temporais ───────────────────
+# ── Parâmetros temporais de deduplicação ──────────────────────────
 @dataclass(frozen=True)
 class ParametrosTemporais:
     """
-    Parâmetros temporais de deduplicação declarados por uma plataforma.
-
-    São DADOS fornecidos ao core, não política. O core mantém a
-    soberania sobre a decisão final de deduplicação e pode aplicar
-    limites ou regras universais sobre estes valores.
-
-    Valores em segundos.
+    Parâmetros temporais de deduplicação declarados por uma
+    plataforma. São dados fornecidos ao core, não política: o core
+    decide a deduplicação. Valores em segundos.
     """
     janela_s:       float
     ttl_restock_s:  float
@@ -109,32 +97,28 @@ class ParametrosTemporais:
 @dataclass(frozen=True)
 class Plataforma:
     """
-    Definição formal de uma plataforma que cumpre o contrato.
+    Definição formal de uma plataforma. Cada módulo de plataforma
+    constrói e expõe uma instância desta estrutura.
 
-    Cada módulo de plataforma constrói e expõe uma instância desta
-    estrutura. As capacidades são funções referenciadas pelos campos
-    abaixo.
+    Identidade:
+      - identificador   : string estável, minúscula, única.
+      - versao_contrato : inteiro; verificado no cadastro.
 
-    ── Identidade ────────────────────────────────────────────────
-      - identificador     : string estável, minúscula, única
-      - versao_contrato   : inteiro; verificado no cadastro
+    Capacidades obrigatórias:
+      - reconhece         : (url) -> bool. Pura, sem I/O.
+      - extrai_identidade : (url) -> IdentidadeProduto. Pura, sem I/O.
+      - afilia            : async (url, sessao) -> str | AUSENTE.
+                            Efeito colateral controlado; não propaga
+                            exceção (falha resulta em AUSENTE).
 
-    ── Capacidades obrigatórias ──────────────────────────────────
-      - reconhece         : (url: str) -> bool
-                            Pura, determinística, sem I/O.
-      - extrai_identidade : (url: str) -> IdentidadeProduto
-                            Pura, determinística, sem I/O.
-      - afilia            : async (url, sessao) -> str | AUSENTE
-                            Efeito colateral controlado (rede, cache).
-                            Não propaga exceção: falha vira AUSENTE.
-
-    ── Capacidades opcionais (None quando ausentes) ──────────────
-      - parametros_temporais : ParametrosTemporais | None
-                               Dado, não política.
-      - pos_processa         : async (contexto_leitura) -> None | None
-                               Isolada, assíncrona, não altera fluxo.
-      - limpa_url            : (url: str) -> str | None
-                               Pura, determinística, sem I/O.
+    Capacidades opcionais:
+      - parametros_temporais : ParametrosTemporais | None. Dado.
+      - limpa_url            : (url) -> str | None. Pura, sem I/O.
+      - requer_encurtamento  : bool, padrão False. Declaração de
+                               intenção: indica que os links desta
+                               plataforma devem ser submetidos ao
+                               encurtador do core. Não contém lógica
+                               de encurtamento.
     """
     # Identidade
     identificador:   str
@@ -147,5 +131,5 @@ class Plataforma:
 
     # Capacidades opcionais
     parametros_temporais: Optional[ParametrosTemporais] = None
-    pos_processa:         Optional[Callable[..., Awaitable[None]]] = None
     limpa_url:            Optional[Callable[[str], str]] = None
+    requer_encurtamento:  bool = False
