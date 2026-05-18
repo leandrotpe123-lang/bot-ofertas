@@ -334,6 +334,5 @@ PLATAFORMA = Plataforma(
     extrai_identidade=extrai_identidade,
     afilia=afilia,
     parametros_temporais=_PARAMETROS_TEMPORAIS,
-    pos_processa=None,
     limpa_url=limpa_url,
 )
