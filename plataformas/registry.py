@@ -4,44 +4,36 @@ Registry de Plataformas.
 Único ponto de contato entre o core da pipeline e as plataformas.
 A pipeline nunca importa uma plataforma concreta: consulta o registry.
 
-O registry possui exatamente três funções:
-  - cadastrar : registra uma plataforma, com verificação estrutural
-  - resolver  : determina qual plataforma reconhece uma URL
-  - acessar   : devolve o objeto de uma plataforma por identificador
-
-O registry NÃO executa lógica de pipeline. NÃO classifica conteúdo,
-NÃO normaliza, NÃO calcula score, NÃO deduplica, NÃO publica. NÃO
-acessa rede, banco ou cache. NÃO mantém estado de processamento.
-Mantém apenas o catálogo de plataformas, estabelecido na
-inicialização.
+Três funções: cadastrar, resolver, acessar. O registry não executa
+lógica de pipeline, não acessa rede ou banco, e não mantém estado
+de processamento — apenas o catálogo de plataformas.
 
 Baseline arquitetural: Documento 2 — Especificação do Registry.
 """
-
 from __future__ import annotations
 
 import os
-
 from typing import Dict, Optional
 
 from logger import log_sys
 from plataformas.contrato import CONTRACT_VERSION, Plataforma
 
 
+# ── Modo de execução ──────────────────────────────────────────────
+# Em desenvolvimento, uma falha em reconhece() é defeito de contrato
+# e interrompe a resolução. Em produção, é registrada e isolada.
+_MODO_PRODUCAO = os.environ.get("REGISTRY_ENV", "dev").lower() == "prod"
+
+
 # ── Exceção de cadastro ───────────────────────────────────────────
 class ErroCadastroPlataforma(Exception):
     """
-    Emitida quando um cadastro de plataforma é rejeitado.
-
-    A rejeição de cadastro é um erro de inicialização, não uma
-    condição silenciosa: deve interromper a inicialização do
-    sistema e ser visível.
+    Emitida quando um cadastro de plataforma é rejeitado. A rejeição
+    é erro de inicialização, não condição silenciosa.
     """
 
 
 # ── Catálogo interno ──────────────────────────────────────────────
-# Dicionário indexado pelo identificador da plataforma. Estabelecido
-# na inicialização e estável durante a vida do processo.
 _catalogo: Dict[str, Plataforma] = {}
 
 
@@ -50,15 +42,18 @@ def cadastrar(plataforma: Plataforma) -> None:
     """
     Registra uma plataforma no catálogo.
 
-    Executa três verificações estruturais, todas de inicialização:
+    Verificações estruturais de inicialização:
+      1. versão do contrato compatível com a suportada pelo core;
+      2. capacidades obrigatórias presentes;
+      3. identidade — distingue dois casos:
+           - identificador já ocupado pelo MESMO objeto:
+             operação sem efeito (recadastro idêntico, tolerado
+             para permitir reexecução do startup no mesmo processo);
+           - identificador já ocupado por objeto DIFERENTE:
+             ErroCadastroPlataforma (colisão real de identidade).
 
-      1. versão do contrato compatível com a suportada pelo core
-      2. identificador único entre as plataformas já registradas
-      3. presença das três capacidades obrigatórias
-
-    Qualquer falha emite ErroCadastroPlataforma e a plataforma NÃO
-    é registrada. Não verifica a correção da lógica interna da
-    plataforma, apenas sua conformidade estrutural com o contrato.
+    Qualquer falha das verificações 1 ou 2, ou colisão na 3, emite
+    ErroCadastroPlataforma e a plataforma NÃO é registrada.
     """
     # Verificação 1: versão do contrato
     if plataforma.versao_contrato != CONTRACT_VERSION:
@@ -68,22 +63,27 @@ def cadastrar(plataforma: Plataforma) -> None:
             f"com a suportada ({CONTRACT_VERSION})."
         )
 
-    # Verificação 2: unicidade de identidade
-    if plataforma.identificador in _catalogo:
-        raise ErroCadastroPlataforma(
-            f"Plataforma '{plataforma.identificador}': identificador "
-            f"já registrado."
-        )
-
-    # Verificação 3: conformidade mínima com o contrato
+    # Verificação 2: conformidade mínima com o contrato
     obrigatorias = ("reconhece", "extrai_identidade", "afilia")
     for nome in obrigatorias:
-        capacidade = getattr(plataforma, nome, None)
-        if not callable(capacidade):
+        if not callable(getattr(plataforma, nome, None)):
             raise ErroCadastroPlataforma(
                 f"Plataforma '{plataforma.identificador}': capacidade "
                 f"obrigatória '{nome}' ausente ou inválida."
             )
+
+    # Verificação 3: identidade
+    existente = _catalogo.get(plataforma.identificador)
+    if existente is not None:
+        if existente is plataforma:
+            # Recadastro idêntico: operação sem efeito. Permite a
+            # reexecução de _run() no mesmo processo (restart parcial).
+            return
+        # Colisão real: identificador ocupado por objeto diferente.
+        raise ErroCadastroPlataforma(
+            f"Plataforma '{plataforma.identificador}': identificador "
+            f"já ocupado por outra definição de plataforma."
+        )
 
     _catalogo[plataforma.identificador] = plataforma
     log_sys.info(
@@ -91,36 +91,21 @@ def cadastrar(plataforma: Plataforma) -> None:
         f"contrato=v{plataforma.versao_contrato}"
     )
 
-# ── Modo de execução ──────────────────────────────────────────────
-# Em desenvolvimento, uma falha em reconhece() é defeito de contrato
-# e deve interromper a resolução, ficando explícita. Em produção, a
-# falha é registrada e isolada para preservar a continuidade.
-_MODO_PRODUCAO = os.environ.get("REGISTRY_ENV", "dev").lower() == "prod"
 
-
+# ── Função 2: resolução ───────────────────────────────────────────
 def resolver(url: str) -> Optional[Plataforma]:
     """
     Determina qual plataforma reconhece uma URL.
 
-    Consulta a capacidade de reconhecimento de cada plataforma
-    registrada. O contrato garante reconhecimento mutuamente
-    exclusivo (4ª invariante), portanto há no máximo uma
-    correspondência e a ordem de consulta é irrelevante.
+    Consulta a capacidade de reconhecimento de cada plataforma. O
+    contrato garante reconhecimento mutuamente exclusivo, portanto
+    há no máximo uma correspondência e a ordem é irrelevante.
 
-    Pura e determinística: apoia-se apenas nas capacidades de
-    reconhecimento, que o contrato define como puras. Não acessa
-    rede, banco ou cache.
+    Pura e determinística. Retorna a plataforma correspondente, ou
+    None quando nenhuma reconhece a URL.
 
-    Comportamento em caso de exceção em reconhece(): como a
-    capacidade foi especificada como não-falhável, uma exceção é
-    sempre defeito estrutural da plataforma.
-      - desenvolvimento: a exceção é propagada e interrompe a
-        resolução, tornando o defeito explícito;
-      - produção: a exceção é registrada e isolada, e a resolução
-        prossegue com as demais plataformas.
-
-    Retorna a plataforma correspondente, ou None quando nenhuma
-    plataforma reconhece a URL.
+    Exceção em reconhece() é defeito de contrato: em desenvolvimento
+    é propagada; em produção é registrada e isolada.
     """
     if not url:
         return None
@@ -141,21 +126,14 @@ def resolver(url: str) -> Optional[Plataforma]:
 # ── Função 3: acesso ──────────────────────────────────────────────
 def acessar(identificador: str) -> Optional[Plataforma]:
     """
-    Devolve o objeto de uma plataforma a partir de seu identificador.
-
+    Devolve o objeto de uma plataforma a partir do identificador.
     Pura e determinística. Retorna None quando o identificador não
-    corresponde a nenhuma plataforma registrada, de forma coerente
-    com a função de resolução.
+    corresponde a nenhuma plataforma registrada.
     """
     return _catalogo.get(identificador)
 
 
-# ── Apoio à inicialização e à observabilidade ─────────────────────
+# ── Apoio à observabilidade ───────────────────────────────────────
 def plataformas_registradas() -> tuple:
-    """
-    Devolve os identificadores de todas as plataformas registradas.
-
-    Função de leitura, destinada a logs de inicialização e à
-    verificação operacional. Não participa do fluxo da pipeline.
-    """
+    """Identificadores das plataformas registradas. Apenas leitura."""
     return tuple(_catalogo.keys())
