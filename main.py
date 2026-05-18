@@ -29,18 +29,26 @@ from telethon import events
 from telethon.errors import AuthKeyUnregisteredError, SessionPasswordNeededError
 
 import config
+import globals as g
+
 from client import client
+
 from config import (
     API_ID, API_HASH, SESSION_STRING,
     GRUPOS_ORIGEM, GRUPO_DESTINO,
     _AMZ_TAG, _SHP_APP_ID, _MGL_PROMOTER, _MGL_SLUG,
     _PIL_OK, _EXECUTOR,
 )
+
 from database import _init_db, _db, db_limpar
-import globals as g
 from globals import _init_globals
 from logger import log_sys, log_hc
+
 from pipeline.orchestrator import processar, _iniciar_orchestrator
+
+from plataformas.registry import cadastrar
+from plataformas import amazon, shopee, magalu
+
 from web.redirect import _iniciar_servidor_web
 
 
@@ -77,7 +85,14 @@ async def _run() -> bool:
     # 2. Inicializa banco de dados
     _init_db()
 
-    # 3. Conecta ao Telegram
+    # 3. Composition root: o registry é povoado explicitamente aqui,
+    #    no entrypoint da aplicação. O cadastro é idempotente quanto
+    #    à reexecução de _run() no mesmo processo.
+    cadastrar(amazon.PLATAFORMA)
+    cadastrar(shopee.PLATAFORMA)
+    cadastrar(magalu.PLATAFORMA)
+
+    # 4. Conecta ao Telegram
     log_sys.info("🔌 Conectando...")
     await client.connect()
     if not await client.is_user_authorized():
@@ -87,15 +102,9 @@ async def _run() -> bool:
     me = await client.get_me()
     log_sys.info(f"✅ {me.first_name} (@{me.username}) | ID={me.id}")
     log_sys.info(f"📡 {GRUPOS_ORIGEM} → {GRUPO_DESTINO}")
-    log_sys.info(
-        f"🟠 Amazon: {_AMZ_TAG} | "
-        f"🟣 Shopee: {_SHP_APP_ID} | "
-        f"🔵 Magalu: {_MGL_PROMOTER}/{_MGL_SLUG}"
-    )
-    log_sys.info(f"🖼 Pillow: {'OK' if _PIL_OK else 'OFF'}")
-    log_sys.info("🚀 FOGUETÃO v80.2 — ONLINE")
+    log_sys.info("🚀 FOGUETÃO — ONLINE")
 
-    # 4. Registra handlers de eventos
+    # 5. Registra handlers de eventos
     @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
     async def on_new(event):
         try:
@@ -110,21 +119,12 @@ async def _run() -> bool:
         except Exception as e:
             log_sys.error(f"❌ on_edit: {e}", exc_info=True)
 
-    # 4.5. Warmup do cache Magalu
-    # Carrega últimos 500 links já vistos do SQLite pra RAM
-    # Evita refazer desencurtar+afiliar após restart do Railway
-    try:
-        from plataformas.magalu import warmup_cache_magalu
-        await warmup_cache_magalu(limite=500)
-    except Exception as e:
-        log_sys.warning(f"⚠️ warmup_cache_magalu: {e}")
-
-    # 5. Inicia tarefas de background
+    # 6. Inicia tarefas de background
     asyncio.create_task(_health_check())
     asyncio.create_task(_iniciar_orchestrator())
     asyncio.create_task(_iniciar_servidor_web())
 
-    # 6. Aguarda desconexão
+    # 7. Aguarda desconexão
     await client.run_until_disconnected()
     return True
 
