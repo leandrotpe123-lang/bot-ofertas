@@ -139,6 +139,39 @@ def _eh_magalu_url(url: str) -> bool:
     return _bate_dominio(_netloc(url), _MGL_DOMINIOS_SET)
 
 
+def classificar_universal(url: str) -> str:
+    """
+    Classifica uma URL nas categorias UNIVERSAIS do core.
+
+    Categorias universais são regra do core: comportamento transversal,
+    independente de qualquer plataforma concreta. Esta função decide
+    apenas essas categorias; a resolução de plataforma NÃO ocorre aqui,
+    sendo responsabilidade exclusiva do registry.
+
+    Devolve uma das três categorias universais:
+      - "mundial"   : domínio mundial preservado como link direto;
+      - "bloqueado" : domínio que não deve ser processado nem publicado;
+      - "preservar" : domínio preservado sem afiliação.
+
+    Devolve cadeia vazia quando a URL não pertence a nenhuma categoria
+    universal — caso em que a decisão cabe ao registry.
+
+    Extração da porção de categorias universais já presente em
+    classificar_url. Não substitui classificar_url, que permanece como
+    o classificador completo da camada 2.
+    """
+    nl = _netloc(url)
+    if not nl:
+        return ""
+    if _bate_dominio(nl, _MUNDIAIS):
+        return "mundial"
+    if _bate_dominio(nl, _BLOQUEADOS):
+        return "bloqueado"
+    if _bate_dominio(nl, _PRESERVE):
+        return "preservar"
+    return ""
+
+
 def classificar_url(url: str) -> LinkClassificado:
     if not url or len(url) > 4000 or "://" not in url:
         return LinkClassificado(url, None, "invalido", "")
