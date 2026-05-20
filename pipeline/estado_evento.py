@@ -164,6 +164,19 @@ def obter_parametros_temporais(plat: str) -> ParametrosTemporais:
 # temporárias de compatibilidade da normalização, momento em que
 # os consumidores legados migrarão diretamente para
 # obter_parametros_temporais.
+#
+# SEMÂNTICA DE FALLBACK EM get:
+# Chamadas com default explícito devolvem o default do chamador
+# quando a plataforma não é resolvida pelo registry, preservando
+# a semântica dos consumidores legados que sempre fornecem default.
+#
+# Chamadas sem default devolvem None nessa situação — comportamento
+# alinhado a dict.get() e deliberadamente distinto do antigo
+# dicionário literal, que nunca devolvia None para suas chaves
+# declaradas.
+#
+# Os consumidores ativos sempre passam default explícito.
+# Novos consumidores devem ter essa diferença em mente.
 # ─────────────────────────────────────────────────────────────────
 class _JanelaC3Compat:
     __slots__ = ()
