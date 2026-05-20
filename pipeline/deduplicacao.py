@@ -1,10 +1,30 @@
-"""Camada 4 — Deduplicação inteligente, score evolutivo e identidade canônica."""
+"""
+Camada 4 — Deduplicação inteligente, score evolutivo e identidade
+canônica.
+
+Responsabilidade única: decidir duplicidade. A deduplicação é a
+autoridade de DECISÃO sobre duplicidade; não é autoridade de
+derivação de identidade.
+
+CONSUMO DE IDENTIDADE DERIVADA:
+  A identidade — de produto e de campanha — é derivada pela
+  normalização, autoridade única dessa derivação, sobre as URLs
+  afiliadas LONGAS e antes do encurtamento terminal. Esta camada
+  CONSOME os campos já derivados (ids_globais, sku, chave_campanha,
+  tem_host_campanha) e NÃO os reextrai do mapa.
+
+  O campo mapa, quando a deduplicação executa, já contém URLs na
+  forma de publicação — possivelmente encurtadas. Reinterpretá-lo
+  para derivar identidade violaria a invariante de que a URL curta
+  jamais participa de derivação de identidade. A única leitura
+  legítima do mapa nesta camada é o nível 6 da identidade canônica,
+  fallback operacional NÃO semântico e explicitamente reconhecido.
+"""
 from __future__ import annotations
 import asyncio
 import re
 import time
 from typing import Optional, Tuple
-from urllib.parse import urlparse
 
 import config
 from database import (
@@ -22,7 +42,7 @@ from utils.hashes import _fp4, _fp_benef
 from utils.textos import (
     _alma, _cupons_set, _benef_set, _janela, _normalizar_valor, _sim, _SIM_FORTE,
 )
-from utils.urls import _cache_key, _netloc
+from utils.urls import _cache_key
 
 
 # ── Constantes ───────────────────────────────────────────────────
@@ -55,11 +75,6 @@ _RE_EVENTO_CAMPANHA = re.compile(
     r'flapremios|prime\s*day|black\s*friday|esquenta)\b',
     re.I,
 )
-_HOSTS_CAMPANHA = frozenset({
-    "flapremios.com.br",
-    "premios.shopee.com.br",
-    "primevideo.com",
-})
 
 # Padrão "lista de cupons" — formato típico:
 #   "🔥 R$ 100 OFF em R$ 900: INFLU100"
@@ -151,16 +166,26 @@ def _eh_post_cashback(texto: str) -> bool:
     return bool(_RE_TITULO_CASHBACK.search(titulo))
 
 
-def _eh_post_evento(texto: str, mapa: dict) -> bool:
-    """Detecta evento/campanha/roleta (sem ASIN, sem cupom claro)."""
+def _eh_post_evento(texto: str, tem_host_campanha: bool) -> bool:
+    """
+    Detecta evento/campanha/roleta (sem ASIN, sem cupom claro).
+
+    CONSUMO DE IDENTIDADE DERIVADA:
+      Esta função NÃO reinterpreta o mapa de URLs. A identidade de
+      campanha é derivada pela normalização — autoridade única dessa
+      derivação — sobre as URLs afiliadas LONGAS, antes do
+      encurtamento terminal. A deduplicação apenas consome o campo
+      derivado tem_host_campanha.
+
+    A detecção combina dois sinais independentes:
+      - vocabulário de evento no texto: classificação de conteúdo,
+        legítima nesta camada por operar sobre o texto e não sobre
+        a identidade de URL;
+      - presença de host de campanha: consumida do campo derivado.
+    """
     if _RE_EVENTO_CAMPANHA.search(texto[:200]):
         return True
-    for url in mapa.values():
-        host = _netloc(url)
-        for h in _HOSTS_CAMPANHA:
-            if host == h or host.endswith("." + h):
-                return True
-    return False
+    return tem_host_campanha
 
 
 def _eh_reativacao(texto: str) -> bool:
@@ -173,35 +198,6 @@ def _extrair_pct_cashback(texto: str) -> str:
     primeiras = " ".join(texto.split("\n")[:5])
     m = _RE_PCT.search(primeiras)
     return m.group(1) if m else ""
-
-
-def _host_canonico_campanha(mapa: dict) -> str:
-    """
-    Para campanhas, extrai uma chave canônica = host + path (sem
-    query string). Garante que campanhas diferentes no mesmo
-    domínio não colidam.
-
-    Ex:
-      shopee.com.br/m/roleta-shopee         → "shopee.com.br/m/roleta-shopee"
-      shopee.com.br/m/promocao-relampago    → "shopee.com.br/m/promocao-relampago"
-      shopee.com.br/m/missao-pix            → "shopee.com.br/m/missao-pix"
-    """
-    for url in mapa.values():
-        try:
-            p = urlparse(url)
-            host = (p.netloc or "").lower()
-            if not host:
-                continue
-            # Remove "www." e porta
-            if host.startswith("www."):
-                host = host[4:]
-            host = host.split(":")[0]
-            # Path sem trailing slash duplicado
-            path = (p.path or "").rstrip("/")
-            return f"{host}{path}" if path else host
-        except Exception:
-            continue
-    return ""
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -339,8 +335,8 @@ def _detectar_tipo_oferta(norm: MensagemNormalizada) -> str:
     if _eh_post_cashback(texto):
         return "evento"
 
-    # P6: campanha/evento
-    if _eh_post_evento(texto, norm.mapa):
+    # P6: campanha/evento — consome o campo derivado tem_host_campanha
+    if _eh_post_evento(texto, norm.tem_host_campanha):
         return "evento"
 
     # Fallback
@@ -364,7 +360,7 @@ def identidade_canonica(norm: MensagemNormalizada) -> str:
       1. Post-cupom      → plat|cup|CODIGO
       2. Post-cashback   → plat|cash|VALOR%
       3. Produto/ASIN    → plat|min(ids_globais)        ← determinístico
-      4. Campanha        → plat|camp|host+path          ← path evita colisão
+      4. Campanha        → plat|camp|chave_campanha     ← derivada na norm.
       5. Cupom genérico  → plat|cup|CODIGO
       6. URL canônica    → plat|url|cache_key
       7. Texto           → plat|txt|hash
@@ -375,9 +371,16 @@ def identidade_canonica(norm: MensagemNormalizada) -> str:
     identidade. Cupom diferente no mesmo produto = melhoria avaliada
     por SCORE em enviar(), não duplicação.
 
-    NÍVEL 4 — Campanha: usa host+path canônico (não só host). Sem path,
-    campanhas diferentes no mesmo domínio (ex: 3 campanhas Shopee em
-    shopee.com.br/m/*) colidiriam como duplicata.
+    NÍVEL 4 — Campanha: usa a chave_campanha derivada pela normalização
+    sobre as URLs afiliadas LONGAS. A chave é host+caminho canônico —
+    sem caminho, campanhas diferentes no mesmo domínio (ex: 3 campanhas
+    Shopee em shopee.com.br/m/*) colidiriam como duplicata. A
+    deduplicação CONSOME a chave já derivada e NÃO a reextrai do mapa,
+    que nesta fase já contém URLs de publicação, possivelmente
+    encurtadas.
+
+    NÍVEL 6 — URL canônica: única leitura do mapa nesta camada.
+    Fallback operacional NÃO semântico, explicitamente reconhecido.
     """
     texto = norm.texto_limpo
     plat  = norm.plat
@@ -407,11 +410,10 @@ def identidade_canonica(norm: MensagemNormalizada) -> str:
         id_menor = min(norm.ids_globais)
         return f"{plat}|{id_menor}"
 
-    # NÍVEL 4: Campanha/evento — host+path pra não colidir
-    if _eh_post_evento(texto, norm.mapa):
-        host_path = _host_canonico_campanha(norm.mapa)
-        if host_path:
-            return f"{plat}|camp|{host_path}"
+    # NÍVEL 4: Campanha/evento — chave_campanha derivada na normalização
+    if _eh_post_evento(texto, norm.tem_host_campanha):
+        if norm.chave_campanha:
+            return f"{plat}|camp|{norm.chave_campanha}"
         m = _RE_EVENTO_CAMPANHA.search(texto[:200])
         if m:
             return f"{plat}|camp|{m.group(0).lower()}"
