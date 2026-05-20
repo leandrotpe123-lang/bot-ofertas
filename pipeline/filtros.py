@@ -1,27 +1,21 @@
 """
-Camada — Filtros de Conteúdo.
+Camada de Filtragem de Conteúdo — SUBSISTEMA CONGELADO.
 
-Responsabilidade única: decidir se uma mensagem deve ser bloqueada
-antes de prosseguir no processamento, aplicando critérios de política
-de conteúdo.
+Este módulo está deliberadamente desconectado do fluxo operacional
+da pipeline, mas permanece preservado no projeto porque contém
+heurísticas de filtragem ainda consideradas úteis ao comportamento
+desejado do sistema.
 
-Aplica dois conjuntos de políticas:
-  - filtro de produtos: bloqueia termos de produtos indesejados,
-    com exceção para multi-produto e override por sinal social forte
-  - filtro de posts indesejados: bloqueia posts que pedem link,
-    encaminham para canais externos, contêm vídeo Shopee, ou apontam
-    para domínios concorrentes sem link de plataforma legítima
+A reintegração futura da camada de filtragem será decidida
+arquiteturalmente no momento apropriado. O ponto de integração,
+as regras a preservar e a adaptação às APIs canônicas serão
+definidos nessa etapa.
 
-NÃO faz:
-  - normalização de mensagem (responsabilidade da normalização)
-  - registro de posts pendentes (responsabilidade do orquestrador)
-  - classificação de plataforma (responsabilidade da classificação)
-  - verificação de viabilidade de texto (permanece na normalização)
-  - persistência
-
-A decisão sobre o que fazer com uma mensagem bloqueada — descartá-la
-ou registrá-la como pendente — pertence ao orquestrador. Este módulo
-apenas avalia e comunica o resultado.
+As dependências atuais de símbolos legados de pipeline.classificacao
+são conscientemente toleradas durante o estado de congelamento.
+A depuração futura da cascata concreta de plataforma pode tornar
+este módulo temporariamente não-importável, o que é tratado como
+dívida consciente de congelamento, não como regressão operacional.
 """
 from __future__ import annotations
 
