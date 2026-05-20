@@ -238,8 +238,16 @@ def _eh_encurtador_generico(url: str) -> bool:
 # contrato. Não é pendência obrigatória; é observação de evolução.
 # ─────────────────────────────────────────────────────────────────
 _HOSTS_CAMPANHA = frozenset({
+    # Domínios de marketplace cujas URLs longas podem caracterizar
+    # uma página de campanha (ex.: shopee.com.br/m/roleta).
     "shopee.com.br", "s.shopee.com.br", "magazinevoce.com.br",
     "magazineluiza.com.br", "amazon.com.br",
+    # Domínios dedicados a evento ou promoção. Reconciliados ao
+    # conjunto canônico para que tem_host_campanha e chave_campanha
+    # ofereçam cobertura uniforme sobre eles, evitando perda
+    # silenciosa de detecção na transição em que a deduplicação
+    # passou a consumir os campos derivados.
+    "flapremios.com.br", "premios.shopee.com.br", "primevideo.com",
 })
 
 
@@ -543,4 +551,4 @@ async def normalizar(
         ids_globais=ids_globais, chave_campanha=chave_campanha,
         tem_host_campanha=tem_host_campanha, is_reply=bruta.is_reply,
         reply_to=bruta.reply_to, is_override=is_override,
-)
+  )
