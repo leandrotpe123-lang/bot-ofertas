@@ -52,6 +52,16 @@ _ENCURTADORES = frozenset({
 })
 
 
+# ── Quirk HTTP: hosts que exigem GET na resolução ─────────────────
+# Hosts cujos servidores não respondem corretamente a requisições
+# HEAD, exigindo GET direto no resolver de redirecionamento. Hoje
+# coincide com _ENCURTADORES, mas a relação NÃO é definicional: é
+# fato empírico, sujeito a revisão por host individualmente.
+_ENCURTADORES_FORCA_GET = frozenset({
+    "amzn.to", "a.co", "amzn.com", "amzlink.to",
+})
+
+
 # ── Padrões de extração ───────────────────────────────────────────
 _P_ASIN = [
     re.compile(r'/dp/([A-Z0-9]{10})', re.I),
@@ -297,4 +307,5 @@ PLATAFORMA = Plataforma(
     afilia=afilia,
     parametros_temporais=_PARAMETROS_TEMPORAIS,
     limpa_url=limpa_url,
-    )
+    encurtadores_forca_get=_ENCURTADORES_FORCA_GET,
+)
