@@ -119,6 +119,14 @@ class Plataforma:
                                plataforma devem ser submetidos ao
                                encurtador do core. Não contém lógica
                                de encurtamento.
+      - encurtadores_forca_get : frozenset[str] | None. Conjunto
+                                 de hosts cujos servidores não
+                                 respondem corretamente a HEAD,
+                                 exigindo GET direto na resolução
+                                 de redirecionamento. Conhecimento
+                                 de quirk HTTP, não de identidade
+                                 de plataforma. None equivale a
+                                 não declarar; o core ignora.
     """
     # Identidade
     identificador:   str
@@ -133,3 +141,4 @@ class Plataforma:
     parametros_temporais: Optional[ParametrosTemporais] = None
     limpa_url:            Optional[Callable[[str], str]] = None
     requer_encurtamento:  bool = False
+    encurtadores_forca_get: Optional[frozenset[str]] = None
