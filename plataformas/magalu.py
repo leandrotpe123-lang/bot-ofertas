@@ -56,6 +56,20 @@ _ENCURTADORES = frozenset({
 })
 
 
+# ── Quirk HTTP: hosts que exigem GET na resolução ─────────────────
+# Hosts cujos servidores não respondem corretamente a requisições
+# HEAD, exigindo GET direto no resolver de redirecionamento. Para
+# Magalu, esta declaração materializa empiricamente a distinção
+# entre identidade de encurtador e quirk HTTP: `maga.lu` requer
+# GET, mas `divulgador.magalu.com` — também encurtador próprio da
+# plataforma — responde corretamente a HEAD e portanto NÃO compõe
+# este conjunto. A relação com _ENCURTADORES é factual, não
+# definicional, e deve ser revisada por host individualmente.
+_ENCURTADORES_FORCA_GET = frozenset({
+    "maga.lu",
+})
+
+
 # ── Padrão de extração do identificador de produto ────────────────
 _P_PRODUTO = re.compile(r'/(?:[^/]+/)?p/([a-z0-9]{5,})(?:/|$|[?#])', re.I)
 
