@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import time
 from typing import Optional
 from urllib.parse import urlparse
@@ -94,9 +95,6 @@ _PARAMETROS_TEMPORAIS = ParametrosTemporais(
     janela_s=60.0,
     ttl_restock_s=3600.0,
 )
-
-
-import re  # posicionado após as constantes para clareza de leitura
 
 
 # ── Funções de apoio ──────────────────────────────────────────────
