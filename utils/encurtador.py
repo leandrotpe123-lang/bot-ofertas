@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import hashlib
 
-from config import SHORT_BASE_URL
+from config import _SHORT_BASE as SHORT_BASE_URL
 from logger import log_sys
 from utils.links_curtos import registrar_codigo
 
