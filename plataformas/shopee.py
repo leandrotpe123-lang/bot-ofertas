@@ -58,6 +58,18 @@ _ENCURTADORES = frozenset({
     "s.shopee.com.br", "shope.ee", "s.shopee.com",
 })
 
+
+# ── Quirk HTTP: hosts que exigem GET na resolução ─────────────────
+# Hosts cujos servidores não respondem corretamente a requisições
+# HEAD, exigindo GET direto no resolver de redirecionamento. Para
+# Shopee, a análise empírica mostra que todos os encurtadores
+# próprios — s.shopee.com.br, shope.ee, s.shopee.com — respondem
+# corretamente a HEAD. O conjunto é declarado EXPLICITAMENTE VAZIO,
+# o que registra que a consideração foi feita e a resposta é nula
+# — semântica distinta de não declarar a capacidade, que ficaria
+# como None no contrato.
+_ENCURTADORES_FORCA_GET = frozenset()
+
 # Domínio de campanha de tratamento por repasse direto, sem afiliação.
 _REPASSE_DIRETO = frozenset({"flapremios.com.br"})
 
