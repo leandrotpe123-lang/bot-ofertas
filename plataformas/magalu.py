@@ -26,7 +26,8 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import aiohttp
 
-from config import _MGL_PARTNER, _MGL_PROMOTER, _MGL_PID, _SEM_HTTP
+import config 
+from config import _MGL_PARTNER, _MGL_PROMOTER, _MGL_PID
 from logger import log_nrm
 from plataformas.contrato import (
     AUSENTE,
@@ -239,7 +240,7 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     # Expansão de encurtador próprio, com validação pós-expansão.
     if _netloc(url) in _ENCURTADORES:
         try:
-            async with _SEM_HTTP:
+            async with config._SEM_HTTP:
                 url_expandida = await desencurtar(url, sessao)
         except Exception as exc:
             log_nrm.warning(
