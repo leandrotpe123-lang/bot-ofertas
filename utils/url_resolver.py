@@ -15,11 +15,20 @@ NÃO faz:
   - normalização de mensagem (responsabilidade da normalização)
   - validação de conteúdo (responsabilidade dos filtros)
 
-PENDÊNCIA REGISTRADA:
-  O conjunto `_FORCA_GET` é importado de `pipeline.classificacao`,
-  criando uma dependência utils → pipeline. O destino arquitetural
-  correto desse conjunto é este módulo. A migração está registrada
-  para a fase de revisão de `pipeline/classificacao.py`.
+ESTADO TRANSICIONAL:
+  O conjunto efetivo de hosts que exigem GET na resolução é composto
+  lazy a partir de três fontes: encurtadores genéricos declarados
+  localmente (_FORCA_GET_GENERICOS), contribuições das plataformas
+  via registry (encurtadores_forca_get de cada Plataforma), e o
+  legado importado de `pipeline.classificacao` mantido como rede de
+  segurança durante a transição.
+
+  A remoção do import legado é entrega futura, condicionada a
+  validação empírica de que a composição via registry está
+  funcionando corretamente em runtime. O cache da composição é
+  invalidável via _resetar_forca_get, ponto único de gerenciamento
+  preparado para evolução arquitetural futura sem refatoração
+  estrutural deste módulo.
 """
 from __future__ import annotations
 
@@ -33,7 +42,7 @@ from bs4 import BeautifulSoup
 from config import USER_AGENTS
 from globals import _get_raw, _set_raw
 from logger import log_nrm
-from pipeline.classificacao import _FORCA_GET
+from pipeline.classificacao import _FORCA_GET as _FORCA_GET_LEGADO
 from utils.urls import _netloc, _sanitizar_url
 
 
@@ -43,6 +52,107 @@ _TIMEOUT_HEAD     = 10
 _TIMEOUT_GET      = 20
 _MAX_REDIRECTS    = 20
 _LIMITE_HTML      = 500_000
+
+
+# ── Composição de hosts que exigem GET ────────────────────────────
+# Conjunto local de encurtadores genéricos do core, não atribuídos
+# a nenhuma plataforma específica do projeto. Hosts cujos servidores
+# não respondem corretamente a HEAD e exigem GET direto na resolução
+# de redirecionamento.
+_FORCA_GET_GENERICOS = frozenset({
+    "bit.ly", "cutt.ly", "tinyurl.com", "rb.gy",
+    "is.gd", "ow.ly", "buff.ly", "tidd.ly",
+})
+
+# Cache do conjunto efetivo, populado na primeira chamada de
+# _hosts_forca_get e mantido pela vida do processo. Invalidável
+# manualmente via _resetar_forca_get.
+_FORCA_GET_COMPOSTO: frozenset[str] | None = None
+
+
+def _compor_forca_get() -> frozenset[str]:
+    """
+    Compõe o conjunto efetivo de hosts que exigem GET, unindo três
+    fontes ordenadas por confiabilidade: encurtadores genéricos do
+    core, contribuições das plataformas via registry, e o legado
+    transitório de pipeline.classificacao.
+
+    Cada fonte é processada defensivamente — falhas em uma fonte
+    não bloqueiam a composição com as demais. No pior caso resta
+    o conjunto local de genéricos. NÃO realiza cache; o cache é
+    feito por _hosts_forca_get.
+    """
+    composto: set[str] = set(_FORCA_GET_GENERICOS)
+
+    try:
+        from plataformas import registry  # lazy: evita ciclo de import
+        identificadores = registry.plataformas_registradas()
+        if not identificadores:
+            log_nrm.warning(
+                "⚠ _compor_forca_get: registry vazio no momento da "
+                "composição — contribuição de plataformas ausente"
+            )
+        else:
+            for ident in identificadores:
+                try:
+                    plataforma = registry.acessar(ident)
+                    if plataforma is None:
+                        continue
+                    contrib = plataforma.encurtadores_forca_get
+                    if contrib is not None:
+                        composto |= contrib
+                except Exception as e:
+                    log_nrm.warning(
+                        f"⚠ _compor_forca_get: falha lendo plataforma "
+                        f"{ident!r}: {e}"
+                    )
+    except Exception as e:
+        log_nrm.warning(
+            f"⚠ _compor_forca_get: falha iterando registry: {e}"
+        )
+
+    try:
+        composto |= _FORCA_GET_LEGADO
+    except Exception as e:
+        log_nrm.warning(
+            f"⚠ _compor_forca_get: falha lendo legado: {e}"
+        )
+
+    return frozenset(composto)
+
+
+def _hosts_forca_get() -> frozenset[str]:
+    """
+    Devolve o conjunto efetivo de hosts que exigem GET, compondo-o
+    lazy na primeira chamada e cacheando o resultado em variável de
+    módulo. Chamadas subsequentes devolvem o cache.
+    """
+    global _FORCA_GET_COMPOSTO
+    if _FORCA_GET_COMPOSTO is None:
+        _FORCA_GET_COMPOSTO = _compor_forca_get()
+        log_nrm.info(
+            f"⚙ _hosts_forca_get: composição inicial — "
+            f"{len(_FORCA_GET_COMPOSTO)} hosts"
+        )
+    return _FORCA_GET_COMPOSTO
+
+
+def _resetar_forca_get() -> None:
+    """
+    Invalida o cache da composição. Próxima chamada de
+    _hosts_forca_get refaz a composição.
+
+    PROPÓSITO ARQUITETURAL: ponto único, identificado e declarado
+    de invalidação do cache. NÃO é invocada pelo código atual e
+    não tem caso de uso operacional ativo. Existe para que a
+    evolução arquitetural futura — registro tardio de plataformas,
+    recarga de configuração, ciclos de teste isolados — possa ser
+    feita sem refatoração estrutural deste módulo. A sua presença
+    é afirmação de que o cache é recurso gerenciável, não efeito
+    colateral opaco.
+    """
+    global _FORCA_GET_COMPOSTO
+    _FORCA_GET_COMPOSTO = None
 
 
 async def desencurtar(
@@ -82,9 +192,10 @@ async def desencurtar(
     }
 
     try:
+        hosts = _hosts_forca_get()
         usar_head = (
-            nl not in _FORCA_GET
-            and not any(nl.endswith("." + d) for d in _FORCA_GET)
+            nl not in hosts
+            and not any(nl.endswith("." + d) for d in hosts)
         )
         if usar_head:
             try:
