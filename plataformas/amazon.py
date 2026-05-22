@@ -24,7 +24,8 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import aiohttp
 
-from config import _AMZ_TAG, _SEM_HTTP
+import config
+from config import _AMZ_TAG
 from logger import log_nrm
 from plataformas.contrato import (
     AUSENTE,
@@ -272,7 +273,7 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     # Expansão de encurtador próprio, quando aplicável.
     if _netloc(url) in _ENCURTADORES:
         try:
-            async with _SEM_HTTP:
+            async with config._SEM_HTTP:
                 url = await desencurtar(url, sessao)
         except Exception as e:
             log_nrm.warning(f"⚠️ AMZ expansão falhou: {e}")
