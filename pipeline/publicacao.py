@@ -13,7 +13,8 @@ import globals as g
 from logger import log_out, log_sys
 from pipeline.deduplicacao import calcular_score, identidade_canonica
 from pipeline.montagem import MensagemMontada
-from pipeline.normalizacao import MensagemNormalizada, _KW_EVENTO
+from pipeline.normalizacao import MensagemNormalizada
+from pipeline.estado_evento import _KW_EVENTO
 from utils.helpers import ler_mapa, salvar_mapa
 
 
