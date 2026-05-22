@@ -14,8 +14,8 @@ from pipeline.normalizacao import (
     _KW_CUPOM,
     _FALSO_CUPOM,
     _tem_emoji,
-    _KW_EVENTO,
 )
+from pipeline.estado_evento import _KW_EVENTO
 
 # ─────────────────────────────────────────────────────────────────
 # Dataclass de saída
