@@ -31,7 +31,8 @@ from urllib.parse import urlparse
 
 import aiohttp
 
-from config import _SHP_APP_ID, _SHP_SECRET, _SEM_HTTP
+import config
+from config import _SHP_APP_ID, _SHP_SECRET
 from logger import log_nrm
 from plataformas.contrato import (
     AUSENTE,
@@ -247,7 +248,7 @@ async def _chamar_servico_afiliados(
                 ),
                 "Content-Type": "application/json",
             }
-            async with _SEM_HTTP:
+            async with config._SEM_HTTP:
                 async with sessao.post(
                     _ENDPOINT_AFILIADOS,
                     data=payload, headers=headers,
@@ -305,7 +306,7 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     url_expandida = url
     if netloc in _ENCURTADORES:
         try:
-            async with _SEM_HTTP:
+            async with config._SEM_HTTP:
                 url_expandida = await desencurtar(url, sessao)
         except Exception as e:
             log_nrm.warning(f"⚠️ SHP expansão falhou: {e}")
