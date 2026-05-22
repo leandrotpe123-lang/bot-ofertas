@@ -309,9 +309,11 @@ async def _hook_pos_envio(montada: MensagemMontada) -> None:
 
 
 async def enviar(montada: MensagemMontada,
-                 norm: Optional[MensagemNormalizada] = None) -> bool:
+                 norm: Optional[MensagemNormalizada] = None,
+                 is_edit: bool = False) -> bool:
     """
     Publica ou edita mensagem no grupo destino.
+    Aceita `is_edit` por coerência contratual com o orchestrator.
     Lock por identidade garante serialização entre tasks da mesma oferta.
     """
     identity: Optional[str] = None
