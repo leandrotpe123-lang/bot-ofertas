@@ -292,7 +292,6 @@ def _proteger_url_md(url: str) -> str:
 
     return (
         url.replace('\\', '\\\\')
-           .replace('_', '\\_')
            .replace('*', '\\*')
            .replace('`', '\\`')
            .replace('[', '\\[')
