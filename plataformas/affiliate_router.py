@@ -31,9 +31,8 @@ async def rotear_afiliacao(
         return await _afiliar_magalu(url, sessao, msg_id)
 
     if plat in ("mercadolivre", "ml", "meli"):
-        from plataformas.mercadolivre.affiliate import gerar_link_afiliado as _afiliar_mercadolivre
-        return await _afiliar_mercadolivre(url, sessao)
-
+        from plataformas.mercado_livre import _afiliar_mercadolivre
+        return await _afiliar_mercadolivre(url, sessao, msg_id)
     # Plataforma desconhecida ou futura
     log_nrm.debug(f"🔮 Plataforma sem motor de afiliação: plat={plat} url={url[:60]}")
     return None
