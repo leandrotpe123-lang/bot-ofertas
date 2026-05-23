@@ -281,4 +281,5 @@ PLATAFORMA = Plataforma(
     parametros_temporais=_PARAMETROS_TEMPORAIS,
     limpa_url=limpa_url,
     encurtadores_forca_get=_ENCURTADORES_FORCA_GET,
+    requer_encurtamento=True,
 )
