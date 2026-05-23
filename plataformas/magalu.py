@@ -22,11 +22,11 @@ Baseline arquitetural: Documento 1 — Especificação do Contrato.
 from __future__ import annotations
 
 import re
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse, quote
 
 import aiohttp
 
-import config 
+import config
 from config import _MGL_PARTNER, _MGL_PROMOTER, _MGL_PID
 from logger import log_nrm
 from plataformas.contrato import (
@@ -190,31 +190,28 @@ def limpa_url(url: str) -> str:
 # ── Capacidade obrigatória: afiliação ─────────────────────────────
 def _construir_url_afiliada(url: str) -> str:
     """
-    Constrói a URL afiliada longa da Magalu, anexando os parâmetros
-    de atribuição comercial. Não realiza encurtamento: o
-    encurtamento é comportamento do core.
+    Aplica patch não-destrutivo dos parâmetros afiliados sobre a URL.
+    Substitui valores dos parâmetros canônicos APENAS quando já
+    presentes na URL. Não adiciona parâmetros ausentes. Não remove
+    parâmetros não afiliados. Preserva todo o restante intacto.
     """
-    parsed = urlparse(url)
-    params = {
-        k: v[0]
-        for k, v in parse_qs(
-            parsed.query, keep_blank_values=True,
-        ).items()
-        if k.lower() not in _PARAMS_REMOVER
-    }
-    params.update({
-        "partner_id":        _MGL_PARTNER,
-        "promoter_id":       _MGL_PROMOTER,
-        "utm_source":        "divulgador",
-        "utm_medium":        "magalu",
-        "utm_campaign":      _MGL_PROMOTER,
-        "pid":               _MGL_PID,
-        "c":                 _MGL_PROMOTER,
-        "af_force_deeplink": "true",
-    })
-    return urlunparse(parsed._replace(
-        query=urlencode(params), fragment="",
-    ))
+    canonicos = (
+        ("partner_id",        _MGL_PARTNER),
+        ("promoter_id",       _MGL_PROMOTER),
+        ("utm_source",        "divulgador"),
+        ("utm_medium",        "magalu"),
+        ("utm_campaign",      _MGL_PROMOTER),
+        ("pid",               _MGL_PID),
+        ("c",                 _MGL_PROMOTER),
+        ("af_force_deeplink", "true"),
+    )
+
+    for nome, valor in canonicos:
+        padrao = re.compile(rf'(?<=[?&]){re.escape(nome)}=[^&#]*')
+        novo = f"{nome}={quote(valor, safe='')}"
+        url = padrao.sub(novo, url, count=1)
+
+    return url
 
 
 async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
