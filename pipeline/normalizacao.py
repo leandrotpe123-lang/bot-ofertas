@@ -344,11 +344,14 @@ async def _normalizar_um(
     # 2. Expansão de encurtador genérico — responsabilidade universal.
     url = url_original
     if _eh_encurtador_generico(url_original):
-        try:
-            expandida = await desencurtar(url_original, sessao)
-            if expandida and expandida != url_original:
-                url = expandida
-                categoria = classificar_universal(url)
+    try:
+        expandida = await desencurtar(url_original, sessao)
+        if expandida and expandida != url_original:
+            url = expandida
+            log_nrm.info(
+                f"🔗 expandido | {_netloc(url_original)} → {_netloc(url)}"
+            )
+            categoria = classificar_universal(url)
                 if categoria == "bloqueado":
                     return url_original, None, "none"
                 if categoria in ("mundial", "preservar"):
