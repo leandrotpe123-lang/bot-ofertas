@@ -344,7 +344,7 @@ async def _normalizar_um(
     # 2. Expansão de encurtador genérico — responsabilidade universal.
     url = url_original
     if _eh_encurtador_generico(url_original):
-    try:
+        try:
         expandida = await desencurtar(url_original, sessao)
         if expandida and expandida != url_original:
             url = expandida
