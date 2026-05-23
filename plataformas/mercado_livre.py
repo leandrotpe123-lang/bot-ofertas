@@ -80,11 +80,11 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import aiohttp
 
-from config import _SEM_HTTP
+import config
 from database import db_get_link, db_set_link
 from globals import _get_final, _set_final
 from logger import log_nrm
-from pipeline.normalizacao import desencurtar
+from utils.url_resolver import desencurtar
 from utils.urls import _netloc, _sanitizar_url
 
 
@@ -491,7 +491,7 @@ async def _chamar_api_shorten(url_pronta: str,
                 "Accept":        "application/json",
             }
             payload = {"urls": [url_pronta]}
-            async with _SEM_HTTP:
+            async with config._SEM_HTTP:
                 async with sessao.post(
                     _ML_SHORTEN_URL,
                     json=payload, headers=hdrs,
@@ -545,7 +545,7 @@ async def _expandir_se_preciso(url: str, sessao: aiohttp.ClientSession) -> str:
     if not _eh_encurtador_ml(url):
         return url
     try:
-        async with _SEM_HTTP:
+        async with config._SEM_HTTP:
             expandida = await desencurtar(url, sessao)
         log_nrm.debug(f"  ML expandida: {expandida[:90]}")
         return expandida
