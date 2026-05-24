@@ -31,12 +31,6 @@ _ENCURTADORES = frozenset({
     "rb.gy", "is.gd", "tiny.cc", "buff.ly", "short.io", "bl.ink",
     "rebrand.ly", "shorturl.at", "tidd.ly",
 })
-_FORCA_GET = frozenset({
-    "amzlink.to", "amzn.to", "a.co", "amzn.com",
-    "bit.ly", "cutt.ly", "tinyurl.com",
-    "rb.gy", "is.gd", "ow.ly", "buff.ly",
-    "maga.lu", "tidd.ly",
-})
 
 
 # ── Domínios e encurtadores por plataforma ───────────────────────
