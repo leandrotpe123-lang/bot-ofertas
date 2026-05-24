@@ -15,14 +15,11 @@ NÃO faz:
   - normalização de mensagem (responsabilidade da normalização)
   - validação de conteúdo (responsabilidade dos filtros)
 
-ESTADO TRANSICIONAL:
-  O conjunto efetivo de hosts que exigem GET na resolução é composto
-  lazy a partir de três fontes: encurtadores genéricos declarados
-  localmente (_FORCA_GET_GENERICOS), contribuições das plataformas
-  via registry (encurtadores_forca_get de cada Plataforma), e o
-  legado importado de `pipeline.classificacao` mantido como rede de
-  segurança durante a transição.
-
+COMPOSIÇÃO DE HOSTS QUE EXIGEM GET:
+  O conjunto efetivo é composto lazy a partir de duas fontes:
+  _FORCA_GET_GENERICOS local e capacidade encurtadores_forca_get
+  de cada Plataforma via registry. O cache é invalidável via
+  _resetar_forca_get.
   A remoção do import legado é entrega futura, condicionada a
   validação empírica de que a composição via registry está
   funcionando corretamente em runtime. O cache da composição é
@@ -42,7 +39,6 @@ from bs4 import BeautifulSoup
 from config import USER_AGENTS
 from globals import _get_raw, _set_raw
 from logger import log_nrm
-from pipeline.classificacao import _FORCA_GET as _FORCA_GET_LEGADO
 from utils.urls import _netloc, _sanitizar_url
 
 
@@ -111,13 +107,6 @@ def _compor_forca_get() -> frozenset[str]:
             f"⚠ _compor_forca_get: falha iterando registry: {e}"
         )
 
-    try:
-        composto |= _FORCA_GET_LEGADO
-    except Exception as e:
-        log_nrm.warning(
-            f"⚠ _compor_forca_get: falha lendo legado: {e}"
-        )
-
     return frozenset(composto)
 
 def _logar_decomposicao_inicial() -> None:
@@ -130,11 +119,6 @@ def _logar_decomposicao_inicial() -> None:
     altera cache, não propaga exceção. Toda falha individual de
     leitura é registrada como warning e isolada, preservando a
     natureza não-intrusiva da instrumentação.
-
-    Existência temporária: a linha de log da fonte legada perde
-    propósito na fase 6 e é removida junto com o próprio legado.
-    As demais linhas podem permanecer como observabilidade
-    arquitetural legítima, a decidir no momento da fase 6.
     """
     log_nrm.info(
         f"⚙ _hosts_forca_get: fonte=genericos_core "
@@ -174,17 +158,6 @@ def _logar_decomposicao_inicial() -> None:
             f"⚠ _hosts_forca_get: falha iterando registry "
             f"para decomposição: {e}"
         )
-
-    try:
-        log_nrm.info(
-            f"⚙ _hosts_forca_get: fonte=legado_transitorio "
-            f"hosts={sorted(_FORCA_GET_LEGADO)}"
-        )
-    except Exception as e:
-        log_nrm.warning(
-            f"⚠ _hosts_forca_get: falha lendo legado "
-            f"para decomposição: {e}"
-      )
 
 
 def _hosts_forca_get() -> frozenset[str]:
