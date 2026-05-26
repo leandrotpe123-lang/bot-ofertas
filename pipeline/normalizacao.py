@@ -67,7 +67,7 @@ import aiohttp
 from database import db_get_dedupe, db_get_link
 from globals import _get_session, _get_final, _log_cache_stats
 from logger import log_nrm
-from pipeline.classificacao import classificar_universal
+from utils.categorias_universais import classificar_universal
 from pipeline.estado_evento import (
     EstadoEvento,
     detectar_estado_evento,
