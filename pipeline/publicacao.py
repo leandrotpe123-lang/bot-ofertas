@@ -192,6 +192,107 @@ async def editar(msg_id_origem: int, texto_novo: str) -> bool:
     if not id_d: return False
     return await editar_por_id(id_d, texto_novo)
 
+# ─────────────────────────────────────────────────────────────────
+# Engine evolutiva de edição
+#
+# PRIORIDADE ARQUITETURAL:
+#   1. editar mensagem existente
+#   2. fallback para repost SOMENTE se edição falhar
+#
+# Mantém identidade persistente do evento:
+# cupom/produto/campanha permanecem no mesmo post.
+# ─────────────────────────────────────────────────────────────────
+async def _tentar_edicao_evolutiva(
+    msg_id_dest: int,
+    montada: MensagemMontada,
+) -> tuple[bool, bool]:
+    """
+    Tenta editar a mensagem existente preservando o mesmo post.
+
+    Retorna:
+        (ok, editou_midia)
+
+    ok:
+        True  -> edição aplicada com sucesso
+        False -> edição falhou completamente
+
+    editou_midia:
+        True  -> mídia foi realmente atualizada
+        False -> apenas texto ou nada
+    """
+    from client import client
+
+    # ── CASO 1: existe mídia nova ────────────────────────────────
+    if montada.imagem:
+        try:
+            await client.edit_message(
+                GRUPO_DESTINO,
+                msg_id_dest,
+                montada.texto,
+                parse_mode="md",
+                file=montada.imagem,
+            )
+
+            log_out.info(
+                f"🖼️ [EDIT_MIDIA_OK] dest_id={msg_id_dest}"
+            )
+            return True, True
+
+        except MessageNotModifiedError:
+            return True, True
+
+        except FloodWaitError as e:
+            if e.seconds > 120:
+                log_out.warning(
+                    f"⚠️ FloodWait longo ({e.seconds}s) "
+                    f"na edição de mídia"
+                )
+                return False, False
+
+            await asyncio.sleep(e.seconds)
+
+        except Exception as e:
+            log_out.warning(
+                f"⚠️ [EDIT_MIDIA_FALHOU] "
+                f"dest_id={msg_id_dest} erro={e}"
+            )
+
+    # ── CASO 2: fallback apenas texto ────────────────────────────
+    try:
+        await client.edit_message(
+            GRUPO_DESTINO,
+            msg_id_dest,
+            montada.texto,
+            parse_mode="md",
+        )
+
+        log_out.info(
+            f"✏️ [EDIT_TEXTO_OK] dest_id={msg_id_dest}"
+        )
+
+        return True, False
+
+    except MessageNotModifiedError:
+        return True, False
+
+    except FloodWaitError as e:
+        if e.seconds > 120:
+            log_out.warning(
+                f"⚠️ FloodWait longo ({e.seconds}s) "
+                f"na edição de texto"
+            )
+            return False, False
+
+        await asyncio.sleep(e.seconds)
+
+    except Exception as e:
+        log_out.error(
+            f"❌ [EDIT_TOTAL_FALHOU] "
+            f"dest_id={msg_id_dest} erro={e}"
+        )
+
+    return False, False
+
 
 # ─────────────────────────────────────────────────────────────────
 # Substituição com mídia (deletar + reenviar)
@@ -368,62 +469,112 @@ async def _enviar_inner(montada: MensagemMontada,
                     log_out.info(f"🔒 [MAX_EDITS] {identity} edits={edit_count}")
                     return True
 
-                # ── DECISÃO 1: Score MAIOR — sempre processa ────────
-                if score > score_atual:
-                    if _deve_substituir_post(
-                        lider_atual, norm.chat, bool(montada.imagem), ts_anterior
-                    ):
-                        log_out.info(
-                            f"🔄 [SUBSTITUI_MIDIA] {identity} "
-                            f"score {score_atual}→{score} chat={norm.chat} "
-                            f"delta={int(agora - ts_anterior)}s"
-                        )
-                        sent = await _substituir_post_com_midia(
-                            msg_id_dest, montada
-                        )
-                        if sent:
-                            mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-                            mp[str(montada.msg_id)] = sent.id
-                            try:
-                                await loop.run_in_executor(
-                                    _EXECUTOR, salvar_mapa, mp
-                                )
-                            except Exception as e:
-                                log_sys.error(f"❌ salvar_mapa: {e}")
+                # ── DECISÃO 1: Score MAIOR — evolução prioritária ──
+if score > score_atual:
 
-                            db_set_estado(
-                                identity, sent.id, score, montada.texto,
-                                montada.plat, norm.chat,
-                                estado.get("janela_fim", 0), edit_count + 1,
-                                estado.get("shadow_reply_id", 0),
-                            )
-                            log_out.info(
-                                f"✅ [SUBSTITUIDO_OK] {identity} "
-                                f"novo_id={sent.id} score={score}"
-                            )
-                            return True
-                        # Fallback: cai pra edição comum
+    log_out.info(
+        f"📈 [SCORE_EVOLUIU] {identity} "
+        f"{score_atual}→{score} "
+        f"chat={norm.chat} "
+        f"img={'sim' if montada.imagem else 'não'}"
+    )
 
-                    log_out.info(
-                        f"✳️ [EVOLUI] {identity} "
-                        f"score {score_atual}→{score} "
-                        f"{'(janela)' if na_janela else '(lider)'} "
-                        f"chat={norm.chat} "
-                        f"img_nova={'sim' if montada.imagem else 'não'}"
-                    )
-                    ok = await _editar_inner_no_sem(
-                        msg_id_dest, montada.texto, montada.imagem,
-                    )
-                    if ok:
-                        db_set_estado(
-                            identity, msg_id_dest, score, montada.texto,
-                            montada.plat, norm.chat,
-                            estado.get("janela_fim", 0), edit_count + 1,
-                            estado.get("shadow_reply_id", 0))
-                        log_out.info(f"✏️ [EDITADO_OK] {identity} novo_score={score}")
-                    else:
-                        log_out.warning(f"⚠️ [EDIT_FALHOU] {identity}")
-                    return ok
+    # ───────────────────────────────────────────────
+    # PRIORIDADE ABSOLUTA:
+    # preservar o MESMO POST via edição
+    # ───────────────────────────────────────────────
+    ok_edit, editou_midia = await _tentar_edicao_evolutiva(
+        msg_id_dest,
+        montada,
+    )
+
+    # ── EDIÇÃO OK ─────────────────────────────────
+    if ok_edit:
+
+        db_set_estado(
+            identity,
+            msg_id_dest,
+            score,
+            montada.texto,
+            montada.plat,
+            norm.chat,
+            estado.get("janela_fim", 0),
+            edit_count + 1,
+            estado.get("shadow_reply_id", 0),
+        )
+
+        if editou_midia:
+            log_out.info(
+                f"🖼️ [EVOLUCAO_COM_MIDIA_OK] "
+                f"{identity} score={score}"
+            )
+        else:
+            log_out.info(
+                f"✏️ [EVOLUCAO_TEXTO_OK] "
+                f"{identity} score={score}"
+            )
+
+        return True
+
+    # ───────────────────────────────────────────────
+    # FALLBACK EXTREMO:
+    # repost apenas se edição falhou COMPLETAMENTE
+    # ───────────────────────────────────────────────
+    log_out.warning(
+        f"♻️ [FALLBACK_REPOST] {identity} "
+        f"edit falhou → tentando substituição"
+    )
+
+    sent = await _substituir_post_com_midia(
+        msg_id_dest,
+        montada,
+    )
+
+    if sent:
+
+        mp = await loop.run_in_executor(
+            _EXECUTOR,
+            ler_mapa,
+        )
+
+        mp[str(montada.msg_id)] = sent.id
+
+        try:
+            await loop.run_in_executor(
+                _EXECUTOR,
+                salvar_mapa,
+                mp,
+            )
+        except Exception as e:
+            log_sys.error(
+                f"❌ salvar_mapa: {e}"
+            )
+
+        db_set_estado(
+            identity,
+            sent.id,
+            score,
+            montada.texto,
+            montada.plat,
+            norm.chat,
+            estado.get("janela_fim", 0),
+            edit_count + 1,
+            estado.get("shadow_reply_id", 0),
+        )
+
+        log_out.info(
+            f"✅ [REPOST_FALLBACK_OK] "
+            f"{identity} novo_id={sent.id}"
+        )
+
+        return True
+
+    log_out.error(
+        f"❌ [EVOLUCAO_FALHOU_TOTAL] "
+        f"{identity}"
+    )
+
+    return False
 
                 # ── DECISÃO 2: Score IGUAL ──────────────────────────
                 if score == score_atual:
