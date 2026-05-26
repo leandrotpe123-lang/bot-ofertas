@@ -295,6 +295,127 @@ async def _tentar_edicao_evolutiva(
 
 
 # ─────────────────────────────────────────────────────────────────
+# Engine semântica de evolução
+#
+# Decide:
+#   - ignorar duplicata
+#   - permitir evolução
+#   - trocar mídia
+#   - preservar líder
+#
+# Separação arquitetural:
+#   identidade != representação
+# ─────────────────────────────────────────────────────────────────
+def _analisar_evolucao_semantica(
+    *,
+    texto_novo: str,
+    texto_atual: str,
+    score_novo: int,
+    score_atual: int,
+    tem_midia_nova: bool,
+    lider_atual: str,
+    chat_novo: str,
+    ts_post_antigo: float,
+) -> dict:
+    """
+    Motor decisório semântico da evolução do evento.
+
+    Retorna:
+        {
+            "silenciar": bool,
+            "editar": bool,
+            "trocar_midia": bool,
+            "motivo": str,
+        }
+    """
+
+    from utils.textos import _alma, _sim
+
+    alma_nova   = _alma(texto_novo)
+    alma_atual  = _alma(texto_atual)
+
+    similaridade = _sim(alma_nova, alma_atual)
+
+    delta_tempo = time.time() - ts_post_antigo
+
+    # Resultado default
+    result = {
+        "silenciar": False,
+        "editar": False,
+        "trocar_midia": False,
+        "motivo": "",
+    }
+
+    # ───────────────────────────────────────────────
+    # CASO 1 — conteúdo praticamente idêntico
+    # ───────────────────────────────────────────────
+    if similaridade >= 0.97:
+
+        # mídia nova melhor → permite upgrade visual
+        if (
+            tem_midia_nova
+            and _midia_grupo_ruim(lider_atual)
+            and not _midia_grupo_ruim(chat_novo)
+            and delta_tempo < config._JANELA_REENVIO_MIDIA_S
+        ):
+            result["editar"] = True
+            result["trocar_midia"] = True
+            result["motivo"] = "upgrade_visual"
+
+            return result
+
+        # duplicata pura
+        result["silenciar"] = True
+        result["motivo"] = "duplicata_pura"
+
+        return result
+
+    # ───────────────────────────────────────────────
+    # CASO 2 — score maior SEMPRE evolui
+    # ───────────────────────────────────────────────
+    if score_novo > score_atual:
+
+        result["editar"] = True
+        result["motivo"] = "score_maior"
+
+        # mídia junto
+        if tem_midia_nova:
+            result["trocar_midia"] = True
+
+        return result
+
+    # ───────────────────────────────────────────────
+    # CASO 3 — score igual mas texto melhorou
+    # ───────────────────────────────────────────────
+    if score_novo == score_atual:
+
+        # pequena melhoria textual
+        if 0.75 <= similaridade < 0.97:
+
+            result["editar"] = True
+            result["motivo"] = "refinamento_textual"
+
+            if tem_midia_nova:
+                result["trocar_midia"] = True
+
+            return result
+
+        # muito diferente = suspeito
+        result["silenciar"] = True
+        result["motivo"] = "variacao_suspeita"
+
+        return result
+
+    # ───────────────────────────────────────────────
+    # CASO 4 — score menor
+    # ───────────────────────────────────────────────
+    result["silenciar"] = True
+    result["motivo"] = "score_menor"
+
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────
 # Substituição com mídia (deletar + reenviar)
 #
 # Se delete falha, ABORTA (retorna None). O caller cai pra edição
@@ -576,47 +697,120 @@ if score > score_atual:
 
     return False
 
-                # ── DECISÃO 2: Score IGUAL ──────────────────────────
-                if score == score_atual:
-                    # Sub-caso: troca de imagem feia → boa
-                    if (_midia_grupo_ruim(lider_atual)
-                            and not _midia_grupo_ruim(norm.chat)
-                            and montada.imagem
-                            and (agora - ts_anterior) < config._JANELA_REENVIO_MIDIA_S):
-                        log_out.info(
-                            f"🖼 [TROCA_IMG_BOA] {identity} "
-                            f"de {lider_atual} (ruim) → {norm.chat} (bom) "
-                            f"delta={int(agora - ts_anterior)}s"
-                        )
-                        sent = await _substituir_post_com_midia(
-                            msg_id_dest, montada
-                        )
-                        if sent:
-                            mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-                            mp[str(montada.msg_id)] = sent.id
-                            try:
-                                await loop.run_in_executor(
-                                    _EXECUTOR, salvar_mapa, mp
-                                )
-                            except Exception as e:
-                                log_sys.error(f"❌ salvar_mapa: {e}")
+                # ── DECISÃO 2: evolução semântica ─────────────────
+analise = _analisar_evolucao_semantica(
+    texto_novo=montada.texto,
+    texto_atual=texto_atual,
+    score_novo=score,
+    score_atual=score_atual,
+    tem_midia_nova=bool(montada.imagem),
+    lider_atual=lider_atual,
+    chat_novo=norm.chat,
+    ts_post_antigo=ts_anterior,
+)
 
-                            db_set_estado(
-                                identity, sent.id, score, montada.texto,
-                                montada.plat, norm.chat,
-                                estado.get("janela_fim", 0), edit_count + 1,
-                                estado.get("shadow_reply_id", 0),
-                            )
-                            log_out.info(f"✅ [IMG_TROCADA_OK] {identity}")
-                            return True
+# ── SILENCIAR ─────────────────────────────────────
+if analise["silenciar"]:
 
-                    # Texto quase igual → ignora silenciosamente
-                    from utils.textos import _alma, _sim
-                    sim_v = _sim(_alma(montada.texto), _alma(texto_atual))
-                    if sim_v > 0.85:
-                        log_out.debug(
-                            f"🔁 [DUP_SILENCIOSO] {identity} sim={sim_v:.2f}")
-                        return True
+    log_out.debug(
+        f"🔇 [SEMANTICA_SILENCIADA] "
+        f"{identity} motivo={analise['motivo']}"
+    )
+
+    return True
+
+# ── EVOLUIR ───────────────────────────────────────
+if analise["editar"]:
+
+    log_out.info(
+        f"🧠 [SEMANTICA_EVOLUIU] "
+        f"{identity} motivo={analise['motivo']}"
+    )
+
+    ok_edit, editou_midia = await _tentar_edicao_evolutiva(
+        msg_id_dest,
+        montada,
+    )
+
+    if ok_edit:
+
+        db_set_estado(
+            identity,
+            msg_id_dest,
+            score,
+            montada.texto,
+            montada.plat,
+            norm.chat,
+            estado.get("janela_fim", 0),
+            edit_count + 1,
+            estado.get("shadow_reply_id", 0),
+        )
+
+        log_out.info(
+            f"✅ [SEMANTICA_EDITADA_OK] "
+            f"{identity}"
+        )
+
+        return True
+
+    # fallback extremo
+    if analise["trocar_midia"]:
+
+        log_out.warning(
+            f"♻️ [SEMANTICA_FALLBACK_REPOST] "
+            f"{identity}"
+        )
+
+        sent = await _substituir_post_com_midia(
+            msg_id_dest,
+            montada,
+        )
+
+        if sent:
+
+            mp = await loop.run_in_executor(
+                _EXECUTOR,
+                ler_mapa,
+            )
+
+            mp[str(montada.msg_id)] = sent.id
+
+            try:
+                await loop.run_in_executor(
+                    _EXECUTOR,
+                    salvar_mapa,
+                    mp,
+                )
+            except Exception as e:
+                log_sys.error(
+                    f"❌ salvar_mapa: {e}"
+                )
+
+            db_set_estado(
+                identity,
+                sent.id,
+                score,
+                montada.texto,
+                montada.plat,
+                norm.chat,
+                estado.get("janela_fim", 0),
+                edit_count + 1,
+                estado.get("shadow_reply_id", 0),
+            )
+
+            log_out.info(
+                f"✅ [SEMANTICA_REPOST_OK] "
+                f"{identity}"
+            )
+
+            return True
+
+    log_out.warning(
+        f"⚠️ [SEMANTICA_EVOLUCAO_ABORTADA] "
+        f"{identity}"
+    )
+
+    return True
 
                 # ── DECISÃO 3: Score igual com baixa similaridade / menor ──
                 log_out.info(
