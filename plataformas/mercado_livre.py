@@ -133,11 +133,19 @@ _ML_LIST_UUID = os.environ.get(
 # documentação pública uniforme — exposto como variável de ambiente
 # para permitir ajuste em produção sem mexer no código.
 _ENDPOINT_OAUTH = "https://api.mercadolibre.com/oauth/token"
-_ENDPOINT_SHORTEN = os.environ.get(
-    "ML_API_SHORTEN_URL",
-    "https://api.mercadolibre.com/affiliate-program/links",
+_ENDPOINT_CREATE_LINK = os.environ.get(
+    "ML_API_CREATE_LINK_URL",
+    "https://www.mercadolivre.com.br/affiliate-program/api/v2/affiliates/createLink",
 )
 
+# Mapeamento de cenário interno → valor canônico do campo 'type'
+# esperado pela API. Encapsula a única tradução semântica entre
+# o vocabulário do plugin e o vocabulário da API.
+_TYPE_POR_CENARIO = {
+    "produto":  "product",
+    "lista":    "list",
+    "campanha": "social_profile",
+}
 # Host canônico de saída para a URL longa pré-API.
 _HOST_PADRAO = "www.mercadolivre.com.br"
 
@@ -530,66 +538,47 @@ def _validar_url_propria(url: str) -> bool:
     return True
 
 
-# ── Cliente da API afiliada ───────────────────────────────────────
-def _extrair_short_da_resposta(data) -> str:
-    """
-    Parser defensivo: a resposta varia entre versões da API afiliada
-    do Mercado Livre. Tenta os formatos conhecidos sem assumir um.
-    Devolve string vazia quando nenhum formato corresponde.
-
-    Formatos conhecidos:
-      - {"data": [{"url_short": "..."}]}
-      - {"urls": [{"short_url": "..."}]}
-      - {"results": [{"short": "..."}]}
-      - {"url_short": "..."} no topo
-      - [{"url_short": "..."}] no topo (lista nua)
-    """
-    chaves_curto = (
-        "url_short", "short_url", "short",
-        "url", "shortLink", "shortUrl",
-    )
-
-    if isinstance(data, dict):
-        container = (
-            data.get("data") or data.get("urls")
-            or data.get("results") or data.get("links")
-        )
-        if isinstance(container, list) and container:
-            item = container[0]
-            if isinstance(item, dict):
-                for k in chaves_curto:
-                    v = item.get(k)
-                    if v and isinstance(v, str) and "meli.la" in v:
-                        return v
-        # Formato com short no topo do dicionário.
-        for k in chaves_curto:
-            v = data.get(k)
-            if v and isinstance(v, str) and "meli.la" in v:
-                return v
-    if isinstance(data, list) and data:
-        item = data[0]
-        if isinstance(item, dict):
-            for k in chaves_curto:
-                v = item.get(k)
-                if v and isinstance(v, str) and "meli.la" in v:
-                    return v
-    return ""
-
-
-async def _chamar_api_shorten(
-    url_pronta: str,
+# ── Cliente da API afiliada (CreateLink v2) ───────────────────────
+async def _chamar_api_create_link(
+    url_ml: str,
+    cenario: str,
     sessao: aiohttp.ClientSession,
 ) -> Optional[str]:
     """
-    Chama a API afiliada com política de retry. Em 401, força
-    renovação do token e tenta novamente. Devolve None em qualquer
-    falha definitiva.
+    Gera o link curto via API CreateLink moderna do Mercado Livre.
 
-    Política de retry:
-      - 401: força refresh, tenta novamente (até 3 vezes);
-      - 5xx: backoff progressivo, tenta novamente (até 3 vezes);
-      - 4xx (exceto 401): falha definitiva, sem retry.
+    Diferenças arquiteturais frente ao endpoint legado:
+
+      • o servidor recebe identidade SEMÂNTICA estruturada
+        (itemId, tag, type, itemAddToList) em vez de URL pré-
+        transformada. A construção da URL afiliada longa migrou
+        do cliente para o servidor;
+
+      • a validação anti-vazamento é feita pela igualdade entre
+        response['tag'] e _ML_MATT_WORD. Se o servidor responder
+        com outra tag, abortamos sem retornar afiliado;
+
+      • o parser de resposta é canônico: short_url no topo do
+        dicionário, com formato estável.
     """
+    parsed = urlparse(url_ml)
+
+    payload = {
+        "tag":             _ML_MATT_WORD,
+        "type":            _TYPE_POR_CENARIO.get(cenario, "social_profile"),
+        "extraCommission": "false",
+        "urls":            [url_ml],
+    }
+
+    # itemId — obrigatório quando há MLB extraível no path.
+    mlb = _extrair_mlb(parsed.path)
+    if mlb:
+        payload["itemId"] = mlb
+
+    # itemAddToList — wishlist própria, anexada em product e list.
+    if cenario in ("produto", "lista"):
+        payload["itemAddToList"] = _ML_LIST_UUID
+
     for tentativa in range(1, _TENTATIVAS_API + 1):
         token = await _obter_access_token(sessao)
         if not token:
@@ -597,13 +586,12 @@ async def _chamar_api_shorten(
         try:
             hdrs = {
                 "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
+                "Content-Type":  "application/json",
+                "Accept":        "application/json",
             }
-            payload = {"urls": [url_pronta]}
             async with config._SEM_HTTP:
                 async with sessao.post(
-                    _ENDPOINT_SHORTEN,
+                    _ENDPOINT_CREATE_LINK,
                     json=payload,
                     headers=hdrs,
                     timeout=aiohttp.ClientTimeout(total=_TIMEOUT_API),
@@ -631,21 +619,35 @@ async def _chamar_api_shorten(
                             f"❌ ML {r.status} t={tentativa}: {corpo}"
                         )
                         return None
+
                     data = await r.json(content_type=None)
-                    short = _extrair_short_da_resposta(data)
-                    if short:
+
+                    # Anti-vazamento: tag da resposta deve ser a nossa.
+                    tag_resposta = data.get("tag", "")
+                    if tag_resposta != _ML_MATT_WORD:
+                        log_nrm.error(
+                            f"🚫 ML tag externa na resposta: "
+                            f"'{tag_resposta}' != '{_ML_MATT_WORD}' → abortado"
+                        )
+                        return None
+
+                    short = data.get("short_url", "")
+                    if short and "meli.la" in short:
                         log_nrm.info(f"✅ ML t={tentativa}: {short}")
                         return short
+
                     log_nrm.warning(
-                        f"⚠️ ML resposta sem short t={tentativa}: "
+                        f"⚠️ ML resposta sem short_url t={tentativa}: "
                         f"{str(data)[:200]}"
                     )
         except asyncio.TimeoutError:
             log_nrm.warning(f"⏱ ML timeout t={tentativa}")
         except Exception as e:
             log_nrm.warning(f"⚠️ ML t={tentativa}: {e}")
+
         if tentativa < _TENTATIVAS_API:
             await asyncio.sleep(tentativa * 1.5)
+
     return None
 
 
@@ -767,28 +769,25 @@ def limpa_url(url: str) -> str:
 async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     """
     Converte uma URL do Mercado Livre em link afiliado próprio
-    (meli.la).
+    (meli.la), através da API CreateLink moderna.
 
-    Capacidade com efeito colateral controlado: acessa a rede para
-    expandir encurtadores, autentica via OAuth com refresh
-    automático, e chama o serviço de geração de link afiliado.
-    Consulta o cache de links mediado.
-
-    Não propaga exceções: qualquer falha resulta em AUSENTE. A
-    pipeline interpreta AUSENTE como "não publicar". JAMAIS
-    devolve URL com identidade externa.
+    Após a migração da v2, o fluxo simplifica: o cliente envia a
+    URL original + identidade semântica estruturada, e o servidor
+    devolve short_url + long_url já transformados com a nossa
+    identidade aplicada. As transformações locais de URL
+    (_trocar_identidade_lista, _trocar_identidade_campanha) deixam
+    de ser invocadas; a anti-vazamento migra para a verificação
+    da tag na resposta do servidor.
 
     Fluxo:
       1. sanitiza a URL recebida
-      2. consulta o cache (memória + persistente, via mediador)
+      2. consulta o cache mediado
       3. expande encurtadores externos (meli.la) ou internos (/sec/)
-      4. valida que a URL pós-expansão continua pertencendo a ML
+      4. valida que a URL pós-expansão continua sendo ML
       5. detecta cenário entre lista, campanha e produto
-      6. transforma a URL conforme o cenário
-      7. valida anti-vazamento — última barreira antes da API
-      8. chama API afiliada com retry e refresh automático
-      9. valida que a resposta é uma meli.la legítima
-     10. registra o par (original, curto) no cache mediado
+      6. chama CreateLink com payload estruturado
+      7. valida que a resposta é uma meli.la legítima
+      8. registra o par (original, curto) no cache mediado
     """
     url = _sanitizar_url(url)
 
@@ -820,7 +819,7 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         )
         return AUSENTE
 
-    # 5. Detecção de cenário.
+    # 5. Detecção de cenário (necessária para o campo 'type' do payload).
     cenario = _cenario_de(url_expandida)
     if not cenario:
         log_nrm.warning(
@@ -829,42 +828,20 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         )
         return AUSENTE
 
-    # 6. Transformação por cenário.
-    try:
-        if cenario == "lista":
-            url_pronta = _trocar_identidade_lista(url_expandida)
-        elif cenario == "campanha":
-            url_pronta = _trocar_identidade_campanha(url_expandida)
-        else:  # produto
-            url_pronta = _limpar_url_produto(url_expandida)
-    except Exception as e:
-        log_nrm.warning(
-            f"⚠️ ML transformação ({cenario}) falhou: {e}"
-        )
-        return AUSENTE
+    log_nrm.info(f"🎯 ML {cenario}: {url_expandida[:90]}")
 
-    log_nrm.info(f"🎯 ML {cenario}: {url_pronta[:90]}")
-
-    # 7. Validação anti-vazamento.
-    if not _validar_url_propria(url_pronta):
-        log_nrm.error(
-            f"🚫 ML identidade externa detectada — abortado: "
-            f"{url_pronta[:90]}"
-        )
-        return AUSENTE
-
-    # 8. Chamada à API afiliada.
-    short = await _chamar_api_shorten(url_pronta, sessao)
+    # 6. Chamada à API afiliada moderna (CreateLink v2).
+    short = await _chamar_api_create_link(url_expandida, cenario, sessao)
     if not short:
         log_nrm.warning(f"❌ ML API falhou para {url[:60]}")
         return AUSENTE
 
-    # 9. Validação da resposta — deve ser meli.la.
+    # 7. Validação da resposta — host deve ser meli.la.
     if _netloc(short) != "meli.la":
         log_nrm.error(f"⚠️ ML resposta com host inesperado: {short}")
         return AUSENTE
 
-    # 10. Registro no cache mediado.
+    # 8. Registro no cache mediado.
     registrar_link(url, short, _IDENTIFICADOR)
     return short
 
