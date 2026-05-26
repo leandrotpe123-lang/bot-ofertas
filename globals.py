@@ -23,8 +23,6 @@ from logger import log_db
 # ── Caches in-memory ─────────────────────────────────────────────
 _raw_cache:   OrderedDict[str, str] = OrderedDict()
 _final_cache: OrderedDict[str, str] = OrderedDict()
-_cls_cache:   OrderedDict          = OrderedDict()   # str → LinkClassificado
-_cls_lock    = Lock()
 _cache_lock  = Lock()
 _CACHE_LIMIT = 5000
 
@@ -170,6 +168,6 @@ def _log_cache_stats():
     from database import _db_count_links
     log_db.debug(
         f"📦 Cache | raw={len(_raw_cache)} final={len(_final_cache)} "
-        f"cls={len(_cls_cache)} db_links={_db_count_links()}"
+        f"db_links={_db_count_links()}"
 )
     
