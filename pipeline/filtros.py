@@ -11,11 +11,22 @@ arquiteturalmente no momento apropriado. O ponto de integração,
 as regras a preservar e a adaptação às APIs canônicas serão
 definidos nessa etapa.
 
-As dependências atuais de símbolos legados de pipeline.classificacao
-são conscientemente toleradas durante o estado de congelamento.
-A depuração futura da cascata concreta de plataforma pode tornar
-este módulo temporariamente não-importável, o que é tratado como
-dívida consciente de congelamento, não como regressão operacional.
+═══════════════════════════════════════════════════════════════════
+DEPENDÊNCIAS — SOBERANIA DO REGISTRY
+═══════════════════════════════════════════════════════════════════
+Este módulo consome a fronteira semântica canônica da casa para
+reconhecimento de URLs:
+  - reconhecimento de plataforma : `plataformas.registry.resolver()`,
+    fonte única de verdade composta automaticamente pelos plugins
+    via Auto Discovery;
+  - categorias universais        : `utils.categorias_universais`,
+    soberano para as quatro categorias que não pertencem a nenhuma
+    plataforma (mundial, bloqueado, preservar, expandir).
+
+Nenhum conhecimento concreto de plataforma vive aqui. Quando novos
+plugins forem registrados pelo Auto Discovery, suas URLs passam a
+ser reconhecidas automaticamente por este módulo, sem alteração
+local.
 """
 from __future__ import annotations
 
@@ -24,12 +35,9 @@ from dataclasses import dataclass
 from typing import Tuple
 
 from logger import log_cls
-from pipeline.classificacao import _ENCURTADORES_POR_PLAT, _classificar_cached
+from plataformas import registry
+from utils.categorias_universais import eh_encurtador_generico
 from utils.urls import _netloc
-
-
-# ── Conjunto de plataformas comerciais ────────────────────────────
-_PLAT_COMERCIAL = frozenset(_ENCURTADORES_POR_PLAT.keys()) | {"expandir"}
 
 
 # ── Filtro de produtos: termos bloqueados ─────────────────────────
@@ -174,12 +182,36 @@ def _tem_link_concorrente(texto: str) -> bool:
 
 
 def _tem_link_plataforma_real(texto: str) -> bool:
+    """
+    Verdadeiro se ao menos uma URL no texto pertence a uma
+    plataforma reconhecida pelo registry ou é um encurtador
+    genérico que provavelmente revelará uma plataforma após
+    expansão.
+
+    A pergunta semântica é: existe presença comercial real no
+    post? A resposta combina duas fontes complementares e
+    arquiteturalmente coerentes:
+
+      - registry.resolver(url) : plataforma reconhecida (domínio
+        próprio ou encurtador próprio de algum plugin cadastrado
+        no registry, automaticamente descoberto via Auto Discovery);
+
+      - eh_encurtador_generico(url) : encurtador universal que
+        ainda não foi expandido — presença comercial provável,
+        cuja categoria definitiva só será conhecida após desencurtar.
+
+    À medida que novos plugins forem registrados pelo Auto Discovery,
+    esta função passa a reconhecer suas URLs automaticamente, sem
+    alteração local. É exatamente a propriedade Zero-Touch
+    Extension prometida pela arquitetura da casa.
+    """
     urls = re.findall(r'https?://[^\s\)>\]\}",;]+', texto)
     if not urls:
         return False
     for url in urls:
-        lc = _classificar_cached(url)
-        if lc.plat in _PLAT_COMERCIAL:
+        if registry.resolver(url) is not None:
+            return True
+        if eh_encurtador_generico(url):
             return True
     return False
 
@@ -227,4 +259,5 @@ def avaliar(texto: str, contexto_extra: str = "") -> ResultadoFiltro:
 
     return ResultadoFiltro(
         bloqueado=False, override=override, motivo="",
-    )
+)
+    
