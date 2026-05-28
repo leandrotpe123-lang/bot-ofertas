@@ -315,8 +315,11 @@ def _detectar_tipo_oferta(norm: MensagemNormalizada) -> str:
     """
     texto = norm.texto_limpo
 
-    # P1: tem ID de produto E NÃO é post-cupom → produto
-    if norm.ids_globais and not _eh_post_cupom(texto):
+    # P1: tem ID de produto → produto. PRIORIDADE PRODUTO sobre cupom:
+    # um produto pode trazer cupom embutido (ex.: Shopee); a presença
+    # de id de produto define o tipo, e o cupom passa a ser ATRIBUTO
+    # do produto, não um evento de cupom separado.
+    if norm.ids_globais:
         return "produto"
 
     # P2: é post-cupom (cupom domina o título) → cupom
@@ -327,9 +330,8 @@ def _detectar_tipo_oferta(norm: MensagemNormalizada) -> str:
     if norm.cupom and not norm.ids_globais:
         return "cupom"
 
-    # P4: tem ID de produto (caso restante)
-    if norm.ids_globais:
-        return "produto"
+    # (P4 removido: a prioridade de produto em P1 já cobre todo caso
+    #  com ids_globais; este ramo havia se tornado inalcançável.)
 
     # P5: cashback sem cupom code
     if _eh_post_cashback(texto):
@@ -354,22 +356,34 @@ def _janela_por_tipo(tipo: str) -> float:
 
 def identidade_canonica(norm: MensagemNormalizada) -> str:
     """
-    Chave estável da oferta. Hierarquia em 7 níveis:
+    Chave estável da oferta. Hierarquia (prioridade de cima p/ baixo):
 
       0. Lista de cupons → plat|cuplist|hash(sorted(cupons))
+      P. PRODUTO         → plat|prod|ids|preco|cupom   ← PRIORIDADE
       1. Post-cupom      → plat|cup|CODIGO
       2. Post-cashback   → plat|cash|VALOR%
-      3. Produto/ASIN    → plat|min(ids_globais)        ← determinístico
-      4. Campanha        → plat|camp|chave_campanha     ← derivada na norm.
+      4. Campanha        → plat|camp|chave_campanha    ← derivada na norm.
       5. Cupom genérico  → plat|cup|CODIGO
       6. URL canônica    → plat|url|cache_key
       7. Texto           → plat|txt|hash
 
-    NÍVEL 3 — Produto/ASIN: usa o MENOR id_global (alfabético) em vez
-    do primeiro. Garante que a mesma oferta vinda de grupos diferentes
-    (que podem montar mapa em ordens diferentes) produza a MESMA
-    identidade. Cupom diferente no mesmo produto = melhoria avaliada
-    por SCORE em enviar(), não duplicação.
+    NÍVEL P — PRODUTO (prioridade sobre cupom): quando há id_global,
+    a oferta é um PRODUTO, mesmo que traga cupom embutido (ex.: Shopee).
+    O cupom vira ATRIBUTO do produto, não evento de cupom separado.
+
+    A identidade do produto carrega PREÇO e CUPOM como assinatura:
+    o mesmo produto com preço OU cupom DIFERENTE é uma oferta
+    DIFERENTE e NÃO pode deduplicar. Mesmo produto + mesmo preço +
+    mesmo cupom = mesma oferta → deduplica (SCORE decide editar/ignorar
+    em enviar()).
+
+    O componente de produto é o conjunto ORDENADO de ids (não o menor),
+    para preservar a identidade de TODOS os produtos. Assim um post
+    COMBINADO (X+Y+Z) tem identidade distinta de cada post individual,
+    sem colisão silenciosa. A absorção de posts individuais por um
+    combo (apagar individual e mantê-lo no combo editado) é decisão da
+    camada de PUBLICAÇÃO — próximo módulo —, que consumirá estas
+    identidades; esta camada apenas as DERIVA de forma estável.
 
     NÍVEL 4 — Campanha: usa a chave_campanha derivada pela normalização
     sobre as URLs afiliadas LONGAS. A chave é host+caminho canônico —
@@ -395,7 +409,17 @@ def identidade_canonica(norm: MensagemNormalizada) -> str:
             cupons_hash = _fp4("|".join(cupons_set))
             return f"{plat}|cuplist|{cupons_hash}"
 
-    # NÍVEL 1: Post-cupom — cupom no título manda no produto
+    # NÍVEL P (PRIORIDADE PRODUTO): produto com id_global.
+    # Preço e cupom entram na ASSINATURA — preço OU cupom diferente =
+    # oferta diferente = NÃO deduplica. Conjunto ORDENADO de ids
+    # preserva TODAS as identidades (combo ≠ individual, sem colisão).
+    if norm.ids_globais:
+        ids_sig   = "+".join(sorted(norm.ids_globais))
+        preco_sig = _normalizar_valor(texto)
+        cupom_sig = norm.cupom.upper() if norm.cupom else ""
+        return f"{plat}|prod|{ids_sig}|{preco_sig}|{cupom_sig}"
+
+    # NÍVEL 1: Post-cupom SEM produto — cupom é o assunto principal
     if _eh_post_cupom(texto) and norm.cupom:
         return f"{plat}|cup|{norm.cupom.upper()}"
 
@@ -405,10 +429,8 @@ def identidade_canonica(norm: MensagemNormalizada) -> str:
         if pct:
             return f"{plat}|cash|{pct}"
 
-    # NÍVEL 3: Produto com ASIN/SKU — id menor (determinístico)
-    if norm.ids_globais:
-        id_menor = min(norm.ids_globais)
-        return f"{plat}|{id_menor}"
+    # (NÍVEL 3 antigo removido: a identidade de produto subiu para o
+    #  NÍVEL P, agora ciente de preço/cupom e com prioridade sobre cupom.)
 
     # NÍVEL 4: Campanha/evento — chave_campanha derivada na normalização
     if _eh_post_evento(texto, norm.tem_host_campanha):
