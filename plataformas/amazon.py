@@ -25,7 +25,9 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 import aiohttp
 
 import config
-from config import _AMZ_TAG
+import os
+
+_AMZ_TAG = os.environ.get("AMAZON_TAG", "leo21073-20")
 from logger import log_nrm
 from plataformas.contrato import (
     AUSENTE,
