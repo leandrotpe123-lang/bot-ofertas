@@ -15,16 +15,6 @@ GRUPOS_ORIGEM  = [
 ]
 GRUPO_DESTINO  = "@ofertap"
 
-# ── Afiliados ─────────────────────────────────────────────────────
-_AMZ_TAG     = os.environ.get("AMAZON_TAG",         "leo21073-20")
-_SHP_APP_ID  = os.environ.get("SHOPEE_APP_ID",      "18348480261")
-_SHP_SECRET  = os.environ.get("SHOPEE_SECRET",      "")
-_MGL_PARTNER = os.environ.get("MAGALU_PARTNER_ID",  "3440")
-_MGL_PROMOTER= os.environ.get("MAGALU_PROMOTER_ID", "5479317")
-_MGL_PID     = os.environ.get("MAGALU_PID",         "magazinevoce")
-_MGL_SLUG    = os.environ.get("MAGALU_SLUG",        "magazineleo12")
-_CUTTLY_KEY  = os.environ.get("CUTTLY_API_KEY",     "")
-
 # ── Encurtador próprio ────────────────────────────────────────────
 _RAILWAY_DOMAIN = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
 _SHORT_BASE = f"https://{_RAILWAY_DOMAIN}" if _RAILWAY_DOMAIN else "https://leoind.com.br"
