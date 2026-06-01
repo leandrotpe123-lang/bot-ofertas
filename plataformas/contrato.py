@@ -127,6 +127,19 @@ class Plataforma:
                                  de quirk HTTP, não de identidade
                                  de plataforma. None equivale a
                                  não declarar; o core ignora.
+
+      - hosts_campanha : frozenset[str] | None. Conjunto de hosts
+                         cujas URLs afiliadas LONGAS caracterizam uma
+                         página de campanha desta plataforma (ex.: a
+                         landing de uma roleta, uma campanha sazonal).
+                         Conhecimento de host de campanha, declarado
+                         localmente. O core compõe a UNIÃO das
+                         contribuições de todas as plataformas
+                         registradas e a utiliza para derivar
+                         tem_host_campanha e chave_campanha. Não
+                         contém lógica de campanha. None equivale a
+                         não declarar; o core ignora.                            
+
     """
     # Identidade
     identificador:   str
@@ -143,3 +156,5 @@ class Plataforma:
     requer_encurtamento:  bool = False
     encurtadores_forca_get: Optional[frozenset[str]] = None
     hosts_campanha:       Optional[frozenset[str]] = None
+
+
