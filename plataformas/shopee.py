@@ -32,7 +32,10 @@ from urllib.parse import urlparse
 import aiohttp
 
 import config
-from config import _SHP_APP_ID, _SHP_SECRET
+import os
+
+_SHP_APP_ID = os.environ.get("SHOPEE_APP_ID", "18348480261")
+_SHP_SECRET = os.environ.get("SHOPEE_SECRET", "")
 from logger import log_nrm
 from plataformas.contrato import (
     AUSENTE,
