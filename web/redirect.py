@@ -1,4 +1,4 @@
-"""Servidor web de redirect — encurtador próprio Magalu."""
+"""Servidor web de redirect do encurtador próprio (agnóstico de plataforma)."""
 from __future__ import annotations
 import os
 
