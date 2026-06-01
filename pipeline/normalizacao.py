@@ -228,27 +228,125 @@ def _eh_encurtador_generico(url: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────
-# HOSTS DE CAMPANHA
-# Conjunto de hosts que caracterizam uma campanha. Usado na derivação
-# da identidade de campanha, sobre URLs afiliadas LONGAS.
+# HOSTS DE CAMPANHA — COMPOSIÇÃO VIA REGISTRY
 #
-# OBSERVAÇÃO DE EVOLUÇÃO: este conjunto é hoje uma constante fixa e
-# estável. Caso o número de plataformas cresça e o conjunto se torne
-# volátil, avaliar a sua migração para uma capacidade declarativa do
-# contrato. Não é pendência obrigatória; é observação de evolução.
+# O conhecimento de quais hosts caracterizam uma página de campanha
+# pertence a cada plataforma e é declarado na capacidade
+# hosts_campanha do contrato. Este módulo NÃO mantém lista concreta
+# de hosts de marketplace: compõe a UNIÃO das contribuições das
+# plataformas registradas, do mesmo modo que url_resolver compõe
+# encurtadores_forca_get.
+#
+# DIVERGÊNCIA DELIBERADA EM RELAÇÃO A _compor_forca_get:
+#   A composição de força-GET parte de um conjunto local de
+#   encurtadores GENÉRICOS (universais, sem dono). Hosts de campanha
+#   NÃO têm componente universal: todo host de campanha legítimo
+#   pertence a uma plataforma. Semear um conjunto local de hosts de
+#   campanha reintroduziria exatamente o acoplamento que esta
+#   migração elimina. Por isso a semente é VAZIA — a união provém
+#   integralmente das plataformas.
 # ─────────────────────────────────────────────────────────────────
-_HOSTS_CAMPANHA = frozenset({
-    # Domínios de marketplace cujas URLs longas podem caracterizar
-    # uma página de campanha (ex.: shopee.com.br/m/roleta).
-    "shopee.com.br", "s.shopee.com.br", "magazinevoce.com.br",
-    "magazineluiza.com.br", "amazon.com.br",
-    # Domínios dedicados a evento ou promoção. Reconciliados ao
-    # conjunto canônico para que tem_host_campanha e chave_campanha
-    # ofereçam cobertura uniforme sobre eles, evitando perda
-    # silenciosa de detecção na transição em que a deduplicação
-    # passou a consumir os campos derivados.
-    "flapremios.com.br", "premios.shopee.com.br", "primevideo.com",
-})
+_HOSTS_CAMPANHA_COMPOSTO: Optional[frozenset] = None
+
+
+def _compor_hosts_campanha() -> frozenset:
+    """
+    Compõe a união dos hosts de campanha declarados pelas plataformas
+    registradas, lendo a capacidade hosts_campanha de cada uma via
+    registry. Defensiva por fonte: falha ao ler uma plataforma não
+    bloqueia as demais. NÃO faz cache; o cache é de _hosts_campanha.
+    Sem semente local — hosts de campanha não têm componente universal.
+    """
+    composto: set = set()
+
+    identificadores = registry.plataformas_registradas()
+    if not identificadores:
+        log_nrm.warning(
+            "⚠ _compor_hosts_campanha: registry vazio na composição — "
+            "nenhum host de campanha disponível"
+        )
+        return frozenset()
+
+    for ident in identificadores:
+        try:
+            plataforma = registry.acessar(ident)
+            if plataforma is None:
+                continue
+            contrib = plataforma.hosts_campanha
+            if contrib is not None:
+                composto |= contrib
+        except Exception as e:
+            log_nrm.warning(
+                f"⚠ _compor_hosts_campanha: falha lendo plataforma "
+                f"{ident!r}: {e}"
+            )
+
+    return frozenset(composto)
+
+
+def _logar_decomposicao_hosts_campanha() -> None:
+    """
+    Log observacional por plataforma da composição. Estritamente
+    observacional: não altera composição nem cache, não propaga
+    exceção. Espelha _logar_decomposicao_inicial de url_resolver e
+    torna VISÍVEL, no log, exatamente quais hosts cada plataforma
+    contribui — base empírica para verificar a preservação.
+    """
+    try:
+        for ident in registry.plataformas_registradas():
+            try:
+                plataforma = registry.acessar(ident)
+                if plataforma is None:
+                    continue
+                contrib = plataforma.hosts_campanha
+                if contrib is None:
+                    log_nrm.info(
+                        f"⚙ _hosts_campanha: fonte=plataforma "
+                        f"id={ident!r} contribuicao=nao_declarada"
+                    )
+                else:
+                    log_nrm.info(
+                        f"⚙ _hosts_campanha: fonte=plataforma "
+                        f"id={ident!r} hosts={sorted(contrib)}"
+                    )
+            except Exception as e:
+                log_nrm.warning(
+                    f"⚠ _hosts_campanha: falha lendo plataforma "
+                    f"{ident!r} p/ decomposição: {e}"
+                )
+    except Exception as e:
+        log_nrm.warning(
+            f"⚠ _hosts_campanha: falha iterando registry "
+            f"p/ decomposição: {e}"
+        )
+
+
+def _hosts_campanha() -> frozenset:
+    """
+    Devolve o conjunto efetivo de hosts de campanha, compondo-o lazy
+    na primeira chamada e cacheando em variável de módulo. Na
+    composição inicial, emite log observacional por fonte. Espelha
+    _hosts_forca_get.
+    """
+    global _HOSTS_CAMPANHA_COMPOSTO
+    if _HOSTS_CAMPANHA_COMPOSTO is None:
+        _HOSTS_CAMPANHA_COMPOSTO = _compor_hosts_campanha()
+        log_nrm.info(
+            f"⚙ _hosts_campanha: composição inicial — "
+            f"{len(_HOSTS_CAMPANHA_COMPOSTO)} hosts"
+        )
+        _logar_decomposicao_hosts_campanha()
+    return _HOSTS_CAMPANHA_COMPOSTO
+
+
+def _resetar_hosts_campanha() -> None:
+    """
+    Invalida o cache da composição. Costura única de invalidação,
+    preparada para registro tardio de plataforma e ciclos de teste
+    isolados. Espelha _resetar_forca_get.
+    """
+    global _HOSTS_CAMPANHA_COMPOSTO
+    _HOSTS_CAMPANHA_COMPOSTO = None
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -306,13 +404,15 @@ def _identificador_de(url: str) -> str:
 
 def _eh_host_de_campanha(url: str) -> bool:
     """
-    Verdadeiro se o host de uma única URL pertence ao conjunto de
-    hosts de campanha. Predicado unitário. Opera sobre a URL
-    afiliada LONGA, usando _netloc — a função canônica de extração
-    de host do projeto.
+    Verdadeiro se o host de uma única URL pertence à união de hosts
+    de campanha composta a partir das plataformas registradas.
+    Predicado unitário, sobre a URL afiliada LONGA, usando _netloc.
+    A semântica de casamento (igualdade ou sufixo) é idêntica à do
+    conjunto hardcoded anterior, preservando o comportamento.
     """
     host = _netloc(url)
-    for h in _HOSTS_CAMPANHA:
+    hosts = _hosts_campanha()
+    for h in hosts:
         if host == h or host.endswith("." + h):
             return True
     return False
