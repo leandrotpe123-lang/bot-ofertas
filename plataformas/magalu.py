@@ -74,6 +74,10 @@ _ENCURTADORES_FORCA_GET = frozenset({
     "maga.lu",
 })
 
+# ── Hosts de campanha ─────────────────────────────────────────────
+_HOSTS_CAMPANHA = frozenset({
+    "magazineluiza.com.br", "magazinevoce.com.br",
+})
 
 # ── Padrão de extração do identificador de produto ────────────────
 _P_PRODUTO = re.compile(r'/(?:[^/]+/)?p/([a-z0-9]{5,})(?:/|$|[?#])', re.I)
@@ -285,5 +289,6 @@ PLATAFORMA = Plataforma(
     parametros_temporais=_PARAMETROS_TEMPORAIS,
     limpa_url=limpa_url,
     encurtadores_forca_get=_ENCURTADORES_FORCA_GET,
+    hosts_campanha=_HOSTS_CAMPANHA,
     requer_encurtamento=True,
 )
