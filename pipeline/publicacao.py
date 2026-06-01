@@ -282,32 +282,6 @@ def _deve_substituir_post(
     return True
 
 
-# ─────────────────────────────────────────────────────────────────
-# Hook pós-publicação por plataforma
-#
-# Pós-processamento específico que algumas plataformas precisam
-# (encurtamento background de URLs longas, etc).
-#
-# DÉBITO ARQUITETURAL: este hook conhece a plataforma "magalu" e
-# deveria viver em plataformas/magalu.py, sendo invocado via uma
-# API genérica no affiliate_router. Migrar quando o router ganhar
-# `pos_publicacao(montada)`.
-# ─────────────────────────────────────────────────────────────────
-async def _hook_pos_envio(montada: MensagemMontada) -> None:
-    if montada.plat != "magalu" or not montada.mapa:
-        return
-    try:
-        from plataformas.magalu import _cuttly_background
-    except Exception:
-        return
-    for orig, conv in montada.mapa.items():
-        if "partner_id" in conv and "leoind.com.br" not in conv:
-            try:
-                asyncio.create_task(_cuttly_background(conv, montada.msg_id))
-            except Exception:
-                pass
-
-
 async def enviar(montada: MensagemMontada,
                  norm: Optional[MensagemNormalizada] = None,
                  is_edit: bool = False) -> bool:
@@ -535,12 +509,6 @@ async def _enviar_inner(montada: MensagemMontada,
 
         if norm is not None and norm.is_override:
             log_out.info(f"🔓 [OVERRIDE_OK] Post liberado publicado | id={sent.id}")
-
-        # Hook por plataforma (encurtamento, etc) — falhas não revogam envio
-        try:
-            await _hook_pos_envio(montada)
-        except Exception as e:
-            log_sys.warning(f"⚠️ _hook_pos_envio: {e}")
 
         log_out.info(
             f"🚀 [OK] @{montada.chat}→{GRUPO_DESTINO} | "
