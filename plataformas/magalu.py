@@ -27,7 +27,11 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse, quote
 import aiohttp
 
 import config
-from config import _MGL_PARTNER, _MGL_PROMOTER, _MGL_PID
+import os
+
+_MGL_PARTNER = os.environ.get("MAGALU_PARTNER_ID", "3440")
+_MGL_PROMOTER = os.environ.get("MAGALU_PROMOTER_ID", "5479317")
+_MGL_PID = os.environ.get("MAGALU_PID", "magazinevoce")
 from logger import log_nrm
 from plataformas.contrato import (
     AUSENTE,
