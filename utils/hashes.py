@@ -16,9 +16,3 @@ def _fp_c3(id_global: str, plat: str) -> str:
 def _fp_benef(id_global: str, plat: str, benef: frozenset) -> str:
     """Fingerprint para conjunto de benefícios de uma oferta."""
     return _fp4(f"{plat}|ben|{id_global}|{'|'.join(sorted(benef))}")
-
-
-def _gerar_code_magalu(url_afiliada: str) -> str:
-    """Código estável de 7 chars para o encurtador próprio Magalu."""
-    return hashlib.sha256(url_afiliada.encode()).hexdigest()[:7]
-  
