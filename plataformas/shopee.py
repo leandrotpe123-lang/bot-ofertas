@@ -78,6 +78,15 @@ _ENCURTADORES_FORCA_GET = frozenset()
 # Domínio de campanha de tratamento por repasse direto, sem afiliação.
 _REPASSE_DIRETO = frozenset({"flapremios.com.br"})
 
+# ── Hosts de campanha ─────────────────────────────────────────────
+# Hosts cujas URLs afiliadas LONGAS caracterizam uma página de
+# campanha da Shopee. Declarados localmente; o core compõe a união
+# entre plataformas para derivar tem_host_campanha e chave_campanha.
+_HOSTS_CAMPANHA = frozenset({
+    "shopee.com.br", "s.shopee.com.br", "premios.shopee.com.br",
+    "flapremios.com.br",
+})
+
 
 # ── Padrões de extração do identificador de produto ───────────────
 # Na Shopee, o produto é identificado pelo par (loja, item).
@@ -350,4 +359,5 @@ PLATAFORMA = Plataforma(
     parametros_temporais=_PARAMETROS_TEMPORAIS,
     limpa_url=limpa_url,
     encurtadores_forca_get=_ENCURTADORES_FORCA_GET,
+    hosts_campanha=_HOSTS_CAMPANHA,
 )
