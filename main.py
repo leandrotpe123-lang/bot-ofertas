@@ -36,7 +36,6 @@ from client import client
 from config import (
     API_ID, API_HASH, SESSION_STRING,
     GRUPOS_ORIGEM, GRUPO_DESTINO,
-    _AMZ_TAG, _SHP_APP_ID, _MGL_PROMOTER, _MGL_SLUG,
     _PIL_OK, _EXECUTOR,
 )
 
