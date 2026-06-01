@@ -64,6 +64,10 @@ _ENCURTADORES_FORCA_GET = frozenset({
     "amzn.to", "a.co", "amzn.com", "amzlink.to",
 })
 
+# ── Hosts de campanha ─────────────────────────────────────────────
+_HOSTS_CAMPANHA = frozenset({
+    "amazon.com.br",
+})
 
 # ── Padrões de extração ───────────────────────────────────────────
 _P_ASIN = [
@@ -311,4 +315,5 @@ PLATAFORMA = Plataforma(
     parametros_temporais=_PARAMETROS_TEMPORAIS,
     limpa_url=limpa_url,
     encurtadores_forca_get=_ENCURTADORES_FORCA_GET,
+    hosts_campanha=_HOSTS_CAMPANHA,
 )
