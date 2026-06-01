@@ -142,3 +142,4 @@ class Plataforma:
     limpa_url:            Optional[Callable[[str], str]] = None
     requer_encurtamento:  bool = False
     encurtadores_forca_get: Optional[frozenset[str]] = None
+    hosts_campanha:       Optional[frozenset[str]] = None
