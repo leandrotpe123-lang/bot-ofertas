@@ -67,6 +67,7 @@ _ENCURTADORES_FORCA_GET = frozenset({
 # ── Hosts de campanha ─────────────────────────────────────────────
 _HOSTS_CAMPANHA = frozenset({
     "amazon.com.br",
+    "primevideo.com",
 })
 
 # ── Padrões de extração ───────────────────────────────────────────
