@@ -460,27 +460,12 @@ async def _checar_reativacao(norm: MensagemNormalizada) -> bool:
         return False
     return True
 
-
-# ─────────────────────────────────────────────────────────────────
-# Wrapping de persistência (schema legado)
-#
-# A pipeline opera com `ids_globais` (lista, modelo unificado).
-# O schema do DB tem colunas separadas (`asin`, `id_prod`) por razões
-# históricas. Esta função traduz entre os dois, isolando o mapeamento
-# do fluxo principal da pipeline.
-#
-# É a ÚNICA referência a nome de plataforma no módulo. Quando o DB
-# unificar para uma coluna `id_global`, remover esta função e chamar
-# `db_set_dedupe` diretamente da `deve_enviar_async`.
-# ─────────────────────────────────────────────────────────────────
 def _persistir_dedupe(fp, plat, cupons, alma, tipo, ids_globais, benef):
-    if not ids_globais:
-        asin, id_prod = "", ""
-    elif plat == "amazon":
-        asin, id_prod = ids_globais[0], ""
-    else:
-        asin, id_prod = "", ids_globais[0]
-    db_set_dedupe(fp, plat, cupons, alma, tipo, asin, id_prod, benef)
+    # id_prod é a coluna única de identidade de produto, para toda
+    # plataforma. A coluna asin permanece vazia (legado a remover em
+    # frente de limpeza própria). Sem ramo por nome de plataforma.
+    id_prod = ids_globais[0] if ids_globais else ""
+    db_set_dedupe(fp, plat, cupons, alma, tipo, "", id_prod, benef)
 
 
 # ─────────────────────────────────────────────────────────────────
