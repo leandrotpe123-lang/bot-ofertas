@@ -354,105 +354,101 @@ def _janela_por_tipo(tipo: str) -> float:
     return float(config._JANELA_EVENTO_S)
 
 
-def identidade_canonica(norm: MensagemNormalizada) -> str:
+def _id_lista_cupons(norm, plat, texto):
+    if not _eh_lista_cupons(texto):
+        return None
+    cupons_todos = extrair_todos_cupons(
+        texto, getattr(norm, "code_entities", None)
+    )
+    if not cupons_todos:
+        return None
+    cupons_set = sorted(set(c.upper() for c in cupons_todos))
+    return f"{plat}|cuplist|{_fp4('|'.join(cupons_set))}"
+
+
+def _id_produto(norm, plat, texto):
+    # Produto vence cupom: cupom diferente no mesmo produto é melhoria
+    # avaliada por SCORE em enviar(), não duplicação.
+    if not norm.ids_globais:
+        return None
+    return f"{plat}|{min(norm.ids_globais)}"
+
+
+def _id_cupom_sem_produto(norm, plat, texto):
+    # AUTORIDADE DO CUPOM — fato objetivo, não heurística de formato.
+    # Condição exclusiva: cupom válido extraído E ausência de produto.
+    # `not norm.ids_globais` é redundante com a precedência (produto já
+    # foi avaliado antes), mas é DECLARADO aqui para que a autoridade do
+    # nível não dependa da posição na sequência.
+    if not norm.cupom or norm.ids_globais:
+        return None
+    return f"{plat}|cup|{norm.cupom.upper()}"
+
+
+def _id_cashback(norm, plat, texto):
+    if not _eh_post_cashback(texto) or norm.cupom:
+        return None
+    pct = _extrair_pct_cashback(texto)
+    if not pct:
+        return None
+    return f"{plat}|cash|{pct}"
+
+
+def _id_campanha(norm, plat, texto):
+    if not _eh_post_evento(texto, norm.tem_host_campanha):
+        return None
+    if norm.chave_campanha:
+        return f"{plat}|camp|{norm.chave_campanha}"
+    m = _RE_EVENTO_CAMPANHA.search(texto[:200])
+    if m:
+        return f"{plat}|camp|{m.group(0).lower()}"
+    return None
+
+
+def _id_url(norm, plat, texto):
+    # Fallback operacional NÃO semântico — única leitura do mapa aqui.
+    if not norm.mapa:
+        return None
+    primeira_url = next(iter(norm.mapa.values()), None)
+    if not primeira_url:
+        return None
+    return f"{plat}|url|{_cache_key(primeira_url)}"
+
+
+def _id_texto(norm, plat, texto):
+    # Fallback terminal: nunca devolve None.
+    return f"{plat}|txt|{_fp4(_alma(texto))}"
+
+
+# A ordem desta tupla É a precedência. Não há precedência implícita.
+_HIERARQUIA_IDENTIDADE = (
+    _id_lista_cupons,
+    _id_produto,
+    _id_cupom_sem_produto,
+    _id_cashback,
+    _id_campanha,
+    _id_url,
+    _id_texto,
+)
+
+
+def identidade_canonica(norm: "MensagemNormalizada") -> str:
     """
-    Chave estável da oferta. Hierarquia (prioridade de cima p/ baixo):
+    Chave estável da oferta, determinada pela invariante de precedência
+    declarada em _HIERARQUIA_IDENTIDADE.
 
-      0. Lista de cupons → plat|cuplist|hash(sorted(cupons))
-      P. PRODUTO         → plat|prod|ids|preco|cupom   ← PRIORIDADE
-      1. Post-cupom      → plat|cup|CODIGO
-      2. Post-cashback   → plat|cash|VALOR%
-      4. Campanha        → plat|camp|chave_campanha    ← derivada na norm.
-      5. Cupom genérico  → plat|cup|CODIGO
-      6. URL canônica    → plat|url|cache_key
-      7. Texto           → plat|txt|hash
-
-    NÍVEL P — PRODUTO (prioridade sobre cupom): quando há id_global,
-    a oferta é um PRODUTO, mesmo que traga cupom embutido (ex.: Shopee).
-    O cupom vira ATRIBUTO do produto, não evento de cupom separado.
-
-    A identidade do produto carrega PREÇO e CUPOM como assinatura:
-    o mesmo produto com preço OU cupom DIFERENTE é uma oferta
-    DIFERENTE e NÃO pode deduplicar. Mesmo produto + mesmo preço +
-    mesmo cupom = mesma oferta → deduplica (SCORE decide editar/ignorar
-    em enviar()).
-
-    O componente de produto é o conjunto ORDENADO de ids (não o menor),
-    para preservar a identidade de TODOS os produtos. Assim um post
-    COMBINADO (X+Y+Z) tem identidade distinta de cada post individual,
-    sem colisão silenciosa. A absorção de posts individuais por um
-    combo (apagar individual e mantê-lo no combo editado) é decisão da
-    camada de PUBLICAÇÃO — próximo módulo —, que consumirá estas
-    identidades; esta camada apenas as DERIVA de forma estável.
-
-    NÍVEL 4 — Campanha: usa a chave_campanha derivada pela normalização
-    sobre as URLs afiliadas LONGAS. A chave é host+caminho canônico —
-    sem caminho, campanhas diferentes no mesmo domínio (ex: 3 campanhas
-    Shopee em shopee.com.br/m/*) colidiriam como duplicata. A
-    deduplicação CONSOME a chave já derivada e NÃO a reextrai do mapa,
-    que nesta fase já contém URLs de publicação, possivelmente
-    encurtadas.
-
-    NÍVEL 6 — URL canônica: única leitura do mapa nesta camada.
-    Fallback operacional NÃO semântico, explicitamente reconhecido.
+    A precedência NÃO depende da ordem de instruções `if`: o dispatcher
+    percorre _HIERARQUIA_IDENTIDADE em ordem e devolve a primeira
+    identidade não-nula. _eh_post_cupom NÃO participa desta decisão.
     """
     texto = norm.texto_limpo
-    plat  = norm.plat
-
-    # NÍVEL 0: LISTA DE CUPONS — identidade pelo conjunto ordenado
-    if _eh_lista_cupons(texto):
-        cupons_todos = extrair_todos_cupons(
-            texto, getattr(norm, "code_entities", None)
-        )
-        if cupons_todos:
-            cupons_set = sorted(set(c.upper() for c in cupons_todos))
-            cupons_hash = _fp4("|".join(cupons_set))
-            return f"{plat}|cuplist|{cupons_hash}"
-
-    # NÍVEL P (PRIORIDADE PRODUTO): produto com id_global.
-    # Preço e cupom entram na ASSINATURA — preço OU cupom diferente =
-    # oferta diferente = NÃO deduplica. Conjunto ORDENADO de ids
-    # preserva TODAS as identidades (combo ≠ individual, sem colisão).
-    if norm.ids_globais:
-        ids_sig   = "+".join(sorted(norm.ids_globais))
-        preco_sig = _normalizar_valor(texto)
-        cupom_sig = norm.cupom.upper() if norm.cupom else ""
-        return f"{plat}|prod|{ids_sig}|{preco_sig}|{cupom_sig}"
-
-    # NÍVEL 1: Post-cupom SEM produto — cupom é o assunto principal
-    if _eh_post_cupom(texto) and norm.cupom:
-        return f"{plat}|cup|{norm.cupom.upper()}"
-
-    # NÍVEL 2: Post-cashback sem código
-    if _eh_post_cashback(texto) and not norm.cupom:
-        pct = _extrair_pct_cashback(texto)
-        if pct:
-            return f"{plat}|cash|{pct}"
-
-    # (NÍVEL 3 antigo removido: a identidade de produto subiu para o
-    #  NÍVEL P, agora ciente de preço/cupom e com prioridade sobre cupom.)
-
-    # NÍVEL 4: Campanha/evento — chave_campanha derivada na normalização
-    if _eh_post_evento(texto, norm.tem_host_campanha):
-        if norm.chave_campanha:
-            return f"{plat}|camp|{norm.chave_campanha}"
-        m = _RE_EVENTO_CAMPANHA.search(texto[:200])
-        if m:
-            return f"{plat}|camp|{m.group(0).lower()}"
-
-    # NÍVEL 5: Cupom genérico
-    if norm.cupom:
-        return f"{plat}|cup|{norm.cupom.upper()}"
-
-    # NÍVEL 6: URL canônica do primeiro link
-    if norm.mapa:
-        primeira_url = next(iter(norm.mapa.values()), None)
-        if primeira_url:
-            return f"{plat}|url|{_cache_key(primeira_url)}"
-
-    # NÍVEL 7: Hash do texto normalizado
-    alma_v = _alma(texto)
-    return f"{plat}|txt|{_fp4(alma_v)}"
+    plat = norm.plat
+    for resolver in _HIERARQUIA_IDENTIDADE:
+        ident = resolver(norm, plat, texto)
+        if ident is not None:
+            return ident
+    # Inalcançável: _id_texto é total. Defesa explícita do invariante.
+    return f"{plat}|txt|{_fp4(_alma(texto))}"
 
 
 # ─────────────────────────────────────────────────────────────────
