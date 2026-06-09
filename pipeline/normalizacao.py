@@ -257,31 +257,17 @@ def _compor_hosts_campanha() -> frozenset:
     bloqueia as demais. NÃO faz cache; o cache é de _hosts_campanha.
     Sem semente local — hosts de campanha não têm componente universal.
     """
-    composto: set = set()
-
-    identificadores = registry.plataformas_registradas()
-    if not identificadores:
+    try:
+        # Composição com proveniência vive no registry (dono da camada
+        # coletiva). Visão plana = chaves do mapa elemento -> donos. A
+        # origem fica retida e consultável em registry.compor_capacidade,
+        # tornando avaliável a disjunção deste espaço com dono.
+        return frozenset(registry.compor_capacidade("hosts_campanha").keys())
+    except Exception as e:
         log_nrm.warning(
-            "⚠ _compor_hosts_campanha: registry vazio na composição — "
-            "nenhum host de campanha disponível"
+            f"⚠ _compor_hosts_campanha: falha compondo via registry: {e}"
         )
         return frozenset()
-
-    for ident in identificadores:
-        try:
-            plataforma = registry.acessar(ident)
-            if plataforma is None:
-                continue
-            contrib = plataforma.hosts_campanha
-            if contrib is not None:
-                composto |= contrib
-        except Exception as e:
-            log_nrm.warning(
-                f"⚠ _compor_hosts_campanha: falha lendo plataforma "
-                f"{ident!r}: {e}"
-            )
-
-    return frozenset(composto)
 
 
 def _logar_decomposicao_hosts_campanha() -> None:
