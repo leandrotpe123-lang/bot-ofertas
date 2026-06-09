@@ -82,29 +82,16 @@ def _compor_forca_get() -> frozenset[str]:
 
     try:
         from plataformas import registry  # lazy: evita ciclo de import
-        identificadores = registry.plataformas_registradas()
-        if not identificadores:
-            log_nrm.warning(
-                "⚠ _compor_forca_get: registry vazio no momento da "
-                "composição — contribuição de plataformas ausente"
-            )
-        else:
-            for ident in identificadores:
-                try:
-                    plataforma = registry.acessar(ident)
-                    if plataforma is None:
-                        continue
-                    contrib = plataforma.encurtadores_forca_get
-                    if contrib is not None:
-                        composto |= contrib
-                except Exception as e:
-                    log_nrm.warning(
-                        f"⚠ _compor_forca_get: falha lendo plataforma "
-                        f"{ident!r}: {e}"
-                    )
+        # Composição com proveniência vive no registry (dono da camada
+        # coletiva). Aqui usamos a visão plana — as chaves do mapa
+        # elemento -> donos — para o teste de pertinência. A origem
+        # fica retida e consultável em registry.compor_capacidade.
+        composto |= set(
+            registry.compor_capacidade("encurtadores_forca_get").keys()
+        )
     except Exception as e:
         log_nrm.warning(
-            f"⚠ _compor_forca_get: falha iterando registry: {e}"
+            f"⚠ _compor_forca_get: falha compondo via registry: {e}"
         )
 
     return frozenset(composto)
