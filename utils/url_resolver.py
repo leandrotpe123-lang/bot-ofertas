@@ -49,14 +49,13 @@ _FORCA_GET_GENERICOS = frozenset({
 
 def _compor_forca_get() -> frozenset[str]:
     """
-    Compõe o conjunto efetivo de hosts que exigem GET, unindo três
-    fontes ordenadas por confiabilidade: encurtadores genéricos do
-    core, contribuições das plataformas via registry, e o legado
-    transitório de pipeline.classificacao.
-
-    Cada fonte é processada defensivamente — falhas em uma fonte
-    não bloqueiam a composição com as demais. No pior caso resta
-    o conjunto local de genéricos.
+    Compõe o conjunto efetivo de hosts que exigem GET: une os
+    encurtadores genéricos do core (universais, sem dono) com a
+    visão plana da composição de encurtadores_forca_get das
+    plataformas, obtida do registry (dono da camada coletiva). A
+    origem fica retida no registry; aqui só a visão plana importa.
+    No pior caso (registry indisponível) resta o conjunto local de
+    genéricos. Não faz cache — o cache vive no registry.
     """
     composto: set[str] = set(_FORCA_GET_GENERICOS)
 
