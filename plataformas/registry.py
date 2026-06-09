@@ -232,6 +232,33 @@ def formacao() -> Dict[str, tuple]:
         "falhas": tuple(_formacao_falhas),
     }
 
+def compor_capacidade(nome: str) -> Dict[str, frozenset[str]]:
+    """
+    Compõe uma capacidade agregável (frozenset[str]) ao longo do
+    catálogo RETENDO a origem: devolve elemento -> frozenset dos
+    identificadores que o declararam.
+
+    `nome` é o atributo de Plataforma a compor (ex.:
+    "encurtadores_forca_get", "hosts_campanha"); valor frozenset[str]
+    | None. O registry NÃO conhece o significado da capacidade —
+    compõe o frozenset nomeado pelo chamador; o sentido permanece da
+    plataforma. A visão plana (a união de hoje) é o conjunto de
+    chaves deste mapa.
+
+    A origem retida torna AVALIÁVEL a disjunção de espaços com dono:
+    uma chave com mais de um declarante é uma colisão observável. O
+    registry compõe e expõe; não julga se a colisão é legítima —
+    isso é regra do contrato.
+    """
+    mapa: Dict[str, set[str]] = {}
+    for ident, plataforma in _catalogo.items():
+        contrib = getattr(plataforma, nome, None)
+        if not contrib:
+            continue
+        for elemento in contrib:
+            mapa.setdefault(elemento, set()).add(ident)
+    return {elemento: frozenset(donos) for elemento, donos in mapa.items()}
+
 
 # ── Apoio à inicialização e à observabilidade ─────────────────────
 def plataformas_registradas() -> tuple:
