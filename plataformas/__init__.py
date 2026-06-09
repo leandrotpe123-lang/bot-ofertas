@@ -238,8 +238,6 @@ def inicializar() -> None:
         )
         return
 
-    _ja_inicializado = True
-
     modo_producao = (
         os.environ.get("REGISTRY_ENV", "dev").lower() == "prod"
     )
@@ -250,6 +248,8 @@ def inicializar() -> None:
         modo_producao=modo_producao,
     )
 
+    _ja_inicializado = True
+
     formacao = registry.formacao()
 
     log_sys.info(
@@ -258,7 +258,7 @@ def inicializar() -> None:
         f"ignorados={len(formacao['ignorados'])} "
         f"falhas={len(formacao['falhas'])} "
         f"plataformas={list(formacao['registrados'])}"
-    )
+          )
 
 
 # ── API pública da package ────────────────────────────────────────
