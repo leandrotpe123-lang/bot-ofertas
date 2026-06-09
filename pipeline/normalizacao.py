@@ -226,115 +226,6 @@ def _eh_encurtador_generico(url: str) -> bool:
     """Verdadeiro se a URL é um encurtador genérico, não de plataforma."""
     return _netloc(url) in _ENCURTADORES_GENERICOS
 
-
-# ─────────────────────────────────────────────────────────────────
-# HOSTS DE CAMPANHA — COMPOSIÇÃO VIA REGISTRY
-#
-# O conhecimento de quais hosts caracterizam uma página de campanha
-# pertence a cada plataforma e é declarado na capacidade
-# hosts_campanha do contrato. Este módulo NÃO mantém lista concreta
-# de hosts de marketplace: compõe a UNIÃO das contribuições das
-# plataformas registradas, do mesmo modo que url_resolver compõe
-# encurtadores_forca_get.
-#
-# DIVERGÊNCIA DELIBERADA EM RELAÇÃO A _compor_forca_get:
-#   A composição de força-GET parte de um conjunto local de
-#   encurtadores GENÉRICOS (universais, sem dono). Hosts de campanha
-#   NÃO têm componente universal: todo host de campanha legítimo
-#   pertence a uma plataforma. Semear um conjunto local de hosts de
-#   campanha reintroduziria exatamente o acoplamento que esta
-#   migração elimina. Por isso a semente é VAZIA — a união provém
-#   integralmente das plataformas.
-# ─────────────────────────────────────────────────────────────────
-_HOSTS_CAMPANHA_COMPOSTO: Optional[frozenset] = None
-
-
-def _compor_hosts_campanha() -> frozenset:
-    """
-    Compõe a união dos hosts de campanha declarados pelas plataformas
-    registradas, lendo a capacidade hosts_campanha de cada uma via
-    registry. Defensiva por fonte: falha ao ler uma plataforma não
-    bloqueia as demais. NÃO faz cache; o cache é de _hosts_campanha.
-    Sem semente local — hosts de campanha não têm componente universal.
-    """
-    try:
-        # Composição com proveniência vive no registry (dono da camada
-        # coletiva). Visão plana = chaves do mapa elemento -> donos. A
-        # origem fica retida e consultável em registry.compor_capacidade,
-        # tornando avaliável a disjunção deste espaço com dono.
-        return frozenset(registry.compor_capacidade("hosts_campanha").keys())
-    except Exception as e:
-        log_nrm.warning(
-            f"⚠ _compor_hosts_campanha: falha compondo via registry: {e}"
-        )
-        return frozenset()
-
-
-def _logar_decomposicao_hosts_campanha() -> None:
-    """
-    Log observacional por plataforma da composição. Estritamente
-    observacional: não altera composição nem cache, não propaga
-    exceção. Espelha _logar_decomposicao_inicial de url_resolver e
-    torna VISÍVEL, no log, exatamente quais hosts cada plataforma
-    contribui — base empírica para verificar a preservação.
-    """
-    try:
-        for ident in registry.plataformas_registradas():
-            try:
-                plataforma = registry.acessar(ident)
-                if plataforma is None:
-                    continue
-                contrib = plataforma.hosts_campanha
-                if contrib is None:
-                    log_nrm.info(
-                        f"⚙ _hosts_campanha: fonte=plataforma "
-                        f"id={ident!r} contribuicao=nao_declarada"
-                    )
-                else:
-                    log_nrm.info(
-                        f"⚙ _hosts_campanha: fonte=plataforma "
-                        f"id={ident!r} hosts={sorted(contrib)}"
-                    )
-            except Exception as e:
-                log_nrm.warning(
-                    f"⚠ _hosts_campanha: falha lendo plataforma "
-                    f"{ident!r} p/ decomposição: {e}"
-                )
-    except Exception as e:
-        log_nrm.warning(
-            f"⚠ _hosts_campanha: falha iterando registry "
-            f"p/ decomposição: {e}"
-        )
-
-
-def _hosts_campanha() -> frozenset:
-    """
-    Devolve o conjunto efetivo de hosts de campanha, compondo-o lazy
-    na primeira chamada e cacheando em variável de módulo. Na
-    composição inicial, emite log observacional por fonte. Espelha
-    _hosts_forca_get.
-    """
-    global _HOSTS_CAMPANHA_COMPOSTO
-    if _HOSTS_CAMPANHA_COMPOSTO is None:
-        _HOSTS_CAMPANHA_COMPOSTO = _compor_hosts_campanha()
-        log_nrm.info(
-            f"⚙ _hosts_campanha: composição inicial — "
-            f"{len(_HOSTS_CAMPANHA_COMPOSTO)} hosts"
-        )
-        _logar_decomposicao_hosts_campanha()
-    return _HOSTS_CAMPANHA_COMPOSTO
-
-
-def _resetar_hosts_campanha() -> None:
-    """
-    Invalida o cache da composição. Costura única de invalidação,
-    preparada para registro tardio de plataforma e ciclos de teste
-    isolados. Espelha _resetar_forca_get.
-    """
-    global _HOSTS_CAMPANHA_COMPOSTO
-    _HOSTS_CAMPANHA_COMPOSTO = None
-
-
 # ─────────────────────────────────────────────────────────────────
 # CONTRATO DE SAÍDA
 # ─────────────────────────────────────────────────────────────────
@@ -397,7 +288,7 @@ def _eh_host_de_campanha(url: str) -> bool:
     conjunto hardcoded anterior, preservando o comportamento.
     """
     host = _netloc(url)
-    hosts = _hosts_campanha()
+    hosts = registry.compor_capacidade("hosts_campanha").keys()
     for h in hosts:
         if host == h or host.endswith("." + h):
             return True
