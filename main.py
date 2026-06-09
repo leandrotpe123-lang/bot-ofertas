@@ -3,6 +3,7 @@ FOGUETÃO v80.2 — Ponto de entrada.
 
 Responsabilidades exclusivas deste módulo:
   - Inicializar globals, DB e orchestrator
+  - Disparar o boot do catálogo de plataformas (Auto Discovery)
   - Registrar handlers de eventos (NewMessage / MessageEdited)
   - Iniciar health check e servidor web
   - Loop de restart com tratamento de erros fatais
@@ -45,8 +46,7 @@ from logger import log_sys, log_hc
 
 from pipeline.orchestrator import processar, _iniciar_orchestrator
 
-from plataformas.registry import cadastrar
-from plataformas import amazon, shopee, magalu
+import plataformas
 
 from web.redirect import _iniciar_servidor_web
 
@@ -84,14 +84,12 @@ async def _run() -> bool:
     # 2. Inicializa banco de dados
     _init_db()
 
-    # 3. Composition root: o registry é povoado explicitamente aqui,
-    #    no entrypoint da aplicação. O cadastro é idempotente quanto
-    #    à reexecução de _run() no mesmo processo.
-    cadastrar(amazon.PLATAFORMA)
-    cadastrar(shopee.PLATAFORMA)
-    cadastrar(magalu.PLATAFORMA)
+    # NB: o boot do catálogo (plataformas.inicializar()) NÃO mora aqui.
+    # _run() está dentro do loop de restart e pode reexecutar; o Auto
+    # Discovery deve rodar uma única vez por processo. Ele é disparado
+    # em main(), antes do loop. Ver main().
 
-    # 4. Conecta ao Telegram
+    # 3. Conecta ao Telegram
     log_sys.info("🔌 Conectando...")
     await client.connect()
     if not await client.is_user_authorized():
@@ -103,7 +101,7 @@ async def _run() -> bool:
     log_sys.info(f"📡 {GRUPOS_ORIGEM} → {GRUPO_DESTINO}")
     log_sys.info("🚀 FOGUETÃO — ONLINE")
 
-    # 5. Registra handlers de eventos
+    # 4. Registra handlers de eventos
     @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
     async def on_new(event):
         try:
@@ -118,21 +116,31 @@ async def _run() -> bool:
         except Exception as e:
             log_sys.error(f"❌ on_edit: {e}", exc_info=True)
 
-    # 6. Inicia tarefas de background
+    # 5. Inicia tarefas de background
     asyncio.create_task(_health_check())
     asyncio.create_task(_iniciar_orchestrator())
     asyncio.create_task(_iniciar_servidor_web())
 
-    # 7. Aguarda desconexão
+    # 6. Aguarda desconexão
     await client.run_until_disconnected()
     return True
 
 
 # ── Loop principal com restart automático ────────────────────────
 async def main() -> None:
+    # Boot do catálogo: UMA vez por processo, FORA do loop de restart.
+    # Auto Discovery não pode reexecutar a cada tentativa de _run() —
+    # no 2º ciclo o catálogo já estaria povoado e todo cadastro seria
+    # rejeitado por duplicidade. Importar `plataformas` não dispara
+    # nada; quem inicializa é esta chamada explícita. Em dev, falha de
+    # plugin aqui interrompe o processo (fail-fast); em prod, falhas
+    # são isoladas e o boot prossegue. Auto Discovery é a única
+    # autoridade de registro; a formação fica em registry.formacao().
+    plataformas.inicializar()
+
     while True:
         try:
-            await _run()
+            conectado = await _run()
         except (AuthKeyUnregisteredError, SessionPasswordNeededError) as e:
             log_sys.error(f"❌ Auth fatal: {e}")
             break
@@ -143,6 +151,14 @@ async def main() -> None:
             except Exception:
                 pass
             await asyncio.sleep(15)
+            continue
+
+        # _run() retornou sem exceção:
+        #   False → sessão inválida: terminal, NÃO reiniciar;
+        #   True  → desconexão limpa: reconecta (resiliência do worker).
+        if not conectado:
+            log_sys.error("❌ Sessão inválida — encerrando sem restart.")
+            break
 
     # Shutdown limpo
     try:
@@ -153,4 +169,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-                      
+
