@@ -255,9 +255,10 @@ def compor_capacidade(nome: str) -> Dict[str, frozenset[str]]:
     registry compõe e expõe; não julga se a colisão é legítima —
     isso é regra do contrato.
     """
-  em_cache = _composicao_cache.get(nome)
+    em_cache = _composicao_cache.get(nome)
     if em_cache is not None:
         return em_cache
+
     mapa: Dict[str, set[str]] = {}
     for ident, plataforma in _catalogo.items():
         contrib = getattr(plataforma, nome, None)
@@ -265,10 +266,10 @@ def compor_capacidade(nome: str) -> Dict[str, frozenset[str]]:
             continue
         for elemento in contrib:
             mapa.setdefault(elemento, set()).add(ident)
-          resultado = {elemento: frozenset(donos) for elemento, donos in mapa.items()}
+
+    resultado = {elemento: frozenset(donos) for elemento, donos in mapa.items()}
     _composicao_cache[nome] = resultado
     return resultado
-
 
 # ── Apoio à inicialização e à observabilidade ─────────────────────
 def plataformas_registradas() -> tuple:
