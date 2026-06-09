@@ -216,9 +216,7 @@ def tem_contexto(texto: str) -> bool:
 # ENCURTADORES GENÉRICOS
 # ─────────────────────────────────────────────────────────────────
 _ENCURTADORES_GENERICOS = frozenset({
-    "bit.ly", "tinyurl.com", "cutt.ly", "t.co", "ow.ly", "goo.gl",
-    "rb.gy", "is.gd", "tiny.cc", "buff.ly", "short.io", "bl.ink",
-    "rebrand.ly", "shorturl.at", "tidd.ly",
+    "bit.ly", "cutt.ly", "tidd.ly", "ofertou.ai",
 })
 
 
