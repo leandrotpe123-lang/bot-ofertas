@@ -14,18 +14,6 @@ NÃO faz:
   - afiliação de links (responsabilidade das plataformas)
   - normalização de mensagem (responsabilidade da normalização)
   - validação de conteúdo (responsabilidade dos filtros)
-
-COMPOSIÇÃO DE HOSTS QUE EXIGEM GET:
-  O conjunto efetivo é composto lazy a partir de duas fontes:
-  _FORCA_GET_GENERICOS local e capacidade encurtadores_forca_get
-  de cada Plataforma via registry. O cache é invalidável via
-  _resetar_forca_get.
-  A remoção do import legado é entrega futura, condicionada a
-  validação empírica de que a composição via registry está
-  funcionando corretamente em runtime. O cache da composição é
-  invalidável via _resetar_forca_get, ponto único de gerenciamento
-  preparado para evolução arquitetural futura sem refatoração
-  estrutural deste módulo.
 """
 from __future__ import annotations
 
@@ -60,12 +48,6 @@ _FORCA_GET_GENERICOS = frozenset({
     "is.gd", "ow.ly", "buff.ly", "tidd.ly",
 })
 
-# Cache do conjunto efetivo, populado na primeira chamada de
-# _hosts_forca_get e mantido pela vida do processo. Invalidável
-# manualmente via _resetar_forca_get.
-_FORCA_GET_COMPOSTO: frozenset[str] | None = None
-
-
 def _compor_forca_get() -> frozenset[str]:
     """
     Compõe o conjunto efetivo de hosts que exigem GET, unindo três
@@ -75,8 +57,7 @@ def _compor_forca_get() -> frozenset[str]:
 
     Cada fonte é processada defensivamente — falhas em uma fonte
     não bloqueiam a composição com as demais. No pior caso resta
-    o conjunto local de genéricos. NÃO realiza cache; o cache é
-    feito por _hosts_forca_get.
+    o conjunto local de genéricos.
     """
     composto: set[str] = set(_FORCA_GET_GENERICOS)
 
@@ -95,100 +76,6 @@ def _compor_forca_get() -> frozenset[str]:
         )
 
     return frozenset(composto)
-
-def _logar_decomposicao_inicial() -> None:
-    """
-    Emite logs observacionais decompondo a origem do conjunto
-    efetivo de hosts que exigem GET, por fonte. Invocada uma única
-    vez por processo, imediatamente após a primeira composição.
-
-    Função estritamente observacional: não altera composição, não
-    altera cache, não propaga exceção. Toda falha individual de
-    leitura é registrada como warning e isolada, preservando a
-    natureza não-intrusiva da instrumentação.
-    """
-    log_nrm.info(
-        f"⚙ _hosts_forca_get: fonte=genericos_core "
-        f"hosts={sorted(_FORCA_GET_GENERICOS)}"
-    )
-
-    try:
-        from plataformas import registry  # lazy: simetria com _compor_forca_get
-        identificadores = registry.plataformas_registradas()
-        for ident in identificadores:
-            try:
-                plataforma = registry.acessar(ident)
-                if plataforma is None:
-                    log_nrm.info(
-                        f"⚙ _hosts_forca_get: fonte=plataforma "
-                        f"id={ident!r} contribuicao=indisponivel"
-                    )
-                    continue
-                contrib = plataforma.encurtadores_forca_get
-                if contrib is None:
-                    log_nrm.info(
-                        f"⚙ _hosts_forca_get: fonte=plataforma "
-                        f"id={ident!r} contribuicao=nao_declarada"
-                    )
-                else:
-                    log_nrm.info(
-                        f"⚙ _hosts_forca_get: fonte=plataforma "
-                        f"id={ident!r} hosts={sorted(contrib)}"
-                    )
-            except Exception as e:
-                log_nrm.warning(
-                    f"⚠ _hosts_forca_get: falha lendo plataforma "
-                    f"{ident!r} para decomposição: {e}"
-                )
-    except Exception as e:
-        log_nrm.warning(
-            f"⚠ _hosts_forca_get: falha iterando registry "
-            f"para decomposição: {e}"
-        )
-
-
-def _hosts_forca_get() -> frozenset[str]:
-    """
-    Devolve o conjunto efetivo de hosts que exigem GET, compondo-o
-    lazy na primeira chamada e cacheando o resultado em variável de
-    módulo. Chamadas subsequentes devolvem o cache.
-
-    Na primeira composição, emite logs observacionais decompondo a
-    origem do conjunto efetivo por fonte (genéricos do core,
-    contribuições por plataforma, legado transitório). Esses logs
-    são estritamente observacionais — não alteram a composição nem
-    o cache — e existem para autorizar empiricamente a remoção
-    futura do legado. A linha referente ao legado desaparece na
-    fase 6, junto com o próprio legado.
-    """
-    global _FORCA_GET_COMPOSTO
-    if _FORCA_GET_COMPOSTO is None:
-        _FORCA_GET_COMPOSTO = _compor_forca_get()
-        log_nrm.info(
-            f"⚙ _hosts_forca_get: composição inicial — "
-            f"{len(_FORCA_GET_COMPOSTO)} hosts"
-        )
-        _logar_decomposicao_inicial()
-    return _FORCA_GET_COMPOSTO
-
-
-def _resetar_forca_get() -> None:
-    """
-    Invalida o cache da composição. Próxima chamada de
-    _hosts_forca_get refaz a composição.
-
-    PROPÓSITO ARQUITETURAL: ponto único, identificado e declarado
-    de invalidação do cache. NÃO é invocada pelo código atual e
-    não tem caso de uso operacional ativo. Existe para que a
-    evolução arquitetural futura — registro tardio de plataformas,
-    recarga de configuração, ciclos de teste isolados — possa ser
-    feita sem refatoração estrutural deste módulo. A sua presença
-    é afirmação de que o cache é recurso gerenciável, não efeito
-    colateral opaco.
-    """
-    global _FORCA_GET_COMPOSTO
-    _FORCA_GET_COMPOSTO = None
-
 
 async def desencurtar(
     url: str,
@@ -227,7 +114,7 @@ async def desencurtar(
     }
 
     try:
-        hosts = _hosts_forca_get()
+        hosts = _compor_forca_get()
         usar_head = (
             nl not in hosts
             and not any(nl.endswith("." + d) for d in hosts)
