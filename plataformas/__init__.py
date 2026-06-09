@@ -1,11 +1,17 @@
 """
 Package plataformas — Catálogo Vivo de Plugins de Plataforma.
 
-Este __init__.py é o gatilho do mecanismo de Auto Discovery da casa.
-Ao ser carregado pela primeira vez (no boot do processo), varre o
-próprio diretório da package em busca de módulos que exponham uma
-instância PLATAFORMA do contrato e os registra automaticamente no
-catálogo do registry.
+Esta package é a dona da DESCOBERTA: conhece o próprio diretório,
+importlib, pkgutil, os candidatos a plugin e a constante PLATAFORMA.
+Ela varre o diretório, importa os plugins e REPORTA cada evento de
+formação ao registry. O registry é dono da camada coletiva (catálogo
+e formação); a package é dona da descoberta. As responsabilidades não
+se misturam.
+
+A descoberta NÃO acontece por efeito colateral de import. Importar
+esta package não inicializa o catálogo. O boot do catálogo é uma
+DECISÃO EXPLÍCITA do entrypoint, que chama plataformas.inicializar()
+como um passo nomeado da inicialização.
 
 ═══════════════════════════════════════════════════════════════════
 PRINCÍPIO INEGOCIÁVEL
@@ -50,6 +56,18 @@ candidatos que não sejam plugin são silenciosamente ignorados
 (podem ser helpers internos da package).
 
 ═══════════════════════════════════════════════════════════════════
+FORMAÇÃO — POSSE DO REGISTRY
+═══════════════════════════════════════════════════════════════════
+A descoberta NÃO retém a verdade de formação. Cada evento é reportado
+ao registry, que é o dono da camada coletiva:
+  - sobreviventes  : entram no catálogo via registry.cadastrar;
+  - não-plugins    : reportados via registry.registrar_ignorado;
+  - import falho    : reportado via registry.registrar_falha_formacao;
+  - cadastro recusado : gravado pelo próprio registry em cadastrar.
+A formação resultante é consultável em registry.formacao(). Esta
+package não guarda cópia: a fonte única é o registry.
+
+═══════════════════════════════════════════════════════════════════
 POLÍTICA DE ERRO
 ═══════════════════════════════════════════════════════════════════
 REGISTRY_ENV=dev (padrão):
@@ -58,9 +76,9 @@ REGISTRY_ENV=dev (padrão):
   contrato deve ser visível.
 
 REGISTRY_ENV=prod:
-  falhas são logadas e isoladas; a descoberta prossegue com os
-  demais plugins. Preserva continuidade operacional ao custo de
-  silenciar defeitos.
+  falhas são logadas, reportadas à formação e isoladas; a descoberta
+  prossegue com os demais plugins. Preserva continuidade operacional
+  ao custo de silenciar defeitos.
 
 ═══════════════════════════════════════════════════════════════════
 DETERMINISMO
@@ -74,26 +92,28 @@ e do teste vale o custo zero.
 ═══════════════════════════════════════════════════════════════════
 EXECUÇÃO
 ═══════════════════════════════════════════════════════════════════
-A descoberta acontece exatamente uma vez por processo, no primeiro
-import desta package. Python cacheia __init__.py — não há
-reexecução. Para testes, o trabalho real está em _descobrir_plugins,
-que recebe path e nome de pacote como parâmetros e pode ser
-invocada com diretórios mock.
+A descoberta é disparada por uma chamada explícita a inicializar(),
+feita pelo entrypoint no boot. Importar esta package não dispara
+nada. inicializar() é idempotente apenas no sentido de que o catálogo
+e a formação são estáveis após a primeira execução; não é projetada
+para reexecução no mesmo processo. Para testes, o trabalho real está
+em _descobrir_plugins, que recebe path e nome de pacote como
+parâmetros e pode ser invocada com diretórios mock; os testes
+inspecionam o resultado via registry.formacao().
 
 ═══════════════════════════════════════════════════════════════════
 API PÚBLICA DA PACKAGE
 ═══════════════════════════════════════════════════════════════════
-Apenas dois símbolos são considerados públicos para consumidores
-externos:
-  - registry  : o catálogo
-  - contrato  : os tipos do contrato (uso por anotações de tipo)
+Símbolos públicos para consumidores externos:
+  - inicializar : dispara a descoberta no boot (chamada pelo main)
+  - registry    : o catálogo e a camada coletiva
+  - contrato    : os tipos do contrato (uso por anotações de tipo)
 """
 from __future__ import annotations
 
 import importlib
 import os
 import pkgutil
-from typing import List, Tuple
 
 from logger import log_sys
 
@@ -125,33 +145,27 @@ def _descobrir_plugins(
     pacote_path,
     pacote_nome: str,
     modo_producao: bool,
-) -> Tuple[List[str], List[str], List[Tuple[str, str]]]:
+) -> None:
     """
     Varre o diretório do pacote e tenta registrar cada módulo
     candidato como plugin.
 
-    Devolve a tripla (registrados, ignorados, falhos):
-      - registrados : identificadores efetivamente cadastrados no
-                      registry, em ordem alfabética;
-      - ignorados   : nomes de módulos candidatos importados que
-                      não expõem PLATAFORMA válida — não são
-                      plugins (podem ser helpers internos);
-      - falhos      : pares (nome_modulo, motivo) para módulos
-                      cujo import ou cadastro foi recusado.
+    Não devolve valor: cada evento de formação é REPORTADO ao
+    registry, que é o dono da camada coletiva. Sobreviventes entram
+    no catálogo via registry.cadastrar; candidatos sem PLATAFORMA
+    válida são reportados via registry.registrar_ignorado; imports
+    malsucedidos via registry.registrar_falha_formacao; rejeições de
+    cadastro são gravadas pelo próprio registry em cadastrar. A
+    formação resultante é consultável em registry.formacao().
 
     Em modo desenvolvimento, qualquer falha re-lança a exceção
     original após o log, interrompendo o boot. Em modo produção, a
-    falha é apenas reportada e a descoberta prossegue com os
-    demais plugins.
+    falha é apenas reportada e a descoberta prossegue com os demais
+    plugins.
 
-    A função é parametrizada para ser testável com diretórios mock
-    e instâncias de registry simuladas — o __init__.py invoca-a
-    apenas com os defaults reais.
+    A função é parametrizada para ser testável com diretórios mock;
+    os testes inspecionam o resultado via registry.formacao().
     """
-    registrados: List[str] = []
-    ignorados: List[str] = []
-    falhos: List[Tuple[str, str]] = []
-
     # Coleta primeiro, ordena depois — determinismo entre sistemas.
     nomes_candidatos = sorted(
         nome
@@ -162,71 +176,85 @@ def _descobrir_plugins(
     for nome in nomes_candidatos:
         caminho = f"{pacote_nome}.{nome}"
 
-        # 1) Tentativa de import — falha aqui significa código quebrado
-        #    no plugin (sintaxe, dependência ausente, exceção em
-        #    top-level). É erro estrutural do plugin.
+        # 1) Import — falha aqui é código quebrado no plugin (sintaxe,
+        #    dependência ausente, exceção em top-level). O registry não
+        #    observa imports; reportamos a falha de formação a ele.
         try:
             modulo = importlib.import_module(caminho)
         except Exception as exc:
             motivo = f"import falhou: {type(exc).__name__}: {exc}"
-            falhos.append((nome, motivo))
+            registry.registrar_falha_formacao(nome, motivo)
             log_sys.error(f"❌ Plugin '{nome}' — {motivo}")
             if not modo_producao:
                 raise
             continue
 
-        # 2) Verificação de conformidade — o módulo expõe PLATAFORMA?
-        #    Se não, não é plugin. Pode ser helper interno da package
-        #    (cenário legítimo). Log em debug, não warning.
+        # 2) Conformidade — o módulo expõe PLATAFORMA? Se não, não é
+        #    plugin (pode ser helper interno, cenário legítimo). O
+        #    registry não observa isso; reportamos como ignorado.
         plataforma_obj = getattr(modulo, "PLATAFORMA", None)
         if not isinstance(plataforma_obj, Plataforma):
-            ignorados.append(nome)
+            registry.registrar_ignorado(nome)
             log_sys.debug(
                 f"⏭ Módulo '{nome}' sem PLATAFORMA válida — ignorado"
             )
             continue
 
-        # 3) Cadastro — falha aqui é defeito de contrato detectado
-        #    pelo registry (versão incompatível, identificador
-        #    duplicado, capacidade obrigatória ausente).
+        # 3) Cadastro — a rejeição de contrato (versão incompatível,
+        #    identificador duplicado, capacidade ausente) é detectada e
+        #    GRAVADA pelo próprio registry, dono da formação. Aqui só
+        #    decidimos halt (dev) ou isolamento (prod).
         try:
             registry.cadastrar(plataforma_obj)
+        except registry.ErroCadastroPlataforma:
+            if not modo_producao:
+                raise
+            continue
         except Exception as exc:
-            motivo = f"cadastro recusado: {type(exc).__name__}: {exc}"
-            falhos.append((nome, motivo))
+            # Falha inesperada, não é rejeição de contrato: o registry
+            # não a gravou; reportamos para a formação ficar completa.
+            motivo = f"cadastro falhou: {type(exc).__name__}: {exc}"
+            registry.registrar_falha_formacao(nome, motivo)
             log_sys.error(f"❌ Plugin '{nome}' — {motivo}")
             if not modo_producao:
                 raise
             continue
 
-        registrados.append(plataforma_obj.identificador)
 
-    return registrados, ignorados, falhos
+def inicializar() -> None:
+    """
+    Dispara a descoberta de plugins — boot explícito do catálogo.
 
+    É a porta pública do boot: o entrypoint chama plataformas.inicializar()
+    como um passo nomeado da inicialização. Varre o diretório da package,
+    importa os plugins e reporta cada evento de formação ao registry. Não
+    é disparada por import; é uma decisão direta do boot.
 
-# ── Execução da descoberta ────────────────────────────────────────
-# Roda exatamente uma vez por processo, no primeiro import da
-# package. Python cacheia __init__.py — não há reexecução.
+    Ao final, registra o resumo da formação lendo de registry.formacao()
+    — a fonte única. Esta package não retém cópia da verdade coletiva.
+    """
+    modo_producao = (
+        os.environ.get("REGISTRY_ENV", "dev").lower() == "prod"
+    )
 
-_MODO_PRODUCAO = (
-    os.environ.get("REGISTRY_ENV", "dev").lower() == "prod"
-)
+    _descobrir_plugins(
+        pacote_path=__path__,
+        pacote_nome=__name__,
+        modo_producao=modo_producao,
+    )
 
-_registrados, _ignorados, _falhos = _descobrir_plugins(
-    pacote_path=__path__,
-    pacote_nome=__name__,
-    modo_producao=_MODO_PRODUCAO,
-)
-
-log_sys.info(
-    f"🧩 Auto Discovery | registrados={len(_registrados)} "
-    f"ignorados={len(_ignorados)} falhos={len(_falhos)} "
-    f"plataformas={_registrados}"
-)
+    formacao = registry.formacao()
+    log_sys.info(
+        f"🧩 Auto Discovery | "
+        f"registrados={len(formacao['registrados'])} "
+        f"ignorados={len(formacao['ignorados'])} "
+        f"falhas={len(formacao['falhas'])} "
+        f"plataformas={list(formacao['registrados'])}"
+    )
 
 
 # ── API pública da package ────────────────────────────────────────
 # Plataformas concretas NÃO são reexportadas. O caminho idiomático
 # para acessá-las é sempre via registry.resolver / registry.acessar.
-__all__ = ["registry", "contrato"]
-  
+# A descoberta é disparada por inicializar(), nunca por import.
+__all__ = ["inicializar", "registry", "contrato"]
