@@ -129,7 +129,7 @@ async def _run() -> bool:
 # ── Loop principal com restart automático ────────────────────────
 async def main() -> None:
   
-    plataformas.inicializar()
+    plataformas.inicializar()  # boot do catálogo (único por processo — garantido na própria função)
 
     while True:
         try:
