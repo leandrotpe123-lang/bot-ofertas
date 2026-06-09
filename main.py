@@ -128,14 +128,7 @@ async def _run() -> bool:
 
 # ── Loop principal com restart automático ────────────────────────
 async def main() -> None:
-    # Boot do catálogo: UMA vez por processo, FORA do loop de restart.
-    # Auto Discovery não pode reexecutar a cada tentativa de _run() —
-    # no 2º ciclo o catálogo já estaria povoado e todo cadastro seria
-    # rejeitado por duplicidade. Importar `plataformas` não dispara
-    # nada; quem inicializa é esta chamada explícita. Em dev, falha de
-    # plugin aqui interrompe o processo (fail-fast); em prod, falhas
-    # são isoladas e o boot prossegue. Auto Discovery é a única
-    # autoridade de registro; a formação fica em registry.formacao().
+  
     plataformas.inicializar()
 
     while True:
