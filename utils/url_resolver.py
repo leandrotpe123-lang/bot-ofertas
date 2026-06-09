@@ -44,8 +44,7 @@ _LIMITE_HTML      = 500_000
 # não respondem corretamente a HEAD e exigem GET direto na resolução
 # de redirecionamento.
 _FORCA_GET_GENERICOS = frozenset({
-    "bit.ly", "cutt.ly", "tinyurl.com", "rb.gy",
-    "is.gd", "ow.ly", "buff.ly", "tidd.ly",
+    "cutt.ly", "ofertou.ai", "tidd.ly",
 })
 
 def _compor_forca_get() -> frozenset[str]:
