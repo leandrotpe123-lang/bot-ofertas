@@ -232,6 +232,11 @@ def formacao() -> Dict[str, tuple]:
         "falhas": tuple(_formacao_falhas),
     }
 
+# Cache das composições coletivas, por nome de capacidade. Catálogo
+# imóvel após o boot ⇒ composição estável por processo. Fonte única
+# de cache da camada coletiva — os consumidores não cacheiam mais.
+_composicao_cache: Dict[str, Dict[str, frozenset[str]]] = {}
+
 def compor_capacidade(nome: str) -> Dict[str, frozenset[str]]:
     """
     Compõe uma capacidade agregável (frozenset[str]) ao longo do
@@ -250,6 +255,9 @@ def compor_capacidade(nome: str) -> Dict[str, frozenset[str]]:
     registry compõe e expõe; não julga se a colisão é legítima —
     isso é regra do contrato.
     """
+  em_cache = _composicao_cache.get(nome)
+    if em_cache is not None:
+        return em_cache
     mapa: Dict[str, set[str]] = {}
     for ident, plataforma in _catalogo.items():
         contrib = getattr(plataforma, nome, None)
@@ -257,7 +265,9 @@ def compor_capacidade(nome: str) -> Dict[str, frozenset[str]]:
             continue
         for elemento in contrib:
             mapa.setdefault(elemento, set()).add(ident)
-    return {elemento: frozenset(donos) for elemento, donos in mapa.items()}
+          resultado = {elemento: frozenset(donos) for elemento, donos in mapa.items()}
+    _composicao_cache[nome] = resultado
+    return resultado
 
 
 # ── Apoio à inicialização e à observabilidade ─────────────────────
