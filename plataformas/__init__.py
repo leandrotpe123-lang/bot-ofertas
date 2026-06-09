@@ -127,6 +127,7 @@ from plataformas.contrato import Plataforma
 # isolar o core da package em plataformas/_core/ é desejável no
 # futuro mas não bloqueia esta fundação.
 _MODULOS_ESTRUTURAIS = frozenset({"registry", "contrato"})
+_ja_inicializado = False
 
 
 def _eh_candidato_a_plugin(nome_modulo: str) -> bool:
@@ -225,14 +226,20 @@ def inicializar() -> None:
     """
     Dispara a descoberta de plugins — boot explícito do catálogo.
 
-    É a porta pública do boot: o entrypoint chama plataformas.inicializar()
-    como um passo nomeado da inicialização. Varre o diretório da package,
-    importa os plugins e reporta cada evento de formação ao registry. Não
-    é disparada por import; é uma decisão direta do boot.
-
-    Ao final, registra o resumo da formação lendo de registry.formacao()
-    — a fonte única. Esta package não retém cópia da verdade coletiva.
+    É a porta pública do boot: o entrypoint chama
+    plataformas.inicializar() como um passo nomeado da inicialização.
     """
+    global _ja_inicializado
+
+    if _ja_inicializado:
+        log_sys.warning(
+            "🧩 Auto Discovery já executado neste processo — "
+            "rechamada ignorada."
+        )
+        return
+
+    _ja_inicializado = True
+
     modo_producao = (
         os.environ.get("REGISTRY_ENV", "dev").lower() == "prod"
     )
@@ -244,6 +251,7 @@ def inicializar() -> None:
     )
 
     formacao = registry.formacao()
+
     log_sys.info(
         f"🧩 Auto Discovery | "
         f"registrados={len(formacao['registrados'])} "
