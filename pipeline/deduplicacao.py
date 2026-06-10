@@ -32,12 +32,8 @@ from database import (
 )
 import globals as g
 from logger import log_ded
-from pipeline.normalizacao import (
-    EstadoEvento,
-    MensagemNormalizada,
-    extrair_todos_cupons,
-    _KW_CUPOM,
-)
+from pipeline.normalizacao import MensagemNormalizada
+from utils.cupom import _KW_CUPOM, extrair_todos_cupons
 from utils.hashes import _fp4, _fp_benef
 from utils.textos import (
     _alma, _cupons_set, _benef_set, _janela, _normalizar_valor, _sim, _SIM_FORTE,
