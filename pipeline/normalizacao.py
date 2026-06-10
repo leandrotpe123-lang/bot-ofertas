@@ -46,13 +46,6 @@ NÃO faz:
     pipeline.estado_evento)
   - resolução de URL via rede (responsabilidade de utils.url_resolver)
   - registro de posts pendentes (responsabilidade do orquestrador)
-
-REEXPORTAÇÕES TEMPORÁRIAS DE COMPATIBILIDADE:
-  Os símbolos _KW_CUPOM, _FALSO_CUPOM, extrair_todos_cupons,
-  EstadoEvento e _JANELA_C3 são reexportados a partir de suas novas
-  origens para não quebrar montagem e deduplicação antes da revisão
-  desses módulos. Estas reexportações devem ser removidas quando
-  montagem e deduplicação tiverem seus imports corrigidos.
 """
 from __future__ import annotations
 
@@ -76,20 +69,17 @@ from pipeline.estado_evento import (
 from pipeline.ingestao import MensagemBruta
 from plataformas import registry
 from plataformas.contrato import AUSENTE
-from utils.cupom import _FALSO_CUPOM, _KW_CUPOM, extrair_cupom, extrair_todos_cupons
+from utils.cupom import extrair_cupom
 from utils.encurtador import encurtar
 from utils.hashes import _fp_c3
 from utils.url_resolver import desencurtar
 from utils.urls import _netloc, host_canonico_campanha
 
-# ── Reexportações temporárias de compatibilidade ──────────────────
+# ── API pública do módulo ─────────────────────────────────────────
 __all__ = [
     "MensagemNormalizada", "normalizar", "limpar_texto", "tem_contexto",
-    "EstadoEvento", "detectar_estado_evento", "_JANELA_C3",
-    "_KW_CUPOM", "_FALSO_CUPOM", "extrair_cupom", "extrair_todos_cupons",
-    "_tem_emoji", "desencurtar",
+    "_tem_emoji",
 ]
-
 
 # ─────────────────────────────────────────────────────────────────
 # LIMPEZA DE TEXTO
