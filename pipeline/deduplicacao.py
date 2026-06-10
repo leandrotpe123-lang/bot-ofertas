@@ -21,22 +21,21 @@ CONSUMO DE IDENTIDADE DERIVADA:
   fallback operacional NÃO semântico e explicitamente reconhecido.
 """
 from __future__ import annotations
-import asyncio
 import re
 import time
 from typing import Optional, Tuple
 
 import config
-from database import (
-    db_get_dedupe, db_set_dedupe, db_buscar_janela_rapida, db_get_estado,
-)
+from database import db_set_dedupe
 import globals as g
 from logger import log_ded
 from pipeline.normalizacao import MensagemNormalizada
 from utils.cupom import _KW_CUPOM, extrair_todos_cupons
-from utils.hashes import _fp4, _fp_benef
+from utils.hashes import _fp4
 from utils.textos import (
-    _alma, _cupons_set, _benef_set, _janela, _normalizar_valor, _sim, _SIM_FORTE,
+    _alma,
+    _cupons_set,
+    _benef_set,
 )
 from utils.urls import _cache_key
 
@@ -251,12 +250,6 @@ async def _atomic_check_and_claim(fp: str, janela: float) -> Tuple[bool, Optiona
         # Claim
         g._atomic_mem[fp] = agora
         return False, ts
-
-
-async def _atomic_release(fp: str):
-    """Libera lock manualmente (raramente usado — TTL faz cleanup auto)."""
-    async with (await _get_atomic_lck()):
-        g._atomic_mem.pop(fp, None)
 
 
 # ─────────────────────────────────────────────────────────────────
