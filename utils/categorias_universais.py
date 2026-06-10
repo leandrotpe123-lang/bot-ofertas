@@ -104,9 +104,7 @@ _PRESERVE: FrozenSet[str] = frozenset({
 # declarados pelos próprios plugins e ficam sob a soberania do
 # registry.
 _ENCURTADORES_GENERICOS: FrozenSet[str] = frozenset({
-    "bit.ly", "cutt.ly", "tinyurl.com", "t.co", "ow.ly", "goo.gl",
-    "rb.gy", "is.gd", "tiny.cc", "buff.ly", "short.io", "bl.ink",
-    "rebrand.ly", "shorturl.at", "tidd.ly",
+    "bit.ly", "cutt.ly", "tidd.ly", "ofertou.ai",
 })
 
 
