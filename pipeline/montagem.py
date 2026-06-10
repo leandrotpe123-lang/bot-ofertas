@@ -11,11 +11,10 @@ from typing import Dict, List, Optional
 from logger import log_enr
 from pipeline.normalizacao import (
     MensagemNormalizada,
-    _KW_CUPOM,
-    _FALSO_CUPOM,
     _tem_emoji,
 )
 from pipeline.estado_evento import _KW_EVENTO
+from utils.cupom import _FALSO_CUPOM, _KW_CUPOM
 
 # ─────────────────────────────────────────────────────────────────
 # Dataclass de saída
