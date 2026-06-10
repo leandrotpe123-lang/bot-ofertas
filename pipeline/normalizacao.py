@@ -67,7 +67,7 @@ import aiohttp
 from database import db_get_dedupe, db_get_link
 from globals import _get_session, _get_final, _log_cache_stats
 from logger import log_nrm
-from utils.categorias_universais import classificar_universal
+from utils.categorias_universais import classificar_universal, eh_encurtador_generico
 from pipeline.estado_evento import (
     EstadoEvento,
     detectar_estado_evento,
@@ -211,19 +211,6 @@ def tem_contexto(texto: str) -> bool:
             return True
     return len(total) > 20
 
-
-# ─────────────────────────────────────────────────────────────────
-# ENCURTADORES GENÉRICOS
-# ─────────────────────────────────────────────────────────────────
-_ENCURTADORES_GENERICOS = frozenset({
-    "bit.ly", "cutt.ly", "tidd.ly", "ofertou.ai",
-})
-
-
-def _eh_encurtador_generico(url: str) -> bool:
-    """Verdadeiro se a URL é um encurtador genérico, não de plataforma."""
-    return _netloc(url) in _ENCURTADORES_GENERICOS
-
 # ─────────────────────────────────────────────────────────────────
 # CONTRATO DE SAÍDA
 # ─────────────────────────────────────────────────────────────────
@@ -318,7 +305,7 @@ async def _normalizar_um(
 
     # 2. Expansão de encurtador genérico — responsabilidade universal.
     url = url_original
-    if _eh_encurtador_generico(url_original):
+    if eh_encurtador_generico(url_original):
         try:
             expandida = await desencurtar(url_original, sessao)
             if expandida and expandida != url_original:
