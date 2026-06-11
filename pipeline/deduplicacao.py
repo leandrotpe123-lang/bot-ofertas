@@ -55,7 +55,7 @@ _RE_TITULO_CUPOM = re.compile(
     re.I,
 )
 _RE_TITULO_CASHBACK = re.compile(
-    r'\b(?:cashback|cash\s*back|moedas?\s+shopee)\b',
+    r'\b(?:cashback|cash\s*back)\b',
     re.I,
 )
 _RE_PCT = re.compile(r'(\d{1,2})\s*%')
@@ -152,13 +152,21 @@ def _eh_post_cupom(texto: str) -> bool:
     return False
 
 
-def _eh_post_cashback(texto: str) -> bool:
-    """Detecta se o post é especificamente sobre cashback (sem cupom code)."""
+def _eh_post_cashback(texto: str, tem_sinal_cashback: bool) -> bool:
+    """
+    Detecta se o post é especificamente sobre cashback (sem cupom code).
+    Combina o vocabulário genérico de cashback no título (universal)
+    com o sinal derivado tem_sinal_cashback — vocabulário específico
+    de plataforma, declarado pela própria plataforma e composto pelo
+    registry. A dedup não conhece mais termos de marca diretamente.
+    """
     linhas = [l for l in texto.strip().split("\n") if l.strip()]
     if not linhas:
         return False
     titulo = linhas[0]
-    return bool(_RE_TITULO_CASHBACK.search(titulo))
+    if _RE_TITULO_CASHBACK.search(titulo):
+        return True
+    return tem_sinal_cashback
 
 
 def _eh_post_evento(texto: str, tem_host_campanha: bool) -> bool:
@@ -323,7 +331,7 @@ def _detectar_tipo_oferta(norm: MensagemNormalizada) -> str:
     #  com ids_globais; este ramo havia se tornado inalcançável.)
 
     # P5: cashback sem cupom code
-    if _eh_post_cashback(texto):
+    if _eh_post_cashback(texto, norm.tem_sinal_cashback):
         return "evento"
 
     # P6: campanha/evento — consome o campo derivado tem_host_campanha
@@ -375,7 +383,7 @@ def _id_cupom_sem_produto(norm, plat, texto):
 
 
 def _id_cashback(norm, plat, texto):
-    if not _eh_post_cashback(texto) or norm.cupom:
+    if not _eh_post_cashback(texto, norm.tem_sinal_cashback) or norm.cupom:
         return None
     pct = _extrair_pct_cashback(texto)
     if not pct:
