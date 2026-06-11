@@ -67,7 +67,7 @@ _RE_TITULO_VOLTOU = re.compile(
 )
 _RE_EVENTO_CAMPANHA = re.compile(
     r'\b(?:roleta|gire|girar|miss[aã]o|arena|quiz|desafio|sorteio|'
-    r'flapremios|prime\s*day|black\s*friday|esquenta)\b',
+    r'black\s*friday|esquenta)\b',
     re.I,
 )
 
