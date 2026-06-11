@@ -224,6 +224,7 @@ class MensagemNormalizada:
     # deduplicação os consome e não reextrai identidade do mapa.
     chave_campanha:    str          = ""
     tem_host_campanha: bool         = False
+    tem_sinal_cashback: bool        = False
     # ──────────────────────────────────────────────────────────────
     is_reply:          bool         = False
     reply_to:          int          = 0
@@ -266,6 +267,24 @@ def _eh_host_de_campanha(url: str) -> bool:
     hosts = registry.compor_capacidade("hosts_campanha").keys()
     for h in hosts:
         if host == h or host.endswith("." + h):
+            return True
+    return False
+
+def _tem_sinal_cashback(texto: str) -> bool:
+    """
+    Verdadeiro se a PRIMEIRA linha não-vazia do texto casa algum
+    padrão de cashback composto a partir das plataformas registradas
+    (união de sinais_cashback). Opera sobre a MESMA linha-título que a
+    deduplicação usa em _eh_post_cashback, preservando o escopo e,
+    portanto, o comportamento. Cada padrão é regex, casado com
+    re.IGNORECASE (equivalente ao re.I do regex anterior).
+    """
+    linhas = [l for l in texto.strip().split("\n") if l.strip()]
+    if not linhas:
+        return False
+    titulo = linhas[0]
+    for padrao in registry.compor_capacidade("sinais_cashback").keys():
+        if re.search(padrao, titulo, re.IGNORECASE):
             return True
     return False
 
@@ -468,6 +487,7 @@ async def normalizar(
     urls_campanha     = [u for u in urls_longas if _eh_host_de_campanha(u)]
     tem_host_campanha = bool(urls_campanha)
     chave_campanha    = host_canonico_campanha(urls_campanha)
+    tem_sinal_cashback = _tem_sinal_cashback(texto_limpo)
 
     # ── ESTADO DE EVENTO ──────────────────────────────────────────
     estado = EstadoEvento.NEW
@@ -504,6 +524,8 @@ async def normalizar(
         cupom=cupom, sku=sku, tem_midia=bruta.tem_midia,
         media_obj=bruta.media_obj, estado_evento=estado,
         ids_globais=ids_globais, chave_campanha=chave_campanha,
-        tem_host_campanha=tem_host_campanha, is_reply=bruta.is_reply,
+        tem_host_campanha=tem_host_campanha,
+        tem_sinal_cashback=tem_sinal_cashback,
+        is_reply=bruta.is_reply,
         reply_to=bruta.reply_to, is_override=is_override,
   )
