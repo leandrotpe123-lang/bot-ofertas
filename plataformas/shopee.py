@@ -34,7 +34,7 @@ import aiohttp
 import config
 import os
 
-_SHP_APP_ID = os.environ.get("SHOPEE_APP_ID", "18348480261")
+_SHP_APP_ID = os.environ.get("SHOPEE_APP_ID", "")
 _SHP_SECRET = os.environ.get("SHOPEE_SECRET", "")
 from logger import log_nrm
 from plataformas.contrato import (
@@ -87,6 +87,10 @@ _HOSTS_CAMPANHA = frozenset({
     "flapremios.com.br",
 })
 
+# ── Sinais textuais de cashback (vocabulário próprio da Shopee) ────
+_SINAIS_CASHBACK = frozenset({
+    r"\bmoedas?\s+shopee\b",
+})
 
 # ── Padrões de extração do identificador de produto ───────────────
 # Na Shopee, o produto é identificado pelo par (loja, item).
@@ -360,4 +364,5 @@ PLATAFORMA = Plataforma(
     limpa_url=limpa_url,
     encurtadores_forca_get=_ENCURTADORES_FORCA_GET,
     hosts_campanha=_HOSTS_CAMPANHA,
+    sinais_cashback=_SINAIS_CASHBACK,
 )
