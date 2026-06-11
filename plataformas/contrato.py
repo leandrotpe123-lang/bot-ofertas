@@ -138,7 +138,16 @@ class Plataforma:
                          registradas e a utiliza para derivar
                          tem_host_campanha e chave_campanha. Não
                          contém lógica de campanha. None equivale a
-                         não declarar; o core ignora.                   
+                         não declarar; o core ignora.
+
+      - sinais_cashback : frozenset[str] | None. Conjunto de padrões
+                          (regex) que, no texto desta plataforma,
+                          sinalizam um post de cashback (ex.: a moeda
+                          de fidelidade própria da plataforma). O core
+                          compõe a UNIÃO das contribuições de todas as
+                          plataformas e a utiliza para derivar
+                          tem_sinal_cashback. Não contém lógica. None
+                          equivale a não declarar; o core ignora.                   
 
     """
     # Identidade
@@ -156,3 +165,4 @@ class Plataforma:
     requer_encurtamento:  bool = False
     encurtadores_forca_get: Optional[frozenset[str]] = None
     hosts_campanha:       Optional[frozenset[str]] = None
+    sinais_cashback:      Optional[frozenset[str]] = None
