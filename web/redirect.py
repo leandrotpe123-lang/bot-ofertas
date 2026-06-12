@@ -10,7 +10,7 @@ from logger import log_sys
 
 
 async def _handle_redirect(request: web.Request) -> web.Response:
-    code = request.match_info.get("code", "").replace("-magalu", "")
+    code = request.match_info.get("code", "")
     if not code:
         return web.Response(status=404, text="Not found")
     url_destino = db_get_short(code)
