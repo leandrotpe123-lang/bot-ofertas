@@ -200,11 +200,16 @@ _JANELA_C3 = _JanelaC3Compat()
 
 
 # ── Vocabulário de evento e de reativação ─────────────────────────
-# _KW_EVENTO detecta campanhas interativas (quiz, roleta, missão).
-# Esta é a definição canônica de _KW_EVENTO no sistema.
+# _KW_EVENTO é a definição canônica da família INTERATIVA de evento:
+# dinâmicas de participação (quiz, roleta, missão, sorteio...).
+# Vocabulário de CALENDÁRIO COMERCIAL (black friday, esquenta) NÃO
+# pertence a esta família e não deve entrar aqui: no canônico, ele
+# alteraria a saturação (publicacao) e os títulos (montagem) no pico
+# comercial. Esse vocabulário vive como resíduo nomeado na
+# deduplicação (_RE_CALENDARIO_COMERCIAL).
 _KW_EVENTO = re.compile(
     r'\b(?:quiz|roleta|miss[aã]o|arena|girar|gire|roda|jogar|'
-    r'jogue|desafio)\b',
+    r'jogue|desafio|sorteio)\b',
     re.I,
 )
 
