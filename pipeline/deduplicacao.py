@@ -29,6 +29,7 @@ import config
 from database import db_set_dedupe
 import globals as g
 from logger import log_ded
+from pipeline.estado_evento import _KW_EVENTO
 from pipeline.normalizacao import MensagemNormalizada
 from utils.cupom import _KW_CUPOM, extrair_todos_cupons
 from utils.hashes import _fp4
@@ -65,9 +66,13 @@ _RE_TITULO_VOLTOU = re.compile(
     r'normalizou|relan[çc]amento|reativa[çc][aã]o|back|return)\b',
     re.I,
 )
-_RE_EVENTO_CAMPANHA = re.compile(
-    r'\b(?:roleta|gire|girar|miss[aã]o|arena|quiz|desafio|sorteio|'
-    r'black\s*friday|esquenta)\b',
+# Resíduo NOMEADO de calendário comercial — fronteira explícita.
+# NÃO pertence à família interativa canônica (_KW_EVENTO, dono:
+# pipeline.estado_evento) e NÃO deve subir para lá: no canônico,
+# este vocabulário furaria a saturação e mudaria títulos no pico
+# comercial. Serve apenas ao gate/chave de identidade de campanha.
+_RE_CALENDARIO_COMERCIAL = re.compile(
+    r'\b(?:black\s*friday|esquenta)\b',
     re.I,
 )
 
@@ -181,12 +186,15 @@ def _eh_post_evento(texto: str, tem_host_campanha: bool) -> bool:
       derivado tem_host_campanha.
 
     A detecção combina dois sinais independentes:
-      - vocabulário de evento no texto: classificação de conteúdo,
-        legítima nesta camada por operar sobre o texto e não sobre
-        a identidade de URL;
+      - vocabulário de evento no texto, em duas famílias nomeadas:
+        a interativa canônica (_KW_EVENTO, dono: estado_evento) e o
+        resíduo local de calendário comercial — classificação de
+        conteúdo, legítima nesta camada por operar sobre o texto;
       - presença de host de campanha: consumida do campo derivado.
     """
-    if _RE_EVENTO_CAMPANHA.search(texto[:200]):
+    if _KW_EVENTO.search(texto[:200]):
+        return True
+    if _RE_CALENDARIO_COMERCIAL.search(texto[:200]):
         return True
     return tem_host_campanha
 
@@ -396,9 +404,15 @@ def _id_campanha(norm, plat, texto):
         return None
     if norm.chave_campanha:
         return f"{plat}|camp|{norm.chave_campanha}"
-    m = _RE_EVENTO_CAMPANHA.search(texto[:200])
-    if m:
-        return f"{plat}|camp|{m.group(0).lower()}"
+    candidatos = [
+        m for m in (
+            _KW_EVENTO.search(texto[:200]),
+            _RE_CALENDARIO_COMERCIAL.search(texto[:200]),
+        ) if m
+    ]
+    if candidatos:
+        primeiro = min(candidatos, key=lambda m: m.start())
+        return f"{plat}|camp|{primeiro.group(0).lower()}"
     return None
 
 
