@@ -29,7 +29,7 @@ import config
 from database import db_set_dedupe
 import globals as g
 from logger import log_ded
-from pipeline.estado_evento import _KW_EVENTO
+from pipeline.estado_evento import _KW_EVENTO, _RE_RETORNO
 from pipeline.normalizacao import MensagemNormalizada
 from utils.cupom import _KW_CUPOM, extrair_todos_cupons
 from utils.hashes import _fp4
@@ -60,12 +60,7 @@ _RE_TITULO_CASHBACK = re.compile(
     re.I,
 )
 _RE_PCT = re.compile(r'(\d{1,2})\s*%')
-_RE_TITULO_VOLTOU = re.compile(
-    r'\b(?:voltou|voltando|reativad[oa]|ativ[oa]\s+novamente|'
-    r'de\s+volta|cupom\s+voltou|oferta\s+voltou|disponível\s+novamente|'
-    r'normalizou|relan[çc]amento|reativa[çc][aã]o|back|return)\b',
-    re.I,
-)
+
 # Resíduo NOMEADO de calendário comercial — fronteira explícita.
 # NÃO pertence à família interativa canônica (_KW_EVENTO, dono:
 # pipeline.estado_evento) e NÃO deve subir para lá: no canônico,
@@ -200,8 +195,13 @@ def _eh_post_evento(texto: str, tem_host_campanha: bool) -> bool:
 
 
 def _eh_reativacao(texto: str) -> bool:
-    """Detecta linguagem de reativação ('voltou', 'reativado' etc.)."""
-    return bool(_RE_TITULO_VOLTOU.search(texto[:300]))
+    """
+    Detecta linguagem de reativação ('voltou', 'reativado' etc.).
+    Consome o vocabulário canônico _RE_RETORNO (dono: estado_evento);
+    a DECISÃO — gate anti-flood de 30s — permanece desta camada, e o
+    escopo de busca ([:300]) é do chamador, não do vocabulário.
+    """
+    return bool(_RE_RETORNO.search(texto[:300]))
 
 
 def _extrair_pct_cashback(texto: str) -> str:
