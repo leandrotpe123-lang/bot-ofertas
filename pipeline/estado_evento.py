@@ -213,11 +213,20 @@ _KW_EVENTO = re.compile(
     re.I,
 )
 
-# _RE_RESTOCK_C3 detecta linguagem de retorno explícito de uma oferta.
-_RE_RESTOCK_C3 = re.compile(
-    r'voltou|restock|reativado|dispon[ií]vel\s+novamente|'
-    r'voltou\s+ao\s+estoque|de\s+volta|ativo\s+novamente|normalizou|'
-    r'voltando|voltou\s+cupom|relançamento',
+# _RE_RETORNO é a definição canônica da linguagem de RETORNO de
+# oferta ("voltou", "reativado", "restock"...). Fonte única do
+# VOCABULÁRIO — as DECISÕES que o consomem permanecem separadas:
+#   - ciclo de vida (detectar_estado_evento, aqui): RESTOCKED exige
+#     histórico fora da janela da plataforma;
+#   - gate anti-flood (deduplicacao._eh_reativacao): janela curta
+#     de 30s sobre o texto, com ou sem histórico.
+# Consolidar o vocabulário NÃO funde as decisões.
+# Compostos com "voltou" (ex.: "voltou ao estoque") são subsumidos
+# por \bvoltou\b e não se re-declaram.
+_RE_RETORNO = re.compile(
+    r'\b(?:voltou|voltando|reativad[oa]|reativa[çc][aã]o|'
+    r'ativ[oa]\s+novamente|dispon[ií]vel\s+novamente|de\s+volta|'
+    r'normalizou|relan[çc]amento|restock)\b',
     re.I,
 )
 
@@ -262,7 +271,7 @@ def detectar_estado_evento(
       avaliada quando NÃO há sinal de retorno no texto. A ordem
       das verificações no corpo da função reflete essa regra.
     """
-    eh_restock = bool(_RE_RESTOCK_C3.search(texto))
+    eh_restock = bool(_RE_RETORNO.search(texto))
     entrada    = db_get_dedupe(_fp_c3(id_global, plat))
 
     if not entrada:
