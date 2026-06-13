@@ -57,7 +57,7 @@ from typing import Dict, List, Optional, Tuple
 
 import aiohttp
 
-from database import db_get_dedupe, db_get_link
+from database import db_get_ts_por_cupom, db_get_link
 from globals import _get_session, _get_final, _log_cache_stats
 from logger import log_nrm
 from utils.categorias_universais import classificar_universal, eh_encurtador_generico
@@ -71,7 +71,6 @@ from plataformas import registry
 from plataformas.contrato import AUSENTE
 from utils.cupom import extrair_cupom
 from utils.encurtador import encurtar
-from utils.hashes import _fp_c3
 from utils.url_resolver import desencurtar
 from utils.urls import _netloc, host_canonico_campanha
 
@@ -494,10 +493,9 @@ async def normalizar(
     if ids_globais:
         estado = detectar_estado_evento(texto_limpo, ids_globais[0], plat_dom)
     elif cupom:
-        fp_cup  = _fp_c3(f"cup_{cupom}", plat_dom)
-        entrada = db_get_dedupe(fp_cup)
-        if entrada:
-            delta  = time.time() - entrada.get("ts", 0)
+        ts_anterior_db = db_get_ts_por_cupom(plat_dom, (cupom or "").upper())
+        if ts_anterior_db is not None:
+            delta  = time.time() - ts_anterior_db
             janela = _JANELA_C3.get(plat_dom, 120.0)
             estado = EstadoEvento.SEEN if delta < janela else EstadoEvento.EXPIRED
 
