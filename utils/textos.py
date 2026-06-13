@@ -5,8 +5,6 @@ import unicodedata
 from difflib import SequenceMatcher
 from typing import Optional
 
-# _JANELA_C3 importado lazy de pipeline.estado_evento dentro de _janela()
-
 # ── Constantes de deduplicação ────────────────────────────────────
 _RUIDO_NORM = frozenset({
     "promo","promocao","promoção","oferta","desconto","cupom","corre","aproveita",
@@ -66,13 +64,7 @@ def _benef(t: str) -> frozenset:
 
 def _benef_set(t: str) -> frozenset:
     return _benef(t)
-
-
-def _janela(plat: str) -> float:
-    # _JANELA_C3 é definido em pipeline/estado_evento.py (dono real)
-    from pipeline.estado_evento import _JANELA_C3
-    return _JANELA_C3.get(plat, _JANELA_C3["default"])
-
+    
 
 def _sim(a: str, b: str) -> float:
     if not a or not b:
