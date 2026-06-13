@@ -35,12 +35,10 @@ import time
 from enum import Enum
 from typing import Tuple
 
-from database import db_get_dedupe
+from database import db_get_ts_por_produto
 from logger import log_nrm
 from plataformas import registry
 from plataformas.contrato import ParametrosTemporais
-from utils.hashes import _fp_c3
-
 
 # ── Defaults do core ──────────────────────────────────────────────
 # Política do core para a ausência de declaração da plataforma.
@@ -272,13 +270,12 @@ def detectar_estado_evento(
       das verificações no corpo da função reflete essa regra.
     """
     eh_restock = bool(_RE_RETORNO.search(texto))
-    entrada    = db_get_dedupe(_fp_c3(id_global, plat))
+    ts_anterior_db = db_get_ts_por_produto(plat, id_global)
 
-    if not entrada:
+    if ts_anterior_db is None:
         return EstadoEvento.NEW
 
-    ts_anterior = entrada.get("ts", 0)
-    delta       = time.time() - ts_anterior
+    delta       = time.time() - ts_anterior_db
     params      = obter_parametros_temporais(plat)
     janela      = params.janela_s
     ttl         = params.ttl_restock_s
