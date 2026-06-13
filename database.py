@@ -31,7 +31,7 @@ def _init_db():
         CREATE TABLE IF NOT EXISTS dedupe_temp(
             fp TEXT PRIMARY KEY, plat TEXT NOT NULL, cupons TEXT,
             alma TEXT, camp TEXT, asin TEXT, id_prod TEXT, benef TEXT,
-            ts REAL NOT NULL);
+            cupom_id TEXT, ts REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS saturacao(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             plat TEXT NOT NULL, sku TEXT, ts REAL NOT NULL);
@@ -51,6 +51,7 @@ def _init_db():
         CREATE INDEX IF NOT EXISTS idx_dt_plat     ON dedupe_temp(plat,ts);
         CREATE INDEX IF NOT EXISTS idx_dt_asin     ON dedupe_temp(asin);
         CREATE INDEX IF NOT EXISTS idx_dt_id       ON dedupe_temp(id_prod);
+        CREATE INDEX IF NOT EXISTS idx_dt_cupom    ON dedupe_temp(cupom_id);
         CREATE INDEX IF NOT EXISTS idx_sat         ON saturacao(plat,ts);
         CREATE INDEX IF NOT EXISTS idx_sl_code     ON short_links(code);
         CREATE INDEX IF NOT EXISTS idx_oe_identity ON oferta_estado(identity);
@@ -60,6 +61,7 @@ def _init_db():
         ("dedupe_temp",   "benef",            "TEXT"),
         ("dedupe_temp",   "asin",             "TEXT"),
         ("dedupe_temp",   "id_prod",          "TEXT"),
+        ("dedupe_temp",   "cupom_id",          "TEXT"),
         ("oferta_estado", "lider",            "TEXT"),
         ("oferta_estado", "janela_fim",       "REAL"),
         ("oferta_estado", "edit_count",       "INTEGER"),
@@ -153,21 +155,46 @@ def db_get_ts_por_produto(plat: str, id_prod: str) -> Optional[float]:
         log_db.error(f"❌ db_get_ts_por_produto: {e}")
         return None
 
+def db_get_ts_por_cupom(plat: str, cupom_id: str) -> Optional[float]:
+    """
+    Timestamp da passagem mais recente de uma oferta-cupom, lido pela
+    coluna canônica cupom_id (índice idx_dt_cupom). Espelho exato de
+    db_get_ts_por_produto: mesmo corte de TTL_DEDUPE, mesma ordenação,
+    mesmo contrato de retorno. O cupom_id é o cupom representativo em
+    caixa alta — a MESMA expressão (norm.cupom.upper()) usada pela
+    identity canônica e pelo writer. Retorna None se não houver
+    registro vivo. Não usa o caminho do fp.
+    """
+    if not cupom_id:
+        return None
+    try:
+        limite = time.time() - TTL_DEDUPE
+        with _db() as db:
+            row = db.execute(
+                "SELECT ts FROM dedupe_temp"
+                " WHERE plat=? AND cupom_id=? AND ts>=?"
+                " ORDER BY ts DESC LIMIT 1",
+                (plat, cupom_id, limite)).fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        log_db.error(f"❌ db_get_ts_por_cupom: {e}")
+        return None
+
 def db_set_dedupe(fp: str, plat: str, cupons: list, alma: str,
                   camp: str, asin: str = "", id_prod: str = "",
-                  benef: list = None):
+                  benef: list = None, cupom_id: str = ""):
     try:
         with _db() as db:
             db.execute(
                 "INSERT OR REPLACE INTO dedupe_temp"
-                "(fp,plat,cupons,alma,camp,asin,id_prod,benef,ts)"
-                " VALUES(?,?,?,?,?,?,?,?,?)",
+                "(fp,plat,cupons,alma,camp,asin,id_prod,benef,cupom_id,ts)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (fp, plat, json.dumps(cupons or []), alma or "",
                  camp or "geral", asin or "", id_prod or "",
-                 json.dumps(benef or []), time.time()))
+                 json.dumps(benef or []), cupom_id or "", time.time()))
     except Exception as e:
         log_db.error(f"❌ db_set_dedupe: {e}")
-
+        
 def db_buscar_janela_rapida(plat: str, janela: float = 900) -> list:
     try:
         limite = time.time() - janela
