@@ -471,12 +471,14 @@ async def _checar_reativacao(norm: MensagemNormalizada) -> bool:
         return False
     return True
 
-def _persistir_dedupe(fp, plat, cupons, alma, tipo, ids_globais, benef):
-    # id_prod é a coluna única de identidade de produto, para toda
-    # plataforma. A coluna asin permanece vazia (legado a remover em
-    # frente de limpeza própria). Sem ramo por nome de plataforma.
+def _persistir_dedupe(fp, plat, cupons, alma, tipo, ids_globais, benef, cupom_id):
+    # id_prod e cupom_id são as colunas canônicas de identidade —
+    # produto e cupom — para toda plataforma. A coluna asin permanece
+    # vazia (legado a remover em frente própria). cupom_id é o cupom
+    # representativo já em caixa alta, derivado no chamador a partir
+    # da mesma fonte da identity (norm.cupom). Sem ramo por plataforma.
     id_prod = ids_globais[0] if ids_globais else ""
-    db_set_dedupe(fp, plat, cupons, alma, tipo, "", id_prod, benef)
+    db_set_dedupe(fp, plat, cupons, alma, tipo, "", id_prod, benef, cupom_id)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -544,8 +546,8 @@ async def deve_enviar_async(norm: MensagemNormalizada) -> bool:
         # ── PERSISTÊNCIA ─────────────────────────────────────────
         _persistir_dedupe(
             fp_identity, plat, list(cupons), alma_v, tipo,
-            ids_globais, list(benef),
-        )
+            ids_globais, list(benef), (norm.cupom or "").upper(),
+              )
 
         log_ded.info(
             f"✅ [PASSOU] {identity} tipo={tipo} chat={chat} "
