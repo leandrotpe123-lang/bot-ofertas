@@ -129,6 +129,30 @@ def db_get_dedupe(fp: str) -> Optional[dict]:
         log_db.error(f"❌ db_get_dedupe: {e}")
     return None
 
+def db_get_ts_por_produto(plat: str, id_prod: str) -> Optional[float]:
+    """
+    Timestamp da passagem mais recente de uma oferta-produto, lido pela
+    coluna canônica id_prod (índice idx_dt_id). Aplica o MESMO corte de
+    TTL_DEDUPE que db_get_dedupe — entradas além de 24h não existem para
+    efeito de ciclo de vida (oferta volta a NEW). Usado pelo C3 de
+    produto, que precisa apenas do ts. Retorna None se não houver
+    registro vivo. Não substitui db_get_dedupe nem toca o caminho do fp.
+    """
+    if not id_prod:
+        return None
+    try:
+        limite = time.time() - TTL_DEDUPE
+        with _db() as db:
+            row = db.execute(
+                "SELECT ts FROM dedupe_temp"
+                " WHERE plat=? AND id_prod=? AND ts>=?"
+                " ORDER BY ts DESC LIMIT 1",
+                (plat, id_prod, limite)).fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        log_db.error(f"❌ db_get_ts_por_produto: {e}")
+        return None
+
 def db_set_dedupe(fp: str, plat: str, cupons: list, alma: str,
                   camp: str, asin: str = "", id_prod: str = "",
                   benef: list = None):
