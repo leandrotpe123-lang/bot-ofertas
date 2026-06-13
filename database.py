@@ -112,33 +112,14 @@ def db_set_link(url_orig: str, url_conv: str, plat: str):
         log_db.error(f"❌ db_set_link: {e}")
 
 # ── dedupe_temp ───────────────────────────────────────────────────
-def db_get_dedupe(fp: str) -> Optional[dict]:
-    try:
-        limite = time.time() - TTL_DEDUPE
-        with _db() as db:
-            row = db.execute(
-                "SELECT plat,cupons,alma,camp,asin,id_prod,benef,ts"
-                " FROM dedupe_temp WHERE fp=? AND ts>=?",
-                (fp, limite)).fetchone()
-        if row:
-            return {
-                "plat": row[0], "cupons": json.loads(row[1] or "[]"),
-                "alma": row[2], "camp": row[3],
-                "asin": row[4] or "", "id_prod": row[5] or "",
-                "benef": json.loads(row[6] or "[]"), "ts": row[7],
-            }
-    except Exception as e:
-        log_db.error(f"❌ db_get_dedupe: {e}")
-    return None
-
 def db_get_ts_por_produto(plat: str, id_prod: str) -> Optional[float]:
     """
     Timestamp da passagem mais recente de uma oferta-produto, lido pela
-    coluna canônica id_prod (índice idx_dt_id). Aplica o MESMO corte de
-    TTL_DEDUPE que db_get_dedupe — entradas além de 24h não existem para
+    coluna canônica id_prod (índice idx_dt_id). Aplica o MESMO 
+    corte de TTL_DEDUPE — entradas além de 24h não existem para
     efeito de ciclo de vida (oferta volta a NEW). Usado pelo C3 de
     produto, que precisa apenas do ts. Retorna None se não houver
-    registro vivo. Não substitui db_get_dedupe nem toca o caminho do fp.
+    registro vivo. Lê pela coluna canônica, não pelo caminho do fp.
     """
     if not id_prod:
         return None
