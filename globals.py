@@ -36,7 +36,6 @@ _w_lck:          Optional[asyncio.Lock]  = None
 _IDS_LOCK:       Optional[asyncio.Lock]  = None
 _BURST_LOCK:     Optional[asyncio.Lock]  = None
 _atomic_lck_obj: Optional[asyncio.Lock]  = None
-_pending_lock:   Optional[asyncio.Lock]  = None
 
 # CIRURGIA 11 (Bug #24): lock global pra _IDENTITY_LOCKS em publicacao.py.
 # Antes era inicializado lazy DENTRO de publicacao._get_identity_lock,
@@ -100,7 +99,7 @@ def _init_globals():
     """
     global _buf_lck, _buf_evt, _w_lck, _w_ativos
     global _IDS_LOCK, _BURST_LOCK, _atomic_lck_obj
-    global _pending_lock, _identity_locks_lck, _session_lock
+    global _identity_locks_lck, _session_lock
     import config as _cfg
 
     # Containers mutáveis: clear() pra manter mesmo objeto
@@ -120,7 +119,6 @@ def _init_globals():
     _IDS_LOCK           = asyncio.Lock()
     _BURST_LOCK         = asyncio.Lock()
     _atomic_lck_obj     = asyncio.Lock()
-    _pending_lock       = asyncio.Lock()
     _identity_locks_lck = asyncio.Lock()   # ← Cirurgia 11
     _session_lock       = asyncio.Lock()   # ← Cirurgia 20
 
