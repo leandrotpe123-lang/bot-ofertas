@@ -18,18 +18,6 @@ from pipeline.publicacao import editar_por_id, _MAX_EDITS
 from utils.helpers import ler_mapa
 from utils.hashes import _fp4
 
-
-# ==================== TASK MANAGEMENT ====================
-_tasks_ativas: set[asyncio.Task] = set()
-
-def _spawn_task(coro) -> asyncio.Task:
-    """Cria task gerenciada."""
-    task = asyncio.create_task(coro)
-    _tasks_ativas.add(task)
-    task.add_done_callback(_tasks_ativas.discard)
-    return task
-
-
 # ==================== MEMÓRIA DE CONTEXTO ====================
 _context_memory: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
     "last_restock": 0.0,
@@ -206,15 +194,6 @@ async def processar_shadow_reply(bruta) -> bool:
             return False
 
         ctx = ShadowContext(bruta.texto, row[0], int(msg_dest), row, score, tipo, bruta)
-
-        if tipo in ('humanizado', 'edicao_restock'):
-            try:
-                from handlers.pending import _tentar_liberar_pending, _processar_post_liberado
-                liberada = await _tentar_liberar_pending(bruta.reply_to, bruta.texto)
-                if liberada:
-                    _spawn_task(_processar_post_liberado(liberada, bruta.texto))
-            except Exception as e:
-                log_out.warning(f"Pending via shadow: {e}")
 
         handler = PIPELINE.get(tipo)
         if handler:
