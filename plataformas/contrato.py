@@ -79,6 +79,27 @@ class IdentidadeProduto:
     tipo_link:  TipoLink
     id_produto: object                       # str | _Ausente
     id_global:  Optional[str] = None
+    
+
+# ── Resultado da afiliação ────────────────────────────────────────
+@dataclass(frozen=True)
+class Afiliacao:
+    """
+    Resultado da capacidade de afiliação.
+
+      - publicada : URL afiliada na forma de PUBLICAÇÃO (o que vai ao
+                    destino). String não vazia.
+      - canonica  : URL afiliada na forma CANÔNICA, que carrega a
+                    identidade na rota e alimenta a extração de
+                    identidade. String não vazia.
+
+    Plataforma cuja forma publicada já é identificável devolve str
+    diretamente (o core trata canonica = publicada). Plataforma cuja
+    forma publicada é opaca (ex.: encurtador próprio) devolve esta
+    estrutura, separando o que se publica do que se identifica.
+    """
+    publicada: str
+    canonica:  str
 
 
 # ── Parâmetros temporais de deduplicação ──────────────────────────
@@ -107,9 +128,12 @@ class Plataforma:
     Capacidades obrigatórias:
       - reconhece         : (url) -> bool. Pura, sem I/O.
       - extrai_identidade : (url) -> IdentidadeProduto. Pura, sem I/O.
-      - afilia            : async (url, sessao) -> str | AUSENTE.
+      - afilia            : async (url, sessao) -> Afiliacao | str | AUSENTE.
                             Efeito colateral controlado; não propaga
-                            exceção (falha resulta em AUSENTE).
+                            exceção (falha resulta em AUSENTE). Devolver
+                            str equivale a Afiliacao(publicada=str,
+                            canonica=str). Devolver Afiliacao separa a
+                            forma de publicação da forma de identidade.
 
     Capacidades opcionais:
       - parametros_temporais : ParametrosTemporais | None. Dado.
@@ -157,7 +181,7 @@ class Plataforma:
     # Capacidades obrigatórias
     reconhece:         Callable[[str], bool]
     extrai_identidade: Callable[[str], IdentidadeProduto]
-    afilia:            Callable[..., Awaitable[object]]   # -> str | _Ausente
+    afilia:            Callable[..., Awaitable[object]]   # -> Afiliacao | str | _Ausente
 
     # Capacidades opcionais
     parametros_temporais: Optional[ParametrosTemporais] = None
