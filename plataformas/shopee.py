@@ -39,6 +39,7 @@ _SHP_SECRET = os.environ.get("SHOPEE_SECRET", "")
 from logger import log_nrm
 from plataformas.contrato import (
     AUSENTE,
+    Afiliacao,
     CONTRACT_VERSION,
     IdentidadeProduto,
     ParametrosTemporais,
@@ -97,7 +98,7 @@ _SINAIS_CASHBACK = frozenset({
 _P_PRODUTO = [
     re.compile(r'/product/(\d+)/(\d+)'),
     re.compile(r'/item/(\d+)/(\d+)'),
-    re.compile(r'/i\.(\d+)\.(\d+)'),
+    re.compile(r'[-/]i\.(\d+)\.(\d+)'),
 ]
 
 
@@ -349,8 +350,9 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         log_nrm.warning(f"⚠️ SHP validação falhou: {link}")
         return AUSENTE
 
-    registrar_link(url, link, _IDENTIFICADOR)
-    return link
+    resultado = Afiliacao(publicada=link, canonica=url_limpa)
+    registrar_link(url, resultado, _IDENTIFICADOR)
+    return resultado
 
 
 # ── Definição da plataforma ───────────────────────────────────────
