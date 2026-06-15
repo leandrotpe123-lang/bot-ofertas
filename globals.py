@@ -18,7 +18,7 @@ from typing import Dict, Optional
 import aiohttp
 
 import config
-from contrato import Afiliacao
+from plataformas.contrato import Afiliacao
 from logger import log_db
 
 # ── Caches in-memory ─────────────────────────────────────────────
