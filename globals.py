@@ -18,11 +18,12 @@ from typing import Dict, Optional
 import aiohttp
 
 import config
+from contrato import Afiliacao
 from logger import log_db
 
 # ── Caches in-memory ─────────────────────────────────────────────
 _raw_cache:   OrderedDict[str, str] = OrderedDict()
-_final_cache: OrderedDict[str, str] = OrderedDict()
+_final_cache: OrderedDict[str, Afiliacao] = OrderedDict()
 _cache_lock  = Lock()
 _CACHE_LIMIT = 5000
 
@@ -140,7 +141,7 @@ def _set_raw(url: str, valor: str):
             _raw_cache.popitem(last=False)
 
 
-def _set_final(url: str, valor: str):
+def _set_final(url: str, valor: Afiliacao):
     from utils.urls import _cache_key
     key = _cache_key(url)
     with _cache_lock:
@@ -156,7 +157,7 @@ def _get_raw(url: str) -> Optional[str]:
         return _raw_cache.get(_cache_key(url))
 
 
-def _get_final(url: str) -> Optional[str]:
+def _get_final(url: str) -> Optional[Afiliacao]:
     from utils.urls import _cache_key
     with _cache_lock:
         return _final_cache.get(_cache_key(url))
