@@ -27,7 +27,7 @@ def _init_db():
     _db_conn.executescript("""
         CREATE TABLE IF NOT EXISTS links_cache(
             url_orig TEXT PRIMARY KEY, url_conv TEXT NOT NULL,
-            plat TEXT NOT NULL, ts REAL NOT NULL);
+            url_canon TEXT, plat TEXT NOT NULL, ts REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS dedupe_temp(
             fp TEXT PRIMARY KEY, plat TEXT NOT NULL, cupons TEXT,
             alma TEXT, camp TEXT, asin TEXT, id_prod TEXT, benef TEXT,
@@ -66,9 +66,17 @@ def _init_db():
         ("oferta_estado", "janela_fim",       "REAL"),
         ("oferta_estado", "edit_count",       "INTEGER"),
         ("oferta_estado", "shadow_reply_id",  "INTEGER"),
+        ("links_cache",   "url_canon",        "TEXT"),
     ]:
         try:
             _db_conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {col} {tipo}")
+            # Purge dirigido: ao adicionar url_canon PELA PRIMEIRA VEZ,
+            # expurga o cache opaco da Shopee para a nova invariante
+            # nascer limpa. Roda só quando o ALTER tem sucesso — ou
+            # seja, UMA ÚNICA VEZ (no deploy desta migração).
+            if tabela == "links_cache" and col == "url_canon":
+                _db_conn.execute("DELETE FROM links_cache WHERE plat='shopee'")
+                log_db.info("🧹 Shopee cache purgado (migração url_canon)")
         except sqlite3.OperationalError:
             pass
     log_db.info(f"🗄 DB ON | {_DB_PATH}")
@@ -82,32 +90,35 @@ def _db():
             log_db.error(f"❌ DB: {e}"); raise
 
 # ── links_cache ───────────────────────────────────────────────────
-def db_get_link(url: str) -> Optional[str]:
+def db_get_link(url: str) -> Optional[tuple[str, str]]:
     try:
         from utils.urls import _cache_key
         url = _cache_key(url)
         with _db() as db:
             row = db.execute(
-                "SELECT url_conv FROM links_cache WHERE url_orig=?", (url,)
+                "SELECT url_conv, url_canon FROM links_cache WHERE url_orig=?",
+                (url,)
             ).fetchone()
             if row:
                 db.execute(
                     "UPDATE links_cache SET ts=? WHERE url_orig=?",
                     (time.time(), url))
-                return row[0]
+                publicada = row[0]
+                canonica  = row[1] or row[0]   
+                return (publicada, canonica)
     except Exception as e:
         log_db.error(f"❌ db_get_link: {e}")
     return None
 
-def db_set_link(url_orig: str, url_conv: str, plat: str):
+def db_set_link(url_orig: str, url_conv: str, url_canon: str, plat: str):
     try:
         from utils.urls import _cache_key
         url_orig = _cache_key(url_orig)
         with _db() as db:
             db.execute(
-                "INSERT OR REPLACE INTO links_cache(url_orig,url_conv,plat,ts)"
-                " VALUES(?,?,?,?)",
-                (url_orig, url_conv, plat, time.time()))
+                "INSERT OR REPLACE INTO links_cache(url_orig,url_conv,url_canon,plat,ts)"
+                " VALUES(?,?,?,?,?)",
+                (url_orig, url_conv, url_canon, plat, time.time()))
     except Exception as e:
         log_db.error(f"❌ db_set_link: {e}")
 
