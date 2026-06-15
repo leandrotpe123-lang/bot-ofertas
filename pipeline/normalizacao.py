@@ -68,7 +68,8 @@ from pipeline.estado_evento import (
 )
 from pipeline.ingestao import MensagemBruta
 from plataformas import registry
-from plataformas.contrato import AUSENTE
+from plataformas.contrato import AUSENTE, Afiliacao
+from utils.cache_links import consultar_link
 from utils.cupom import extrair_cupom
 from utils.encurtador import encurtar
 from utils.url_resolver import desencurtar
@@ -298,11 +299,12 @@ async def _normalizar_um(
 ) -> Tuple[str, Optional[str], str]:
     """
     Resolve e afilia um único link. Devolve a tupla
-    (url_original, url_convertida, plataforma). A url_convertida é
-    a URL afiliada LONGA — o encurtamento NÃO ocorre aqui.
+    (url_original, conv, plataforma), onde conv é um Afiliacao
+    (publicada + canonica), uma str (quando as duas formas
+    coincidem) ou None. O encurtamento NÃO ocorre aqui.
 
-    A url_convertida é None quando o link não pôde ser afiliado ou
-    não é aproveitável.
+    conv é None quando o link não pôde ser afiliado ou não é
+    aproveitável.
     """
     # 1. Categorias universais do core, decididas antes do registry.
     categoria = classificar_universal(url_original)
@@ -334,9 +336,9 @@ async def _normalizar_um(
 
     # 3. Cache de link já afiliado. O cache armazena exclusivamente
     #    a URL afiliada LONGA; o encurtamento é terminal e não cacheado.
-    cached = _get_final(url_original) or db_get_link(url_original)
+    cached = consultar_link(url_original)
     if not cached and url != url_original:
-        cached = _get_final(url) or db_get_link(url)
+        cached = consultar_link(url)
     if cached:
         plataforma_cache = registry.resolver(url)
         ident = (
@@ -444,15 +446,24 @@ async def normalizar(
     )
 
     # mapa: URLs afiliadas LONGAS. Base semântica até o encurtamento.
-    mapa:  Dict[str, str] = {}
-    plats: List[str]      = []
+    mapa:      Dict[str, str] = {}
+    canonicas: Dict[str, str] = {}
+    plats:     List[str]      = []
     for res in resultados:
         if isinstance(res, Exception):
             log_nrm.error(f"❌ normalizar link: {res}")
             continue
         orig, conv, plat = res
         if conv and plat not in ("none", None):
-            mapa[orig] = conv
+            # conv é Afiliacao (publicada ≠ canonica) ou str (formas
+            # iguais). A publicada vai ao mapa de publicação; a
+            # canonica alimenta a derivação de identidade.
+            if isinstance(conv, Afiliacao):
+                publicada, canonica = conv.publicada, conv.canonica
+            else:
+                publicada = canonica = conv
+            mapa[orig]      = publicada
+            canonicas[orig] = canonica
             if plat not in ("mundial", "preservar"):
                 plats.append(plat)
 
@@ -469,7 +480,7 @@ async def normalizar(
     # fonte de identidade: a fonte canônica é a URL afiliada longa.
     # A normalização é a autoridade única de derivação — produto
     # (ids_globais, sku) e campanha (chave_campanha, tem_host_campanha).
-    urls_longas = list(mapa.values())
+    urls_longas = list(canonicas.values())
 
     ids_globais: List[str] = []
     for conv in urls_longas:
