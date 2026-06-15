@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from contrato import Afiliacao
+from plataformas.contrato import Afiliacao
 from database import db_get_link, db_set_link
 from globals import _get_final, _set_final
 from logger import log_nrm
