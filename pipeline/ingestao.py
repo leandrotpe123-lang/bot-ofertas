@@ -34,7 +34,8 @@ def _extrair_code_entities(message) -> List[str]:
     Retorna lista de strings (sem deduplicar — preserva ordem de aparição).
     """
     try:
-        texto = message.text or getattr(message, "message", "") or ""
+        texto = (getattr(message, "raw_text", None)
+                 or getattr(message, "message", "") or "")
         if not texto:
             return []
         entidades = getattr(message, "entities", None) or []
