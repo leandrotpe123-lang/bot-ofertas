@@ -46,6 +46,10 @@ def _init_db():
         CREATE TABLE IF NOT EXISTS shadow_reply(
             identity TEXT PRIMARY KEY, msg_id INTEGER NOT NULL,
             enviado INTEGER DEFAULT 0, ts REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS cupom_idx(
+            plat TEXT NOT NULL, codigo TEXT NOT NULL,
+            identity TEXT NOT NULL, ts REAL NOT NULL,
+            PRIMARY KEY(plat, codigo));
         CREATE INDEX IF NOT EXISTS idx_lc_plat     ON links_cache(plat);
         CREATE INDEX IF NOT EXISTS idx_lc_ts       ON links_cache(ts);
         CREATE INDEX IF NOT EXISTS idx_dt_plat     ON dedupe_temp(plat,ts);
@@ -56,6 +60,7 @@ def _init_db():
         CREATE INDEX IF NOT EXISTS idx_sl_code     ON short_links(code);
         CREATE INDEX IF NOT EXISTS idx_oe_identity ON oferta_estado(identity);
         CREATE INDEX IF NOT EXISTS idx_oe_plat     ON oferta_estado(plat);
+        CREATE INDEX IF NOT EXISTS idx_ci_lookup   ON cupom_idx(plat,codigo,ts);
     """)
     for tabela, col, tipo in [
         ("dedupe_temp",   "benef",            "TEXT"),
@@ -171,6 +176,48 @@ def db_get_ts_por_cupom(plat: str, cupom_id: str) -> Optional[float]:
     except Exception as e:
         log_db.error(f"❌ db_get_ts_por_cupom: {e}")
         return None
+
+def db_cupom_idx_buscar(plat: str, codigos: list, janela_s: float) -> Optional[str]:
+    """Retorna a identity de um post de cupom se QUALQUER código da lista
+    já estiver indexado dentro da janela (plat + código). Casamento por
+    código compartilhado — o link nunca entra. Sem código → None."""
+    cods = [c.upper() for c in (codigos or []) if c]
+    if not cods:
+        return None
+    limite = time.time() - janela_s
+    ph = ",".join("?" * len(cods))
+    try:
+        with _db() as cx:
+            r = cx.execute(
+                f"SELECT identity FROM cupom_idx"
+                f" WHERE plat=? AND codigo IN ({ph}) AND ts>=?"
+                f" ORDER BY ts DESC LIMIT 1",
+                (plat, *cods, limite)).fetchone()
+            return r[0] if r else None
+    except Exception as e:
+        log_db.error(f"❌ db_cupom_idx_buscar: {e}")
+        return None
+
+
+def db_cupom_idx_registrar(plat: str, codigos: list, identity: str) -> None:
+    """Registra TODOS os códigos do post sob a MESMA identity
+    (plat + código → identity), com ts atual (janela deslizante).
+    Preserva todos os códigos — não só um."""
+    cods = [c.upper() for c in (codigos or []) if c]
+    if not cods or not identity:
+        return
+    agora = time.time()
+    try:
+        with _db() as cx:
+            cx.executemany(
+                "INSERT INTO cupom_idx(plat,codigo,identity,ts)"
+                " VALUES(?,?,?,?)"
+                " ON CONFLICT(plat,codigo) DO UPDATE SET"
+                " identity=excluded.identity, ts=excluded.ts",
+                [(plat, c, identity, agora) for c in cods])
+    except Exception as e:
+        log_db.error(f"❌ db_cupom_idx_registrar: {e}")
+
 
 def db_set_dedupe(fp: str, plat: str, cupons: list, alma: str,
                   camp: str, asin: str = "", id_prod: str = "",
