@@ -135,9 +135,15 @@ async def _enviar_msg(texto: str, img) -> object:
 #   - editar_por_id:        COM semáforo, callers externos
 # ─────────────────────────────────────────────────────────────────
 async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
-                                imagem_nova=None) -> bool:
+                                imagem_nova=None,
+                                exigir_imagem: bool = False) -> bool:
     """Edita mensagem sem adquirir _SEM_ENVIO. Use APENAS dentro de
-    funções que já seguram o semáforo."""
+    funções que já seguram o semáforo.
+
+    Com exigir_imagem=True, se a edição COM imagem falhar (post nasceu
+    sem mídia — o Telegram não deixa colar foto por edição), devolve
+    False SEM editar só o texto, para o chamador cair no fallback de
+    substituição (deletar+repostar)."""
     from client import client
     for t in range(1, 4):
         try:
@@ -147,7 +153,13 @@ async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
                         GRUPO_DESTINO, msg_id_dest, texto_novo,
                         parse_mode="md", file=imagem_nova,
                     )
-                except Exception:
+                except Exception as e_img:
+                    if exigir_imagem:
+                        log_out.info(
+                            f"🖼 imagem não entrou (post sem mídia) "
+                            f"dest_id={msg_id_dest}: {e_img}"
+                        )
+                        return False
                     await client.edit_message(
                         GRUPO_DESTINO, msg_id_dest, texto_novo,
                         parse_mode="md",
@@ -344,40 +356,6 @@ async def _enviar_inner(montada: MensagemMontada,
 
                 # ── DECISÃO 1: Score MAIOR — sempre processa ────────
                 if score > score_atual:
-                    if _deve_substituir_post(
-                        lider_atual, norm.chat, bool(montada.imagem), ts_anterior
-                    ):
-                        log_out.info(
-                            f"🔄 [SUBSTITUI_MIDIA] {identity} "
-                            f"score {score_atual}→{score} chat={norm.chat} "
-                            f"delta={int(agora - ts_anterior)}s"
-                        )
-                        sent = await _substituir_post_com_midia(
-                            msg_id_dest, montada
-                        )
-                        if sent:
-                            mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-                            mp[str(montada.msg_id)] = sent.id
-                            try:
-                                await loop.run_in_executor(
-                                    _EXECUTOR, salvar_mapa, mp
-                                )
-                            except Exception as e:
-                                log_sys.error(f"❌ salvar_mapa: {e}")
-
-                            db_set_estado(
-                                identity, sent.id, score, montada.texto,
-                                montada.plat, norm.chat,
-                                estado.get("janela_fim", 0), edit_count + 1,
-                                estado.get("shadow_reply_id", 0),
-                            )
-                            log_out.info(
-                                f"✅ [SUBSTITUIDO_OK] {identity} "
-                                f"novo_id={sent.id} score={score}"
-                            )
-                            return True
-                        # Fallback: cai pra edição comum
-
                     log_out.info(
                         f"✳️ [EVOLUI] {identity} "
                         f"score {score_atual}→{score} "
@@ -385,8 +363,10 @@ async def _enviar_inner(montada: MensagemMontada,
                         f"chat={norm.chat} "
                         f"img_nova={'sim' if montada.imagem else 'não'}"
                     )
+                    # PRIORIDADE: editar o MESMO post (texto + imagem).
                     ok = await _editar_inner_no_sem(
                         msg_id_dest, montada.texto, montada.imagem,
+                        exigir_imagem=bool(montada.imagem),
                     )
                     if ok:
                         db_set_estado(
@@ -395,13 +375,41 @@ async def _enviar_inner(montada: MensagemMontada,
                             estado.get("janela_fim", 0), edit_count + 1,
                             estado.get("shadow_reply_id", 0))
                         log_out.info(f"✏️ [EDITADO_OK] {identity} novo_score={score}")
+                        return True
+
+                    # PLANO B: edição falhou OU imagem não entrou (post
+                    # nasceu sem mídia) → deletar+repostar pra imagem entrar.
+                    log_out.info(
+                        f"🔄 [SUBSTITUI_FALLBACK] {identity} "
+                        f"score {score_atual}→{score} chat={norm.chat}"
+                    )
+                    sent = await _substituir_post_com_midia(msg_id_dest, montada)
+                    if sent:
+                        mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+                        mp[str(montada.msg_id)] = sent.id
+                        try:
+                            await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
+                        except Exception as e:
+                            log_sys.error(f"❌ salvar_mapa: {e}")
+                        db_set_estado(
+                            identity, sent.id, score, montada.texto,
+                            montada.plat, norm.chat,
+                            estado.get("janela_fim", 0), edit_count + 1,
+                            estado.get("shadow_reply_id", 0),
+                        )
+                        log_out.info(
+                            f"✅ [SUBSTITUIDO_OK] {identity} "
+                            f"novo_id={sent.id} score={score}"
+                        )
                     else:
-                        log_out.warning(f"⚠️ [EDIT_FALHOU] {identity}")
-                    return ok
+                        log_out.warning(f"⚠️ [SUBSTITUI_FALHOU] {identity}")
+                    return True
 
                 # ── DECISÃO 2: Score IGUAL ──────────────────────────
                 if score == score_atual:
-                    # Sub-caso: troca de imagem feia → boa
+                    # Sub-caso: troca de imagem feia → boa. PRIORIDADE:
+                    # editar a imagem NO LUGAR; se não entrar (post sem
+                    # mídia) ou a edição falhar → PLANO B: deletar+repostar.
                     if (_midia_grupo_ruim(lider_atual)
                             and not _midia_grupo_ruim(norm.chat)
                             and montada.imagem
@@ -411,26 +419,35 @@ async def _enviar_inner(montada: MensagemMontada,
                             f"de {lider_atual} (ruim) → {norm.chat} (bom) "
                             f"delta={int(agora - ts_anterior)}s"
                         )
-                        sent = await _substituir_post_com_midia(
-                            msg_id_dest, montada
+                        ok = await _editar_inner_no_sem(
+                            msg_id_dest, montada.texto, montada.imagem,
+                            exigir_imagem=True,
                         )
+                        if ok:
+                            db_set_estado(
+                                identity, msg_id_dest, score, montada.texto,
+                                montada.plat, norm.chat,
+                                estado.get("janela_fim", 0), edit_count + 1,
+                                estado.get("shadow_reply_id", 0),
+                            )
+                            log_out.info(f"✅ [IMG_TROCADA_OK] {identity}")
+                            return True
+
+                        sent = await _substituir_post_com_midia(msg_id_dest, montada)
                         if sent:
                             mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
                             mp[str(montada.msg_id)] = sent.id
                             try:
-                                await loop.run_in_executor(
-                                    _EXECUTOR, salvar_mapa, mp
-                                )
+                                await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
                             except Exception as e:
                                 log_sys.error(f"❌ salvar_mapa: {e}")
-
                             db_set_estado(
                                 identity, sent.id, score, montada.texto,
                                 montada.plat, norm.chat,
                                 estado.get("janela_fim", 0), edit_count + 1,
                                 estado.get("shadow_reply_id", 0),
                             )
-                            log_out.info(f"✅ [IMG_TROCADA_OK] {identity}")
+                            log_out.info(f"✅ [IMG_TROCADA_OK] {identity} (substitui)")
                             return True
 
                     # Texto quase igual → ignora silenciosamente
