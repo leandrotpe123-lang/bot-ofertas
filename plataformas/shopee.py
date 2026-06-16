@@ -202,9 +202,16 @@ def limpa_url(url: str) -> str:
     from urllib.parse import parse_qs, urlencode, urlunparse
     try:
         parsed = urlparse(url)
+        # Live da Shopee: a transmissão é identificada por
+        # session/share_user_id/from — não por shopid/itemid. Sem
+        # esses, o link de live abre em erro.
+        if (parsed.netloc or "").lower() == "live.shopee.com.br":
+            manter = {"session", "share_user_id", "from"}
+        else:
+            manter = {"shopid", "itemid", "smtt"}
         params = {
             k: v[0] for k, v in parse_qs(parsed.query).items()
-            if k in {"shopid", "itemid", "smtt"}
+            if k in manter
         }
         return urlunparse(parsed._replace(
             query=urlencode(params) if params else "",
