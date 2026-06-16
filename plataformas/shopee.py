@@ -98,6 +98,7 @@ _SINAIS_CASHBACK = frozenset({
 _P_PRODUTO = [
     re.compile(r'/product/(\d+)/(\d+)'),
     re.compile(r'/item/(\d+)/(\d+)'),
+    re.compile(r'/opaanlp/(\d+)/(\d+)'),
     re.compile(r'[-/]i\.(\d+)\.(\d+)'),
 ]
 
