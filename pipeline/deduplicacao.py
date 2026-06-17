@@ -26,7 +26,11 @@ import time
 from typing import Optional, Tuple
 
 import config
-from database import db_set_dedupe
+from database import (
+    db_set_dedupe,
+    db_cupom_idx_buscar,
+    db_cupom_idx_registrar,
+)
 import globals as g
 from logger import log_ded
 from pipeline.estado_evento import _KW_EVENTO, _RE_RETORNO
@@ -47,6 +51,11 @@ from utils.urls import _cache_key
 # múltiplos grupos mandam "voltou" do mesmo evento em sequência.
 _JANELA_REATIVACAO_S = 30.0
 
+# ── KILL-SWITCH do domínio cupom ─────────────────────────────────
+# True  → identidade de cupom por CÓDIGO COMPARTILHADO (índice).
+# False → comportamento antigo (um código / fingerprint do conjunto).
+# Vire False para reverter NA HORA se algum cupom legítimo sumir.
+_CUPOM_IDX_ON = True
 
 # ─────────────────────────────────────────────────────────────────
 # Detecção do TIPO do post (define qual identidade usar)
@@ -358,6 +367,27 @@ def _janela_por_tipo(tipo: str) -> float:
     if tipo == "produto": return float(config._JANELA_PRODUTO_S)
     return float(config._JANELA_EVENTO_S)
 
+def _id_cupom_indexado(norm, plat: str, texto: str, fallback: str) -> str:
+    """Resolve a identidade de cupom pelo ÍNDICE POR CÓDIGO.
+
+    Se QUALQUER código do post já foi visto (plat + código) dentro da
+    janela de cupom, reusa a identidade daquele post. Senão usa
+    `fallback` (identidade nova). Em ambos os casos registra TODOS os
+    códigos sob a identidade resolvida — preserva todos, não só um. O
+    link nunca participa: a chave é código + plataforma."""
+    codes = sorted(set(
+        c.upper() for c in extrair_todos_cupons(
+            texto, getattr(norm, "code_entities", None)
+        ) if c
+    ))
+    if not codes:
+        return fallback
+    janela = float(config._JANELA_CUPOM_S)
+    existente = db_cupom_idx_buscar(plat, codes, janela)
+    identity = existente or fallback
+    db_cupom_idx_registrar(plat, codes, identity)
+    return identity
+
 
 def _id_lista_cupons(norm, plat, texto):
     if not _eh_lista_cupons(texto):
@@ -368,7 +398,10 @@ def _id_lista_cupons(norm, plat, texto):
     if not cupons_todos:
         return None
     cupons_set = sorted(set(c.upper() for c in cupons_todos))
-    return f"{plat}|cuplist|{_fp4('|'.join(cupons_set))}"
+    fallback = f"{plat}|cuplist|{_fp4('|'.join(cupons_set))}"
+    if _CUPOM_IDX_ON:
+        return _id_cupom_indexado(norm, plat, texto, fallback)
+    return fallback
 
 
 def _id_produto(norm, plat, texto):
@@ -387,7 +420,10 @@ def _id_cupom_sem_produto(norm, plat, texto):
     # nível não dependa da posição na sequência.
     if not norm.cupom or norm.ids_globais:
         return None
-    return f"{plat}|cup|{norm.cupom.upper()}"
+    fallback = f"{plat}|cup|{norm.cupom.upper()}"
+    if _CUPOM_IDX_ON:
+        return _id_cupom_indexado(norm, plat, texto, fallback)
+    return fallback
 
 
 def _id_cashback(norm, plat, texto):
