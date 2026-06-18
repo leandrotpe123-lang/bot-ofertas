@@ -337,6 +337,34 @@ async def _enviar_inner(montada: MensagemMontada,
                 ts_anterior = estado.get("ts", 0) or 0
                 score_atual = estado["score"]
 
+                # ── CUPOM ENRIQUECIDO (regra 3) ─────────────────────
+                # Cupom que trouxe código(s) novo(s) → edita o MESMO post
+                # pra mostrar todos, mesmo de outro grupo e com score
+                # igual. Independe do peso do score. O texto manda (mostra
+                # os códigos); a imagem é best-effort — o realce de imagem
+                # por score melhor continua sendo a DECISÃO 1. Respeita
+                # _MAX_EDITS fora da janela. Vem ANTES do override de líder
+                # de propósito: post mais rico de outro grupo não trava.
+                novos_cup = getattr(norm, "_cupom_novos", 0)
+                if novos_cup > 0 and (na_janela or edit_count < _MAX_EDITS):
+                    novo_score = max(score, score_atual)
+                    ok = await _editar_inner_no_sem(
+                        msg_id_dest, montada.texto, montada.imagem)
+                    if ok:
+                        db_set_estado(
+                            identity, msg_id_dest, novo_score, montada.texto,
+                            montada.plat, norm.chat,
+                            estado.get("janela_fim", 0), edit_count + 1,
+                            estado.get("shadow_reply_id", 0))
+                        log_out.info(
+                            f"💎 [CUPOM_ENRIQUECIDO] {identity} "
+                            f"novos={novos_cup} score={novo_score} "
+                            f"chat={norm.chat}")
+                    else:
+                        log_out.warning(
+                            f"⚠️ [CUPOM_ENRIQUECIDO_FALHOU] {identity}")
+                    return True
+
                 # Override de líder por score: outro grupo só substitui
                 # se trouxer cupom/preço melhor (score MAIOR). Score
                 # igual ou menor fora da janela é bloqueado.
