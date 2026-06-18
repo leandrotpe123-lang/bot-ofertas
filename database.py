@@ -199,24 +199,33 @@ def db_cupom_idx_buscar(plat: str, codigos: list, janela_s: float) -> Optional[s
         return None
 
 
-def db_cupom_idx_registrar(plat: str, codigos: list, identity: str) -> None:
+def db_cupom_idx_registrar(plat: str, codigos: list, identity: str) -> int:
     """Registra TODOS os códigos do post sob a MESMA identity
     (plat + código → identity), com ts atual (janela deslizante).
-    Preserva todos os códigos — não só um."""
+    Preserva todos os códigos — não só um. Retorna QUANTOS códigos
+    eram NOVOS (não estavam no índice) — usado pela exceção de
+    reativação 'passa se vier com mais códigos'."""
     cods = [c.upper() for c in (codigos or []) if c]
     if not cods or not identity:
-        return
+        return 0
     agora = time.time()
     try:
         with _db() as cx:
+            ph = ",".join("?" * len(cods))
+            ja = {r[0] for r in cx.execute(
+                f"SELECT codigo FROM cupom_idx"
+                f" WHERE plat=? AND codigo IN ({ph})",
+                (plat, *cods)).fetchall()}
             cx.executemany(
                 "INSERT INTO cupom_idx(plat,codigo,identity,ts)"
                 " VALUES(?,?,?,?)"
                 " ON CONFLICT(plat,codigo) DO UPDATE SET"
                 " identity=excluded.identity, ts=excluded.ts",
                 [(plat, c, identity, agora) for c in cods])
+            return sum(1 for c in cods if c not in ja)
     except Exception as e:
         log_db.error(f"❌ db_cupom_idx_registrar: {e}")
+        return 0
 
 
 def db_set_dedupe(fp: str, plat: str, cupons: list, alma: str,
