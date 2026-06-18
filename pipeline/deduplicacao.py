@@ -50,6 +50,9 @@ from utils.urls import _cache_key
 # Permite uma reativação legítima passar mas bloqueia flood quando
 # múltiplos grupos mandam "voltou" do mesmo evento em sequência.
 _JANELA_REATIVACAO_S = 30.0
+# Reativação de CUPOM: janela longa (10 min) — regra do domínio cupom.
+# Produto e campanha continuam em _JANELA_REATIVACAO_S (30s). Não mistura.
+_JANELA_REATIVACAO_CUPOM_S = 600.0
 
 # ── KILL-SWITCH do domínio cupom ─────────────────────────────────
 # True  → identidade de cupom por CÓDIGO COMPARTILHADO (índice).
@@ -385,7 +388,7 @@ def _id_cupom_indexado(norm, plat: str, texto: str, fallback: str) -> str:
     janela = float(config._JANELA_CUPOM_S)
     existente = db_cupom_idx_buscar(plat, codes, janela)
     identity = existente or fallback
-    db_cupom_idx_registrar(plat, codes, identity)
+    norm._cupom_novos = db_cupom_idx_registrar(plat, codes, identity)
     return identity
 
 
@@ -550,10 +553,21 @@ async def deve_enviar_async(norm: MensagemNormalizada) -> bool:
         # mesmo evento dentro de _JANELA_REATIVACAO_S.
         if await _checar_reativacao(norm):
             fp_reativ = _fp4(f"reativ|{identity}")
+            janela_reativ = (
+                _JANELA_REATIVACAO_CUPOM_S if tipo == "cupom"
+                else _JANELA_REATIVACAO_S
+            )
             na_janela, ts_ant = await _atomic_check_and_claim(
-                fp_reativ, _JANELA_REATIVACAO_S,
+                fp_reativ, janela_reativ,
             )
             if na_janela:
+                novos = getattr(norm, "_cupom_novos", 0)
+                if tipo == "cupom" and novos > 0:
+                    log_ded.info(
+                        f"♻️ [REATIVACAO_MAIS_CODIGOS] {identity} "
+                        f"novos={novos} chat={chat} → enviar() decide"
+                    )
+                    return True
                 delta = int(time.monotonic() - ts_ant) if ts_ant else 0
                 log_ded.info(
                     f"♻️ [REATIVACAO_FLOOD] {identity} delta={delta}s "
