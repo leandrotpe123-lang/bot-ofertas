@@ -388,7 +388,13 @@ def _id_cupom_indexado(norm, plat: str, texto: str, fallback: str) -> str:
     janela = float(config._JANELA_CUPOM_S)
     existente = db_cupom_idx_buscar(plat, codes, janela)
     identity = existente or fallback
-    norm._cupom_novos = db_cupom_idx_registrar(plat, codes, identity)
+    # max() preserva a contagem REAL de códigos novos: identidade_canonica
+    # roda 2x por post (uma no dedup, outra no enviar). Na 2ª vez os
+    # códigos já estão no índice e registrar devolve 0 — sem o max,
+    # _cupom_novos zeraria e o cupom enriquecido nunca editaria o post.
+    norm._cupom_novos = max(
+        getattr(norm, "_cupom_novos", 0),
+        db_cupom_idx_registrar(plat, codes, identity))
     return identity
 
 
