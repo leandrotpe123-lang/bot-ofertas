@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 import config
 from config import _MAX_EDITS
+from pipeline.identidade import username_de
 
 # Ações possíveis
 IGNORAR  = "IGNORAR"
@@ -47,7 +48,7 @@ class Decisao:
 
 
 def _midia_ruim(chat: str) -> bool:
-    return (chat or "").lower() in config._GRUPOS_IMG_RUIM
+    return username_de(chat) in config._GRUPOS_IMG_RUIM
 
 
 def decidir(norm, montada, score: int, estado: dict, agora: float) -> Decisao:
