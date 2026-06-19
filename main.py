@@ -45,6 +45,7 @@ from globals import _init_globals
 from logger import log_sys, log_hc
 
 from pipeline.orchestrator import processar, _iniciar_orchestrator
+from pipeline.identidade import precarregar_usernames
 
 import plataformas
 
@@ -100,6 +101,9 @@ async def _run() -> bool:
     log_sys.info(f"✅ {me.first_name} (@{me.username}) | ID={me.id}")
     log_sys.info(f"📡 {GRUPOS_ORIGEM} → {GRUPO_DESTINO}")
     log_sys.info("🚀 FOGUETÃO — ONLINE")
+  # Pré-aquece identidade (id→@username) dos grupos monitorados, para
+    # regras dependentes de @username valerem já na 1ª mensagem.
+    await precarregar_usernames(client, GRUPOS_ORIGEM)
 
     # 4. Registra handlers de eventos
     @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
