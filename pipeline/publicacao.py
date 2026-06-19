@@ -4,7 +4,7 @@ import asyncio
 import time
 from typing import Optional
 
-from telethon.errors import FloodWaitError, MessageNotModifiedError
+from telethon.errors import FloodWaitError
 
 import config
 from config import GRUPO_DESTINO, _EXECUTOR, _JANELA_DISPUTA_S, _MAX_EDITS
