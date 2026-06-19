@@ -12,6 +12,7 @@ from database import db_get_estado, db_set_estado, db_registrar_sat
 import globals as g
 from logger import log_out, log_sys
 from pipeline.deduplicacao import calcular_score, identidade_canonica
+from pipeline.decisao import decidir
 from pipeline.montagem import MensagemMontada
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.estado_evento import _KW_EVENTO
@@ -328,170 +329,101 @@ async def _enviar_inner(montada: MensagemMontada,
             estado = db_get_estado(identity)
 
             if estado:
-                agora       = time.time()
-                na_janela   = agora < (estado.get("janela_fim", 0) or 0)
-                lider_atual = estado.get("lider", "") or ""
-                edit_count  = estado.get("edit_count", 0) or 0
-                msg_id_dest = estado["msg_id_dest"]
-                texto_atual = estado.get("texto", "") or ""
-                ts_anterior = estado.get("ts", 0) or 0
-                score_atual = estado["score"]
+                agora = time.time()
+                d = decidir(norm, montada, score, estado, agora)
 
-                # ── CUPOM ENRIQUECIDO (regra 3) ─────────────────────
-                # Cupom que trouxe código(s) novo(s) → edita o MESMO post
-                # pra mostrar todos, mesmo de outro grupo e com score
-                # igual. Independe do peso do score. O texto manda (mostra
-                # os códigos); a imagem é best-effort — o realce de imagem
-                # por score melhor continua sendo a DECISÃO 1. Respeita
-                # _MAX_EDITS fora da janela. Vem ANTES do override de líder
-                # de propósito: post mais rico de outro grupo não trava.
-                novos_cup = getattr(norm, "_cupom_novos", 0)
-                if novos_cup > 0 and (na_janela or edit_count < _MAX_EDITS):
-                    novo_score = max(score, score_atual)
-                    ok = await _editar_inner_no_sem(
-                        msg_id_dest, montada.texto, montada.imagem)
-                    if ok:
-                        db_set_estado(
-                            identity, msg_id_dest, novo_score, montada.texto,
-                            montada.plat, norm.chat,
-                            estado.get("janela_fim", 0), edit_count + 1,
-                            estado.get("shadow_reply_id", 0))
-                        log_out.info(
-                            f"💎 [CUPOM_ENRIQUECIDO] {identity} "
-                            f"novos={novos_cup} score={novo_score} "
-                            f"chat={norm.chat}")
-                    else:
-                        log_out.warning(
-                            f"⚠️ [CUPOM_ENRIQUECIDO_FALHOU] {identity}")
-                    return True
-
-                # Override de líder por score: outro grupo só substitui
-                # se trouxer cupom/preço melhor (score MAIOR). Score
-                # igual ou menor fora da janela é bloqueado.
-                if (not na_janela and lider_atual and norm.chat != lider_atual
-                        and score <= score_atual):
+                # ── Log da decisão (rótulos idênticos aos atuais) ──
+                if d.motivo == "LIDER_TRAVADO":
                     log_out.info(
                         f"🔒 [LIDER_TRAVADO] {identity} "
-                        f"lider={lider_atual} candidato={norm.chat} "
-                        f"score {score}<={score_atual}"
-                    )
-                    return True
-
-                # Limite de edições (apenas FORA da janela)
-                if edit_count >= _MAX_EDITS and not na_janela:
-                    log_out.info(f"🔒 [MAX_EDITS] {identity} edits={edit_count}")
-                    return True
-
-                # ── DECISÃO 1: Score MAIOR — sempre processa ────────
-                if score > score_atual:
+                        f"lider={estado.get('lider','')} candidato={norm.chat} "
+                        f"score {score}<={d.score_atual}")
+                elif d.motivo == "MAX_EDITS":
+                    log_out.info(
+                        f"🔒 [MAX_EDITS] {identity} "
+                        f"edits={estado.get('edit_count', 0) or 0}")
+                elif d.motivo == "EVOLUI":
                     log_out.info(
                         f"✳️ [EVOLUI] {identity} "
-                        f"score {score_atual}→{score} "
-                        f"{'(janela)' if na_janela else '(lider)'} "
+                        f"score {d.score_atual}→{score} "
+                        f"{'(janela)' if d.na_janela else '(lider)'} "
                         f"chat={norm.chat} "
-                        f"img_nova={'sim' if montada.imagem else 'não'}"
-                    )
-                    # PRIORIDADE: editar o MESMO post (texto + imagem).
-                    ok = await _editar_inner_no_sem(
-                        msg_id_dest, montada.texto, montada.imagem,
-                        exigir_imagem=bool(montada.imagem),
-                    )
-                    if ok:
-                        db_set_estado(
-                            identity, msg_id_dest, score, montada.texto,
-                            montada.plat, norm.chat,
-                            estado.get("janela_fim", 0), edit_count + 1,
-                            estado.get("shadow_reply_id", 0))
-                        log_out.info(f"✏️ [EDITADO_OK] {identity} novo_score={score}")
-                        return True
-
-                    # PLANO B: edição falhou OU imagem não entrou (post
-                    # nasceu sem mídia) → deletar+repostar pra imagem entrar.
+                        f"img_nova={'sim' if montada.imagem else 'não'}")
+                elif d.motivo == "TROCA_IMG_BOA":
                     log_out.info(
-                        f"🔄 [SUBSTITUI_FALLBACK] {identity} "
-                        f"score {score_atual}→{score} chat={norm.chat}"
-                    )
-                    sent = await _substituir_post_com_midia(msg_id_dest, montada)
-                    if sent:
-                        mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-                        mp[str(montada.msg_id)] = sent.id
-                        try:
-                            await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
-                        except Exception as e:
-                            log_sys.error(f"❌ salvar_mapa: {e}")
-                        db_set_estado(
-                            identity, sent.id, score, montada.texto,
-                            montada.plat, norm.chat,
-                            estado.get("janela_fim", 0), edit_count + 1,
-                            estado.get("shadow_reply_id", 0),
-                        )
-                        log_out.info(
-                            f"✅ [SUBSTITUIDO_OK] {identity} "
-                            f"novo_id={sent.id} score={score}"
-                        )
-                    else:
-                        log_out.warning(f"⚠️ [SUBSTITUI_FALHOU] {identity}")
+                        f"🖼 [TROCA_IMG_BOA] {identity} "
+                        f"de {estado.get('lider','')} (ruim) → {norm.chat} (bom) "
+                        f"delta={d.delta}s")
+                elif d.motivo == "DUP_SILENCIOSO":
+                    log_out.debug(
+                        f"🔁 [DUP_SILENCIOSO] {identity} sim={d.sim:.2f}")
+                elif d.motivo == "SCORE_NAO_EVOLUI":
+                    log_out.info(
+                        f"🔁 [SCORE_NAO_EVOLUI] {identity} "
+                        f"atual={score} salvo={d.score_atual} chat={norm.chat}")
+
+                if d.acao != "EVOLUIR":
                     return True
 
-                # ── DECISÃO 2: Score IGUAL ──────────────────────────
-                if score == score_atual:
-                    # Sub-caso: troca de imagem feia → boa. PRIORIDADE:
-                    # editar a imagem NO LUGAR; se não entrar (post sem
-                    # mídia) ou a edição falhar → PLANO B: deletar+repostar.
-                    if (_midia_grupo_ruim(lider_atual)
-                            and not _midia_grupo_ruim(norm.chat)
-                            and montada.imagem
-                            and (agora - ts_anterior) < config._JANELA_REENVIO_MIDIA_S):
+                # ══ Aplicação no destino (vira o Módulo 3) ══════════
+                msg_id_dest = estado["msg_id_dest"]
+                edit_count  = estado.get("edit_count", 0) or 0
+
+                ok = await _editar_inner_no_sem(
+                    msg_id_dest, montada.texto, montada.imagem,
+                    exigir_imagem=d.exigir_imagem)
+                if ok:
+                    db_set_estado(
+                        identity, msg_id_dest, d.novo_score, montada.texto,
+                        montada.plat, norm.chat,
+                        estado.get("janela_fim", 0), edit_count + 1,
+                        estado.get("shadow_reply_id", 0))
+                    if d.motivo == "CUPOM_ENRIQUECIDO":
                         log_out.info(
-                            f"🖼 [TROCA_IMG_BOA] {identity} "
-                            f"de {lider_atual} (ruim) → {norm.chat} (bom) "
-                            f"delta={int(agora - ts_anterior)}s"
-                        )
-                        ok = await _editar_inner_no_sem(
-                            msg_id_dest, montada.texto, montada.imagem,
-                            exigir_imagem=True,
-                        )
-                        if ok:
-                            db_set_estado(
-                                identity, msg_id_dest, score, montada.texto,
-                                montada.plat, norm.chat,
-                                estado.get("janela_fim", 0), edit_count + 1,
-                                estado.get("shadow_reply_id", 0),
-                            )
-                            log_out.info(f"✅ [IMG_TROCADA_OK] {identity}")
-                            return True
+                            f"💎 [CUPOM_ENRIQUECIDO] {identity} "
+                            f"novos={getattr(norm, '_cupom_novos', 0)} "
+                            f"score={d.novo_score} chat={norm.chat}")
+                    elif d.motivo == "TROCA_IMG_BOA":
+                        log_out.info(f"✅ [IMG_TROCADA_OK] {identity}")
+                    else:
+                        log_out.info(
+                            f"✏️ [EDITADO_OK] {identity} novo_score={d.novo_score}")
+                    return True
 
-                        sent = await _substituir_post_com_midia(msg_id_dest, montada)
-                        if sent:
-                            mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-                            mp[str(montada.msg_id)] = sent.id
-                            try:
-                                await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
-                            except Exception as e:
-                                log_sys.error(f"❌ salvar_mapa: {e}")
-                            db_set_estado(
-                                identity, sent.id, score, montada.texto,
-                                montada.plat, norm.chat,
-                                estado.get("janela_fim", 0), edit_count + 1,
-                                estado.get("shadow_reply_id", 0),
-                            )
-                            log_out.info(f"✅ [IMG_TROCADA_OK] {identity} (substitui)")
-                            return True
+                if not d.permite_substituir:
+                    if d.motivo == "CUPOM_ENRIQUECIDO":
+                        log_out.warning(f"⚠️ [CUPOM_ENRIQUECIDO_FALHOU] {identity}")
+                    else:
+                        log_out.warning(
+                            f"⚠️ [EDIT_FALHOU] {identity} motivo={d.motivo}")
+                    return True
 
-                    # Texto quase igual → ignora silenciosamente
-                    from utils.textos import _alma, _sim
-                    sim_v = _sim(_alma(montada.texto), _alma(texto_atual))
-                    if sim_v > 0.85:
-                        log_out.debug(
-                            f"🔁 [DUP_SILENCIOSO] {identity} sim={sim_v:.2f}")
-                        return True
-
-                # ── DECISÃO 3: Score igual com baixa similaridade / menor ──
                 log_out.info(
-                    f"🔁 [SCORE_NAO_EVOLUI] {identity} "
-                    f"atual={score} salvo={score_atual} chat={norm.chat}")
+                    f"🔄 [SUBSTITUI_FALLBACK] {identity} "
+                    f"score {d.score_atual}→{d.novo_score} chat={norm.chat}")
+                sent = await _substituir_post_com_midia(msg_id_dest, montada)
+                if sent:
+                    mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+                    mp[str(montada.msg_id)] = sent.id
+                    try:
+                        await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
+                    except Exception as e:
+                        log_sys.error(f"❌ salvar_mapa: {e}")
+                    db_set_estado(
+                        identity, sent.id, d.novo_score, montada.texto,
+                        montada.plat, norm.chat,
+                        estado.get("janela_fim", 0), edit_count + 1,
+                        estado.get("shadow_reply_id", 0))
+                    if d.motivo == "TROCA_IMG_BOA":
+                        log_out.info(f"✅ [IMG_TROCADA_OK] {identity} (substitui)")
+                    else:
+                        log_out.info(
+                            f"✅ [SUBSTITUIDO_OK] {identity} "
+                            f"novo_id={sent.id} score={d.novo_score}")
+                else:
+                    log_out.warning(f"⚠️ [SUBSTITUI_FALHOU] {identity}")
                 return True
-
+                
         # ═════════════════════════════════════════════════════════════
         # NOVO ENVIO (sem estado prévio)
         # ═════════════════════════════════════════════════════════════
