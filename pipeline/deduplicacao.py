@@ -35,6 +35,7 @@ import globals as g
 from logger import log_ded
 from pipeline.estado_evento import _KW_EVENTO, _RE_RETORNO
 from pipeline.normalizacao import MensagemNormalizada
+from pipeline.identidade import username_de
 from utils.cupom import _KW_CUPOM, extrair_todos_cupons
 from utils.hashes import _fp4
 from utils.textos import (
@@ -309,10 +310,10 @@ def calcular_score(norm: MensagemNormalizada) -> int:
     if norm.sku:
         score += 1
 
-    # Mídia: peso varia conforme grupo de origem
+    # Mídia: peso varia conforme grupo de origem. A identidade é numérica;
+    # resolvemos o @username via identidade p/ consultar a lista legível.
     if norm.tem_midia:
-        chat_lower = (norm.chat or "").lower()
-        if chat_lower in config._GRUPOS_IMG_RUIM:
+        if username_de(norm.chat) in config._GRUPOS_IMG_RUIM:
             score += config._SCORE_MIDIA_RUIM
         else:
             score += config._SCORE_MIDIA_NORMAL
