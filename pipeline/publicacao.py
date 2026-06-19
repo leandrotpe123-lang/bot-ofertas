@@ -104,11 +104,6 @@ async def delay_saturacao(plat: str, texto: str) -> float:
     return delay
 
 
-def _midia_grupo_ruim(chat: str) -> bool:
-    """Verifica se o chat está na lista de grupos com imagem feia."""
-    return (chat or "").lower() in config._GRUPOS_IMG_RUIM
-
-
 async def enviar(montada: MensagemMontada,
                  norm: Optional[MensagemNormalizada] = None,
                  is_edit: bool = False) -> bool:
