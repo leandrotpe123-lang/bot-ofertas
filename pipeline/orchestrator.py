@@ -33,7 +33,7 @@ import time
 import globals as g
 from logger import log_sys
 from pipeline.deduplicacao import deve_enviar_async
-from pipeline.idempotencia import ja_processado, marcar_processado
+from pipeline.identidade import checar_e_marcar
 from pipeline.ingestao import ingerir
 from pipeline.montagem import montar
 from pipeline.normalizacao import normalizar
@@ -110,15 +110,15 @@ async def _pipeline(event, is_edit: bool = False) -> None:
     """
     msg_id = event.message.id
 
-    # ── Idempotência (somente novas) ──────────────────────────────
-    if not is_edit and await ja_processado(msg_id):
-        return
-
-    # ── Camada 1: Ingestão ────────────────────────────────────────
+    # ── Camada 1: Ingestão (primeiro — fornece o chat canônico) ──
     try:
-        bruta = ingerir(event)
+        bruta = await ingerir(event)
     except Exception as e:
         log_sys.error(f"❌ ingestao: {e}")
+        return
+
+    # ── Idempotência (somente novas) — chave (chat canônico, msg_id) ──
+    if not is_edit and await checar_e_marcar(f"{bruta.chat}:{msg_id}"):
         return
 
     # ── Shadow reply (somente mensagens novas que são reply) ──────
@@ -166,8 +166,6 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         return
 
     # ── Camada 5: Publicação ──────────────────────────────────────
-    if not is_edit:
-        await marcar_processado(msg_id)
     await enviar(montada, norm=norm, is_edit=is_edit)
 
 
