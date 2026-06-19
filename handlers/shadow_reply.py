@@ -14,7 +14,8 @@ import globals as g
 from config import GRUPO_DESTINO, _EXECUTOR
 from database import db_get_estado, db_set_estado, _db
 from logger import log_out
-from pipeline.publicacao import editar_por_id, _MAX_EDITS
+from pipeline.saida import editar_por_id
+from config import _MAX_EDITS
 from utils.helpers import ler_mapa
 from utils.hashes import _fp4
 
