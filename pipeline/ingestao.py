@@ -7,6 +7,7 @@ from typing import List
 from telethon.tl.types import MessageMediaWebPage, MessageEntityCode, MessageEntityPre
 
 from logger import log_ing
+from pipeline.identidade import chat_canonico, username_para_log
 
 _RE_URL = re.compile(r'https?://[^\s\)\]>,"\'<\u200b\u200c\u200d\u2060]+')
 
@@ -65,7 +66,7 @@ def _extrair_code_entities(message) -> List[str]:
         return []
 
 
-def ingerir(event) -> MensagemBruta:
+async def ingerir(event) -> MensagemBruta:
     """Extrai dados crus da mensagem. Zero lógica de negócio."""
     texto = event.message.text or getattr(event.message, "message", "") or ""
     links = [u.strip().rstrip('.,;)>]}!?') for u in _RE_URL.findall(texto)]
@@ -75,12 +76,9 @@ def ingerir(event) -> MensagemBruta:
     )
     code_entities = _extrair_code_entities(event.message)
 
-    try:
-        chat_obj = getattr(event, "_chat", None)
-        username = getattr(chat_obj, "username", None)
-        chat = (username or str(event.chat_id)).lower()
-    except Exception:
-        chat = str(event.chat_id)
+    # Identidade vem do Módulo 1 (id numérico canônico). Username só p/ log.
+    chat = chat_canonico(event)
+    chat_user = await username_para_log(event)
 
     is_reply = bool(getattr(event.message, "reply_to", None))
     reply_to = 0
@@ -91,7 +89,8 @@ def ingerir(event) -> MensagemBruta:
             pass
 
     log_ing.debug(
-        f"📩 id={event.message.id} chat={chat} "
+        f"📩 id={event.message.id} "
+        f"chat={('@' + chat_user) if chat_user else chat} (cid={chat}) "
         f"links={len(links)} midia={tem_midia} reply={is_reply} "
         f"codes={len(code_entities)}"
     )
