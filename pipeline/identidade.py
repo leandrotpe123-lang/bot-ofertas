@@ -28,12 +28,17 @@ from logger import log_ing
 __all__ = [
     "chat_canonico",
     "username_para_log",
+    "username_de",
+    "precarregar_usernames",
     "checar_e_marcar",
     "contar_processados",
 ]
 
 # ── Identidade canônica ───────────────────────────────────────────
-# Cache de USERNAME por canal (id marcado → @username), APENAS para log.
+# Cache id marcado → @username (minúsculo, sem @). Resolução de identidade
+# reutilizável: serve para log E para regras que dependem do @username
+# (ex.: _GRUPOS_IMG_RUIM). NÃO é a identidade canônica (essa é o id
+# numérico); é só o mapeamento id→@username.
 _CHAT_USERNAME: dict[int, str] = {}
 
 
@@ -69,6 +74,35 @@ async def username_para_log(event) -> str:
     if username:
         _CHAT_USERNAME[cid] = username   # cacheia só resolução boa
     return username
+
+def username_de(chat: str) -> str:
+    """Devolve o @username (minúsculo, sem @) do chat canônico (id
+    numérico em string), ou "" se desconhecido. Resolução de identidade
+    PURA — não conhece regra de score/política; quem decide é quem chama.
+    O cache é preenchido na ingestão e pré-aquecido no boot, então já
+    está pronto quando score/decisão consultam."""
+    try:
+        return _CHAT_USERNAME.get(int(chat), "")
+    except (TypeError, ValueError):
+        return ""
+
+
+async def precarregar_usernames(client, grupos) -> None:
+    """Pré-aquece o cache id→@username dos grupos monitorados no boot,
+    para regras dependentes de @username (ex.: imagem fraca) já valerem
+    na 1ª mensagem, sem furo de cache vazio. Best-effort: a falha de um
+    grupo apenas loga e não interrompe o boot."""
+    from telethon.utils import get_peer_id
+    for grp in grupos:
+        try:
+            ent = await client.get_entity(grp)
+            cid = get_peer_id(ent)
+            user = (getattr(ent, "username", None) or "").lower()
+            if user:
+                _CHAT_USERNAME[cid] = user
+                log_ing.info(f"🔖 identidade pré-aquecida: {cid} → @{user}")
+        except Exception as e:
+            log_ing.warning(f"⚠️ pré-aquecer username {grp}: {e}")
 
 
 # ── Idempotência ──────────────────────────────────────────────────
