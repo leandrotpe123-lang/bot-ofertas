@@ -125,6 +125,17 @@ async def _run() -> bool:
     asyncio.create_task(_iniciar_orchestrator())
     asyncio.create_task(_iniciar_servidor_web())
 
+  # [TESTE] Recupera updates perdidos enquanto o cliente esteve offline.
+    # Após handlers e workers, antes de aguardar (ordem da doc do Telethon).
+    # Validação de gap recuperável — NÃO conserta perda em rajada runtime;
+    # isso depende de sessão persistente (próxima frente). Em try/except
+    # para nunca derrubar o boot caso a sessão não suporte get_update_states.
+    try:
+        await client.catch_up()
+        log_sys.info("📡 catch_up concluído (recuperação de gap offline)")
+    except Exception as e:
+        log_sys.error(f"❌ catch_up: {e}")
+
     # 6. Aguarda desconexão
     await client.run_until_disconnected()
     return True
