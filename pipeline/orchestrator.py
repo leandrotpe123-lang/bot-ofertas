@@ -2,7 +2,7 @@
 Camada 2 — Orquestração.
 
 Responsabilidade única: coordenar o fluxo entre as camadas da pipeline.
-Recebe eventos do Telegram, enfileira com prioridade, gerencia workers
+Recebe eventos do Telegram, enfileira com prioridade, gerencia worker
 e chama cada camada na ordem correta.
 
 Camadas chamadas em sequência:
