@@ -137,11 +137,10 @@ async def _pipeline(event, is_edit: bool = False) -> None:
 
     # ── Idempotência (somente novas) — chave (chat canônico, msg_id) ──
     if not is_edit and await checar_e_marcar(f"{bruta.chat}:{msg_id}"):
-            log_sys.info(
+        log_sys.info(
             f"🧭 TL | id={msg_id} chat={bruta.chat} | DESCARTE | "
             f"motivo=JA_PROCESSADO")
         return
-
     # ── Shadow reply (somente mensagens novas que são reply) ──────
     if bruta.is_reply and bruta.reply_to > 0 and not is_edit:
         from handlers.shadow_reply import processar_shadow_reply
