@@ -160,7 +160,7 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         log_sys.error(f"❌ normalizar: {e}")
         return
     if norm is None:
-            log_sys.info(
+        log_sys.info(
             f"🧭 TL | id={msg_id} chat={bruta.chat} | DESCARTE | "
             f"motivo=NORMALIZACAO_VAZIA")
         return
@@ -169,7 +169,7 @@ async def _pipeline(event, is_edit: bool = False) -> None:
     if not is_edit:
         try:
             if not await deve_enviar_async(norm):
-                            log_sys.info(
+                log_sys.info(
                     f"🧭 TL | id={msg_id} chat={norm.chat} | DESCARTE | "
                     f"motivo=DEDUP")
                 return
