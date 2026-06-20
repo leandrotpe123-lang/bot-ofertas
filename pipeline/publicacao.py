@@ -10,7 +10,7 @@ import config
 from config import GRUPO_DESTINO, _EXECUTOR, _JANELA_DISPUTA_S, _MAX_EDITS
 from database import db_get_estado, db_set_estado, db_registrar_sat
 import globals as g
-from logger import log_out, log_sys
+from logger import log_out, log_sys, _idade_str
 from pipeline.deduplicacao import calcular_score, identidade_canonica
 from pipeline.decisao import decidir
 from pipeline.saida import (
@@ -140,6 +140,12 @@ async def _enviar_inner(montada: MensagemMontada,
             if estado:
                 agora = time.time()
                 d = decidir(norm, montada, score, estado, agora)
+                log_out.debug(
+                    f"🧭 TL | id={montada.msg_id} chat={norm.chat} | DECISAO | "
+                    f"motivo={d.motivo} "
+                    f"na_janela={'sim' if d.na_janela else 'nao'} "
+                    f"score {d.score_atual}→{score} janela_restante="
+                    f"{max(0.0, (estado.get('janela_fim', 0) or 0) - agora):.1f}s")
 
                 # ── Log da decisão (rótulos idênticos aos atuais) ──
                 if d.motivo == "LIDER_TRAVADO":
@@ -172,6 +178,9 @@ async def _enviar_inner(montada: MensagemMontada,
                         f"atual={score} salvo={d.score_atual} chat={norm.chat}")
 
                 if d.acao != "EVOLUIR":
+                    log_out.info(
+                        f"🧭 TL | id={montada.msg_id} chat={norm.chat} | "
+                        f"DESCARTE | motivo={d.motivo}")
                     return True
 
                 # ══ Aplicação no destino (vira o Módulo 3) ══════════
@@ -197,6 +206,11 @@ async def _enviar_inner(montada: MensagemMontada,
                     else:
                         log_out.info(
                             f"✏️ [EDITADO_OK] {identity} novo_score={d.novo_score}")
+                    log_out.info(
+                        f"🧭 TL | id={montada.msg_id} chat={norm.chat} | "
+                        f"PROMOVIDO | dest={msg_id_dest} "
+                        f"novo_score={d.novo_score} "
+                        f"na_janela={'sim' if d.na_janela else 'nao'}")
                     return True
 
                 if not d.permite_substituir:
@@ -263,6 +277,10 @@ async def _enviar_inner(montada: MensagemMontada,
                     montada.plat, norm.chat if norm else "",
                     janela_fim, 0, 0,
                 )
+                log_out.info(
+                    f"🧭 TL | id={montada.msg_id} "
+                    f"chat={norm.chat if norm else ''} | JANELA_CRIADA | "
+                    f"dest={sent.id} dur={_JANELA_DISPUTA_S:.0f}s score={score}")
             except Exception as e:
                 log_sys.error(
                     f"❌ db_set_estado FALHOU pós-envio: {e}", exc_info=True
@@ -302,4 +320,8 @@ async def _enviar_inner(montada: MensagemMontada,
             f"{montada.plat.upper()} score={score} sku={montada.sku} "
             f"identity={identity}"
         )
+        log_out.debug(
+            f"🧭 TL | id={montada.msg_id} chat={norm.chat if norm else ''} | "
+            f"ENVIADO | dest={sent.id} "
+            f"idade_envio={_idade_str(norm.media_obj.date) if norm else '?'}")
         return True
