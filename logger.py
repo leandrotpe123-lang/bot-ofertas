@@ -1,6 +1,7 @@
 """Camada 7 — Logs centralizados. Importado primeiro por todos os módulos."""
 from __future__ import annotations
 import logging
+from datetime import datetime, timezone
 
 def _mk_log(nome: str, cor: str) -> logging.Logger:
     lg = logging.getLogger(nome)
@@ -23,3 +24,33 @@ log_db  = _mk_log('DB',        '1;38;5;208')
 log_sys = _mk_log('SISTEMA',   '1;37')
 log_hc  = _mk_log('HEALTH',    '1;38;5;118')
 
+# ── Helpers de timeline (🧭 TL) — blindados, nunca lançam ─────────
+def _ts_str(date) -> str:
+    """Formata datetime tz-aware (UTC do Telegram) como HH:MM:SS local.
+    Só p/ log. '-' se None, '?' em qualquer falha."""
+    try:
+        if date is None:
+            return "-"
+        return date.astimezone().strftime("%H:%M:%S")
+    except Exception:
+        return "?"
+
+
+def _idade_str(date) -> str:
+    """Idade (agora − date): '12.3s', '2m04s', '1h03m'. tz-aware.
+    Blindado: nunca lança — devolve '?'."""
+    try:
+        if date is None:
+            return "?"
+        s = (datetime.now(timezone.utc) - date).total_seconds()
+        if s < 0:
+            s = 0.0
+        if s < 60:
+            return f"{s:.1f}s"
+        m, seg = divmod(int(s), 60)
+        if m < 60:
+            return f"{m}m{seg:02d}s"
+        h, m = divmod(m, 60)
+        return f"{h}h{m:02d}m"
+    except Exception:
+        return "?"
