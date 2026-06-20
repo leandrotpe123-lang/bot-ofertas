@@ -31,7 +31,7 @@ import heapq
 import time
 
 import globals as g
-from logger import log_sys
+from logger import log_sys, _idade_str
 from pipeline.deduplicacao import deve_enviar_async
 from pipeline.identidade import checar_e_marcar
 from pipeline.ingestao import ingerir
@@ -59,6 +59,10 @@ async def _enfileirar(event, is_edit: bool) -> None:
             return
         prio = _PRIO_EDIT if is_edit else _PRIO_NOVA
         heapq.heappush(g._buf, (prio, time.monotonic(), event, is_edit))
+                log_sys.info(
+            f"🧭 TL | id={event.message.id} chat={event.chat_id} | FILA_IN | "
+            f"tipo={'edit' if is_edit else 'new'} prio={prio} "
+            f"profundidade={len(g._buf)}")
     g._buf_evt.set()
 
 
@@ -94,7 +98,14 @@ async def _worker_loop() -> None:
                         f"⏱ Expirado | id={event.message.id}"
                     )
                     continue
+                log_sys.info(
+                    f"🧭 TL | id={event.message.id} chat={event.chat_id} | "
+                    f"FILA_OUT | tipo={'edit' if is_edit else 'new'}")
+                log_sys.debug(
+                    f"🧭 TL | id={event.message.id} chat={event.chat_id} | "
+                    f"espera_fila={time.monotonic() - ts:.1f}s")
                 await _pipeline(event, is_edit)
+                
             except Exception as e:
                 log_sys.error(f"❌ Worker: {e}", exc_info=True)
             finally:
@@ -117,8 +128,19 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         log_sys.error(f"❌ ingestao: {e}")
         return
 
+    log_sys.info(
+        f"🧭 TL | id={msg_id} chat={bruta.chat} | PROC | "
+        f"origem={'edit' if is_edit else 'new'}")
+    log_sys.debug(
+        f"🧭 TL | id={msg_id} chat={bruta.chat} | "
+        f"idade_proc={_idade_str(event.message.date)} "
+        f"q={len(g._buf)} w={g._w_ativos}")
+
     # ── Idempotência (somente novas) — chave (chat canônico, msg_id) ──
     if not is_edit and await checar_e_marcar(f"{bruta.chat}:{msg_id}"):
+            log_sys.info(
+            f"🧭 TL | id={msg_id} chat={bruta.chat} | DESCARTE | "
+            f"motivo=JA_PROCESSADO")
         return
 
     # ── Shadow reply (somente mensagens novas que são reply) ──────
@@ -140,12 +162,18 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         log_sys.error(f"❌ normalizar: {e}")
         return
     if norm is None:
+            log_sys.info(
+            f"🧭 TL | id={msg_id} chat={bruta.chat} | DESCARTE | "
+            f"motivo=NORMALIZACAO_VAZIA")
         return
 
     # ── Camada 3: Deduplicação + saturação (somente novas) ───────
     if not is_edit:
         try:
             if not await deve_enviar_async(norm):
+                            log_sys.info(
+                    f"🧭 TL | id={msg_id} chat={norm.chat} | DESCARTE | "
+                    f"motivo=DEDUP")
                 return
         except Exception as e:
             log_sys.error(f"❌ deve_enviar: {e}")
@@ -154,6 +182,9 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         try:
             delay = await delay_saturacao(norm.plat, norm.texto_limpo)
             if delay > 0:
+                log_sys.info(
+                    f"🧭 TL | id={msg_id} chat={norm.chat} | SAT_DELAY | "
+                    f"delay={delay:.1f}s")
                 await asyncio.sleep(delay)
         except Exception as e:
             log_sys.error(f"❌ saturacao: {e}")
