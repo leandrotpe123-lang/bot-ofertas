@@ -11,7 +11,7 @@ API_HASH       = os.environ.get("API_HASH", "")
 SESSION_STRING = os.environ.get("TELEGRAM_SESSION", "")
 GRUPOS_ORIGEM  = [
     "promotom", "fumotom", "botofera", "fadadoscupons",
-    "SamuelF3lipePromo", "paraseubaby", "fadapromos",
+    "SamuelF3lipePromo", "fadapromos",
 ]
 GRUPO_DESTINO  = "@ofertap"
 
