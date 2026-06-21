@@ -78,6 +78,11 @@ _SCORE_MIDIA_RUIM   = 1   # mídia de _GRUPOS_IMG_RUIM
 # Se passou MAIS desse tempo desde o post original, edita só o texto
 # (não reenvia pra evitar notificar o grupo 2x desnecessariamente)
 _JANELA_REENVIO_MIDIA_S = 30.0
+# Muro de frescor para mensagens NOVAS (NewMessage). Oferta nova com
+# idade acima disso é oferta velha ressurgida (ex.: post de 117h) e é
+# descartada na entrada. NÃO atrasa nada: rajada acontece em segundos,
+# MUITO abaixo deste muro. Conceito distinto da janela de disputa (90s).
+_MAX_IDADE_NOVA_S = 120.0   
 
 # Timeout do download_media do Telethon (segundos)
 # Protege workers de travar infinito se Telegram engasgar
@@ -85,7 +90,7 @@ _TIMEOUT_DOWNLOAD_MIDIA = 15.0
 
 # ── Reativação de ofertas ────────────────────────────────────────
 # Cooldown mínimo desde a última publicação. Posts com palavras como
-# "voltou", "reativou", "ativo novamente" só republicam se passou esse tempo.
+# "voltou", "Ativo", "Ainda ativo", "reativou", "ativo novamente" só republicam se passou esse tempo.
 # Evita reativação acidental de cupons recém-postados.
 _COOLDOWN_REATIVACAO_S = 30 * 60   # 30 minutos
 
