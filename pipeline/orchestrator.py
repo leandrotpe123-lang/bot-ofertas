@@ -31,7 +31,7 @@ import heapq
 import time
 
 import globals as g
-from config import _JANELA_DISPUTA_S
+from config import _JANELA_DISPUTA_S, _MAX_IDADE_NOVA_S
 from logger import log_sys, _idade_str, _idade_seg
 from pipeline.deduplicacao import deve_enviar_async
 from pipeline.identidade import checar_e_marcar
@@ -212,6 +212,18 @@ async def processar(event, is_edit: bool = False) -> None:
             log_sys.info(
                 f"🧭 TL | id={event.message.id} chat={event.chat_id} | "
                 f"DESCARTE | motivo=EDIT_ANTIGO "
+                f"idade={_idade_str(event.message.date)}")
+            return
+    # ── Trava NOVA_ANTIGA: oferta NOVA velha (frescor de entrada) ─────
+    # Mensagem nova com idade > _MAX_IDADE_NOVA_S (120s) é oferta velha
+    # ressurgida → descarta na entrada. NÃO atrasa nada novo: a rajada
+    # acontece em segundos, MUITO abaixo de 120s, então passa inteira.
+    if not is_edit:
+        idade = _idade_seg(event.message.date)
+        if idade > _MAX_IDADE_NOVA_S:
+            log_sys.info(
+                f"🧭 TL | id={event.message.id} chat={event.chat_id} | "
+                f"DESCARTE | motivo=NOVA_ANTIGA "
                 f"idade={_idade_str(event.message.date)}")
             return
     await _enfileirar(event, is_edit)
