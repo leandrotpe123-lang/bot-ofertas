@@ -148,15 +148,16 @@ async def _enviar_inner(montada: MensagemMontada,
                     f"{max(0.0, (estado.get('janela_fim', 0) or 0) - agora):.1f}s")
 
                 # ── Log da decisão (rótulos idênticos aos atuais) ──
-                if d.motivo == "LIDER_TRAVADO":
+                if d.motivo == "JANELA_ENCERRADA":
                     log_out.info(
-                        f"🔒 [LIDER_TRAVADO] {identity} "
-                        f"lider={estado.get('lider','')} candidato={norm.chat} "
-                        f"score {score}<={d.score_atual}")
-                elif d.motivo == "MAX_EDITS":
+                        f"🔒 [JANELA_ENCERRADA] {identity} "
+                        f"oferta encerrada (fora dos {_JANELA_DISPUTA_S:.0f}s) "
+                        f"candidato={norm.chat}")
+                elif d.motivo == "EVOLUCAO_LIMITE_ATINGIDO":
                     log_out.info(
-                        f"🔒 [MAX_EDITS] {identity} "
-                        f"edits={estado.get('edit_count', 0) or 0}")
+                        f"🔒 [EVOLUCAO_LIMITE_ATINGIDO] {identity} "
+                        f"já evoluiu {estado.get('edit_count', 0) or 0}x na janela "
+                        f"candidato={norm.chat}")
                 elif d.motivo == "EVOLUI":
                     log_out.info(
                         f"✳️ [EVOLUI] {identity} "
