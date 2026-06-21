@@ -54,3 +54,13 @@ def _idade_str(date) -> str:
         return f"{h}h{m:02d}m"
     except Exception:
         return "?"
+
+def _idade_seg(date) -> float:
+    """Idade em segundos (agora − date), tz-aware. Blindado: devolve
+    -1.0 se não der p/ calcular — chamador trata como 'não descartar'."""
+    try:
+        if date is None:
+            return -1.0
+        return (datetime.now(timezone.utc) - date).total_seconds()
+    except Exception:
+        return -1.0
