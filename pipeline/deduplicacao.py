@@ -413,10 +413,23 @@ def _id_lista_cupons(norm, plat, texto):
         return _id_cupom_indexado(norm, plat, texto, fallback)
     return fallback
 
+def _id_post_cupom(norm, plat, texto):
+    # POST DE CUPOM vence produto: quando o cupom é o ASSUNTO do post
+    # (_eh_post_cupom), a oferta É o cupom — não o produto-veículo. Dois
+    # posts do mesmo código (ex.: CURTEAI) com produtos diferentes são a
+    # MESMA oferta. Produto só vence quando NÃO é post de cupom.
+    if not norm.cupom or not _eh_post_cupom(texto):
+        return None
+    fallback = f"{plat}|cup|{norm.cupom.upper()}"
+    if _CUPOM_IDX_ON:
+        return _id_cupom_indexado(norm, plat, texto, fallback)
+    return fallback
+
 
 def _id_produto(norm, plat, texto):
-    # Produto vence cupom: cupom diferente no mesmo produto é melhoria
-    # avaliada por SCORE em enviar(), não duplicação.
+    # Produto vence cupom APENAS quando NÃO é post de cupom (esse caso já
+    # foi resolvido por _id_post_cupom acima). Aqui: produto comum, cujo
+    # cupom eventual é melhoria avaliada por SCORE em enviar(), não dup.
     if not norm.ids_globais:
         return None
     return f"{plat}|{min(norm.ids_globais)}"
@@ -480,6 +493,7 @@ def _id_texto(norm, plat, texto):
 # A ordem desta tupla É a precedência. Não há precedência implícita.
 _HIERARQUIA_IDENTIDADE = (
     _id_lista_cupons,
+    _id_post_cupom, 
     _id_produto,
     _id_cupom_sem_produto,
     _id_cashback,
@@ -496,7 +510,8 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
 
     A precedência NÃO depende da ordem de instruções `if`: o dispatcher
     percorre _HIERARQUIA_IDENTIDADE em ordem e devolve a primeira
-    identidade não-nula. _eh_post_cupom NÃO participa desta decisão.
+    identidade não-nula. _eh_post_cupom participa via _id_post_cupom:
+    post de cupom é identificado pelo código, vencendo o produto.
     """
     texto = norm.texto_limpo
     plat = norm.plat
