@@ -31,7 +31,8 @@ import heapq
 import time
 
 import globals as g
-from logger import log_sys, _idade_str
+from config import _JANELA_DISPUTA_S
+from logger import log_sys, _idade_str, _idade_seg
 from pipeline.deduplicacao import deve_enviar_async
 from pipeline.identidade import checar_e_marcar
 from pipeline.ingestao import ingerir
@@ -201,6 +202,18 @@ async def _pipeline(event, is_edit: bool = False) -> None:
 # ── Entrypoint público ────────────────────────────────────────────
 async def processar(event, is_edit: bool = False) -> None:
     """Chamado pelos handlers do Telethon em `main.py`."""
+    # ── Trava: edição de mensagem antiga (fora da janela de vida) ─────
+    # Evolução legítima edita em segundos (janela=90s). Edição mais velha
+    # que _JANELA_DISPUTA_S é post antigo reeditado na origem → descarta
+    # JÁ NA ENTRADA, antes da fila. NÃO afeta NewMessage. Idade -1 não corta.
+    if is_edit:
+        idade = _idade_seg(event.message.date)
+        if idade > _JANELA_DISPUTA_S:
+            log_sys.info(
+                f"🧭 TL | id={event.message.id} chat={event.chat_id} | "
+                f"DESCARTE | motivo=EDIT_ANTIGO "
+                f"idade={_idade_str(event.message.date)}")
+            return
     await _enfileirar(event, is_edit)
 
 
