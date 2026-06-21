@@ -62,25 +62,27 @@ def decidir(norm, montada, score: int, estado: dict, agora: float) -> Decisao:
     ts_anterior = estado.get("ts", 0) or 0
     score_atual = estado["score"]
 
+    # ══ VIDA DA OFERTA — só evolui DENTRO da janela e no MÁXIMO 1x ══
+    # Fora da janela (_JANELA_DISPUTA_S = 90s): estado FINAL, congelado —
+    # nada mais evolui (nem score, nem imagem, nem cupom).
+    if not na_janela:
+        return Decisao(IGNORAR, "JANELA_ENCERRADA",
+                       na_janela=na_janela, score_atual=score_atual)
+    # Dentro da janela, mas já evoluiu 1x → limite atingido, trava total.
+    if edit_count >= _MAX_EDITS:
+        return Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
+                       na_janela=na_janela, score_atual=score_atual)
+
+    # ── Daqui pra baixo: DENTRO da janela e com 1 evolução disponível ──
+
     # ── CUPOM ENRIQUECIDO: código(s) novo(s) → edita o mesmo post ──
     novos_cup = getattr(norm, "_cupom_novos", 0)
-    if novos_cup > 0 and (na_janela or edit_count < _MAX_EDITS):
+    if novos_cup > 0:
         return Decisao(
             EVOLUIR, "CUPOM_ENRIQUECIDO",
             novo_score=max(score, score_atual),
             exigir_imagem=False, permite_substituir=False,
             na_janela=na_janela, score_atual=score_atual)
-
-    # ── LIDER_TRAVADO: fora da janela, outro grupo com score <= ──
-    if (not na_janela and lider_atual and norm.chat != lider_atual
-            and score <= score_atual):
-        return Decisao(IGNORAR, "LIDER_TRAVADO",
-                       na_janela=na_janela, score_atual=score_atual)
-
-    # ── MAX_EDITS: teto de edições fora da janela ──
-    if edit_count >= _MAX_EDITS and not na_janela:
-        return Decisao(IGNORAR, "MAX_EDITS",
-                       na_janela=na_janela, score_atual=score_atual)
 
     # ── DECISÃO 1: score MAIOR → evolui (edita; fallback substitui) ──
     if score > score_atual:
