@@ -314,7 +314,6 @@ PLATAFORMA = Plataforma(
     extrai_identidade=extrai_identidade,
     afilia=afilia,
     parametros_temporais=_PARAMETROS_TEMPORAIS,
-    limpa_url=limpa_url,
     encurtadores_forca_get=_ENCURTADORES_FORCA_GET,
     hosts_campanha=_HOSTS_CAMPANHA,
 )
