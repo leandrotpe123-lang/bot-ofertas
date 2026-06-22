@@ -534,12 +534,11 @@ async def _checar_reativacao(norm: MensagemNormalizada) -> bool:
 
 def _persistir_dedupe(fp, plat, cupons, alma, tipo, ids_globais, benef, cupom_id):
     # id_prod e cupom_id são as colunas canônicas de identidade —
-    # produto e cupom — para toda plataforma. A coluna asin permanece
-    # vazia (legado a remover em frente própria). cupom_id é o cupom
+    # produto e cupom — para toda plataforma. cupom_id é o cupom
     # representativo já em caixa alta, derivado no chamador a partir
     # da mesma fonte da identity (norm.cupom). Sem ramo por plataforma.
     id_prod = ids_globais[0] if ids_globais else ""
-    db_set_dedupe(fp, plat, cupons, alma, tipo, "", id_prod, benef, cupom_id)
+    db_set_dedupe(fp, plat, cupons, alma, tipo, id_prod, benef, cupom_id)
 
 
 # ─────────────────────────────────────────────────────────────────
