@@ -51,7 +51,7 @@ _DOMINIOS = frozenset({
     "amazon.com.br", "amazon.com",
 })
 _ENCURTADORES = frozenset({
-    "amzn.to", "a.co", "amzn.com", "amzlink.to",
+    "amzn.to", "link.amazon", "a.co", "amzn.com", "amzlink.to",
 })
 
 
