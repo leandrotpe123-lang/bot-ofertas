@@ -137,7 +137,6 @@ class Plataforma:
 
     Capacidades opcionais:
       - parametros_temporais : ParametrosTemporais | None. Dado.
-      - limpa_url            : (url) -> str | None. Pura, sem I/O.
       - requer_encurtamento  : bool, padrão False. Declaração de
                                intenção: indica que os links desta
                                plataforma devem ser submetidos ao
@@ -185,7 +184,6 @@ class Plataforma:
 
     # Capacidades opcionais
     parametros_temporais: Optional[ParametrosTemporais] = None
-    limpa_url:            Optional[Callable[[str], str]] = None
     requer_encurtamento:  bool = False
     encurtadores_forca_get: Optional[frozenset[str]] = None
     hosts_campanha:       Optional[frozenset[str]] = None
