@@ -75,13 +75,6 @@ def _init_db():
     ]:
         try:
             _db_conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {col} {tipo}")
-            # Purge dirigido: ao adicionar url_canon PELA PRIMEIRA VEZ,
-            # expurga o cache opaco da Shopee para a nova invariante
-            # nascer limpa. Roda só quando o ALTER tem sucesso — ou
-            # seja, UMA ÚNICA VEZ (no deploy desta migração).
-            if tabela == "links_cache" and col == "url_canon":
-                _db_conn.execute("DELETE FROM links_cache WHERE plat='shopee'")
-                log_db.info("🧹 Shopee cache purgado (migração url_canon)")
         except sqlite3.OperationalError:
             pass
     log_db.info(f"🗄 DB ON | {_DB_PATH}")
