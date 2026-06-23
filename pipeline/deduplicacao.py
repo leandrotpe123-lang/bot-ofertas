@@ -522,6 +522,41 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
     # Inalcançável: _id_texto é total. Defesa explícita do invariante.
     return f"{plat}|txt|{_fp4(_alma(texto))}"
 
+def identidades(norm: "MensagemNormalizada") -> list[str]:
+    """
+    Conjunto de identidades de OFERTA do post (modelo container/oferta).
+    Cada produto, campanha, cupom e cashback é uma oferta — emitidos em
+    UNIÃO, sem colapso por min(). Por D4, post de cupom também emite os
+    produtos associados. Sem oferta estruturada, devolve o fallback
+    terminal de identidade_canonica.
+
+    ADITIVO: ainda NÃO consumido. identidade_canonica segue como chave
+    única até o consumo per-oferta ser ligado (Estágio 3).
+    """
+    plat = norm.plat
+    texto = norm.texto_limpo
+    ofertas: list[str] = []
+
+    def _add(chave: str) -> None:
+        if chave not in ofertas:
+            ofertas.append(chave)
+
+    for pid in norm.ids_globais:
+        _add(f"{plat}|{pid}")
+
+    for k in norm.chaves_campanha:
+        _add(f"{plat}|camp|{k}")
+
+    for cod in extrair_todos_cupons(texto, getattr(norm, "code_entities", None)):
+        _add(f"{plat}|cup|{cod.upper()}")
+
+    if _eh_post_cashback(texto, norm.tem_sinal_cashback):
+        pct = _extrair_pct_cashback(texto)
+        if pct:
+            _add(f"{plat}|cash|{pct}")
+
+    return ofertas if ofertas else [identidade_canonica(norm)]
+
 
 # ─────────────────────────────────────────────────────────────────
 # REATIVAÇÃO
