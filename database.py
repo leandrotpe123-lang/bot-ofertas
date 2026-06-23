@@ -43,6 +43,15 @@ def _init_db():
             plat TEXT NOT NULL DEFAULT '', lider TEXT DEFAULT '',
             janela_fim REAL DEFAULT 0, edit_count INTEGER DEFAULT 0,
             shadow_reply_id INTEGER DEFAULT 0, ts REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS post_estado(
+            msg_id_dest INTEGER PRIMARY KEY,
+            score INTEGER NOT NULL DEFAULT 0, texto TEXT NOT NULL DEFAULT '',
+            plat TEXT NOT NULL DEFAULT '', lider TEXT DEFAULT '',
+            janela_fim REAL DEFAULT 0, edit_count INTEGER DEFAULT 0,
+            shadow_reply_id INTEGER DEFAULT 0, ts REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS oferta_index(
+            identity TEXT PRIMARY KEY, msg_id_dest INTEGER NOT NULL,
+            ts REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS shadow_reply(
             identity TEXT PRIMARY KEY, msg_id INTEGER NOT NULL,
             enviado INTEGER DEFAULT 0, ts REAL NOT NULL);
@@ -59,6 +68,7 @@ def _init_db():
         CREATE INDEX IF NOT EXISTS idx_sl_code     ON short_links(code);
         CREATE INDEX IF NOT EXISTS idx_oe_identity ON oferta_estado(identity);
         CREATE INDEX IF NOT EXISTS idx_oe_plat     ON oferta_estado(plat);
+        CREATE INDEX IF NOT EXISTS idx_oi_dest     ON oferta_index(msg_id_dest);
         CREATE INDEX IF NOT EXISTS idx_ci_lookup   ON cupom_idx(plat,codigo,ts);
     """)
     for tabela, col, tipo in [
@@ -310,6 +320,108 @@ def db_set_estado(identity: str, msg_id_dest: int, score: int,
                  janela_fim, edit_count, shadow_reply_id, time.time()))
     except Exception as e:
         log_db.error(f"❌ db_set_estado: {e}")
+
+# ── post_estado / oferta_index (modelo container/oferta) ──────────
+def db_get_post(msg_id_dest: int) -> Optional[dict]:
+    """Estado real do post. MESMA forma de dict que db_get_estado
+    (sem 'identity'), para decidir(...) consumir sem mudança."""
+    try:
+        with _db() as db:
+            row = db.execute(
+                "SELECT msg_id_dest,score,texto,plat,lider,janela_fim,"
+                "edit_count,shadow_reply_id,ts"
+                " FROM post_estado WHERE msg_id_dest=?",
+                (msg_id_dest,)).fetchone()
+        if row:
+            return {
+                "msg_id_dest": row[0], "score": row[1], "texto": row[2],
+                "plat": row[3], "lider": row[4] or "",
+                "janela_fim": row[5] or 0.0, "edit_count": row[6] or 0,
+                "shadow_reply_id": row[7] or 0, "ts": row[8],
+            }
+    except Exception as e:
+        log_db.error(f"❌ db_get_post: {e}")
+    return None
+
+
+def db_overlap_posts(ofertas: list[str]) -> list[tuple[int, int]]:
+    """Posts que compartilham >=1 oferta com a lista dada, como
+    (msg_id_dest, n_sobreposicao), ordenados por sobreposicao desc.
+    Base do D1 (maior sobreposicao). A janela é avaliada por
+    decidir(...) no chamador, não aqui. Lista vazia → []."""
+    if not ofertas:
+        return []
+    try:
+        marcadores = ",".join("?" * len(ofertas))
+        with _db() as db:
+            rows = db.execute(
+                f"SELECT msg_id_dest, COUNT(*) AS n FROM oferta_index"
+                f" WHERE identity IN ({marcadores})"
+                f" GROUP BY msg_id_dest ORDER BY n DESC",
+                tuple(ofertas)).fetchall()
+        return [(r[0], r[1]) for r in rows]
+    except Exception as e:
+        log_db.error(f"❌ db_overlap_posts: {e}")
+        return []
+
+
+def db_ofertas_de_post(msg_id_dest: int) -> list[str]:
+    """Todas as ofertas que compõem um post (caminho inverso, via
+    idx_oi_dest). Usado para calcular ofertas novas na evolução e
+    re-apontar na substituição."""
+    try:
+        with _db() as db:
+            rows = db.execute(
+                "SELECT identity FROM oferta_index WHERE msg_id_dest=?",
+                (msg_id_dest,)).fetchall()
+        return [r[0] for r in rows]
+    except Exception as e:
+        log_db.error(f"❌ db_ofertas_de_post: {e}")
+        return []
+
+
+def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
+                      texto: str, plat: str, lider: str = "",
+                      janela_fim: float = 0.0, edit_count: int = 0,
+                      shadow_reply_id: int = 0):
+    """Upsert do estado do post + mapeamento de cada oferta→post.
+    Serve para publicação nova E evolução (idempotente)."""
+    try:
+        agora = time.time()
+        with _db() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO post_estado"
+                "(msg_id_dest,score,texto,plat,lider,"
+                "janela_fim,edit_count,shadow_reply_id,ts)"
+                " VALUES(?,?,?,?,?,?,?,?,?)",
+                (msg_id_dest, score, texto, plat, lider,
+                 janela_fim, edit_count, shadow_reply_id, agora))
+            for oferta in ofertas:
+                db.execute(
+                    "INSERT OR REPLACE INTO oferta_index"
+                    "(identity,msg_id_dest,ts) VALUES(?,?,?)",
+                    (oferta, msg_id_dest, agora))
+    except Exception as e:
+        log_db.error(f"❌ db_registrar_post: {e}")
+
+
+def db_remover_post(msg_id_dest: int):
+    """Apaga o post e TODAS as suas ofertas do índice. Uso restrito ao
+    fallback de SUBSTITUIÇÃO (msg antiga apagada no Telegram, nova criada),
+    chamado no id ANTIGO antes de db_registrar_post(novo, ...). As ofertas
+    levadas à nova msg são reapontadas pelo próprio INSERT OR REPLACE do
+    db_registrar_post; esta função existe para (a) remover o post_estado
+    órfão e (b) impedir que ofertas do post antigo NÃO levadas à nova msg
+    fiquem apontando para uma mensagem já apagada. NÃO usar no caminho de
+    EDIÇÃO (msg_id preservado) — ali apagaria o post vivo."""
+    try:
+        with _db() as db:
+            db.execute("DELETE FROM post_estado WHERE msg_id_dest=?",
+                       (msg_id_dest,))
+            db.execute("DELETE FROM oferta_index WHERE msg_id_dest=?",
+                       (msg_id_dest,))
+    except Exception as e:
+        log_db.error(f"❌ db_remover_post: {e}")
 
 # ── short_links ───────────────────────────────────────────────────
 def db_get_short(code: str) -> Optional[str]:
