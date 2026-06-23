@@ -73,7 +73,7 @@ from utils.cache_links import consultar_link
 from utils.cupom import extrair_cupom
 from utils.encurtador import encurtar
 from utils.url_resolver import desencurtar
-from utils.urls import _netloc, host_canonico_campanha
+from utils.urls import _netloc, host_canonico_campanha, chaves_canonicas_campanha
 
 # ── API pública do módulo ─────────────────────────────────────────
 __all__ = [
@@ -223,6 +223,7 @@ class MensagemNormalizada:
     # Derivação é responsabilidade EXCLUSIVA da normalização; a
     # deduplicação os consome e não reextrai identidade do mapa.
     chave_campanha:    str          = ""
+    chaves_campanha:   List[str]    = field(default_factory=list)
     tem_host_campanha: bool         = False
     tem_sinal_cashback: bool        = False
     # ──────────────────────────────────────────────────────────────
@@ -497,6 +498,7 @@ async def normalizar(
     urls_campanha     = [u for u in urls_longas if _eh_host_de_campanha(u)]
     tem_host_campanha = bool(urls_campanha)
     chave_campanha    = host_canonico_campanha(urls_campanha)
+    chaves_campanha   = chaves_canonicas_campanha(urls_campanha)
     tem_sinal_cashback = _tem_sinal_cashback(texto_limpo)
 
     # ── ESTADO DE EVENTO ──────────────────────────────────────────
@@ -519,12 +521,14 @@ async def normalizar(
     mapa_publicacao, n_encurtadas = _encurtar_mapa(mapa)
 
     log_nrm.info(
-        f"✅ {len(mapa_publicacao)}/{len(converter)} | "
-        f"plat={plat_dom or 'none'} cupom='{cupom}' sku={sku} "
-        f"ids={ids_globais} camp='{chave_campanha}' "
-        f"estado={estado.value} encurtadas={n_encurtadas} "
-        f"override={is_override}"
-    )
+    f"✅ {len(mapa_publicacao)}/{len(converter)} | "
+    f"plat={plat_dom or 'none'} cupom='{cupom}' sku={sku} "
+    f"ids_globais={ids_globais} "
+    f"chave_campanha='{chave_campanha}' "
+    f"chaves_campanha={chaves_campanha} "
+    f"estado={estado.value} encurtadas={n_encurtadas} "
+    f"override={is_override}"
+  )
     _log_cache_stats()
 
     return MensagemNormalizada(
