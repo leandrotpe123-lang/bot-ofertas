@@ -87,3 +87,26 @@ def host_canonico_campanha(urls) -> str:
         except Exception:
             continue
     return min(chaves) if chaves else ""
+
+def chaves_canonicas_campanha(urls) -> list[str]:
+    """
+    Plural de host_canonico_campanha: devolve TODAS as chaves
+    canônicas de campanha (host+caminho, sem query), ordenadas e sem
+    repetição. NÃO colapsa por min() — cada campanha distinta no post
+    é uma chave distinta. O filtro de quais URLs são de campanha é
+    responsabilidade do chamador.
+    """
+    chaves: list[str] = []
+    for url in urls:
+        try:
+            host = _netloc(url)
+            if not host:
+                continue
+            p = urlparse(url)
+            path = (p.path or "").rstrip("/")
+            chave = f"{host}{path}" if path else host
+            if chave not in chaves:
+                chaves.append(chave)
+        except Exception:
+            continue
+    return sorted(chaves)
