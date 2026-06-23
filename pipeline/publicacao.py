@@ -1,6 +1,7 @@
 """Camada 6 — Publicação: envio, edição, controle de saturação e disputa."""
 from __future__ import annotations
 import asyncio
+import contextlib
 import time
 from typing import Optional
 
@@ -8,10 +9,11 @@ from telethon.errors import FloodWaitError
 
 import config
 from config import GRUPO_DESTINO, _EXECUTOR, _JANELA_DISPUTA_S, _MAX_EDITS
-from database import db_get_estado, db_set_estado, db_registrar_sat
+from database import (db_registrar_sat, db_get_post, db_overlap_posts,
+                      db_registrar_post, db_remover_post)
 import globals as g
 from logger import log_out, log_sys, _idade_str
-from pipeline.deduplicacao import calcular_score, identidade_canonica
+from pipeline.deduplicacao import calcular_score, identidades
 from pipeline.decisao import decidir
 from pipeline.saida import (
     _enviar_msg,
@@ -68,6 +70,47 @@ async def _get_identity_lock(identity: str) -> asyncio.Lock:
                 )
         return lock
 
+_POST_LOCKS: dict = {}        # msg_id_dest -> asyncio.Lock
+_POST_LOCKS_TS: dict = {}     # msg_id_dest -> last_access_monotonic
+
+
+async def _get_post_lock(msg_id_dest: int) -> asyncio.Lock:
+    """Camada 2: lock dedicado por post de destino. Protege a mutação
+    concorrente do MESMO post quando duas mensagens de famílias por
+    ofertas DISTINTAS convergem para ele (ex.: {A} e {B} → post {A,B})."""
+    async with g._identity_locks_lck:
+        lock = _POST_LOCKS.get(msg_id_dest)
+        if lock is None:
+            lock = asyncio.Lock()
+            _POST_LOCKS[msg_id_dest] = lock
+        _POST_LOCKS_TS[msg_id_dest] = time.monotonic()
+        if len(_POST_LOCKS) > 200:
+            agora = time.monotonic()
+            antigos = [
+                k for k, ts in _POST_LOCKS_TS.items()
+                if agora - ts > _IDENTITY_LOCK_TTL
+            ]
+            for k in antigos:
+                lk = _POST_LOCKS.get(k)
+                if lk is not None and not lk.locked():
+                    _POST_LOCKS.pop(k, None)
+                    _POST_LOCKS_TS.pop(k, None)
+        return lock
+
+
+def _escolher_post(candidatos: list) -> int:
+    """Post da família: maior sobreposição; empate → desempate estável
+    (maior score → ts mais recente → maior msg_id_dest). `candidatos`
+    já vem ordenado por sobreposição desc de db_overlap_posts."""
+    max_n = candidatos[0][1]
+    empatados = [mid for mid, n in candidatos if n == max_n]
+    if len(empatados) == 1:
+        return empatados[0]
+    def _chave(mid: int):
+        p = db_get_post(mid) or {}
+        return (p.get("score", 0), p.get("ts", 0.0), mid)
+    return max(empatados, key=_chave)
+
 
 async def _marcar(msg_id: int):
     async with g._IDS_LOCK:
@@ -110,146 +153,162 @@ async def enviar(montada: MensagemMontada,
     """
     Publica ou edita mensagem no grupo destino.
     Aceita `is_edit` por coerência contratual com o orchestrator.
-    Lock por identidade garante serialização entre tasks da mesma oferta.
+    Camada 1 do lock: serializa por OFERTA (ordem fixa) entre tasks que
+    compartilham qualquer oferta. A camada 2 (lock do post) é aplicada
+    dentro de _enviar_inner.
     """
-    identity: Optional[str] = None
+    ofertas: list = []
     score: int = 0
     if norm is not None:
-        identity = identidade_canonica(norm)
-        score    = calcular_score(norm)
+        ofertas = identidades(norm)
+        score   = calcular_score(norm)
 
-    if identity is not None:
-        ident_lock = await _get_identity_lock(identity)
-        async with ident_lock:
-            return await _enviar_inner(montada, norm, identity, score)
+    if ofertas:
+        async with contextlib.AsyncExitStack() as stack:
+            for of in sorted(ofertas):
+                await stack.enter_async_context(await _get_identity_lock(of))
+            return await _enviar_inner(montada, norm, ofertas, score)
 
-    return await _enviar_inner(montada, norm, identity, score)
-
+    return await _enviar_inner(montada, norm, ofertas, score)
 
 async def _enviar_inner(montada: MensagemMontada,
                         norm: Optional[MensagemNormalizada],
-                        identity: Optional[str],
+                        ofertas: list,
                         score: int) -> bool:
-    """Corpo real de enviar() — chamado dentro do lock por identidade."""
+    """Corpo real de enviar() — dentro dos locks de oferta. Acha o post
+    parente por sobreposição, trava o post candidato, re-verifica sob o
+    lock e decide pelo score (decisão intocada)."""
     async with config._SEM_ENVIO:
         loop = asyncio.get_running_loop()
+        identity = ofertas[0] if ofertas else None   # rótulo de log
 
-        if norm is not None:
-            estado = db_get_estado(identity)
-
-            if estado:
-                agora = time.time()
-                d = decidir(norm, montada, score, estado, agora)
+        if norm is not None and ofertas:
+            candidatos = db_overlap_posts(ofertas)
+            if len(candidatos) > 1:
                 log_out.debug(
-                    f"🧭 TL | id={montada.msg_id} chat={norm.chat} | DECISAO | "
-                    f"motivo={d.motivo} "
-                    f"na_janela={'sim' if d.na_janela else 'nao'} "
-                    f"score {d.score_atual}→{score} janela_restante="
-                    f"{max(0.0, (estado.get('janela_fim', 0) or 0) - agora):.1f}s")
+                    f"🧬 [FAMILIA_MULTI] {len(candidatos)} posts em sobreposição "
+                    f"p/ ofertas={ofertas} — escolhendo o melhor candidato")
+            if candidatos:
+                msg_id_rel = _escolher_post(candidatos)
+                post_lock = await _get_post_lock(msg_id_rel)
+                async with post_lock:
+                    estado = db_get_post(msg_id_rel)   # re-verifica sob o lock
+                    if estado:
+                        identity = f"post:{msg_id_rel}"
+                        agora = time.time()
+                        d = decidir(norm, montada, score, estado, agora)
+                        log_out.debug(
+                            f"🧭 TL | id={montada.msg_id} chat={norm.chat} | DECISAO | "
+                            f"motivo={d.motivo} "
+                            f"na_janela={'sim' if d.na_janela else 'nao'} "
+                            f"score {d.score_atual}→{score} janela_restante="
+                            f"{max(0.0, (estado.get('janela_fim', 0) or 0) - agora):.1f}s")
 
-                # ── Log da decisão (rótulos idênticos aos atuais) ──
-                if d.motivo == "JANELA_ENCERRADA":
-                    log_out.info(
-                        f"🔒 [JANELA_ENCERRADA] {identity} "
-                        f"oferta encerrada (fora dos {_JANELA_DISPUTA_S:.0f}s) "
-                        f"candidato={norm.chat}")
-                elif d.motivo == "EVOLUCAO_LIMITE_ATINGIDO":
-                    log_out.info(
-                        f"🔒 [EVOLUCAO_LIMITE_ATINGIDO] {identity} "
-                        f"já evoluiu {estado.get('edit_count', 0) or 0}x na janela "
-                        f"candidato={norm.chat}")
-                elif d.motivo == "EVOLUI":
-                    log_out.info(
-                        f"✳️ [EVOLUI] {identity} "
-                        f"score {d.score_atual}→{score} "
-                        f"{'(janela)' if d.na_janela else '(lider)'} "
-                        f"chat={norm.chat} "
-                        f"img_nova={'sim' if montada.imagem else 'não'}")
-                elif d.motivo == "TROCA_IMG_BOA":
-                    log_out.info(
-                        f"🖼 [TROCA_IMG_BOA] {identity} "
-                        f"de {estado.get('lider','')} (ruim) → {norm.chat} (bom) "
-                        f"delta={d.delta}s")
-                elif d.motivo == "DUP_SILENCIOSO":
-                    log_out.debug(
-                        f"🔁 [DUP_SILENCIOSO] {identity} sim={d.sim:.2f}")
-                elif d.motivo == "SCORE_NAO_EVOLUI":
-                    log_out.info(
-                        f"🔁 [SCORE_NAO_EVOLUI] {identity} "
-                        f"atual={score} salvo={d.score_atual} chat={norm.chat}")
+                        if d.motivo == "JANELA_ENCERRADA":
+                            log_out.info(
+                                f"🔒 [JANELA_ENCERRADA] {identity} "
+                                f"oferta encerrada (fora dos {_JANELA_DISPUTA_S:.0f}s) "
+                                f"candidato={norm.chat}")
+                        elif d.motivo == "EVOLUCAO_LIMITE_ATINGIDO":
+                            log_out.info(
+                                f"🔒 [EVOLUCAO_LIMITE_ATINGIDO] {identity} "
+                                f"já evoluiu {estado.get('edit_count', 0) or 0}x na janela "
+                                f"candidato={norm.chat}")
+                        elif d.motivo == "EVOLUI":
+                            log_out.info(
+                                f"✳️ [EVOLUI] {identity} "
+                                f"score {d.score_atual}→{score} "
+                                f"{'(janela)' if d.na_janela else '(lider)'} "
+                                f"chat={norm.chat} "
+                                f"img_nova={'sim' if montada.imagem else 'não'}")
+                        elif d.motivo == "TROCA_IMG_BOA":
+                            log_out.info(
+                                f"🖼 [TROCA_IMG_BOA] {identity} "
+                                f"de {estado.get('lider','')} (ruim) → {norm.chat} (bom) "
+                                f"delta={d.delta}s")
+                        elif d.motivo == "DUP_SILENCIOSO":
+                            log_out.debug(
+                                f"🔁 [DUP_SILENCIOSO] {identity} sim={d.sim:.2f}")
+                        elif d.motivo == "SCORE_NAO_EVOLUI":
+                            log_out.info(
+                                f"🔁 [SCORE_NAO_EVOLUI] {identity} "
+                                f"atual={score} salvo={d.score_atual} chat={norm.chat}")
 
-                if d.acao != "EVOLUIR":
-                    log_out.info(
-                        f"🧭 TL | id={montada.msg_id} chat={norm.chat} | "
-                        f"DESCARTE | motivo={d.motivo}")
-                    return True
+                        if d.acao != "EVOLUIR":
+                            log_out.info(
+                                f"🧭 TL | id={montada.msg_id} chat={norm.chat} | "
+                                f"DESCARTE | motivo={d.motivo}")
+                            return True
 
-                # ══ Aplicação no destino (vira o Módulo 3) ══════════
-                msg_id_dest = estado["msg_id_dest"]
-                edit_count  = estado.get("edit_count", 0) or 0
+                        msg_id_dest = estado["msg_id_dest"]
+                        edit_count  = estado.get("edit_count", 0) or 0
 
-                ok = await _editar_inner_no_sem(
-                    msg_id_dest, montada.texto, montada.imagem,
-                    exigir_imagem=d.exigir_imagem)
-                if ok:
-                    db_set_estado(
-                        identity, msg_id_dest, d.novo_score, montada.texto,
-                        montada.plat, norm.chat,
-                        estado.get("janela_fim", 0), edit_count + 1,
-                        estado.get("shadow_reply_id", 0))
-                    if d.motivo == "CUPOM_ENRIQUECIDO":
+                        ok = await _editar_inner_no_sem(
+                            msg_id_dest, montada.texto, montada.imagem,
+                            exigir_imagem=d.exigir_imagem)
+                        if ok:
+                            db_remover_post(msg_id_dest)
+                            db_registrar_post(
+                                msg_id_dest, ofertas, d.novo_score, montada.texto,
+                                montada.plat, norm.chat,
+                                estado.get("janela_fim", 0), edit_count + 1,
+                                estado.get("shadow_reply_id", 0))
+                            if d.motivo == "CUPOM_ENRIQUECIDO":
+                                log_out.info(
+                                    f"💎 [CUPOM_ENRIQUECIDO] {identity} "
+                                    f"novos={getattr(norm, '_cupom_novos', 0)} "
+                                    f"score={d.novo_score} chat={norm.chat}")
+                            elif d.motivo == "TROCA_IMG_BOA":
+                                log_out.info(f"✅ [IMG_TROCADA_OK] {identity}")
+                            else:
+                                log_out.info(
+                                    f"✏️ [EDITADO_OK] {identity} novo_score={d.novo_score}")
+                            log_out.info(
+                                f"🧭 TL | id={montada.msg_id} chat={norm.chat} | "
+                                f"PROMOVIDO | dest={msg_id_dest} "
+                                f"novo_score={d.novo_score} "
+                                f"na_janela={'sim' if d.na_janela else 'nao'}")
+                            return True
+
+                        if not d.permite_substituir:
+                            if d.motivo == "CUPOM_ENRIQUECIDO":
+                                log_out.warning(f"⚠️ [CUPOM_ENRIQUECIDO_FALHOU] {identity}")
+                            else:
+                                log_out.warning(
+                                    f"⚠️ [EDIT_FALHOU] {identity} motivo={d.motivo}")
+                            return True
+
                         log_out.info(
-                            f"💎 [CUPOM_ENRIQUECIDO] {identity} "
-                            f"novos={getattr(norm, '_cupom_novos', 0)} "
-                            f"score={d.novo_score} chat={norm.chat}")
-                    elif d.motivo == "TROCA_IMG_BOA":
-                        log_out.info(f"✅ [IMG_TROCADA_OK] {identity}")
-                    else:
-                        log_out.info(
-                            f"✏️ [EDITADO_OK] {identity} novo_score={d.novo_score}")
-                    log_out.info(
-                        f"🧭 TL | id={montada.msg_id} chat={norm.chat} | "
-                        f"PROMOVIDO | dest={msg_id_dest} "
-                        f"novo_score={d.novo_score} "
-                        f"na_janela={'sim' if d.na_janela else 'nao'}")
-                    return True
+                            f"🔄 [SUBSTITUI_FALLBACK] {identity} "
+                            f"score {d.score_atual}→{d.novo_score} chat={norm.chat}")
+                        sent = await _substituir_post_com_midia(msg_id_dest, montada)
+                        if sent:
+                            mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+                            mp[str(montada.msg_id)] = sent.id
+                            try:
+                                await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
+                            except Exception as e:
+                                log_sys.error(f"❌ salvar_mapa: {e}")
+                            db_remover_post(msg_id_dest)
+                            db_registrar_post(
+                                sent.id, ofertas, d.novo_score, montada.texto,
+                                montada.plat, norm.chat,
+                                estado.get("janela_fim", 0), edit_count + 1,
+                                estado.get("shadow_reply_id", 0))
+                            if d.motivo == "TROCA_IMG_BOA":
+                                log_out.info(f"✅ [IMG_TROCADA_OK] {identity} (substitui)")
+                            else:
+                                log_out.info(
+                                    f"✅ [SUBSTITUIDO_OK] {identity} "
+                                    f"novo_id={sent.id} score={d.novo_score}")
+                        else:
+                            log_out.warning(f"⚠️ [SUBSTITUI_FALHOU] {identity}")
+                        return True
+                    # estado sumiu sob o lock (substituído/limpo por outra task)
+                    # → cai para NOVO ENVIO
 
-                if not d.permite_substituir:
-                    if d.motivo == "CUPOM_ENRIQUECIDO":
-                        log_out.warning(f"⚠️ [CUPOM_ENRIQUECIDO_FALHOU] {identity}")
-                    else:
-                        log_out.warning(
-                            f"⚠️ [EDIT_FALHOU] {identity} motivo={d.motivo}")
-                    return True
-
-                log_out.info(
-                    f"🔄 [SUBSTITUI_FALLBACK] {identity} "
-                    f"score {d.score_atual}→{d.novo_score} chat={norm.chat}")
-                sent = await _substituir_post_com_midia(msg_id_dest, montada)
-                if sent:
-                    mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-                    mp[str(montada.msg_id)] = sent.id
-                    try:
-                        await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
-                    except Exception as e:
-                        log_sys.error(f"❌ salvar_mapa: {e}")
-                    db_set_estado(
-                        identity, sent.id, d.novo_score, montada.texto,
-                        montada.plat, norm.chat,
-                        estado.get("janela_fim", 0), edit_count + 1,
-                        estado.get("shadow_reply_id", 0))
-                    if d.motivo == "TROCA_IMG_BOA":
-                        log_out.info(f"✅ [IMG_TROCADA_OK] {identity} (substitui)")
-                    else:
-                        log_out.info(
-                            f"✅ [SUBSTITUIDO_OK] {identity} "
-                            f"novo_id={sent.id} score={d.novo_score}")
-                else:
-                    log_out.warning(f"⚠️ [SUBSTITUI_FALHOU] {identity}")
-                return True
-                
         # ═════════════════════════════════════════════════════════════
-        # NOVO ENVIO (sem estado prévio)
+        # NOVO ENVIO (sem post parente vivo)
         # ═════════════════════════════════════════════════════════════
         img = montada.imagem
         sent = None
@@ -267,29 +326,24 @@ async def _enviar_inner(montada: MensagemMontada,
             log_out.error(f"❌ Envio falhou | @{montada.chat}")
             return False
 
-        # Gravar estado IMEDIATAMENTE após envio. Falhas em operações
-        # secundárias (mapa, sat, burst) NÃO devem deixar o estado
-        # ausente — senão um próximo post pode duplicar silenciosamente.
-        if identity is not None:
+        # Gravar estado IMEDIATAMENTE após envio. Falhas secundárias
+        # (mapa, sat, burst) NÃO devem deixar o post sem registro — senão
+        # um próximo post pode duplicar silenciosamente.
+        if ofertas:
             try:
                 janela_fim = time.time() + _JANELA_DISPUTA_S
-                db_set_estado(
-                    identity, sent.id, score, montada.texto,
+                db_registrar_post(
+                    sent.id, ofertas, score, montada.texto,
                     montada.plat, norm.chat if norm else "",
-                    janela_fim, 0, 0,
-                )
+                    janela_fim, 0, 0)
                 log_out.info(
                     f"🧭 TL | id={montada.msg_id} "
                     f"chat={norm.chat if norm else ''} | JANELA_CRIADA | "
                     f"dest={sent.id} dur={_JANELA_DISPUTA_S:.0f}s score={score}")
             except Exception as e:
                 log_sys.error(
-                    f"❌ db_set_estado FALHOU pós-envio: {e}", exc_info=True
-                )
-                # Não falha o post — já foi enviado. Próximo post pode
-                # duplicar (raro), mas é menos pior.
+                    f"❌ db_registrar_post FALHOU pós-envio: {e}", exc_info=True)
 
-        # Operações secundárias — falhas individuais não revogam estado
         try:
             mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
             mp[str(montada.msg_id)] = sent.id
@@ -319,8 +373,7 @@ async def _enviar_inner(montada: MensagemMontada,
             f"🚀 [OK] @{montada.chat}→{GRUPO_DESTINO} | "
             f"{montada.msg_id}→{sent.id} | "
             f"{montada.plat.upper()} score={score} sku={montada.sku} "
-            f"identity={identity}"
-        )
+            f"identity={identity}")
         log_out.debug(
             f"🧭 TL | id={montada.msg_id} chat={norm.chat if norm else ''} | "
             f"ENVIADO | dest={sent.id} "
