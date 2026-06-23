@@ -284,11 +284,21 @@ async def _atomic_check_and_claim(fp: str, janela: float) -> Tuple[bool, Optiona
 # ─────────────────────────────────────────────────────────────────
 # Score evolutivo
 # ─────────────────────────────────────────────────────────────────
+# ── Bônus de QUANTIDADE (riqueza) no score — D3 ──────────────────
+# Aditivos sobre a presença; recompensam ofertas ALÉM da primeira,
+# com teto para a quantidade não dominar a qualidade. Tunáveis.
+_SCORE_POR_LINK_EXTRA  = 2
+_SCORE_POR_CUPOM_EXTRA = 2
+_MAX_EXTRAS_CONTADOS   = 3
+
+
 def calcular_score(norm: MensagemNormalizada) -> int:
     """
     Calcula score de qualidade do post.
     Mídia tem peso configurável: grupos em config._GRUPOS_IMG_RUIM
-    recebem peso reduzido.
+    recebem peso reduzido. A PRESENÇA de links/cupom mantém o peso
+    histórico; a QUANTIDADE (ofertas além da primeira) soma por cima,
+    com teto — é o que faz o post mais rico vencer pelo score (D3).
     """
     texto = norm.texto_limpo
     score = 0
@@ -310,6 +320,16 @@ def calcular_score(norm: MensagemNormalizada) -> int:
     if norm.sku:
         score += 1
 
+    # ── Quantidade (riqueza): ofertas ALÉM da primeira somam, com teto.
+    #    A presença acima fica intacta → posts de 1 link/1 cupom NÃO mudam.
+    n_links_extra = max(0, len(norm.mapa) - 1)
+    if n_links_extra:
+        score += min(n_links_extra, _MAX_EXTRAS_CONTADOS) * _SCORE_POR_LINK_EXTRA
+    n_cupons = len(extrair_todos_cupons(texto, getattr(norm, "code_entities", None)))
+    n_cupons_extra = max(0, n_cupons - 1)
+    if n_cupons_extra:
+        score += min(n_cupons_extra, _MAX_EXTRAS_CONTADOS) * _SCORE_POR_CUPOM_EXTRA
+
     # Mídia: peso varia conforme grupo de origem. A identidade é numérica;
     # resolvemos o @username via identidade p/ consultar a lista legível.
     if norm.tem_midia:
@@ -319,7 +339,6 @@ def calcular_score(norm: MensagemNormalizada) -> int:
             score += config._SCORE_MIDIA_NORMAL
 
     return score
-
 
 # ─────────────────────────────────────────────────────────────────
 # IDENTIDADE CANÔNICA — coração do sistema anti-duplicação
