@@ -537,6 +537,7 @@ async def normalizar(
         cupom=cupom, sku=sku, tem_midia=bruta.tem_midia,
         media_obj=bruta.media_obj, estado_evento=estado,
         ids_globais=ids_globais, chave_campanha=chave_campanha,
+        chaves_campanha=chaves_campanha,
         tem_host_campanha=tem_host_campanha,
         tem_sinal_cashback=tem_sinal_cashback,
         is_reply=bruta.is_reply,
