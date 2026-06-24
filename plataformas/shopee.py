@@ -220,6 +220,23 @@ def limpa_url(url: str) -> str:
     except Exception:
         return url
 
+def _canonica_live(url: str) -> str:
+    """Identidade canônica de uma live da Shopee.
+    A live é identificada pelo `session` (a transmissão direta). O tipo
+    de universal-link (aggregation/share) e os parâmetros de afiliação
+    NÃO fazem parte da identidade. URLs de vitrine/aba (sem session)
+    colapsam numa identidade única de vitrine — para não fragmentar
+    entre si nem se fundir com uma live específica."""
+    from urllib.parse import parse_qs
+    try:
+        parsed = urlparse(url)
+        session = (parse_qs(parsed.query).get("session") or [""])[0].strip()
+        if session:
+            return f"https://live.shopee.com.br/live/{session}"
+        return "https://live.shopee.com.br/aggregation"
+    except Exception:
+        return url
+
 
 # ── Capacidade obrigatória: afiliação ─────────────────────────────
 def _url_produto_canonica(url: str) -> Optional[str]:
@@ -358,7 +375,10 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         log_nrm.warning(f"⚠️ SHP validação falhou: {link}")
         return AUSENTE
 
-    resultado = Afiliacao(publicada=link, canonica=url_limpa)
+    canonica = url_limpa
+    if (_netloc(url_limpa) or "").lower() == "live.shopee.com.br":
+        canonica = _canonica_live(url_limpa)
+    resultado = Afiliacao(publicada=link, canonica=canonica)
     registrar_link(url, resultado, _IDENTIFICADOR)
     return resultado
 
