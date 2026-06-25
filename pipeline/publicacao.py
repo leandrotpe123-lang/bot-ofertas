@@ -261,7 +261,12 @@ async def _enviar_inner(montada: MensagemMontada,
                             msg_id_dest, montada.texto, montada.imagem,
                             exigir_imagem=d.exigir_imagem)
                         if ok:
-                            db_remover_post(msg_id_dest)
+                            # Edição preserva o msg_id: NÃO removemos o post.
+                            # db_registrar_post faz upsert atômico e, como
+                            # ofertas_familia ⊇ ofertas do post, reescreve todas
+                            # sem apagar nenhuma — sem a janela do delete+insert
+                            # em que a família sumiria do índice e outra task
+                            # poderia duplicar. (db_remover_post é só p/ substituição.)
                             db_registrar_post(
                                 msg_id_dest, ofertas_familia, d.novo_score, montada.texto,
                                 montada.plat, norm.chat,
