@@ -11,6 +11,7 @@ import config
 from config import GRUPO_DESTINO, _EXECUTOR, _JANELA_DISPUTA_S, _MAX_EDITS
 from database import (db_registrar_sat, db_get_post, db_overlap_posts,
                       db_registrar_post, db_remover_post)
+                      db_ofertas_de_post)
 import globals as g
 from logger import log_out, log_sys, _idade_str
 from pipeline.deduplicacao import calcular_score, identidades
@@ -243,13 +244,26 @@ async def _enviar_inner(montada: MensagemMontada,
                         msg_id_dest = estado["msg_id_dest"]
                         edit_count  = estado.get("edit_count", 0) or 0
 
+                        # UNIÃO DA FAMÍLIA — regra de negócio: ao evoluir, as
+                        # ofertas registradas passam a ser a UNIÃO das do post
+                        # existente com as da mensagem (X + Y). Lê o post ANTES
+                        # de remover/regravar; a família só cresce, então a união
+                        # é sempre superconjunto do post e nada legítimo se perde.
+                        # Vale para os dois caminhos abaixo (edição e
+                        # substituição), que partem do mesmo msg_id_dest. Sem
+                        # isto, o registro gravaria só as ofertas da mensagem e
+                        # descartaria as exclusivas do post — quebrando a
+                        # conectividade e duplicando a família.
+                        ofertas_familia = sorted(
+                            set(db_ofertas_de_post(msg_id_dest)) | set(ofertas))
+
                         ok = await _editar_inner_no_sem(
                             msg_id_dest, montada.texto, montada.imagem,
                             exigir_imagem=d.exigir_imagem)
                         if ok:
                             db_remover_post(msg_id_dest)
                             db_registrar_post(
-                                msg_id_dest, ofertas, d.novo_score, montada.texto,
+                                msg_id_dest, ofertas_familia, d.novo_score, montada.texto,
                                 montada.plat, norm.chat,
                                 estado.get("janela_fim", 0), edit_count + 1,
                                 estado.get("shadow_reply_id", 0))
@@ -291,7 +305,7 @@ async def _enviar_inner(montada: MensagemMontada,
                                 log_sys.error(f"❌ salvar_mapa: {e}")
                             db_remover_post(msg_id_dest)
                             db_registrar_post(
-                                sent.id, ofertas, d.novo_score, montada.texto,
+                                sent.id, ofertas_familia, d.novo_score, montada.texto,
                                 montada.plat, norm.chat,
                                 estado.get("janela_fim", 0), edit_count + 1,
                                 estado.get("shadow_reply_id", 0))
