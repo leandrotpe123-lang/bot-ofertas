@@ -226,6 +226,12 @@ class MensagemNormalizada:
     chaves_campanha:   List[str]    = field(default_factory=list)
     tem_host_campanha: bool         = False
     tem_sinal_cashback: bool        = False
+    # Entidades de código (monospace) capturadas na ingestão — MESMA
+    # fonte que normalizar() usa para norm.cupom. A dedup consome isto
+    # via extrair_todos_cupons (identidades, _id_cupom_indexado, score).
+    # Sem isto, código que vem só como entidade some das ofertas e a
+    # família duplica.
+    code_entities:     List[str]    = field(default_factory=list)
     # ──────────────────────────────────────────────────────────────
     is_reply:          bool         = False
     reply_to:          int          = 0
@@ -540,6 +546,7 @@ async def normalizar(
         chaves_campanha=chaves_campanha,
         tem_host_campanha=tem_host_campanha,
         tem_sinal_cashback=tem_sinal_cashback,
+        code_entities=bruta.code_entities,
         is_reply=bruta.is_reply,
         reply_to=bruta.reply_to, is_override=is_override,
   )
