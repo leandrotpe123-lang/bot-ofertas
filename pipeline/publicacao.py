@@ -10,7 +10,7 @@ from telethon.errors import FloodWaitError
 import config
 from config import GRUPO_DESTINO, _EXECUTOR, _JANELA_DISPUTA_S, _MAX_EDITS
 from database import (db_registrar_sat, db_get_post, db_overlap_posts,
-                      db_registrar_post, db_remover_post)
+                      db_registrar_post, db_remover_post,
                       db_ofertas_de_post)
 import globals as g
 from logger import log_out, log_sys, _idade_str
