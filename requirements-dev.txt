@@ -1,0 +1,4 @@
+# Dependências SÓ de desenvolvimento/teste — não afetam o bot em produção.
+# A rede de regressão (tests/) roda com pytest, mas também roda standalone
+# sem nenhuma dependência: `python tests/test_golden_scenarios.py`.
+pytest>=8.0,<9.0
