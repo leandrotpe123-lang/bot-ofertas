@@ -546,8 +546,9 @@ def identidades(norm: "MensagemNormalizada") -> list[str]:
     Conjunto de identidades de OFERTA do post (modelo container/oferta).
     Cada produto, campanha, cupom e cashback é uma oferta — emitidos em
     UNIÃO, sem colapso por min(). Por D4, post de cupom também emite os
-    produtos associados. Sem oferta estruturada, devolve o fallback
-    terminal de identidade_canonica.
+    produtos associados. Sem oferta estruturada, percorre a mesma
+    hierarquia de resolvers da canônica (sem chamá-la — quebra a
+    circularidade que o Estágio 3 exige).
 
     ADITIVO: ainda NÃO consumido. identidade_canonica segue como chave
     única até o consumo per-oferta ser ligado (Estágio 3).
@@ -574,7 +575,16 @@ def identidades(norm: "MensagemNormalizada") -> list[str]:
         if pct:
             _add(f"{plat}|cash|{pct}")
 
-    return ofertas if ofertas else [identidade_canonica(norm)]
+    if ofertas:
+        return ofertas
+    # Fallback AUTOSSUFICIENTE: percorre a MESMA hierarquia da canônica, sem
+    # chamar identidade_canonica (quebra a circularidade do Estágio 3). Byte-
+    # idêntico por construção (incl. efeito colateral do índice de cupom).
+    for resolver in _HIERARQUIA_IDENTIDADE:
+        ident = resolver(norm, plat, texto)
+        if ident is not None:
+            return [ident]
+    return [f"{plat}|txt|{_fp4(_alma(texto))}"] 
 
 
 # ─────────────────────────────────────────────────────────────────
