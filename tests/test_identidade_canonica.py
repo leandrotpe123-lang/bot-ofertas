@@ -378,6 +378,31 @@ def test_campanha_plural_canonica_usa_camp():
     assert identidade_canonica(n) == "shopee|camp|black friday"
 
 
+def test_cupom_keyword_multilinha_fallback_preserva_cupom():
+    # LOAD-BEARING / NÃO-DUPLICAÇÃO. extrair_cupom acha o código em até 4
+    # linhas após a keyword; extrair_todos_cupons só na linha da keyword.
+    # Logo há posts com norm.cupom setado mas SEM cupom estruturado ->
+    # identidades cai no fallback e _id_post_cupom recupera cup|CODE. Sem
+    # isso, dois posts do mesmo código com textos diferentes cairiam em
+    # txt|hash distintos = DUPLICAÇÃO. Trava o comportamento e impede que
+    # uma futura poda do fallback o quebre.
+    from utils.cupom import extrair_cupom
+    texto = "Cupom de desconto\nCODE: BLACK50"
+    n = _norm(texto, plat="amazon", cupom=extrair_cupom(texto, None))
+    assert identidade_canonica(n) == "amazon|cup|BLACK50"
+
+
+def test_cupom_keyword_multilinha_dois_posts_colapsam():
+    # Mesmo código via keyword multi-linha, TEXTOS diferentes -> mesma
+    # família. Garante não-duplicação na classe que só o fallback cobre.
+    from utils.cupom import extrair_cupom
+    tA = "Cupom de desconto\nCODE: BLACK50\nproduto A"
+    tB = "Cupom!\nCODE: BLACK50\nproduto B diferente"
+    a = _norm(tA, plat="amazon", cupom=extrair_cupom(tA, None))
+    b = _norm(tB, plat="amazon", cupom=extrair_cupom(tB, None))
+    assert identidade_canonica(a) == identidade_canonica(b)
+
+
 if __name__ == "__main__":
     _ESTADO_ANTES = (config._DB_PATH, _dbmod._DB_PATH, _dbmod._db_conn)
     testes = [v for k, v in sorted(globals().items())
