@@ -524,22 +524,21 @@ _HIERARQUIA_IDENTIDADE = (
 
 def identidade_canonica(norm: "MensagemNormalizada") -> str:
     """
-    Chave estável da oferta, determinada pela invariante de precedência
-    declarada em _HIERARQUIA_IDENTIDADE.
+    Chave estável de dedupe, DERIVADA do conjunto identidades().
 
-    A precedência NÃO depende da ordem de instruções `if`: o dispatcher
-    percorre _HIERARQUIA_IDENTIDADE em ordem e devolve a primeira
-    identidade não-nula. _eh_post_cupom participa via _id_post_cupom:
-    post de cupom é identificado pelo código, vencendo o produto.
+    A canônica é uma VISTA determinística de identidades(): escolhe o
+    representante lex-menor (sorted[0] — independente de ordem) e aplica a
+    grudação transitiva por código (_id_cupom_indexado) por cima. Assim há
+    UM só cálculo de identidade de oferta (identidades), e a canônica é
+    função dele — não um caminho paralelo.
+
+    A grudação preserva a transitividade do índice de cupom: se qualquer
+    código do post já foi visto na janela, a identidade da corrente
+    sobrepõe a base. Famílias de cupom colapsam mesmo quando a base (o
+    produto-veículo) diverge entre posts do mesmo código.
     """
-    texto = norm.texto_limpo
-    plat = norm.plat
-    for resolver in _HIERARQUIA_IDENTIDADE:
-        ident = resolver(norm, plat, texto)
-        if ident is not None:
-            return ident
-    # Inalcançável: _id_texto é total. Defesa explícita do invariante.
-    return f"{plat}|txt|{_fp4(_alma(texto))}"
+    base = sorted(identidades(norm))[0]
+    return _id_cupom_indexado(norm, norm.plat, norm.texto_limpo, base)
 
 def identidades(norm: "MensagemNormalizada") -> list[str]:
     """
