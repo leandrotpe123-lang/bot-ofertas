@@ -46,7 +46,7 @@ _REPO_ROOT = _d
 
 import config
 import database as _dbmod
-from pipeline.deduplicacao import identidade_canonica
+from pipeline.deduplicacao import identidade_canonica, identidades
 from pipeline.normalizacao import MensagemNormalizada
 
 _SENT = object()
@@ -282,6 +282,68 @@ def test_MUDA_NO_1_1_lista_cupons_usa_cuplist():
 def test_MUDA_NO_1_1_multi_produto_colapsa_no_min():
     n = _norm("dois produtos", plat="amazon", ids_globais=["B0BBB", "B0AAA"])
     assert identidade_canonica(n) == "amazon|B0AAA"   # min, nao o conjunto
+
+# ══════════ PRODUTO + CUPOM (mina do 1.1c) ══════════
+
+def test_produto_post_cupom_canonica_usa_cupom():
+    # Post-cupom COM produto: a canônica HOJE resolve pela chave de CUPOM
+    # (o cupom é o assunto), não pelo produto. [MUDA_NO_1_1c]: como
+    # sorted(identidades)[0] seria o produto, derivar a canônica do conjunto
+    # PERDERIA a chave de cupom. Este teste trava o comportamento atual.
+    n = _norm("Cupom imperdivel\nB0XYZ\nuse SAVE20", plat="amazon",
+              cupom="SAVE20", code_entities=["SAVE20"], ids_globais=["B0XYZ"])
+    assert identidade_canonica(n) == "amazon|cup|SAVE20"
+
+
+def test_produto_post_cupom_identidades_emite_ambos():
+    # identidades (camada de overlap) emite produto E cupom — os dois.
+    n = _norm("Cupom imperdivel\nB0XYZ\nuse SAVE20", plat="amazon",
+              cupom="SAVE20", code_entities=["SAVE20"], ids_globais=["B0XYZ"])
+    assert identidades(n) == ["amazon|B0XYZ", "amazon|cup|SAVE20"]
+
+
+def test_produto_cupom_secundario_canonica_usa_produto():
+    # Cupom presente mas NÃO é o assunto -> canônica resolve pelo PRODUTO.
+    n = _norm("Echo Dot 5a geracao\nB0XYZ por menos com SAVE20", plat="amazon",
+              cupom="SAVE20", code_entities=["SAVE20"], ids_globais=["B0XYZ"])
+    assert identidade_canonica(n) == "amazon|B0XYZ"
+
+
+# ══════════ TRANSITIVIDADE do cupom_idx (anti-duplicação load-bearing) ══════════
+
+def _lista(c1, c2):
+    return _norm(f"Cupons\nR$ 20 OFF em R$ 150: {c1}\nR$ 50 OFF em R$ 300: {c2}",
+                 plat="magalu", cupom=c1, code_entities=[c1, c2])
+
+
+def test_cupom_idx_liga_overlap_direto():
+    # Dois posts que compartilham UM código -> MESMA identidade canônica.
+    a = identidade_canonica(_lista("AAAAA", "BBBBB"))
+    b = identidade_canonica(_lista("BBBBB", "CCCCC"))   # compartilha BBBBB
+    assert a == b
+
+
+def test_cupom_idx_transitividade_encadeia():
+    # {A,B} -> {B,C} -> {C,D}: todos colapsam na MESMA identidade, mesmo
+    # {A,B} e {C,D} não compartilhando nenhum código (ligados via a corrente).
+    # Esta é a anti-duplicação STATEFUL que o 1.1c NÃO pode quebrar.
+    i1 = identidade_canonica(_lista("AAAAA", "BBBBB"))
+    i2 = identidade_canonica(_lista("BBBBB", "CCCCC"))
+    i3 = identidade_canonica(_lista("CCCCC", "DDDDD"))
+    assert i1 == i2 == i3
+
+
+def test_cupom_idx_transitividade_supera_overlap_per_oferta():
+    # PROVA de por que a transitividade importa: p1 e p3 NÃO têm overlap por
+    # oferta (identidades disjuntas), mas o cupom_idx os liga via a ponte p2.
+    # Um dedupe per-oferta PURO (só identidades) os separaria -> duplicaria.
+    p1 = _lista("AAAAA", "BBBBB")
+    p3 = _lista("CCCCC", "DDDDD")
+    i1 = identidade_canonica(p1)
+    identidade_canonica(_lista("BBBBB", "CCCCC"))      # a ponte p2
+    i3 = identidade_canonica(p3)
+    assert set(identidades(p1)) & set(identidades(p3)) == set()  # SEM overlap por oferta
+    assert i1 == i3                                              # mas MESMA família via cupom_idx
 
 
 if __name__ == "__main__":
