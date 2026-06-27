@@ -273,10 +273,15 @@ def test_fallback_texto():
 
 # ══════════ Identidades que MUDAM no 1.1 [MUDA_NO_1_1] ══════════
 
-def test_MUDA_NO_1_1_lista_cupons_usa_cuplist():
+def test_lista_cupons_canonica_usa_menor_cup():
+    # 1.1c: a canônica deriva de sorted(identidades)[0] -> para lista de
+    # cupons isso é cup|<menor código>, não mais cuplist|hash. HISTÓRICO:
+    # até o 1.0 a canônica usava cuplist|hash (_id_lista_cupons); o
+    # [MUDA_NO_1_1] previa esta troca. A grudação (_id_cupom_indexado)
+    # mantém a transitividade entre listas que se sobrepõem (test_cupom_idx_*).
     n = _norm("Cupons\nR$ 20 OFF em R$ 150: AAAA1\nR$ 50 OFF em R$ 300: BBBB2",
               plat="magalu", cupom="AAAA1", code_entities=["AAAA1", "BBBB2"])
-    assert identidade_canonica(n).startswith("magalu|cuplist|")
+    assert identidade_canonica(n) == "magalu|cup|AAAA1"
 
 
 def test_MUDA_NO_1_1_multi_produto_colapsa_no_min():
@@ -285,14 +290,16 @@ def test_MUDA_NO_1_1_multi_produto_colapsa_no_min():
 
 # ══════════ PRODUTO + CUPOM (mina do 1.1c) ══════════
 
-def test_produto_post_cupom_canonica_usa_cupom():
-    # Post-cupom COM produto: a canônica HOJE resolve pela chave de CUPOM
-    # (o cupom é o assunto), não pelo produto. [MUDA_NO_1_1c]: como
-    # sorted(identidades)[0] seria o produto, derivar a canônica do conjunto
-    # PERDERIA a chave de cupom. Este teste trava o comportamento atual.
+def test_produto_post_cupom_canonica_usa_produto():
+    # 1.1c: post-cupom COM produto -> a canônica agora resolve pelo PRODUTO
+    # (sorted[0] do conjunto: o ASIN ordena antes de cup|... no lex).
+    # HISTÓRICO: até o 1.0 resolvia por cup|<código> (_id_post_cupom). A
+    # SEGURANÇA da troca está em test_seguranca_mesmo_cupom_produtos_diferentes_colapsam:
+    # mesmo mudando a chave, famílias do mesmo cupom seguem colapsando pela
+    # grudação. identidades segue emitindo ambos (test_..._emite_ambos).
     n = _norm("Cupom imperdivel\nB0XYZ\nuse SAVE20", plat="amazon",
               cupom="SAVE20", code_entities=["SAVE20"], ids_globais=["B0XYZ"])
-    assert identidade_canonica(n) == "amazon|cup|SAVE20"
+    assert identidade_canonica(n) == "amazon|B0XYZ"
 
 
 def test_produto_post_cupom_identidades_emite_ambos():
@@ -344,6 +351,31 @@ def test_cupom_idx_transitividade_supera_overlap_per_oferta():
     i3 = identidade_canonica(p3)
     assert set(identidades(p1)) & set(identidades(p3)) == set()  # SEM overlap por oferta
     assert i1 == i3                                              # mas MESMA família via cupom_idx
+
+
+def test_seguranca_mesmo_cupom_produtos_diferentes_colapsam():
+    # SEGURANÇA (invariante NÃO-DUPLICAR na chave nova): dois post-cupom do
+    # MESMO código com produtos DIFERENTES devem colapsar na MESMA família.
+    # No 1.1c a base de cada um é o próprio produto (sorted[0]), que diverge
+    # (B0XXX vs B0YYY) — mas a grudação por SAVE20 sobrepõe ambos para a
+    # identidade do primeiro. Antes do 1.1c colapsavam via cup|SAVE20; agora
+    # via produto-base + grudação. Chave diferente, MESMA família.
+    p1 = _norm("Cupom imperdivel\nB0XXX\nuse SAVE20", plat="amazon",
+               cupom="SAVE20", code_entities=["SAVE20"], ids_globais=["B0XXX"])
+    p2 = _norm("Cupom imperdivel\nB0YYY\nuse SAVE20", plat="amazon",
+               cupom="SAVE20", code_entities=["SAVE20"], ids_globais=["B0YYY"])
+    assert identidade_canonica(p1) == identidade_canonica(p2)
+
+
+def test_campanha_plural_canonica_usa_camp():
+    # CARACTERIZAÇÃO de um FIX do 1.1c. Campanha PLURAL: chaves_campanha com
+    # múltiplas chaves e chave_campanha (singular) vazia. identidades emite
+    # todas as camp; a canônica 1.1c resolve por camp|<menor>. Até o 1.0 a
+    # canônica caía em txt|hash (porque _id_campanha só lia o singular vazio
+    # e nenhum outro resolver casava). Este teste prova o comportamento novo.
+    n = _norm("Confira as ofertas", plat="shopee",
+              chaves_campanha=["black friday", "natal"])
+    assert identidade_canonica(n) == "shopee|camp|black friday"
 
 
 if __name__ == "__main__":
