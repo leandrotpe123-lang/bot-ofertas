@@ -418,20 +418,6 @@ def _id_cupom_indexado(norm, plat: str, texto: str, fallback: str) -> str:
     return identity
 
 
-def _id_lista_cupons(norm, plat, texto):
-    if not _eh_lista_cupons(texto):
-        return None
-    cupons_todos = extrair_todos_cupons(
-        texto, getattr(norm, "code_entities", None)
-    )
-    if not cupons_todos:
-        return None
-    cupons_set = sorted(set(c.upper() for c in cupons_todos))
-    fallback = f"{plat}|cuplist|{_fp4('|'.join(cupons_set))}"
-    if _CUPOM_IDX_ON:
-        return _id_cupom_indexado(norm, plat, texto, fallback)
-    return fallback
-
 def _id_post_cupom(norm, plat, texto):
     # POST DE CUPOM vence produto: quando o cupom é o ASSUNTO do post
     # (_eh_post_cupom), a oferta É o cupom — não o produto-veículo. Dois
@@ -511,7 +497,6 @@ def _id_texto(norm, plat, texto):
 
 # A ordem desta tupla É a precedência. Não há precedência implícita.
 _HIERARQUIA_IDENTIDADE = (
-    _id_lista_cupons,
     _id_post_cupom, 
     _id_produto,
     _id_cupom_sem_produto,
