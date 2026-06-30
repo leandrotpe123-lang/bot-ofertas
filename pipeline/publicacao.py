@@ -190,15 +190,15 @@ async def _enviar_inner(montada: MensagemMontada,
                         f"🧬 [FAMILIA_MULTI] {len(candidatos)} posts em sobreposição "
                         f"p/ ofertas={ofertas} — escolhendo o melhor candidato")
                 if candidatos:
-                msg_id_rel = _escolher_post(candidatos)
-                    log_out.info(f"🔎 [OVERLAP_MATCH] post:{msg_id_rel} casou por ofertas_compartilhadas={sorted(set(ofertas) & set(db_ofertas_de_post(msg_id_rel)))} | candidato={sorted(ofertas)}")
-                post_lock = await _get_post_lock(msg_id_rel)
-                async with post_lock:
+                  msg_id_rel = _escolher_post(candidatos)
+                  log_out.info(f"🔎 [OVERLAP_MATCH] post:{msg_id_rel} casou por ofertas_compartilhadas={sorted(set(ofertas) & set(db_ofertas_de_post(msg_id_rel)))} | candidato={sorted(ofertas)}")
+                  post_lock = await _get_post_lock(msg_id_rel)
+                  async with post_lock:
                     estado = db_get_post(msg_id_rel)   # re-verifica sob o lock
                     if estado:
-                        identity = f"post:{msg_id_rel}"
-                        agora = time.time()
-                        d = decidir(norm, montada, score, estado, agora)
+                      identity = f"post:{msg_id_rel}"
+                      agora = time.time()
+                      d = decidir(norm, montada, score, estado, agora)
                         log_out.debug(
                             f"🧭 TL | id={montada.msg_id} chat={norm.chat} | DECISAO | "
                             f"motivo={d.motivo} "
