@@ -63,7 +63,7 @@ _EMOJI_TITULO_EVENTO = "⚠️"
 _EMOJI_DESCONTO = "🎟"
 _EMOJI_PRECO    = "💵"
 
-_EMOJI_RESGATE  = "⭐️"
+_EMOJI_RESGATE  = "🎯, 👉🏻"
 _EMOJI_LINK     = "✅"
 
 _EMOJI_MULTI    = "🔹"
