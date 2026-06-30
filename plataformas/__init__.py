@@ -168,10 +168,15 @@ def _descobrir_plugins(
     os testes inspecionam o resultado via registry.formacao().
     """
     # Coleta primeiro, ordena depois — determinismo entre sistemas.
+    # Candidatos = módulos .py soltos E sub-pacotes: uma plataforma
+    # pode ser um único módulo ou um pacote coeso (ex.: shopee/, com
+    # links.py + afiliacao.py + __init__.py expondo PLATAFORMA). A
+    # descoberta é agnóstica à estrutura interna — o que qualifica é
+    # expor PLATAFORMA (verificado adiante), não ser arquivo único.
     nomes_candidatos = sorted(
         nome
-        for _, nome, ehpkg in pkgutil.iter_modules(pacote_path)
-        if not ehpkg and _eh_candidato_a_plugin(nome)
+        for _, nome, _ehpkg in pkgutil.iter_modules(pacote_path)
+        if _eh_candidato_a_plugin(nome)
     )
 
     for nome in nomes_candidatos:
