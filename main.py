@@ -103,17 +103,29 @@ async def _run() -> bool:
     log_sys.info("🚀 FOGUETÃO — ONLINE")
   # Pré-aquece identidade (id→@username) dos grupos monitorados, para
     # regras dependentes de @username valerem já na 1ª mensagem.
-    await precarregar_usernames(client, GRUPOS_ORIGEM)
+    fontes = await precarregar_usernames(client, GRUPOS_ORIGEM)
+    if not fontes:
+        log_sys.error("❌ Nenhuma fonte de origem resolvida — encerrando.")
+        return False
+    if len(fontes) < len(GRUPOS_ORIGEM):
+        log_sys.warning(
+            f"⚠️ {len(GRUPOS_ORIGEM) - len(fontes)} fonte(s) não resolvida(s) "
+            f"e ignorada(s) — monitorando {len(fontes)}/{len(GRUPOS_ORIGEM)}."
+        )
 
-    # 4. Registra handlers de eventos
-    @client.on(events.NewMessage(chats=GRUPOS_ORIGEM))
+    # 4. Registra handlers de eventos — SOBRE AS FONTES RESOLVIDAS.
+    # Registrar com a lista crua de usernames faz o Telethon re-resolver
+    # o filtro de chats; uma fonte morta (username inexistente) faz a
+    # resolução falhar e repetir a cada update. Com entidades já
+    # resolvidas, a fonte morta foi descartada uma vez no boot.
+    @client.on(events.NewMessage(chats=fontes))
     async def on_new(event):
         try:
             await processar(event, is_edit=False)
         except Exception as e:
             log_sys.error(f"❌ on_new: {e}", exc_info=True)
 
-    @client.on(events.MessageEdited(chats=GRUPOS_ORIGEM))
+    @client.on(events.MessageEdited(chats=fontes))
     async def on_edit(event):
         try:
             await processar(event, is_edit=True)
@@ -124,17 +136,6 @@ async def _run() -> bool:
     asyncio.create_task(_health_check())
     asyncio.create_task(_iniciar_orchestrator())
     asyncio.create_task(_iniciar_servidor_web())
-
-  # [TESTE] Recupera updates perdidos enquanto o cliente esteve offline.
-    # Após handlers e workers, antes de aguardar (ordem da doc do Telethon).
-    # Validação de gap recuperável — NÃO conserta perda em rajada runtime;
-    # isso depende de sessão persistente (próxima frente). Em try/except
-    # para nunca derrubar o boot caso a sessão não suporte get_update_states.
-    try:
-        await client.catch_up()
-        log_sys.info("📡 catch_up concluído (recuperação de gap offline)")
-    except Exception as e:
-        log_sys.error(f"❌ catch_up: {e}")
 
     # 6. Aguarda desconexão
     await client.run_until_disconnected()
@@ -177,4 +178,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-
+          
