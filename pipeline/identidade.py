@@ -87,12 +87,19 @@ def username_de(chat: str) -> str:
         return ""
 
 
-async def precarregar_usernames(client, grupos) -> None:
+async def precarregar_usernames(client, grupos) -> list:
     """Pré-aquece o cache id→@username dos grupos monitorados no boot,
     para regras dependentes de @username (ex.: imagem fraca) já valerem
     na 1ª mensagem, sem furo de cache vazio. Best-effort: a falha de um
-    grupo apenas loga e não interrompe o boot."""
+    grupo apenas loga e não interrompe o boot.
+
+    Devolve a lista de ENTIDADES resolvidas com sucesso (na ordem de
+    `grupos`), para que os handlers sejam registrados apenas sobre
+    fontes válidas. Uma fonte morta/renomeada (username inexistente) é
+    descartada AQUI, com aviso, em vez de envenenar a resolução do
+    filtro de chats a cada update."""
     from telethon.utils import get_peer_id
+    resolvidos = []
     for grp in grupos:
         try:
             ent = await client.get_entity(grp)
@@ -101,8 +108,10 @@ async def precarregar_usernames(client, grupos) -> None:
             if user:
                 _CHAT_USERNAME[cid] = user
                 log_ing.info(f"🔖 identidade pré-aquecida: {cid} → @{user}")
+            resolvidos.append(ent)
         except Exception as e:
             log_ing.warning(f"⚠️ pré-aquecer username {grp}: {e}")
+    return resolvidos
 
 
 # ── Idempotência ──────────────────────────────────────────────────
