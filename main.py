@@ -77,40 +77,6 @@ async def _health_check() -> None:
             log_hc.error(f"❌ Health: {e}", exc_info=True)
 
 
-# ── DIAG TEMPORÁRIO — por que 'botofera' não resolve. REMOVER depois ──
-async def _diag_botofera(client) -> None:
-    from telethon.tl.functions.contacts import ResolveUsernameRequest
-    log_sys.info("🔬 ===== DIAG botofera =====")
-    try:
-        r = await client(ResolveUsernameRequest("botofera"))
-        chats = [(getattr(c, "id", None), getattr(c, "username", None))
-                 for c in getattr(r, "chats", [])]
-        users = [(getattr(u, "id", None), getattr(u, "username", None))
-                 for u in getattr(r, "users", [])]
-        log_sys.info(f"🔬 ResolveUsername('botofera') OK -> chats={chats} users={users}")
-    except Exception as e:
-        log_sys.info(f"🔬 ResolveUsername('botofera') ERRO -> {type(e).__name__}: {e}")
-    try:
-        achou = False
-        async for d in client.iter_dialogs():
-            ent = d.entity
-            uname = (getattr(ent, "username", None) or "")
-            if getattr(ent, "id", None) == 3817694320 or "boto" in uname.lower():
-                log_sys.info(
-                    f"🔬 DIALOGO -> id={getattr(ent, 'id', None)} "
-                    f"username={uname!r} title={getattr(ent, 'title', None)!r}"
-                )
-                achou = True
-        if not achou:
-            log_sys.info(
-                "🔬 DIALOGO -> NENHUM diálogo com id=3817694320 nem username com "
-                "'boto' (a conta não é membro / não enxerga o grupo)"
-            )
-    except Exception as e:
-        log_sys.info(f"🔬 iter_dialogs ERRO -> {type(e).__name__}: {e}")
-    log_sys.info("🔬 ===== FIM DIAG =====")
-
-
 # ── Startup ───────────────────────────────────────────────────────
 async def _run() -> bool:
     # 1. Inicializa locks, semáforos e caches no loop correto
@@ -143,8 +109,6 @@ async def _run() -> bool:
         log_sys.error("❌ Nenhuma fonte de origem resolvida — encerrando.")
         return False
 
-    # 🔬 DIAG TEMPORÁRIO — descobrir por que 'botofera' não resolve. Remover depois.
-    await _diag_botofera(client)
 
     # 4. Registra handlers de eventos — SOBRE AS FONTES RESOLVIDAS.
     # Registrar com a lista crua de usernames faz o Telethon re-resolver
