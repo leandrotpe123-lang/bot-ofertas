@@ -77,16 +77,16 @@ async def _health_check() -> None:
             log_hc.error(f"❌ Health: {e}", exc_info=True)
 
 
-# ── Startup ───────────────────────────────────────────────────────
+# ── DIAG TEMPORÁRIO — por que 'botofera' não resolve. REMOVER depois ──
 async def _diag_botofera(client) -> None:
-    # 🔬 DIAG TEMPORÁRIO — por que 'botofera' não resolve. REMOVER depois.
     from telethon.tl.functions.contacts import ResolveUsernameRequest
-    from logger import log_sys
     log_sys.info("🔬 ===== DIAG botofera =====")
     try:
         r = await client(ResolveUsernameRequest("botofera"))
-        chats = [(getattr(c, "id", None), getattr(c, "username", None)) for c in getattr(r, "chats", [])]
-        users = [(getattr(u, "id", None), getattr(u, "username", None)) for u in getattr(r, "users", [])]
+        chats = [(getattr(c, "id", None), getattr(c, "username", None))
+                 for c in getattr(r, "chats", [])]
+        users = [(getattr(u, "id", None), getattr(u, "username", None))
+                 for u in getattr(r, "users", [])]
         log_sys.info(f"🔬 ResolveUsername('botofera') OK -> chats={chats} users={users}")
     except Exception as e:
         log_sys.info(f"🔬 ResolveUsername('botofera') ERRO -> {type(e).__name__}: {e}")
@@ -96,14 +96,22 @@ async def _diag_botofera(client) -> None:
             ent = d.entity
             uname = (getattr(ent, "username", None) or "")
             if getattr(ent, "id", None) == 3817694320 or "boto" in uname.lower():
-                log_sys.info(f"🔬 DIALOGO -> id={getattr(ent,'id',None)} username={uname!r} title={getattr(ent,'title',None)!r}")
+                log_sys.info(
+                    f"🔬 DIALOGO -> id={getattr(ent, 'id', None)} "
+                    f"username={uname!r} title={getattr(ent, 'title', None)!r}"
+                )
                 achou = True
         if not achou:
-            log_sys.info("🔬 DIALOGO -> NENHUM diálogo com id=3817694320 nem username com 'boto' (conta não é membro / não vê o grupo)")
+            log_sys.info(
+                "🔬 DIALOGO -> NENHUM diálogo com id=3817694320 nem username com "
+                "'boto' (a conta não é membro / não enxerga o grupo)"
+            )
     except Exception as e:
         log_sys.info(f"🔬 iter_dialogs ERRO -> {type(e).__name__}: {e}")
     log_sys.info("🔬 ===== FIM DIAG =====")
 
+
+# ── Startup ───────────────────────────────────────────────────────
 async def _run() -> bool:
     # 1. Inicializa locks, semáforos e caches no loop correto
     _init_globals()
@@ -127,14 +135,16 @@ async def _run() -> bool:
     log_sys.info(f"✅ {me.first_name} (@{me.username}) | ID={me.id}")
     log_sys.info(f"📡 {GRUPOS_ORIGEM} → {GRUPO_DESTINO}")
     log_sys.info("🚀 FOGUETÃO — ONLINE")
-  # Pré-aquece identidade (id→@username) dos grupos monitorados, para
+
+    # Pré-aquece identidade (id→@username) dos grupos monitorados, para
     # regras dependentes de @username valerem já na 1ª mensagem.
     fontes = await precarregar_usernames(client, GRUPOS_ORIGEM)
-  await _diag_botofera(client)
     if not fontes:
         log_sys.error("❌ Nenhuma fonte de origem resolvida — encerrando.")
         return False
-  
+
+    # 🔬 DIAG TEMPORÁRIO — descobrir por que 'botofera' não resolve. Remover depois.
+    await _diag_botofera(client)
 
     # 4. Registra handlers de eventos — SOBRE AS FONTES RESOLVIDAS.
     # Registrar com a lista crua de usernames faz o Telethon re-resolver
@@ -167,7 +177,6 @@ async def _run() -> bool:
 
 # ── Loop principal com restart automático ────────────────────────
 async def main() -> None:
-  
     plataformas.inicializar()  # boot do catálogo (único por processo — garantido na própria função)
 
     while True:
@@ -201,4 +210,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-          
+  
