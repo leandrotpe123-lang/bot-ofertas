@@ -24,7 +24,6 @@ from plataformas.contrato import (
 from .afiliacao import afilia
 from .links import (
     _IDENTIFICADOR,
-    _eh_url_campanha,
     extrai_identidade,
     reconhece,
 )
@@ -44,6 +43,19 @@ _SINAIS_CASHBACK = frozenset({
     r"\bmoedas?\s+shopee\b",
 })
 
+# ── Hosts de campanha ─────────────────────────────────────────────
+# Hosts cujas URLs afiliadas LONGAS caracterizam uma página de
+# campanha da Shopee. O core compõe a UNIÃO entre plataformas
+# (registry.compor_capacidade("hosts_campanha")) para derivar
+# tem_host_campanha e chave_campanha — o mecanismo host-based vigente
+# no contrato atual. NÃO incluir o host pelado "shopee.com.br":
+# páginas genéricas de marketing (/m/*, /shopeevip) fundiriam
+# produtos distintos no overlap. O produto já é identificado pelo
+# item id em extrai_identidade, com precedência.
+_HOSTS_CAMPANHA = frozenset({
+    "premios.shopee.com.br", "flapremios.com.br",
+})
+
 # ── Parâmetros temporais de deduplicação ──────────────────────────
 _PARAMETROS_TEMPORAIS = ParametrosTemporais(
     janela_s=60.0,
@@ -52,11 +64,6 @@ _PARAMETROS_TEMPORAIS = ParametrosTemporais(
 
 
 # ── Definição da plataforma ───────────────────────────────────────
-# hosts_campanha é deliberadamente OMITIDO (default None no contrato):
-# a classificação de campanha da Shopee é POR HOST/CAMINHO dentro de
-# extrai_identidade, e eh_url_campanha deriva dela. Não há lista de
-# hosts a declarar ao core — o conhecimento vive inteiro em links.py,
-# sem duplicação.
 PLATAFORMA = Plataforma(
     identificador=_IDENTIFICADOR,
     versao_contrato=CONTRACT_VERSION,
@@ -65,6 +72,6 @@ PLATAFORMA = Plataforma(
     afilia=afilia,
     parametros_temporais=_PARAMETROS_TEMPORAIS,
     encurtadores_forca_get=_ENCURTADORES_FORCA_GET,
+    hosts_campanha=_HOSTS_CAMPANHA,
     sinais_cashback=_SINAIS_CASHBACK,
-    eh_url_campanha=_eh_url_campanha,
 )
