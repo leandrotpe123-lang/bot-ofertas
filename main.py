@@ -107,11 +107,7 @@ async def _run() -> bool:
     if not fontes:
         log_sys.error("❌ Nenhuma fonte de origem resolvida — encerrando.")
         return False
-    if len(fontes) < len(GRUPOS_ORIGEM):
-        log_sys.warning(
-            f"⚠️ {len(GRUPOS_ORIGEM) - len(fontes)} fonte(s) não resolvida(s) "
-            f"e ignorada(s) — monitorando {len(fontes)}/{len(GRUPOS_ORIGEM)}."
-        )
+  
 
     # 4. Registra handlers de eventos — SOBRE AS FONTES RESOLVIDAS.
     # Registrar com a lista crua de usernames faz o Telethon re-resolver
