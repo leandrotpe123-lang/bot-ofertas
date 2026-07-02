@@ -20,14 +20,11 @@ O QUE NÃO FAZ:
   - publicação / edição / substituição              → pipeline.publicacao
   - derivação/classificação de identidade           → pipeline.identidade_oferta
 
-NOTAS (extração — Front 2, passo 2.1):
+NOTAS (histórico de extração):
   Comportamento BYTE-IDÊNTICO ao que existia em deduplicacao.calcular_score.
-  Dois pontos são reconhecidos como herança, a tratar em passos próprios,
-  NÃO aqui:
-    - o predicado de mídia (username_de(...) in _GRUPOS_IMG_RUIM) segue
-      inline; a unificação com decisao._midia_ruim é o passo 2.2;
-    - a contagem de cupons re-deriva via extrair_todos_cupons; consumir
-      n_cupons já produzido pela identidade é evolução posterior.
+  A quantificação foi extraída em 2.1; o predicado de mídia foi unificado
+  em midia_ruim (2.2); a contagem de cupons passou a consumir norm.cupons
+  em vez de re-derivar (Cupom-1). Aqui o score é consumidor puro de norm.
 """
 from __future__ import annotations
 
@@ -36,7 +33,6 @@ import re
 import config
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.identidade import username_de
-from utils.cupom import extrair_todos_cupons
 
 
 # ── Bônus de QUANTIDADE (riqueza) no score — D3 ──────────────────
@@ -87,7 +83,7 @@ def calcular_score(norm: MensagemNormalizada) -> int:
     n_links_extra = max(0, len(norm.mapa) - 1)
     if n_links_extra:
         score += min(n_links_extra, _MAX_EXTRAS_CONTADOS) * _SCORE_POR_LINK_EXTRA
-    n_cupons = len(extrair_todos_cupons(texto, getattr(norm, "code_entities", None)))
+    n_cupons = len(norm.cupons)
     n_cupons_extra = max(0, n_cupons - 1)
     if n_cupons_extra:
         score += min(n_cupons_extra, _MAX_EXTRAS_CONTADOS) * _SCORE_POR_CUPOM_EXTRA
