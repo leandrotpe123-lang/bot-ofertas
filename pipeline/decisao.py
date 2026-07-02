@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 import config
 from config import _MAX_EDITS
-from pipeline.identidade import username_de
+from pipeline.score import midia_ruim
 
 # Ações possíveis
 IGNORAR  = "IGNORAR"
@@ -45,10 +45,6 @@ class Decisao:
     score_atual: int = 0
     delta: int = 0
     sim: float = 0.0
-
-
-def _midia_ruim(chat: str) -> bool:
-    return username_de(chat) in config._GRUPOS_IMG_RUIM
 
 
 def decidir(norm, montada, score: int, estado: dict, agora: float) -> Decisao:
@@ -94,7 +90,7 @@ def decidir(norm, montada, score: int, estado: dict, agora: float) -> Decisao:
     # ── DECISÃO 2: score IGUAL ──
     if score == score_atual:
         delta = int(agora - ts_anterior)
-        if (_midia_ruim(lider_atual) and not _midia_ruim(norm.chat)
+        if (midia_ruim(lider_atual) and not midia_ruim(norm.chat)
                 and montada.imagem
                 and (agora - ts_anterior) < config._JANELA_REENVIO_MIDIA_S):
             return Decisao(
