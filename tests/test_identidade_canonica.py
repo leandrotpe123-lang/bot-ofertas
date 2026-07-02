@@ -48,6 +48,7 @@ import config
 import database as _dbmod
 from pipeline.deduplicacao import identidade_canonica, identidades
 from pipeline.normalizacao import MensagemNormalizada
+from utils.cupom import extrair_todos_cupons
 
 _SENT = object()
 # Tratados à parte: DB pelo isolamento; logger é infra de log, não estado de identidade.
@@ -217,6 +218,7 @@ def _norm(texto="", *, plat="shopee", cupom="", sku="", ids_globais=None,
         ids_globais=ids_globais or [], chave_campanha=chave_campanha,
         chaves_campanha=chaves_campanha or [], tem_host_campanha=tem_host_campanha,
         tem_sinal_cashback=tem_sinal_cashback, code_entities=code_entities or [],
+        cupons=extrair_todos_cupons(texto, code_entities or []),
     )
 
 
