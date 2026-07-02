@@ -47,6 +47,13 @@ _SCORE_POR_CUPOM_EXTRA = 2
 _MAX_EXTRAS_CONTADOS   = 3
 
 
+def midia_ruim(chat: str) -> bool:
+    """True se o grupo de origem tem mídia de baixa qualidade
+    (config._GRUPOS_IMG_RUIM). Ponto único da regra — consumido por
+    calcular_score (peso de mídia) e por decisao.decidir (troca de imagem)."""
+    return username_de(chat) in config._GRUPOS_IMG_RUIM
+
+
 def calcular_score(norm: MensagemNormalizada) -> int:
     """
     Calcula score de qualidade do post.
@@ -88,7 +95,7 @@ def calcular_score(norm: MensagemNormalizada) -> int:
     # Mídia: peso varia conforme grupo de origem. A identidade é numérica;
     # resolvemos o @username via identidade p/ consultar a lista legível.
     if norm.tem_midia:
-        if username_de(norm.chat) in config._GRUPOS_IMG_RUIM:
+        if midia_ruim(norm.chat):
             score += config._SCORE_MIDIA_RUIM
         else:
             score += config._SCORE_MIDIA_NORMAL
