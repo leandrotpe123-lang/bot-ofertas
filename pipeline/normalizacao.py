@@ -70,7 +70,7 @@ from pipeline.ingestao import MensagemBruta
 from plataformas import registry
 from plataformas.contrato import AUSENTE, Afiliacao
 from utils.cache_links import consultar_link
-from utils.cupom import extrair_cupom
+from utils.cupom import extrair_cupom, extrair_todos_cupons
 from utils.encurtador import encurtar
 from utils.url_resolver import desencurtar
 from utils.urls import _netloc, host_canonico_campanha, chaves_canonicas_campanha
@@ -218,6 +218,10 @@ class MensagemNormalizada:
     media_obj:         object
     estado_evento:     EstadoEvento = EstadoEvento.NEW
     ids_globais:       List[str]    = field(default_factory=list)
+    # Lista completa de cupons — snapshot derivado UMA vez na normalização
+    # (extrair_todos_cupons sobre texto_limpo). Consumida por identidade e
+    # score; o representante norm.cupom (extrair_cupom) é derivação distinta.
+    cupons:            List[str]    = field(default_factory=list)
     # ── Identidade de campanha derivada — CONTRATO COM A DEDUPLICAÇÃO.
     # Derivados das URLs afiliadas LONGAS, antes do encurtamento.
     # Derivação é responsabilidade EXCLUSIVA da normalização; a
@@ -226,11 +230,10 @@ class MensagemNormalizada:
     chaves_campanha:   List[str]    = field(default_factory=list)
     tem_host_campanha: bool         = False
     tem_sinal_cashback: bool        = False
-    # Entidades de código (monospace) capturadas na ingestão — MESMA
-    # fonte que normalizar() usa para norm.cupom. A dedup consome isto
-    # via extrair_todos_cupons (identidades, _id_cupom_indexado, score).
-    # Sem isto, código que vem só como entidade some das ofertas e a
-    # família duplica.
+    # Entidades de código (monospace) capturadas na ingestão — insumo que
+    # normalizar() usa para derivar norm.cupom E norm.cupons. Após Cupom-1
+    # o pipeline consome norm.cupons; este campo é insumo interno e sai do
+    # contrato no Cupom-2.
     code_entities:     List[str]    = field(default_factory=list)
     # ──────────────────────────────────────────────────────────────
     is_reply:          bool         = False
@@ -480,6 +483,7 @@ async def normalizar(
 
     plat_dom = max(set(plats), key=plats.count) if plats else ""
     cupom    = extrair_cupom(texto_limpo, getattr(bruta, "code_entities", None))
+    cupons   = extrair_todos_cupons(texto_limpo, getattr(bruta, "code_entities", None))
 
     # ── DERIVAÇÃO DE IDENTIDADE ───────────────────────────────────
     # Opera EXCLUSIVAMENTE sobre as URLs afiliadas LONGAS (conv),
@@ -540,7 +544,7 @@ async def normalizar(
     return MensagemNormalizada(
         msg_id=bruta.msg_id, chat=bruta.chat, texto_limpo=texto_limpo,
         mapa=mapa_publicacao, preservar=preservar_lst, plat=plat_dom,
-        cupom=cupom, sku=sku, tem_midia=bruta.tem_midia,
+        cupom=cupom, cupons=cupons, sku=sku, tem_midia=bruta.tem_midia,
         media_obj=bruta.media_obj, estado_evento=estado,
         ids_globais=ids_globais, chave_campanha=chave_campanha,
         chaves_campanha=chaves_campanha,
