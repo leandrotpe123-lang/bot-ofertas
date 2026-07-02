@@ -44,7 +44,7 @@ from database import (
 )
 from pipeline.estado_evento import _KW_EVENTO
 from pipeline.normalizacao import MensagemNormalizada
-from utils.cupom import _KW_CUPOM, extrair_todos_cupons
+from utils.cupom import _KW_CUPOM
 from utils.hashes import _fp4
 from utils.textos import _alma
 from utils.urls import _cache_key
@@ -273,9 +273,7 @@ def _id_cupom_indexado(norm, plat: str, texto: str, fallback: str) -> str:
     códigos sob a identidade resolvida — preserva todos, não só um. O
     link nunca participa: a chave é código + plataforma."""
     codes = sorted(set(
-        c.upper() for c in extrair_todos_cupons(
-            texto, getattr(norm, "code_entities", None)
-        ) if c
+        c.upper() for c in norm.cupons if c
     ))
     if not codes:
         return fallback
@@ -426,7 +424,7 @@ def identidades(norm: "MensagemNormalizada") -> list[str]:
     for k in norm.chaves_campanha:
         _add(f"{plat}|camp|{k}")
 
-    for cod in extrair_todos_cupons(texto, getattr(norm, "code_entities", None)):
+    for cod in norm.cupons:
         _add(f"{plat}|cup|{cod.upper()}")
 
     if _eh_post_cashback(texto, norm.tem_sinal_cashback):
