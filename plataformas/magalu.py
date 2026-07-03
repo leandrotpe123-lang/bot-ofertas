@@ -37,7 +37,6 @@ from plataformas.contrato import (
     AUSENTE,
     CONTRACT_VERSION,
     IdentidadeProduto,
-    ParametrosTemporais,
     Plataforma,
     TipoLink,
 )
@@ -90,13 +89,6 @@ _PARAMS_REMOVER = frozenset({
     "utm_campaign", "pid", "c", "af_force_deeplink",
     "deep_link_value", "isretargeting",
 })
-
-
-# ── Parâmetros temporais de deduplicação ──────────────────────────
-_PARAMETROS_TEMPORAIS = ParametrosTemporais(
-    janela_s=300.0,
-    ttl_restock_s=14400.0,
-)
 
 
 # ── Funções de apoio ──────────────────────────────────────────────
@@ -286,7 +278,6 @@ PLATAFORMA = Plataforma(
     reconhece=reconhece,
     extrai_identidade=extrai_identidade,
     afilia=afilia,
-    parametros_temporais=_PARAMETROS_TEMPORAIS,
     encurtadores_forca_get=_ENCURTADORES_FORCA_GET,
     hosts_campanha=_HOSTS_CAMPANHA,
     requer_encurtamento=True,
