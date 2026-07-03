@@ -42,8 +42,6 @@ Operações que constituem a normalização:
 NÃO faz:
   - filtragem de conteúdo (responsabilidade de pipeline.filtros)
   - detecção/validação de cupom (responsabilidade de utils.cupom)
-  - classificação de estado de evento (responsabilidade de
-    pipeline.estado_evento)
   - resolução de URL via rede (responsabilidade de utils.url_resolver)
   - registro de posts pendentes (responsabilidade do orquestrador)
 """
@@ -51,21 +49,15 @@ from __future__ import annotations
 
 import asyncio
 import re
-import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import aiohttp
 
-from database import db_get_ts_por_cupom, db_get_link
+from database import db_get_link
 from globals import _get_session, _get_final, _log_cache_stats
 from logger import log_nrm
 from utils.categorias_universais import classificar_universal, eh_encurtador_generico
-from pipeline.estado_evento import (
-    EstadoEvento,
-    detectar_estado_evento,
-    _JANELA_C3,
-)
 from pipeline.ingestao import MensagemBruta
 from plataformas import registry
 from plataformas.contrato import AUSENTE, Afiliacao
@@ -216,7 +208,6 @@ class MensagemNormalizada:
     sku:               str
     tem_midia:         bool
     media_obj:         object
-    estado_evento:     EstadoEvento = EstadoEvento.NEW
     ids_globais:       List[str]    = field(default_factory=list)
     # Lista completa de cupons — snapshot derivado UMA vez na normalização
     # (extrair_todos_cupons sobre texto_limpo). Consumida por identidade e
@@ -511,17 +502,6 @@ async def normalizar(
     chaves_campanha   = chaves_canonicas_campanha(urls_campanha)
     tem_sinal_cashback = _tem_sinal_cashback(texto_limpo)
 
-    # ── ESTADO DE EVENTO ──────────────────────────────────────────
-    estado = EstadoEvento.NEW
-    if ids_globais:
-        estado = detectar_estado_evento(texto_limpo, ids_globais[0], plat_dom)
-    elif cupom:
-        ts_anterior_db = db_get_ts_por_cupom(plat_dom, (cupom or "").upper())
-        if ts_anterior_db is not None:
-            delta  = time.time() - ts_anterior_db
-            janela = _JANELA_C3.get(plat_dom, 120.0)
-            estado = EstadoEvento.SEEN if delta < janela else EstadoEvento.EXPIRED
-
     # ── ENCURTAMENTO TERMINAL ─────────────────────────────────────
     # ÚLTIMA transformação antes do retorno. Toda a identidade —
     # produto e campanha — já foi derivada acima sobre as URLs
@@ -536,7 +516,7 @@ async def normalizar(
     f"ids_globais={ids_globais} "
     f"chave_campanha='{chave_campanha}' "
     f"chaves_campanha={chaves_campanha} "
-    f"estado={estado.value} encurtadas={n_encurtadas} "
+    f"encurtadas={n_encurtadas} " 
     f"override={is_override}"
   )
     _log_cache_stats()
@@ -545,7 +525,7 @@ async def normalizar(
         msg_id=bruta.msg_id, chat=bruta.chat, texto_limpo=texto_limpo,
         mapa=mapa_publicacao, preservar=preservar_lst, plat=plat_dom,
         cupom=cupom, cupons=cupons, sku=sku, tem_midia=bruta.tem_midia,
-        media_obj=bruta.media_obj, estado_evento=estado,
+        media_obj=bruta.media_obj,
         ids_globais=ids_globais, chave_campanha=chave_campanha,
         chaves_campanha=chaves_campanha,
         tem_host_campanha=tem_host_campanha,
