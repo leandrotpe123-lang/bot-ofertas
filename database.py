@@ -128,56 +128,6 @@ def db_set_link(url_orig: str, url_conv: str, url_canon: str, plat: str):
     except Exception as e:
         log_db.error(f"❌ db_set_link: {e}")
 
-# ── dedupe_temp ───────────────────────────────────────────────────
-def db_get_ts_por_produto(plat: str, id_prod: str) -> Optional[float]:
-    """
-    Timestamp da passagem mais recente de uma oferta-produto, lido pela
-    coluna canônica id_prod (índice idx_dt_id). Aplica o MESMO 
-    corte de TTL_DEDUPE — entradas além de 24h não existem para
-    efeito de ciclo de vida (oferta volta a NEW). Usado pelo C3 de
-    produto, que precisa apenas do ts. Retorna None se não houver
-    registro vivo. Lê pela coluna canônica, não pelo caminho do fp.
-    """
-    if not id_prod:
-        return None
-    try:
-        limite = time.time() - TTL_DEDUPE
-        with _db() as db:
-            row = db.execute(
-                "SELECT ts FROM dedupe_temp"
-                " WHERE plat=? AND id_prod=? AND ts>=?"
-                " ORDER BY ts DESC LIMIT 1",
-                (plat, id_prod, limite)).fetchone()
-        return row[0] if row else None
-    except Exception as e:
-        log_db.error(f"❌ db_get_ts_por_produto: {e}")
-        return None
-
-def db_get_ts_por_cupom(plat: str, cupom_id: str) -> Optional[float]:
-    """
-    Timestamp da passagem mais recente de uma oferta-cupom, lido pela
-    coluna canônica cupom_id (índice idx_dt_cupom). Espelho exato de
-    db_get_ts_por_produto: mesmo corte de TTL_DEDUPE, mesma ordenação,
-    mesmo contrato de retorno. O cupom_id é o cupom representativo em
-    caixa alta — a MESMA expressão (norm.cupom.upper()) usada pela
-    identity canônica e pelo writer. Retorna None se não houver
-    registro vivo. Não usa o caminho do fp.
-    """
-    if not cupom_id:
-        return None
-    try:
-        limite = time.time() - TTL_DEDUPE
-        with _db() as db:
-            row = db.execute(
-                "SELECT ts FROM dedupe_temp"
-                " WHERE plat=? AND cupom_id=? AND ts>=?"
-                " ORDER BY ts DESC LIMIT 1",
-                (plat, cupom_id, limite)).fetchone()
-        return row[0] if row else None
-    except Exception as e:
-        log_db.error(f"❌ db_get_ts_por_cupom: {e}")
-        return None
-
 def db_cupom_idx_buscar(plat: str, codigos: list, janela_s: float) -> Optional[str]:
     """Retorna a identity de um post de cupom se QUALQUER código da lista
     já estiver indexado dentro da janela (plat + código). Casamento por
