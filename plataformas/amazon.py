@@ -33,7 +33,6 @@ from plataformas.contrato import (
     AUSENTE,
     CONTRACT_VERSION,
     IdentidadeProduto,
-    ParametrosTemporais,
     Plataforma,
     TipoLink,
 )
@@ -89,13 +88,6 @@ _PATHS_SEM_AFILIACAO = re.compile(
 _PARAMS_MANTER = frozenset({
     "keywords", "node", "k", "i", "rh", "n", "field-keywords",
 })
-
-
-# ── Parâmetros temporais de deduplicação ──────────────────────────
-_PARAMETROS_TEMPORAIS = ParametrosTemporais(
-    janela_s=300.0,
-    ttl_restock_s=7200.0,
-)
 
 
 # ── Funções de apoio ──────────────────────────────────────────────
@@ -313,7 +305,6 @@ PLATAFORMA = Plataforma(
     reconhece=reconhece,
     extrai_identidade=extrai_identidade,
     afilia=afilia,
-    parametros_temporais=_PARAMETROS_TEMPORAIS,
     encurtadores_forca_get=_ENCURTADORES_FORCA_GET,
     hosts_campanha=_HOSTS_CAMPANHA,
 )
