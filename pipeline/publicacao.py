@@ -214,6 +214,156 @@ def _log_decisao(d, montada, norm, estado: dict, score: int,
             f"🔁 [SCORE_NAO_EVOLUI] {identity} "
             f"atual={score} salvo={d.score_atual} chat={norm.chat}")
 
+async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
+                            edit_count, ofertas_familia, identity, loop) -> bool:
+    """Executa a EVOLUÇÃO de um post existente: edita no lugar ou, em
+    fallback autorizado, substitui com mídia. Persiste o novo estado com
+    a união da família. Sem decisão — o caminho já foi decidido a montante."""
+    ok = await _editar_inner_no_sem(
+        msg_id_dest, montada.texto, montada.imagem,
+        exigir_imagem=d.exigir_imagem)
+    if ok:
+        # Edição preserva o msg_id: NÃO removemos o post.
+        # db_registrar_post faz upsert atômico e, como
+        # ofertas_familia ⊇ ofertas do post, reescreve todas
+        # sem apagar nenhuma — sem a janela do delete+insert
+        # em que a família sumiria do índice e outra task
+        # poderia duplicar. (db_remover_post é só p/ substituição.)
+        db_registrar_post(
+            msg_id_dest, ofertas_familia, d.novo_score, montada.texto,
+            montada.plat, norm.chat,
+            estado.get("janela_fim", 0), edit_count + 1,
+            estado.get("shadow_reply_id", 0))
+        if d.motivo == "CUPOM_ENRIQUECIDO":
+            log_out.info(
+                f"💎 [CUPOM_ENRIQUECIDO] {identity} "
+                f"novos={getattr(norm, '_cupom_novos', 0)} "
+                f"score={d.novo_score} chat={norm.chat}")
+        elif d.motivo == "TROCA_IMG_BOA":
+            log_out.info(f"✅ [IMG_TROCADA_OK] {identity}")
+        else:
+            log_out.info(
+                f"✏️ [EDITADO_OK] {identity} novo_score={d.novo_score}")
+        log_out.info(
+            f"🧭 TL | id={montada.msg_id} chat={norm.chat} | "
+            f"PROMOVIDO | dest={msg_id_dest} "
+            f"novo_score={d.novo_score} "
+            f"na_janela={'sim' if d.na_janela else 'nao'}")
+        return True
+
+    if not d.permite_substituir:
+        if d.motivo == "CUPOM_ENRIQUECIDO":
+            log_out.warning(f"⚠️ [CUPOM_ENRIQUECIDO_FALHOU] {identity}")
+        else:
+            log_out.warning(
+                f"⚠️ [EDIT_FALHOU] {identity} motivo={d.motivo}")
+        return True
+
+    log_out.info(
+        f"🔄 [SUBSTITUI_FALLBACK] {identity} "
+        f"score {d.score_atual}→{d.novo_score} chat={norm.chat}")
+    sent = await _substituir_post_com_midia(msg_id_dest, montada)
+    if sent:
+        mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+        mp[str(montada.msg_id)] = sent.id
+        try:
+            await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
+        except Exception as e:
+            log_sys.error(f"❌ salvar_mapa: {e}")
+        db_remover_post(msg_id_dest)
+        db_registrar_post(
+            sent.id, ofertas_familia, d.novo_score, montada.texto,
+            montada.plat, norm.chat,
+            estado.get("janela_fim", 0), edit_count + 1,
+            estado.get("shadow_reply_id", 0))
+        if d.motivo == "TROCA_IMG_BOA":
+            log_out.info(f"✅ [IMG_TROCADA_OK] {identity} (substitui)")
+        else:
+            log_out.info(
+                f"✅ [SUBSTITUIDO_OK] {identity} "
+                f"novo_id={sent.id} score={d.novo_score}")
+    else:
+        log_out.warning(f"⚠️ [SUBSTITUI_FALHOU] {identity}")
+    return True
+
+
+
+async def _aplicar_novo_envio(montada, norm, ofertas, score,
+                              identity, loop) -> bool:
+    """Executa a PUBLICAÇÃO de um post novo: envia com retry, registra a
+    janela e dispara os efeitos colaterais (mapa, idempotência, saturação,
+    burst). Sem decisão — chamado quando não há post parente vivo."""
+    img = montada.imagem
+    sent = None
+    for t in range(1, 4):
+        try:
+            sent = await _enviar_msg(montada.texto, img); break
+        except FloodWaitError as e:
+            await asyncio.sleep(e.seconds)
+        except Exception as e:
+            log_out.error(f"❌ envio t={t}: {e}")
+            if t == 1: img = None
+            elif t < 3: await asyncio.sleep(2 ** t)
+
+    if not sent:
+        log_out.error(f"❌ Envio falhou | @{montada.chat}")
+        return False
+
+    # Gravar estado IMEDIATAMENTE após envio. Falhas secundárias
+    # (mapa, sat, burst) NÃO devem deixar o post sem registro — senão
+    # um próximo post pode duplicar silenciosamente.
+    if ofertas:
+        try:
+            janela_fim = time.time() + _JANELA_DISPUTA_S
+            db_registrar_post(
+                sent.id, ofertas, score, montada.texto,
+                montada.plat, norm.chat if norm else "",
+                janela_fim, 0, 0)
+            log_out.info(
+                f"🧭 TL | id={montada.msg_id} "
+                f"chat={norm.chat if norm else ''} | JANELA_CRIADA | "
+                f"dest={sent.id} dur={_JANELA_DISPUTA_S:.0f}s score={score}")
+        except Exception as e:
+            log_sys.error(
+                f"❌ db_registrar_post FALHOU pós-envio: {e}", exc_info=True)
+
+    try:
+        mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
+        mp[str(montada.msg_id)] = sent.id
+        await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
+    except Exception as e:
+        log_sys.error(f"❌ salvar_mapa: {e}")
+
+    try:
+        await _marcar(montada.msg_id)
+    except Exception as e:
+        log_sys.error(f"❌ _marcar: {e}")
+
+    try:
+        db_registrar_sat(montada.plat, montada.sku)
+    except Exception as e:
+        log_sys.error(f"❌ db_registrar_sat: {e}")
+
+    try:
+        await _burst_add()
+    except Exception:
+        pass
+
+    if norm is not None and norm.is_override:
+        log_out.info(f"🔓 [OVERRIDE_OK] Post liberado publicado | id={sent.id}")
+
+    log_out.info(
+        f"🚀 [OK] @{montada.chat}→{GRUPO_DESTINO} | "
+        f"{montada.msg_id}→{sent.id} | "
+        f"{montada.plat.upper()} score={score} sku={montada.sku} "
+        f"identity={identity}")
+    log_out.debug(
+        f"🧭 TL | id={montada.msg_id} chat={norm.chat if norm else ''} | "
+        f"ENVIADO | dest={sent.id} "
+        f"idade_envio={_idade_str(norm.media_obj.date) if norm else '?'}")
+    return True
+
+
 async def _enviar_inner(montada: MensagemMontada,
                         norm: Optional[MensagemNormalizada],
                         ofertas: list,
@@ -266,144 +416,15 @@ async def _enviar_inner(montada: MensagemMontada,
                         ofertas_familia = sorted(
                             set(db_ofertas_de_post(msg_id_dest)) | set(ofertas))
 
-                        ok = await _editar_inner_no_sem(
-                            msg_id_dest, montada.texto, montada.imagem,
-                            exigir_imagem=d.exigir_imagem)
-                        if ok:
-                            # Edição preserva o msg_id: NÃO removemos o post.
-                            # db_registrar_post faz upsert atômico e, como
-                            # ofertas_familia ⊇ ofertas do post, reescreve todas
-                            # sem apagar nenhuma — sem a janela do delete+insert
-                            # em que a família sumiria do índice e outra task
-                            # poderia duplicar. (db_remover_post é só p/ substituição.)
-                            db_registrar_post(
-                                msg_id_dest, ofertas_familia, d.novo_score, montada.texto,
-                                montada.plat, norm.chat,
-                                estado.get("janela_fim", 0), edit_count + 1,
-                                estado.get("shadow_reply_id", 0))
-                            if d.motivo == "CUPOM_ENRIQUECIDO":
-                                log_out.info(
-                                    f"💎 [CUPOM_ENRIQUECIDO] {identity} "
-                                    f"novos={getattr(norm, '_cupom_novos', 0)} "
-                                    f"score={d.novo_score} chat={norm.chat}")
-                            elif d.motivo == "TROCA_IMG_BOA":
-                                log_out.info(f"✅ [IMG_TROCADA_OK] {identity}")
-                            else:
-                                log_out.info(
-                                    f"✏️ [EDITADO_OK] {identity} novo_score={d.novo_score}")
-                            log_out.info(
-                                f"🧭 TL | id={montada.msg_id} chat={norm.chat} | "
-                                f"PROMOVIDO | dest={msg_id_dest} "
-                                f"novo_score={d.novo_score} "
-                                f"na_janela={'sim' if d.na_janela else 'nao'}")
-                            return True
-
-                        if not d.permite_substituir:
-                            if d.motivo == "CUPOM_ENRIQUECIDO":
-                                log_out.warning(f"⚠️ [CUPOM_ENRIQUECIDO_FALHOU] {identity}")
-                            else:
-                                log_out.warning(
-                                    f"⚠️ [EDIT_FALHOU] {identity} motivo={d.motivo}")
-                            return True
-
-                        log_out.info(
-                            f"🔄 [SUBSTITUI_FALLBACK] {identity} "
-                            f"score {d.score_atual}→{d.novo_score} chat={norm.chat}")
-                        sent = await _substituir_post_com_midia(msg_id_dest, montada)
-                        if sent:
-                            mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-                            mp[str(montada.msg_id)] = sent.id
-                            try:
-                                await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
-                            except Exception as e:
-                                log_sys.error(f"❌ salvar_mapa: {e}")
-                            db_remover_post(msg_id_dest)
-                            db_registrar_post(
-                                sent.id, ofertas_familia, d.novo_score, montada.texto,
-                                montada.plat, norm.chat,
-                                estado.get("janela_fim", 0), edit_count + 1,
-                                estado.get("shadow_reply_id", 0))
-                            if d.motivo == "TROCA_IMG_BOA":
-                                log_out.info(f"✅ [IMG_TROCADA_OK] {identity} (substitui)")
-                            else:
-                                log_out.info(
-                                    f"✅ [SUBSTITUIDO_OK] {identity} "
-                                    f"novo_id={sent.id} score={d.novo_score}")
-                        else:
-                            log_out.warning(f"⚠️ [SUBSTITUI_FALHOU] {identity}")
-                        return True
+                        return await _aplicar_evolucao(
+                            montada, norm, d, estado, msg_id_dest,
+                            edit_count, ofertas_familia, identity, loop)
                     # estado sumiu sob o lock (substituído/limpo por outra task)
                     # → cai para NOVO ENVIO
 
         # ═════════════════════════════════════════════════════════════
         # NOVO ENVIO (sem post parente vivo)
         # ═════════════════════════════════════════════════════════════
-        img = montada.imagem
-        sent = None
-        for t in range(1, 4):
-            try:
-                sent = await _enviar_msg(montada.texto, img); break
-            except FloodWaitError as e:
-                await asyncio.sleep(e.seconds)
-            except Exception as e:
-                log_out.error(f"❌ envio t={t}: {e}")
-                if t == 1: img = None
-                elif t < 3: await asyncio.sleep(2 ** t)
+        return await _aplicar_novo_envio(
+            montada, norm, ofertas, score, identity, loop)
 
-        if not sent:
-            log_out.error(f"❌ Envio falhou | @{montada.chat}")
-            return False
-
-        # Gravar estado IMEDIATAMENTE após envio. Falhas secundárias
-        # (mapa, sat, burst) NÃO devem deixar o post sem registro — senão
-        # um próximo post pode duplicar silenciosamente.
-        if ofertas:
-            try:
-                janela_fim = time.time() + _JANELA_DISPUTA_S
-                db_registrar_post(
-                    sent.id, ofertas, score, montada.texto,
-                    montada.plat, norm.chat if norm else "",
-                    janela_fim, 0, 0)
-                log_out.info(
-                    f"🧭 TL | id={montada.msg_id} "
-                    f"chat={norm.chat if norm else ''} | JANELA_CRIADA | "
-                    f"dest={sent.id} dur={_JANELA_DISPUTA_S:.0f}s score={score}")
-            except Exception as e:
-                log_sys.error(
-                    f"❌ db_registrar_post FALHOU pós-envio: {e}", exc_info=True)
-
-        try:
-            mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-            mp[str(montada.msg_id)] = sent.id
-            await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
-        except Exception as e:
-            log_sys.error(f"❌ salvar_mapa: {e}")
-
-        try:
-            await _marcar(montada.msg_id)
-        except Exception as e:
-            log_sys.error(f"❌ _marcar: {e}")
-
-        try:
-            db_registrar_sat(montada.plat, montada.sku)
-        except Exception as e:
-            log_sys.error(f"❌ db_registrar_sat: {e}")
-
-        try:
-            await _burst_add()
-        except Exception:
-            pass
-
-        if norm is not None and norm.is_override:
-            log_out.info(f"🔓 [OVERRIDE_OK] Post liberado publicado | id={sent.id}")
-
-        log_out.info(
-            f"🚀 [OK] @{montada.chat}→{GRUPO_DESTINO} | "
-            f"{montada.msg_id}→{sent.id} | "
-            f"{montada.plat.upper()} score={score} sku={montada.sku} "
-            f"identity={identity}")
-        log_out.debug(
-            f"🧭 TL | id={montada.msg_id} chat={norm.chat if norm else ''} | "
-            f"ENVIADO | dest={sent.id} "
-            f"idade_envio={_idade_str(norm.media_obj.date) if norm else '?'}")
-        return True
