@@ -91,7 +91,6 @@ from plataformas.contrato import (
     AUSENTE,
     CONTRACT_VERSION,
     IdentidadeProduto,
-    ParametrosTemporais,
     Plataforma,
     TipoLink,
 )
@@ -194,13 +193,6 @@ _RE_PATH_P_MLB = re.compile(r'/p/MLB[-]?(\d{5,})', re.I)
 
 # Path de encurtador interno do site (/sec/XXX).
 _RE_PATH_SEC = re.compile(r'/sec/', re.I)
-
-
-# ── Parâmetros temporais de deduplicação ──────────────────────────
-_PARAMETROS_TEMPORAIS = ParametrosTemporais(
-    janela_s=300.0,
-    ttl_restock_s=7200.0,
-)
 
 
 # ── Parâmetros de limpeza ─────────────────────────────────────────
@@ -853,6 +845,5 @@ PLATAFORMA = Plataforma(
     reconhece=reconhece,
     extrai_identidade=extrai_identidade,
     afilia=afilia,
-    parametros_temporais=_PARAMETROS_TEMPORAIS,
     encurtadores_forca_get=_ENCURTADORES_FORCA_GET,
    )
