@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from plataformas.contrato import (
     CONTRACT_VERSION,
-    ParametrosTemporais,
     Plataforma,
 )
 
@@ -56,13 +55,6 @@ _HOSTS_CAMPANHA = frozenset({
     "premios.shopee.com.br", "flapremios.com.br",
 })
 
-# ── Parâmetros temporais de deduplicação ──────────────────────────
-_PARAMETROS_TEMPORAIS = ParametrosTemporais(
-    janela_s=60.0,
-    ttl_restock_s=3600.0,
-)
-
-
 # ── Definição da plataforma ───────────────────────────────────────
 PLATAFORMA = Plataforma(
     identificador=_IDENTIFICADOR,
@@ -70,7 +62,6 @@ PLATAFORMA = Plataforma(
     reconhece=reconhece,
     extrai_identidade=extrai_identidade,
     afilia=afilia,
-    parametros_temporais=_PARAMETROS_TEMPORAIS,
     encurtadores_forca_get=_ENCURTADORES_FORCA_GET,
     hosts_campanha=_HOSTS_CAMPANHA,
     sinais_cashback=_SINAIS_CASHBACK,
