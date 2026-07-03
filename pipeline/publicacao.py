@@ -277,8 +277,8 @@ async def _enviar_inner(montada: MensagemMontada,
                             log_out.info(
                                 f"🔁 [SCORE_NAO_EVOLUI] {identity} "
                                 f"atual={score} salvo={d.score_atual} chat={norm.chat}")
+                        _log_decisao(d, montada, norm, estado, score, agora, identity)
 
-                      _log_decisao(d, montada, norm, estado, score, agora, identity)
 
                         if d.acao != "EVOLUIR":
                             log_out.info(
