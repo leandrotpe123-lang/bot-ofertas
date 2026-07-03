@@ -172,6 +172,48 @@ async def enviar(montada: MensagemMontada,
 
     return await _enviar_inner(montada, norm, ofertas, score)
 
+def _log_decisao(d, montada, norm, estado: dict, score: int,
+                 agora: float, identity: str) -> None:
+    """Observabilidade da decisão de evolução. Sem efeito de fluxo:
+    apenas registra o veredito de decidir() e o detalhe por motivo.
+    O controle de fluxo (evoluir/descartar) permanece no chamador."""
+    log_out.debug(
+        f"🧭 TL | id={montada.msg_id} chat={norm.chat} | DECISAO | "
+        f"motivo={d.motivo} "
+        f"na_janela={'sim' if d.na_janela else 'nao'} "
+        f"score {d.score_atual}→{score} janela_restante="
+        f"{max(0.0, (estado.get('janela_fim', 0) or 0) - agora):.1f}s")
+
+    if d.motivo == "JANELA_ENCERRADA":
+        log_out.info(
+            f"🔒 [JANELA_ENCERRADA] {identity} "
+            f"oferta encerrada (fora dos {_JANELA_DISPUTA_S:.0f}s) "
+            f"candidato={norm.chat}")
+    elif d.motivo == "EVOLUCAO_LIMITE_ATINGIDO":
+        log_out.info(
+            f"🔒 [EVOLUCAO_LIMITE_ATINGIDO] {identity} "
+            f"já evoluiu {estado.get('edit_count', 0) or 0}x na janela "
+            f"candidato={norm.chat}")
+    elif d.motivo == "EVOLUI":
+        log_out.info(
+            f"✳️ [EVOLUI] {identity} "
+            f"score {d.score_atual}→{score} "
+            f"{'(janela)' if d.na_janela else '(lider)'} "
+            f"chat={norm.chat} "
+            f"img_nova={'sim' if montada.imagem else 'não'}")
+    elif d.motivo == "TROCA_IMG_BOA":
+        log_out.info(
+            f"🖼 [TROCA_IMG_BOA] {identity} "
+            f"de {estado.get('lider','')} (ruim) → {norm.chat} (bom) "
+            f"delta={d.delta}s")
+    elif d.motivo == "DUP_SILENCIOSO":
+        log_out.debug(
+            f"🔁 [DUP_SILENCIOSO] {identity} sim={d.sim:.2f}")
+    elif d.motivo == "SCORE_NAO_EVOLUI":
+        log_out.info(
+            f"🔁 [SCORE_NAO_EVOLUI] {identity} "
+            f"atual={score} salvo={d.score_atual} chat={norm.chat}")
+
 async def _enviar_inner(montada: MensagemMontada,
                         norm: Optional[MensagemNormalizada],
                         ofertas: list,
@@ -235,6 +277,8 @@ async def _enviar_inner(montada: MensagemMontada,
                             log_out.info(
                                 f"🔁 [SCORE_NAO_EVOLUI] {identity} "
                                 f"atual={score} salvo={d.score_atual} chat={norm.chat}")
+
+                      _log_decisao(d, montada, norm, estado, score, agora, identity)
 
                         if d.acao != "EVOLUIR":
                             log_out.info(
