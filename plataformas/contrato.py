@@ -102,18 +102,6 @@ class Afiliacao:
     canonica:  str
 
 
-# ── Parâmetros temporais de deduplicação ──────────────────────────
-@dataclass(frozen=True)
-class ParametrosTemporais:
-    """
-    Parâmetros temporais de deduplicação declarados por uma
-    plataforma. São dados fornecidos ao core, não política: o core
-    decide a deduplicação. Valores em segundos.
-    """
-    janela_s:       float
-    ttl_restock_s:  float
-
-
 # ── Definição da plataforma ───────────────────────────────────────
 @dataclass(frozen=True)
 class Plataforma:
@@ -136,7 +124,6 @@ class Plataforma:
                             forma de publicação da forma de identidade.
 
     Capacidades opcionais:
-      - parametros_temporais : ParametrosTemporais | None. Dado.
       - requer_encurtamento  : bool, padrão False. Declaração de
                                intenção: indica que os links desta
                                plataforma devem ser submetidos ao
@@ -183,7 +170,6 @@ class Plataforma:
     afilia:            Callable[..., Awaitable[object]]   # -> Afiliacao | str | _Ausente
 
     # Capacidades opcionais
-    parametros_temporais: Optional[ParametrosTemporais] = None
     requer_encurtamento:  bool = False
     encurtadores_forca_get: Optional[frozenset[str]] = None
     hosts_campanha:       Optional[frozenset[str]] = None
