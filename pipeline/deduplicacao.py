@@ -49,6 +49,7 @@ from pipeline.identidade_oferta import (
 # reexportado aqui para publicacao e testes seguirem importando da dedup.
 from pipeline.score import calcular_score
 from pipeline.normalizacao import MensagemNormalizada
+from pipeline.enriquecimento import MensagemEnriquecida
 from utils.hashes import _fp4
 from utils.textos import (
     _alma,
@@ -160,7 +161,7 @@ def _persistir_dedupe(fp, plat, cupons, alma, tipo, ids_globais, benef, cupom_id
 # ─────────────────────────────────────────────────────────────────
 # DEVE_ENVIAR — entrypoint da camada 4
 # ─────────────────────────────────────────────────────────────────
-async def deve_enviar_async(norm: MensagemNormalizada) -> bool:
+async def deve_enviar_async(enr: MensagemEnriquecida) -> bool:
     """
     Decide se a mensagem prossegue pra montagem/publicação.
 
@@ -171,6 +172,7 @@ async def deve_enviar_async(norm: MensagemNormalizada) -> bool:
     mensagens "voltou" do mesmo evento em sequência).
     """
     try:
+        norm        = enr.norm
         texto       = norm.texto_limpo
         plat        = norm.plat
         ids_globais = norm.ids_globais
@@ -179,9 +181,10 @@ async def deve_enviar_async(norm: MensagemNormalizada) -> bool:
         benef       = _benef_set(texto)
         chat        = (norm.chat or "").lower()
 
-        # ── TIPO + IDENTIDADE + JANELA ────────────────────────────
-        tipo     = tipo_de_oferta(norm)
-        identity = identidade_canonica(norm)
+        # ── TIPO + IDENTIDADE + JANELA (prontos do enriquecimento) ─
+        #   Consumidos de enr; o efeito de cupom já ocorreu lá, 1x.
+        tipo     = enr.tipo
+        identity = enr.canonica
         janela   = _janela_por_tipo(tipo)
 
         # ── REATIVAÇÃO ────────────────────────────────────────────
