@@ -34,6 +34,7 @@ import globals as g
 from config import _JANELA_DISPUTA_S, _MAX_IDADE_NOVA_S
 from logger import log_sys, _idade_str, _idade_seg
 from pipeline.deduplicacao import deve_enviar_async
+from pipeline.enriquecimento import enriquecer
 from pipeline.identidade import checar_e_marcar
 from pipeline.ingestao import ingerir
 from pipeline.montagem import montar
@@ -166,10 +167,15 @@ async def _pipeline(event, is_edit: bool = False) -> None:
             f"motivo=NORMALIZACAO_VAZIA")
         return
 
+    # ── Camada 3a: Enriquecimento (derivados prontos p/ consumo) ─
+    #   Só no fluxo de publicação nova (not is_edit) — preserva que o
+    #   efeito de cupom de identidade_canonica NÃO roda em edições,
+    #   exatamente como quando vivia em deve_enviar_async.
     # ── Camada 3: Deduplicação + saturação (somente novas) ───────
     if not is_edit:
+        enr = enriquecer(norm)
         try:
-            if not await deve_enviar_async(norm):
+            if not await deve_enviar_async(enr):
                 log_sys.info(
                     f"🧭 TL | id={msg_id} chat={norm.chat} | DESCARTE | "
                     f"motivo=DEDUP")
