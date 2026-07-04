@@ -30,7 +30,7 @@ from pipeline.score import midia_ruim
 # Ações possíveis
 IGNORAR  = "IGNORAR"
 EVOLUIR  = "EVOLUIR"
-PUBLICAR = "PUBLICAR"   # reservado: usado quando não há estado
+PUBLICAR = "PUBLICAR"   # sem estado: não há post parente vivo
 
 
 @dataclass
@@ -47,10 +47,13 @@ class Decisao:
     sim: float = 0.0
 
 
-def decidir(norm, montada, score: int, estado: dict, agora: float) -> Decisao:
-    """Decide a ação para um candidato cuja identidade JÁ tem estado.
-    `estado` deve ser truthy (o chamador trata ausência como PUBLICAR
-    antes de chamar). Não executa nada."""
+def decidir(norm, montada, score: int, estado: dict | None,
+            agora: float) -> Decisao:
+    """Decide a ação para um candidato: PUBLICAR (sem estado vivo),
+    EVOLUIR ou IGNORAR (com estado). Não executa nada."""
+    if not estado:
+        return Decisao(PUBLICAR, "SEM_ESTADO")
+
     na_janela   = agora < (estado.get("janela_fim", 0) or 0)
     lider_atual = estado.get("lider", "") or ""
     edit_count  = estado.get("edit_count", 0) or 0
