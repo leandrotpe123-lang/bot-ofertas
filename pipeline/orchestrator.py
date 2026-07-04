@@ -172,6 +172,7 @@ async def _pipeline(event, is_edit: bool = False) -> None:
     #   efeito de cupom de identidade_canonica NÃO roda em edições,
     #   exatamente como quando vivia em deve_enviar_async.
     # ── Camada 3: Deduplicação + saturação (somente novas) ───────
+    enr = None
     if not is_edit:
         enr = enriquecer(norm)
         try:
@@ -202,7 +203,7 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         return
 
     # ── Camada 5: Publicação ──────────────────────────────────────
-    await enviar(montada, norm=norm, is_edit=is_edit)
+    await enviar(montada, norm=norm, enr=enr, is_edit=is_edit)
 
 
 # ── Entrypoint público ────────────────────────────────────────────
