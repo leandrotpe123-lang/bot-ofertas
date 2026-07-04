@@ -387,12 +387,11 @@ async def _enviar_inner(montada: MensagemMontada,
                 post_lock = await _get_post_lock(msg_id_rel)
                 async with post_lock:
                     estado = db_get_post(msg_id_rel)   # re-verifica sob o lock
-                    if estado:
+                    agora = time.time()
+                    d = decidir(norm, montada, score, estado, agora)
+                    if d.acao != "PUBLICAR":
                         identity = f"post:{msg_id_rel}"
-                        agora = time.time()
-                        d = decidir(norm, montada, score, estado, agora)
                         _log_decisao(d, montada, norm, estado, score, agora, identity)
-
 
                         if d.acao != "EVOLUIR":
                             log_out.info(
@@ -419,8 +418,8 @@ async def _enviar_inner(montada: MensagemMontada,
                         return await _aplicar_evolucao(
                             montada, norm, d, estado, msg_id_dest,
                             edit_count, ofertas_familia, identity, loop)
-                    # estado sumiu sob o lock (substituído/limpo por outra task)
-                    # → cai para NOVO ENVIO
+                    # d.acao == PUBLICAR: estado sumiu sob o lock (substituído/
+                    # limpo por outra task) → cai para NOVO ENVIO
 
         # ═════════════════════════════════════════════════════════════
         # NOVO ENVIO (sem post parente vivo)
