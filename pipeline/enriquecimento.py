@@ -39,7 +39,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pipeline.normalizacao import MensagemNormalizada
-from pipeline.identidade_oferta import tipo_de_oferta, identidade_canonica
+from pipeline.identidade_oferta import tipo_de_oferta, identidade_canonica, identidades
+from pipeline.score import calcular_score
 
 
 @dataclass(frozen=True)
@@ -50,13 +51,16 @@ class MensagemEnriquecida:
     enriquecimento. `norm` é a referência viva ao snapshot — cujo atributo
     dinâmico _cupom_novos permanece a fonte única do efeito de cupom.
 
-    Nesta fase (Corte 1) expõe `tipo` e `canonica`, consumidos pela
-    deduplicação. `ofertas` e `score` entram no Corte 2, quando a
-    publicação passar a consumi-los em vez de rederivá-los.
+    Expõe `tipo` e `canonica` (consumidos pela deduplicação) e, desde o
+    Corte 2, `ofertas` e `score` prontos — consumidos pela publicação no
+    caminho NOVO, que deixou de rederivá-los. Todos puros exceto o efeito
+    de cupom, que ocorre 1x dentro de `identidade_canonica`.
     """
     norm:     MensagemNormalizada
     tipo:     str
     canonica: str
+    ofertas:  list[str]
+    score:    int
 
 
 def enriquecer(norm: MensagemNormalizada) -> MensagemEnriquecida:
@@ -70,5 +74,9 @@ def enriquecer(norm: MensagemNormalizada) -> MensagemEnriquecida:
     """
     tipo     = tipo_de_oferta(norm)
     canonica = identidade_canonica(norm)
-    return MensagemEnriquecida(norm=norm, tipo=tipo, canonica=canonica)
+    ofertas  = identidades(norm)
+    score    = calcular_score(norm)
+    return MensagemEnriquecida(
+        norm=norm, tipo=tipo, canonica=canonica,
+        ofertas=ofertas, score=score)
   
