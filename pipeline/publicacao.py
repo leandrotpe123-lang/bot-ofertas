@@ -23,6 +23,7 @@ from pipeline.saida import (
 )
 from pipeline.montagem import MensagemMontada
 from pipeline.normalizacao import MensagemNormalizada
+from pipeline.enriquecimento import MensagemEnriquecida
 from pipeline.estado_evento import _KW_EVENTO
 from utils.helpers import ler_mapa, salvar_mapa
 
@@ -150,6 +151,7 @@ async def delay_saturacao(plat: str, texto: str) -> float:
 
 async def enviar(montada: MensagemMontada,
                  norm: Optional[MensagemNormalizada] = None,
+                 enr: Optional[MensagemEnriquecida] = None,
                  is_edit: bool = False) -> bool:
     """
     Publica ou edita mensagem no grupo destino.
@@ -157,10 +159,19 @@ async def enviar(montada: MensagemMontada,
     Camada 1 do lock: serializa por OFERTA (ordem fixa) entre tasks que
     compartilham qualquer oferta. A camada 2 (lock do post) é aplicada
     dentro de _enviar_inner.
+
+    ofertas/score vêm PRONTOS do enriquecimento no caminho NOVO (enr
+    presente). Na EDIÇÃO (enr ausente) derivam de norm, como antes — sem
+    redisparar o efeito de cupom, pois nem identidades() nem calcular_score()
+    o produzem; identidade_canonica (único ponto do efeito) roda 1x, só no
+    enriquecimento.
     """
     ofertas: list = []
     score: int = 0
-    if norm is not None:
+    if enr is not None:
+        ofertas = enr.ofertas
+        score   = enr.score
+    elif norm is not None:
         ofertas = identidades(norm)
         score   = calcular_score(norm)
 
