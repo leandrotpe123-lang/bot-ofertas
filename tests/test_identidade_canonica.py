@@ -303,6 +303,16 @@ def test_produto_post_cupom_canonica_usa_produto():
               cupom="SAVE20", code_entities=["SAVE20"], ids_globais=["B0XYZ"])
     assert identidade_canonica(n) == "amazon|B0XYZ"
 
+def test_MUDA_NO_11_10_produto_magalu_sku_minusculo_vence_classes_c():
+    # §11.10 (MB v1.1): eleição por PRECEDÊNCIA DE ESPÉCIE. Antes, o
+    # lex-menor elegia cup|/camp|/cash| quando o SKU era minúsculo
+    # ('j' > 'c') — acidente de alfabeto (P7, "universal disfarçado").
+    # Este teste FALHA no código 1.1c e prova a regra nova.
+    n = _norm("Air fryer imperdivel\njd8ha6b2ck com cupom SAVE20",
+              plat="magalu", cupom="SAVE20", code_entities=["SAVE20"],
+              ids_globais=["jd8ha6b2ck"])
+    assert identidade_canonica(n) == "magalu|jd8ha6b2ck"
+
 
 def test_produto_post_cupom_identidades_emite_ambos():
     # identidades (camada de overlap) emite produto E cupom — os dois.
