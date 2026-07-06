@@ -381,20 +381,23 @@ _HIERARQUIA_IDENTIDADE = (
 
 def identidade_canonica(norm: "MensagemNormalizada") -> str:
     """
-    Chave estável de dedupe, DERIVADA do conjunto identidades().
+    Chave estável de dedupe, eleita por PRECEDÊNCIA DE ESPÉCIE (MB §11.10).
 
-    A canônica é uma VISTA determinística de identidades(): escolhe o
-    representante lex-menor (sorted[0] — independente de ordem) e aplica a
-    grudação transitiva por código (_id_cupom_indexado) por cima. Assim há
-    UM só cálculo de identidade de oferta (identidades), e a canônica é
-    função dele — não um caminho paralelo.
+    Eleição: a âncora de PRODUTO vence qualquer outra classe quando
+    presente — espelha _id_produto (min dos ids_globais). Sem produto,
+    mantém-se o representante lex-menor de identidades(), como desempate
+    APENAS entre classes não-produto. A eleição não pode depender do
+    alfabeto de ID da plataforma (P7): o lex-menor puro elegia camp/cash/
+    cup para SKUs minúsculos (ex.: Magalu) por acidente.
 
-    A grudação preserva a transitividade do índice de cupom: se qualquer
-    código do post já foi visto na janela, a identidade da corrente
-    sobrepõe a base. Famílias de cupom colapsam mesmo quando a base (o
-    produto-veículo) diverge entre posts do mesmo código.
+    A grudação transitiva por código (_id_cupom_indexado) segue aplicada
+    por cima em ambos os ramos: se qualquer código do post já foi visto
+    na janela, a identidade da corrente sobrepõe a base.
     """
-    base = sorted(identidades(norm))[0]
+    if norm.ids_globais:
+        base = f"{norm.plat}|{min(norm.ids_globais)}"
+    else:
+        base = sorted(identidades(norm))[0]
     return _id_cupom_indexado(norm, norm.plat, norm.texto_limpo, base)
 
 
