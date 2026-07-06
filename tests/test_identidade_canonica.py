@@ -314,11 +314,13 @@ def test_MUDA_NO_11_10_produto_magalu_sku_minusculo_vence_classes_c():
     assert identidade_canonica(n) == "magalu|jd8ha6b2ck"
 
 
-def test_produto_post_cupom_identidades_emite_ambos():
-    # identidades (camada de overlap) emite produto E cupom — os dois.
+def test_MUDA_NA_FAMILIA_1_produto_nao_emite_cup():
+    # FAMÍLIA-1 (MB v1.1, P3): com produto, cupom é ATRIBUTO — não ancora.
+    # HISTÓRICO: até a 1.1c emitia ambos ("emite_ambos"). O cupom não some:
+    # vive em norm.cupons, no texto e nas cadeias do cupom_idx.
     n = _norm("Cupom imperdivel\nB0XYZ\nuse SAVE20", plat="amazon",
               cupom="SAVE20", code_entities=["SAVE20"], ids_globais=["B0XYZ"])
-    assert identidades(n) == ["amazon|B0XYZ", "amazon|cup|SAVE20"]
+    assert identidades(n) == ["amazon|B0XYZ"]
 
 
 def test_produto_cupom_secundario_canonica_usa_produto():
