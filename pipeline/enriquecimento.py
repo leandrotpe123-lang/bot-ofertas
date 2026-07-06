@@ -11,19 +11,7 @@ própria.
 Superfície pública:
   - enriquecer(norm) -> MensagemEnriquecida
 
-EFEITO COLATERAL RECONHECIDO (preservado, NÃO alterado):
-  identidade_canonica chama _id_cupom_indexado, que registra códigos no
-  índice cupom_idx (compartilhado entre mensagens) e muta
-  norm._cupom_novos. Esse efeito vivia em deduplicacao.deve_enviar_async
-  e é aqui reposicionado SEM mudar:
-    - sua frequência (1x por mensagem — enriquecer chama identidade_canonica
-      uma vez, como a dedup fazia);
-    - sua ordem relativa às leituras de norm._cupom_novos, que continuam
-      a jusante (dedup, decisao, publicacao);
-    - sua fonte única de verdade: norm._cupom_novos permanece um atributo
-      VIVO de norm, lido pelos consumidores atuais sem alteração. Este
-      módulo NÃO congela esse valor num campo — fazê-lo criaria duas
-      fontes de verdade.
+efeito preservado (frequência/ordem), e que desde a Fase 2 o valor é congelado em cupons_novos após o efeito (P8), com norm._cupom_novos mantido como ponte legada para decisao:78/publicacao:251 até a fase que tocar esses módulos.
 
 Composição, não herança: MensagemEnriquecida carrega a REFERÊNCIA a norm
 mais os derivados; não estende MensagemNormalizada nem mistura o contrato
@@ -39,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pipeline.normalizacao import MensagemNormalizada
-from pipeline.identidade_oferta import tipo_de_oferta, identidade_canonica, identidades
+from pipeline.identidade_oferta import tipo_de_oferta, identidade_canonica, ancoras, Ancora
 from pipeline.score import calcular_score
 
 
@@ -61,7 +49,8 @@ class MensagemEnriquecida:
     canonica: str
     ofertas:  list[str]
     score:    int
-
+    ancoras:  tuple[Ancora, ...] = ()
+    cupons_novos: int = 0
 
 def enriquecer(norm: MensagemNormalizada) -> MensagemEnriquecida:
     """Produz os derivados prontos a partir do snapshot normalizado.
@@ -73,10 +62,12 @@ def enriquecer(norm: MensagemNormalizada) -> MensagemEnriquecida:
     prontos, sem redisparar o efeito.
     """
     tipo     = tipo_de_oferta(norm)
-    canonica = identidade_canonica(norm)
-    ofertas  = identidades(norm)
+    canonica = identidade_canonica(norm)          # efeito de cupom AQUI, 1x
+    ancs     = ancoras(norm)                      # puro (autoritativa, P6)
+    ofertas  = [a.chave for a in ancs]            # projeção == identidades(norm)
     score    = calcular_score(norm)
+    novos    = getattr(norm, "_cupom_novos", 0)   # congela PÓS-efeito (P8)
     return MensagemEnriquecida(
         norm=norm, tipo=tipo, canonica=canonica,
-        ofertas=ofertas, score=score)
-  
+        ofertas=ofertas, score=score,
+        ancoras=tuple(ancs), cupons_novos=novos)
