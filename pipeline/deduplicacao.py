@@ -201,7 +201,7 @@ async def deve_enviar_async(enr: MensagemEnriquecida) -> bool:
                 fp_reativ, janela_reativ,
             )
             if na_janela:
-                novos = getattr(norm, "_cupom_novos", 0)
+                novos = enr.cupons_novos
                 if tipo == "cupom" and novos > 0:
                     log_ded.info(
                         f"♻️ [REATIVACAO_MAIS_CODIGOS] {identity} "
