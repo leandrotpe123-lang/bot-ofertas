@@ -112,15 +112,12 @@ def test_produto_com_cupom_emite_ambos():
     assert "amazon|cup|CURTEAI" in ofs, ofs
 
 
-def test_dois_posts_mesmo_cupom_sao_mesma_familia():
-    """Dois posts compartilhando código (um mais rico) DEVEM ter overlap —
-    é o que faz o segundo evoluir o primeiro em vez de duplicar."""
-    pobre = _norm(_TXT_CUPOM_ENTIDADE, plat="magalu", cupom="PELANDO20",
-                  code_entities=_CODIGOS)
-    rico = _norm(_TXT_CUPOM_ENTIDADE + "\nproduto", plat="magalu",
-                 cupom="PELANDO20", code_entities=_CODIGOS, ids_globais=["SKU9"])
-    assert set(identidades(pobre)) & set(identidades(rico))
-
+def test_MUDA_NA_FAMILIA_1_cupom_nao_une_pobre_e_rico_com_produto():
+    # FAMÍLIA-1: o "rico" tem produto → é oferta PRODUTO; o "pobre" é oferta
+    # CUPOM. Âncoras disjuntas → NÃO são família (P3). Trade-off espelho do
+    # incidente, ratificado: cupom não bloqueia nem cola produto.
+    ...
+    assert not (set(identidades(pobre)) & set(identidades(rico)))
 
 def test_live_aggregation_e_session_NAO_convergem_HOJE():
     """CHARACTERIZATION (comportamento ATUAL, não necessariamente o desejado):
