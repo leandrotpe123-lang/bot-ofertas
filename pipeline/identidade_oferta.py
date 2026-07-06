@@ -404,7 +404,7 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
     return _id_cupom_indexado(norm, norm.plat, norm.texto_limpo, base)
 
 
- @dataclass(frozen=True)
+@dataclass(frozen=True)
 class Ancora:
     """Âncora tipada de família (MB v1.1, P6). `chave` é byte-idêntica à
     string historicamente emitida por identidades() — que agora é VISTA."""
