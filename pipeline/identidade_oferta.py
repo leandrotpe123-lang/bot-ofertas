@@ -403,15 +403,16 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
 
 def identidades(norm: "MensagemNormalizada") -> list[str]:
     """
-    Conjunto de identidades de OFERTA do post (modelo container/oferta).
-    Cada produto, campanha, cupom e cashback é uma oferta — emitidos em
-    UNIÃO, sem colapso por min(). Por D4, post de cupom também emite os
-    produtos associados. Sem oferta estruturada, percorre a mesma
-    hierarquia de resolvers da canônica (sem chamá-la — quebra a
-    circularidade que o Estágio 3 exige).
+    Conjunto de ÂNCORAS de família do post (modelo container/oferta),
+    regido pelo MB v1.1 (P3, Família-1): com PRODUTO presente, cupom e
+    cashback são ATRIBUTOS e não ancoram — só ancoram quando o post não
+    tem produto (cupom-oferta / cashback-oferta). camp| segue emitida
+    até a fase per-link (§11.11; risco residual declarado em §11.5).
+    Sem oferta estruturada, percorre a mesma hierarquia de resolvers da
+    canônica (sem chamá-la — quebra a circularidade do Estágio 3).
 
-    ADITIVO: ainda NÃO consumido. identidade_canonica segue como chave
-    única até o consumo per-oferta ser ligado (Estágio 3).
+    Consumidores: enriquecimento (→ publicação: locks, overlap, registro
+    de família) e o ramo sem-produto da canônica.
     """
     plat = norm.plat
     texto = norm.texto_limpo
@@ -427,13 +428,14 @@ def identidades(norm: "MensagemNormalizada") -> list[str]:
     for k in norm.chaves_campanha:
         _add(f"{plat}|camp|{k}")
 
-    for cod in norm.cupons:
-        _add(f"{plat}|cup|{cod.upper()}")
+    if not norm.ids_globais:
+        for cod in norm.cupons:
+            _add(f"{plat}|cup|{cod.upper()}")
 
-    if _eh_post_cashback(texto, norm.tem_sinal_cashback):
-        pct = _extrair_pct_cashback(texto)
-        if pct:
-            _add(f"{plat}|cash|{pct}")
+        if _eh_post_cashback(texto, norm.tem_sinal_cashback):
+            pct = _extrair_pct_cashback(texto)
+            if pct:
+                _add(f"{plat}|cash|{pct}")
 
     if ofertas:
         return ofertas
