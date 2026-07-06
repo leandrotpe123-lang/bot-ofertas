@@ -9,7 +9,8 @@ deduplicação, que consome o resultado pronto daqui).
 
 Superfície pública (estável):
   - identidades(norm)         -> list[str]  : conjunto per-oferta
-  - identidade_canonica(norm) -> str        : chave canônica de dedupe
+  - ancoras(norm)             -> list[Ancora]: âncoras TIPADAS (P6) — autoritativa
+  - identidades(norm)         -> list[str]  : projeção plana de ancoras()
   - tipo_de_oferta(norm)      -> str        : "produto" | "cupom" | "evento"
 
 CONSUMO DE IDENTIDADE DERIVADA:
@@ -36,6 +37,7 @@ NÃO faz:
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 import config
 from database import (
@@ -280,10 +282,11 @@ def _id_cupom_indexado(norm, plat: str, texto: str, fallback: str) -> str:
     janela = float(config._JANELA_CUPOM_S)
     existente = db_cupom_idx_buscar(plat, codes, janela)
     identity = existente or fallback
-    # max() preserva a contagem REAL de códigos novos: identidade_canonica
-    # roda 2x por post (uma no dedup, outra no enviar). Na 2ª vez os
-    # códigos já estão no índice e registrar devolve 0 — sem o max,
-    # _cupom_novos zeraria e o cupom enriquecido nunca editaria o post.
+    # max() é guarda DEFENSIVA. Desde o D1 o efeito roda 1x por mensagem
+    # nova (identidade_canonica, via enriquecimento). Se algum caminho
+    # reexecutar, registrar devolve 0 para códigos já indexados — o max
+    # preserva a contagem real. (Fase 2: o valor é congelado em
+    # MensagemEnriquecida.cupons_novos APÓS o efeito.)
     norm._cupom_novos = max(
         getattr(norm, "_cupom_novos", 0),
         db_cupom_idx_registrar(plat, codes, identity))
@@ -401,50 +404,74 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
     return _id_cupom_indexado(norm, norm.plat, norm.texto_limpo, base)
 
 
-def identidades(norm: "MensagemNormalizada") -> list[str]:
-    """
-    Conjunto de ÂNCORAS de família do post (modelo container/oferta),
-    regido pelo MB v1.1 (P3, Família-1): com PRODUTO presente, cupom e
-    cashback são ATRIBUTOS e não ancoram — só ancoram quando o post não
-    tem produto (cupom-oferta / cashback-oferta). camp| segue emitida
-    até a fase per-link (§11.11; risco residual declarado em §11.5).
-    Sem oferta estruturada, percorre a mesma hierarquia de resolvers da
-    canônica (sem chamá-la — quebra a circularidade do Estágio 3).
+ @dataclass(frozen=True)
+class Ancora:
+    """Âncora tipada de família (MB v1.1, P6). `chave` é byte-idêntica à
+    string historicamente emitida por identidades() — que agora é VISTA."""
+    especie: str   # "produto" | "cupom" | "campanha" | "cashback" | "fallback"
+    chave: str
 
-    Consumidores: enriquecimento (→ publicação: locks, overlap, registro
-    de família) e o ramo sem-produto da canônica.
+
+_ESPECIE_POR_TAG = {"cup": "cupom", "camp": "campanha",
+                    "cash": "cashback", "url": "fallback", "txt": "fallback"}
+
+
+def _especie_da_chave(chave: str) -> str:
+    # Só para chaves nascidas no FALLBACK da hierarquia (camp/url/txt na
+    # prática; cupom lá é inalcançável — união não-vazia quando há código).
+    partes = chave.split("|", 2)
+    return _ESPECIE_POR_TAG.get(partes[1], "produto") if len(partes) >= 2 else "produto"
+
+
+def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
+    """
+    Derivação AUTORITATIVA das âncoras de família (MB v1.1, P3/P6):
+    com PRODUTO presente, cupom e cashback são ATRIBUTOS e não ancoram —
+    só ancoram quando o post não tem produto. camp| segue emitida até a
+    fase per-link (§11.11; risco declarado em §11.5). Sem oferta
+    estruturada, percorre a hierarquia de resolvers (mesma da canônica,
+    sem chamá-la — quebra a circularidade do Estágio 3).
     """
     plat = norm.plat
     texto = norm.texto_limpo
-    ofertas: list[str] = []
+    saida: list[Ancora] = []
+    vistos: set[str] = set()
 
-    def _add(chave: str) -> None:
-        if chave not in ofertas:
-            ofertas.append(chave)
+    def _add(especie: str, chave: str) -> None:
+        if chave not in vistos:
+            vistos.add(chave)
+            saida.append(Ancora(especie, chave))
 
     for pid in norm.ids_globais:
-        _add(f"{plat}|{pid}")
+        _add("produto", f"{plat}|{pid}")
 
     for k in norm.chaves_campanha:
-        _add(f"{plat}|camp|{k}")
+        _add("campanha", f"{plat}|camp|{k}")
 
     if not norm.ids_globais:
         for cod in norm.cupons:
-            _add(f"{plat}|cup|{cod.upper()}")
+            _add("cupom", f"{plat}|cup|{cod.upper()}")
 
         if _eh_post_cashback(texto, norm.tem_sinal_cashback):
             pct = _extrair_pct_cashback(texto)
             if pct:
-                _add(f"{plat}|cash|{pct}")
+                _add("cashback", f"{plat}|cash|{pct}")
 
-    if ofertas:
-        return ofertas
-    # Fallback AUTOSSUFICIENTE: percorre a MESMA hierarquia da canônica, sem
-    # chamar identidade_canonica (quebra a circularidade do Estágio 3). Byte-
-    # idêntico por construção (incl. efeito colateral do índice de cupom).
+    if saida:
+        return saida
+    # Fallback AUTOSSUFICIENTE — mesma hierarquia, mesmos efeitos (inalcançáveis
+    # para cupom aqui), byte-idêntico por construção.
     for resolver in _HIERARQUIA_IDENTIDADE:
         ident = resolver(norm, plat, texto)
         if ident is not None:
-            return [ident]
-    return [f"{plat}|txt|{_fp4(_alma(texto))}"] 
+            return [Ancora(_especie_da_chave(ident), ident)]
+    chave = f"{plat}|txt|{_fp4(_alma(texto))}"
+    return [Ancora("fallback", chave)]
+
+
+def identidades(norm: "MensagemNormalizada") -> list[str]:
+    """VISTA plana de ancoras() — compatibilidade com os consumidores
+    atuais (fallback de edição na publicação; ramo sem-produto da
+    canônica). A doutrina de emissão vive em ancoras()."""
+    return [a.chave for a in ancoras(norm)]
 
