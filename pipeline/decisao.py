@@ -26,6 +26,7 @@ from dataclasses import dataclass
 import config
 from config import _MAX_EDITS
 from pipeline.score import midia_ruim
+from pipeline.vida_oferta import viva
 
 # Ações possíveis
 IGNORAR  = "IGNORAR"
@@ -54,16 +55,16 @@ def decidir(norm, montada, score: int, estado: dict | None,
     if not estado:
         return Decisao(PUBLICAR, "SEM_ESTADO")
 
-    na_janela   = agora < (estado.get("janela_fim", 0) or 0)
+    na_janela   = viva(estado.get("janela_fim", 0) or 0, agora)
     lider_atual = estado.get("lider", "") or ""
     edit_count  = estado.get("edit_count", 0) or 0
     texto_atual = estado.get("texto", "") or ""
     ts_anterior = estado.get("ts", 0) or 0
     score_atual = estado["score"]
 
-    # ══ VIDA DA OFERTA — só evolui DENTRO da janela e no MÁXIMO 1x ══
-    # Fora da janela (_JANELA_DISPUTA_S = 90s): estado FINAL, congelado —
-    # nada mais evolui (nem score, nem imagem, nem cupom).
+    # ══ VIDA DA OFERTA — a autoridade é vida_oferta.viva() ══
+    # Fora da vida do ciclo: estado FINAL, congelado — nada mais evolui
+    # (nem score, nem imagem, nem cupom). O valor mora no dono, não aqui.
     if not na_janela:
         return Decisao(IGNORAR, "JANELA_ENCERRADA",
                        na_janela=na_janela, score_atual=score_atual)
