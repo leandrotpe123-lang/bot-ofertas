@@ -31,7 +31,7 @@ import heapq
 import time
 
 import globals as g
-from config import _JANELA_DISPUTA_S, _MAX_IDADE_NOVA_S
+from config import _MAX_IDADE_NOVA_S
 from logger import log_sys, _idade_str, _idade_seg
 from pipeline.deduplicacao import deve_enviar_async
 from pipeline.enriquecimento import enriquecer
@@ -40,6 +40,7 @@ from pipeline.ingestao import ingerir
 from pipeline.montagem import montar
 from pipeline.normalizacao import normalizar
 from pipeline.publicacao import delay_saturacao, enviar
+from pipeline.vida_oferta import VIDA_OFERTA_S
 
 
 # ── Parâmetros operacionais ───────────────────────────────────────
@@ -209,13 +210,16 @@ async def _pipeline(event, is_edit: bool = False) -> None:
 # ── Entrypoint público ────────────────────────────────────────────
 async def processar(event, is_edit: bool = False) -> None:
     """Chamado pelos handlers do Telethon em `main.py`."""
-    # ── Trava: edição de mensagem antiga (fora da janela de vida) ─────
-    # Evolução legítima edita em segundos (janela=90s). Edição mais velha
-    # que _JANELA_DISPUTA_S é post antigo reeditado na origem → descarta
-    # JÁ NA ENTRADA, antes da fila. NÃO afeta NewMessage. Idade -1 não corta.
+    # ── Trava: edição de mensagem antiga (fora da vida da oferta) ─────
+    # Uma edição só pode pertencer a um ciclo se chegou dentro da vida
+    # operacional (VIDA_OFERTA_S, da autoridade vida_oferta). Mais velha
+    # que isso é post reeditado tarde na origem → descarta JÁ NA ENTRADA,
+    # antes da fila. Quem casa/evolui/sincroniza é a cadeia rio abaixo
+    # (overlap V3 filtra por ciclo vivo). NÃO afeta NewMessage. Idade -1
+    # não corta.
     if is_edit:
         idade = _idade_seg(event.message.date)
-        if idade > _JANELA_DISPUTA_S:
+        if idade > VIDA_OFERTA_S:
             log_sys.info(
                 f"🧭 TL | id={event.message.id} chat={event.chat_id} | "
                 f"DESCARTE | motivo=EDIT_ANTIGO "
@@ -237,10 +241,10 @@ async def processar(event, is_edit: bool = False) -> None:
 
 
 async def _iniciar_orchestrator() -> None:
-    from config import _JANELA_DISPUTA_S, _MAX_EDITS  # noqa: log only
+    from config import _MAX_EDITS  # noqa: log only
     log_sys.info(
         f"🎛 Orchestrator | workers={_WORKERS_MAX} fila={_FILA_MAX} "
-        f"janela_disputa={_JANELA_DISPUTA_S}s "
+        f"vida_oferta={VIDA_OFERTA_S}s "
         f"max_edits={_MAX_EDITS}"
     )
     asyncio.create_task(_worker_loop())
