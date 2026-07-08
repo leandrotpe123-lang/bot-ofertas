@@ -293,22 +293,29 @@ def db_get_post(msg_id_dest: int) -> Optional[dict]:
         log_db.error(f"❌ db_get_post: {e}")
     return None
 
-
 def db_overlap_posts(ofertas: list[str]) -> list[tuple[int, int]]:
-    """Posts que compartilham >=1 oferta com a lista dada, como
+    """Posts VIVOS que compartilham >=1 oferta com a lista dada, como
     (msg_id_dest, n_sobreposicao), ordenados por sobreposicao desc.
-    Base do D1 (maior sobreposicao). A janela é avaliada por
-    decidir(...) no chamador, não aqui. Lista vazia → []."""
+    V3: só entram posts cujo ciclo de vida ainda está aberto
+    (post_estado.janela_fim > agora) — a estampa gravada no nascimento
+    (vida_oferta) É a autoridade; o overlap apenas não enxerga os mortos.
+    Fora da vida, a oferta não casa e renasce como post novo. A retenção
+    do banco (30d) volta a ser só lixeira, nunca regra de família.
+    Lista vazia → []."""
     if not ofertas:
         return []
     try:
+        agora = time.time()
         marcadores = ",".join("?" * len(ofertas))
         with _db() as db:
             rows = db.execute(
-                f"SELECT msg_id_dest, COUNT(*) AS n FROM oferta_index"
-                f" WHERE identity IN ({marcadores})"
-                f" GROUP BY msg_id_dest ORDER BY n DESC",
-                tuple(ofertas)).fetchall()
+                f"SELECT oi.msg_id_dest, COUNT(*) AS n"
+                f"  FROM oferta_index oi"
+                f"  JOIN post_estado pe ON pe.msg_id_dest = oi.msg_id_dest"
+                f" WHERE oi.identity IN ({marcadores})"
+                f"   AND pe.janela_fim > ?"
+                f" GROUP BY oi.msg_id_dest ORDER BY n DESC",
+                tuple(ofertas) + (agora,)).fetchall()
         return [(r[0], r[1]) for r in rows]
     except Exception as e:
         log_db.error(f"❌ db_overlap_posts: {e}")
