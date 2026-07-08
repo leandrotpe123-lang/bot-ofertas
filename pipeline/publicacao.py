@@ -8,7 +8,8 @@ from typing import Optional
 from telethon.errors import FloodWaitError
 
 import config
-from config import GRUPO_DESTINO, _EXECUTOR, _JANELA_DISPUTA_S, _MAX_EDITS
+from config import GRUPO_DESTINO, _EXECUTOR, _MAX_EDITS
+from pipeline.vida_oferta import estampar
 from database import (db_registrar_sat, db_get_post, db_overlap_posts,
                       db_registrar_post, db_remover_post,
                       db_ofertas_de_post)
@@ -198,7 +199,7 @@ def _log_decisao(d, montada, norm, estado: dict, score: int,
     if d.motivo == "JANELA_ENCERRADA":
         log_out.info(
             f"🔒 [JANELA_ENCERRADA] {identity} "
-            f"oferta encerrada (fora dos {_JANELA_DISPUTA_S:.0f}s) "
+            f"oferta encerrada (ciclo de vida expirado) "
             f"candidato={norm.chat}")
     elif d.motivo == "EVOLUCAO_LIMITE_ATINGIDO":
         log_out.info(
@@ -325,7 +326,10 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
     # um próximo post pode duplicar silenciosamente.
     if ofertas:
         try:
-            janela_fim = time.time() + _JANELA_DISPUTA_S
+            # V1 — nascimento do ciclo: a estampa vem da autoridade única
+            # da vida operacional (vida_oferta). Um valor, um dono.
+            agora_v = time.time()
+            janela_fim = estampar(agora_v)
             db_registrar_post(
                 sent.id, ofertas, score, montada.texto,
                 montada.plat, norm.chat if norm else "",
@@ -333,7 +337,7 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
             log_out.info(
                 f"🧭 TL | id={montada.msg_id} "
                 f"chat={norm.chat if norm else ''} | JANELA_CRIADA | "
-                f"dest={sent.id} dur={_JANELA_DISPUTA_S:.0f}s score={score}")
+                f"dest={sent.id} dur={janela_fim - agora_v:.0f}s score={score}")
         except Exception as e:
             log_sys.error(
                 f"❌ db_registrar_post FALHOU pós-envio: {e}", exc_info=True)
