@@ -13,7 +13,8 @@ Política preservada (idêntica à atual; afinar é passo posterior):
   - cupom com código(s) novo(s) → evolui (edita), mesmo de outro grupo;
   - score MAIOR → evolui;
   - fora da janela, outro grupo com score <= líder → ignora (LIDER_TRAVADO);
-  - teto de edições fora da janela → ignora (MAX_EDITS);
+  - teto de edições → ignora SOMENTE o ramo de evolução (Frente 0 §5):
+    não encerra a família, não bloqueia sincronização/reativação/renascimento;
   - score igual, imagem boa trocando imagem ruim na janela de mídia →
     evolui (troca imagem);
   - score igual e texto quase idêntico → ignora (DUP_SILENCIOSO);
@@ -68,16 +69,21 @@ def decidir(norm, montada, score: int, estado: dict | None,
     if not na_janela:
         return Decisao(IGNORAR, "JANELA_ENCERRADA",
                        na_janela=na_janela, score_atual=score_atual)
-    # Dentro da janela, mas já evoluiu 1x → limite atingido, trava total.
-    if edit_count >= _MAX_EDITS:
-        return Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
-                       na_janela=na_janela, score_atual=score_atual)
-
-    # ── Daqui pra baixo: DENTRO da janela e com 1 evolução disponível ──
+    # ══ TETO DE EVOLUÇÃO — Doutrina Frente 0 §5 ══
+    # O teto trava SOMENTE o ramo de evolução; NÃO encerra a família.
+    # A família só termina na fronteira do histórico (janela_fim <= agora),
+    # já tratada acima (JANELA_ENCERRADA). Reativação, sincronização e
+    # renascimento, quando existirem, entram ACIMA deste ponto e não são
+    # afetados pelo teto. Por isso a verificação vive DENTRO de cada saída
+    # de evolução — nunca como um portão acima de todas elas.
+    tem_orcamento = edit_count < _MAX_EDITS
 
     # ── CUPOM ENRIQUECIDO: código(s) novo(s) → edita o mesmo post ──
     novos_cup = getattr(norm, "_cupom_novos", 0)
     if novos_cup > 0:
+        if not tem_orcamento:
+            return Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
+                           na_janela=na_janela, score_atual=score_atual)
         return Decisao(
             EVOLUIR, "CUPOM_ENRIQUECIDO",
             novo_score=max(score, score_atual),
@@ -86,6 +92,9 @@ def decidir(norm, montada, score: int, estado: dict | None,
 
     # ── DECISÃO 1: score MAIOR → evolui (edita; fallback substitui) ──
     if score > score_atual:
+        if not tem_orcamento:
+            return Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
+                           na_janela=na_janela, score_atual=score_atual)
         return Decisao(
             EVOLUIR, "EVOLUI", novo_score=score,
             exigir_imagem=bool(montada.imagem), permite_substituir=True,
@@ -97,6 +106,9 @@ def decidir(norm, montada, score: int, estado: dict | None,
         if (midia_ruim(lider_atual) and not midia_ruim(norm.chat)
                 and montada.imagem
                 and (agora - ts_anterior) < config._JANELA_REENVIO_MIDIA_S):
+            if not tem_orcamento:
+                return Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
+                               na_janela=na_janela, score_atual=score_atual)
             return Decisao(
                 EVOLUIR, "TROCA_IMG_BOA", novo_score=score,
                 exigir_imagem=True, permite_substituir=True,
