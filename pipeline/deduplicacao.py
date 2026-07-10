@@ -33,7 +33,7 @@ import config
 from database import db_set_dedupe
 import globals as g
 from logger import log_ded
-from pipeline.estado_evento import _RE_RETORNO
+from pipeline.reativacao import eh_reativacao
 # ── Camada fina de compatibilidade (Front 1, passo de extração) ──
 # A identidade de oferta foi extraída para pipeline.identidade_oferta.
 # Estas três funções são importadas aqui e REEXPORTADAS para que os
@@ -67,14 +67,9 @@ _JANELA_REATIVACAO_S = 30.0
 # Produto e campanha continuam em _JANELA_REATIVACAO_S (30s). Não mistura.
 _JANELA_REATIVACAO_CUPOM_S = 600.0
 
-def _eh_reativacao(texto: str) -> bool:
-    """
-    Detecta linguagem de reativação ('voltou', 'reativado' etc.).
-    Consome o vocabulário canônico _RE_RETORNO (dono: estado_evento);
-    a DECISÃO — gate anti-flood de 30s — permanece desta camada, e o
-    escopo de busca ([:300]) é do chamador, não do vocabulário.
-    """
-    return bool(_RE_RETORNO.search(texto[:300]))
+# Detecção de reativação: delegada ao dono canônico (pipeline.reativacao.
+# eh_reativacao). Esta camada mantém APENAS o throttle anti-flood acima —
+# não detecta linguagem de retorno por conta própria.
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -144,8 +139,9 @@ def _janela_por_tipo(tipo: str) -> float:
 # REATIVAÇÃO
 # ─────────────────────────────────────────────────────────────────
 async def _checar_reativacao(norm: MensagemNormalizada) -> bool:
-    """Verifica se o post é uma reativação válida."""
-    if not _eh_reativacao(norm.texto_limpo):
+    """Verifica se o post é uma reativação válida. Detecção delegada ao
+    dono canônico (pipeline.reativacao); esta camada só decide o throttle."""
+    if not eh_reativacao(norm.texto_limpo):
         return False
     return True
 
