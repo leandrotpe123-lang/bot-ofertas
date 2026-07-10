@@ -52,7 +52,6 @@ except ImportError:
     _PIL_OK = False
 
 # ── Constantes de publicação (usadas pelo orchestrator e publicacao) ─
-_JANELA_DISPUTA_S = 90.0   # janela de disputa entre grupos (segundos)
 _MAX_EDITS = 2   # duas evoluções por ciclo; sync/renascimento não contam
                             
 
@@ -87,19 +86,3 @@ _MAX_IDADE_NOVA_S = 120.0
 # Timeout do download_media do Telethon (segundos)
 # Protege workers de travar infinito se Telegram engasgar
 _TIMEOUT_DOWNLOAD_MIDIA = 15.0
-
-# ── Reativação de ofertas ────────────────────────────────────────
-# Cooldown mínimo desde a última publicação. Posts com palavras como
-# "voltou", "Ativo", "Ainda ativo", "reativou", "ativo novamente" só republicam se passou esse tempo.
-# Evita reativação acidental de cupons recém-postados.
-_COOLDOWN_REATIVACAO_S = 30 * 60   # 30 minutos
-
-# ── Código morto sinalizado (NÃO remover ainda) ───────────────────
-# _SHADOW_FRASES: lista de frases fixas de engajamento.
-# Substituída pela captura de comentários reais dos grupos.
-# Mantida aqui para referência histórica.
-_SHADOW_FRASES = [
-    "Precin 🔥", "Bom preço 👀", "Tá barato esse 🛒", "Queimando estoque 🚨",
-    "Melhor preço do mês 💥", "Relâmpago! ⚡", "Tá voando 🔥", "Imperdível esse 🎯",
-    "Preço absurdo 😱", "Que desconto 🤑",
-]
