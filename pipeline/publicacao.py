@@ -8,7 +8,7 @@ from typing import Optional
 from telethon.errors import FloodWaitError
 
 import config
-from config import GRUPO_DESTINO, _EXECUTOR, _MAX_EDITS
+from config import GRUPO_DESTINO, _EXECUTOR
 from pipeline.vida_oferta import estampar
 from database import (db_registrar_sat, db_get_post, db_overlap_posts,
                       db_registrar_post, db_remover_post,
