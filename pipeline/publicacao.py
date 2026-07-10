@@ -298,6 +298,27 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
         log_out.warning(f"⚠️ [SUBSTITUI_FALHOU] {identity}")
     return True
 
+async def _aplicar_sincronizacao(montada, norm, score, estado, msg_id_dest,
+                                 ofertas_familia, identity) -> bool:
+    """Executa a SINCRONIZAÇÃO: espelha no post o conteúdo editado pelo
+    LÍDER. Distinta da evolução — NÃO incrementa edit_count, não disputa
+    score. Preserva líder, janela e contador; atualiza texto/score e a
+    família (união). Sem decisão — o caminho já foi decidido a montante."""
+    ok = await _editar_inner_no_sem(
+        msg_id_dest, montada.texto, montada.imagem, exigir_imagem=False)
+    if not ok:
+        log_out.warning(f"⚠️ [SYNC_FALHOU] {identity} chat={norm.chat}")
+        return True
+    db_registrar_post(
+        msg_id_dest, ofertas_familia, score, montada.texto,
+        montada.plat, estado.get("lider", "") or norm.chat,
+        estado.get("janela_fim", 0), estado.get("edit_count", 0),
+        estado.get("shadow_reply_id", 0))
+    log_out.info(
+        f"🔁 [SINCRONIZADO] {identity} chat={norm.chat} score={score} "
+        f"edit_count={estado.get('edit_count', 0)} (preservado)")
+    return True
+
 
 
 async def _aplicar_novo_envio(montada, norm, ofertas, score,
@@ -425,6 +446,17 @@ async def _enviar_inner(montada: MensagemMontada,
                             return await _aplicar_novo_envio(
                                 montada, norm, ofertas_renasce, score,
                                 identity, loop)
+
+                        if d.acao == "SINCRONIZAR":
+                            # Edição do líder → espelha o conteúdo no post,
+                            # SEM incrementar edit_count (não é evolução).
+                            # Preserva família (união), líder, janela e o
+                            # próprio contador.
+                            ofertas_familia = sorted(
+                                set(db_ofertas_de_post(msg_id_rel)) | set(ofertas))
+                            return await _aplicar_sincronizacao(
+                                montada, norm, score, estado, msg_id_rel,
+                                ofertas_familia, identity)
 
                         if d.acao != "EVOLUIR":
                             log_out.info(
