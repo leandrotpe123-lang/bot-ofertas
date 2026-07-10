@@ -10,7 +10,9 @@ declara vocabulário próprio. NÃO decide se o ciclo está vivo (dono:
 vida_oferta), NÃO executa o renascimento (dono: publicação), NÃO detecta
 reply social (isso é R2 — responsabilidade do shadow_reply, fora daqui).
 
-Consumidor: pipeline.decisao (ramo RENASCER).
+Consumidores: pipeline.deduplicacao (throttle anti-flood — consome a
+detecção; a decisão de frequência permanece lá) e, futuramente,
+pipeline.decisao (ramo RENASCER, ainda não ligado).
 """
 from __future__ import annotations
 
