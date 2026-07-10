@@ -35,6 +35,7 @@ IGNORAR  = "IGNORAR"
 EVOLUIR  = "EVOLUIR"
 PUBLICAR = "PUBLICAR"   # sem estado: não há post parente vivo
 RENASCER = "RENASCER"   # reativação em ciclo vivo → post NOVO (novo ciclo)
+SINCRONIZAR = "SINCRONIZAR"   # edição do líder → espelha conteúdo (sem edit_count)
 
 
 @dataclass
@@ -83,6 +84,19 @@ def decidir(norm, montada, score: int, estado: dict | None,
     if not is_edit and eh_reativacao(norm.texto_limpo):
         return Decisao(RENASCER, "RENASCIMENTO",
                        na_janela=na_janela, score_atual=score_atual)
+
+    # ══ SINCRONIZAÇÃO — regra de negócio F-S ══
+    # Edição vinda do LÍDER (dono do conteúdo no ar) → espelha o conteúdo
+    # completo no post, SEM consumir edit_count e SEM limite de vezes no
+    # ciclo. Não é disputa por score (isso é evolução, entre candidatos):
+    # é o espelho do vencedor editando a própria mensagem. Só edição
+    # (is_edit); mensagem nova segue para evolução abaixo. Se a edição mudou
+    # a identidade a ponto de não casar, o overlap nem trouxe este post →
+    # vira post novo pelo fluxo normal (regra #6), não aqui.
+    if is_edit and lider_atual and norm.chat == lider_atual:
+        return Decisao(SINCRONIZAR, "SINCRONIZACAO",
+                       na_janela=na_janela, score_atual=score_atual)
+      
     # ══ TETO DE EVOLUÇÃO — Doutrina Frente 0 §5 ══
     # O teto trava SOMENTE o ramo de evolução; NÃO encerra a família.
     # A família só termina na fronteira do histórico (janela_fim <= agora),
