@@ -180,9 +180,9 @@ async def enviar(montada: MensagemMontada,
         async with contextlib.AsyncExitStack() as stack:
             for of in sorted(ofertas):
                 await stack.enter_async_context(await _get_identity_lock(of))
-            return await _enviar_inner(montada, norm, ofertas, score)
+            return await _enviar_inner(montada, norm, ofertas, score, is_edit)
 
-    return await _enviar_inner(montada, norm, ofertas, score)
+    return await _enviar_inner(montada, norm, ofertas, score, is_edit)
 
 def _log_decisao(d, montada, norm, estado: dict, score: int,
                  agora: float, identity: str) -> None:
@@ -382,7 +382,8 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
 async def _enviar_inner(montada: MensagemMontada,
                         norm: Optional[MensagemNormalizada],
                         ofertas: list,
-                        score: int) -> bool:
+                        score: int,
+                        is_edit: bool = False) -> bool:
     """Corpo real de enviar() — dentro dos locks de oferta. Acha o post
     parente por sobreposição, trava o post candidato, re-verifica sob o
     lock e decide pelo score (decisão intocada)."""
@@ -403,10 +404,27 @@ async def _enviar_inner(montada: MensagemMontada,
                 async with post_lock:
                     estado = db_get_post(msg_id_rel)   # re-verifica sob o lock
                     agora = time.time()
-                    d = decidir(norm, montada, score, estado, agora)
+                    d = decidir(norm, montada, score, estado, agora, is_edit)
                     if d.acao != "PUBLICAR":
                         identity = f"post:{msg_id_rel}"
                         _log_decisao(d, montada, norm, estado, score, agora, identity)
+
+
+                        if d.acao == "RENASCER":
+                            # Reativação em ciclo vivo → post NOVO. Absorve a
+                            # UNIÃO (família antiga + candidato) para que o
+                            # INSERT OR REPLACE em oferta_index reaponte TODAS
+                            # as âncoras ao post novo — o antigo é orfanado do
+                            # índice e vira histórico (a mensagem antiga
+                            # permanece no canal, por decisão de negócio).
+                            ofertas_renasce = sorted(
+                                set(db_ofertas_de_post(msg_id_rel)) | set(ofertas))
+                            log_out.info(
+                                f"🐣 TL | id={montada.msg_id} chat={norm.chat} | "
+                                f"RENASCIMENTO | supersede={msg_id_rel}")
+                            return await _aplicar_novo_envio(
+                                montada, norm, ofertas_renasce, score,
+                                identity, loop)
 
                         if d.acao != "EVOLUIR":
                             log_out.info(
