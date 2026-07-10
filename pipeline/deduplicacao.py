@@ -197,13 +197,10 @@ async def deve_enviar_async(enr: MensagemEnriquecida) -> bool:
                 fp_reativ, janela_reativ,
             )
             if na_janela:
-                novos = enr.cupons_novos
-                if tipo == "cupom" and novos > 0:
-                    log_ded.info(
-                        f"♻️ [REATIVACAO_MAIS_CODIGOS] {identity} "
-                        f"novos={novos} chat={chat} → enviar() decide"
-                    )
-                    return True
+                # Repetição dentro da janela → flood, para TODOS os tipos.
+                # Opção A ratificada: cupom com códigos novos deixou de ser
+                # exceção. Uma reativação por identidade/janela; o throttle é
+                # o único dono dessa pergunta (sem segundo relógio).
                 delta = int(time.monotonic() - ts_ant) if ts_ant else 0
                 log_ded.info(
                     f"♻️ [REATIVACAO_FLOOD] {identity} delta={delta}s "
