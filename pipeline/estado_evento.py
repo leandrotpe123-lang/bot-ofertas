@@ -11,7 +11,9 @@ consomem estes vocabulários moram nos consumidores:
   - _KW_EVENTO  → identidade_oferta (classificação e chave de
                   campanha), montagem (título de evento),
                   publicacao (evento interativo fura saturação);
-  - _RE_RETORNO → deduplicacao (_eh_reativacao — gate anti-flood).
+  - _RE_RETORNO → reativacao (eh_reativacao — detecção canônica de
+                  retorno), consumida pelo throttle anti-flood da
+                  deduplicacao e, futuramente, pelo ramo RENASCER.
 
 NÃO faz:
   - decisão temporal sobre ofertas (responsabilidade da
@@ -38,8 +40,9 @@ _KW_EVENTO = re.compile(
 # oferta ("voltou", "reativado", "restock"...). Fonte única do
 # VOCABULÁRIO — a DECISÃO que o consome permanece separada e mora
 # no consumidor:
-#   - gate anti-flood (deduplicacao._eh_reativacao): janela curta
-#     sobre o texto, com ou sem histórico.
+#   - detecção canônica (reativacao.eh_reativacao): escopo fixo sobre
+#     o início do texto; o gate anti-flood (deduplicacao) apenas
+#     consome essa detecção para throttle, sem redetectar.
 # Compostos com "voltou" (ex.: "voltou ao estoque") são subsumidos
 # por \bvoltou\b e não se re-declaram.
 _RE_RETORNO = re.compile(
