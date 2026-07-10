@@ -28,11 +28,13 @@ import config
 from config import _MAX_EDITS
 from pipeline.score import midia_ruim
 from pipeline.vida_oferta import viva
+from pipeline.reativacao import eh_reativacao
 
 # Ações possíveis
 IGNORAR  = "IGNORAR"
 EVOLUIR  = "EVOLUIR"
 PUBLICAR = "PUBLICAR"   # sem estado: não há post parente vivo
+RENASCER = "RENASCER"   # reativação em ciclo vivo → post NOVO (novo ciclo)
 
 
 @dataclass
@@ -50,7 +52,7 @@ class Decisao:
 
 
 def decidir(norm, montada, score: int, estado: dict | None,
-            agora: float) -> Decisao:
+            agora: float, is_edit: bool = False) -> Decisao:
     """Decide a ação para um candidato: PUBLICAR (sem estado vivo),
     EVOLUIR ou IGNORAR (com estado). Não executa nada."""
     if not estado:
@@ -68,6 +70,18 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # (nem score, nem imagem, nem cupom). O valor mora no dono, não aqui.
     if not na_janela:
         return Decisao(IGNORAR, "JANELA_ENCERRADA",
+                       na_janela=na_janela, score_atual=score_atual)
+
+    # ══ RENASCIMENTO — regra de negócio F-R (#1) ══
+    # Ciclo vivo + sinal explícito de retorno ("voltou", "restock"...):
+    # a oferta voltou a ficar disponível → publica post NOVO (novo ciclo),
+    # sem evoluir o atual. Fica ACIMA da evolução: o teto (§5) não o afeta.
+    # Cupom novo SOZINHO não dispara (regra #2): sem sinal de retorno, segue
+    # para o ramo de cupom abaixo. Frequência (1 por identidade/janela) é do
+    # throttle da dedup — esta camada é pura e só reconhece o evento.
+    # Só em mensagem NOVA (not is_edit): edição é sincronização (F‑S), não retorno.
+    if not is_edit and eh_reativacao(norm.texto_limpo):
+        return Decisao(RENASCER, "RENASCIMENTO",
                        na_janela=na_janela, score_atual=score_atual)
     # ══ TETO DE EVOLUÇÃO — Doutrina Frente 0 §5 ══
     # O teto trava SOMENTE o ramo de evolução; NÃO encerra a família.
