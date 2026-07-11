@@ -30,7 +30,6 @@ import time
 from typing import Optional, Tuple
 
 import config
-from database import db_set_dedupe
 import globals as g
 from logger import log_ded
 from pipeline.reativacao import eh_reativacao
@@ -145,15 +144,6 @@ async def _checar_reativacao(norm: MensagemNormalizada) -> bool:
         return False
     return True
 
-def _persistir_dedupe(fp, plat, cupons, alma, tipo, ids_globais, benef, cupom_id):
-    # id_prod e cupom_id são as colunas canônicas de identidade —
-    # produto e cupom — para toda plataforma. cupom_id é o cupom
-    # representativo já em caixa alta, derivado no chamador a partir
-    # da mesma fonte da identity (norm.cupom). Sem ramo por plataforma.
-    id_prod = ids_globais[0] if ids_globais else ""
-    db_set_dedupe(fp, plat, cupons, alma, tipo, id_prod, benef, cupom_id)
-
-
 # ─────────────────────────────────────────────────────────────────
 # DEVE_ENVIAR — entrypoint da camada 4
 # ─────────────────────────────────────────────────────────────────
@@ -226,11 +216,9 @@ async def deve_enviar_async(enr: MensagemEnriquecida) -> bool:
             )
             return True
 
-        # ── PERSISTÊNCIA ─────────────────────────────────────────
-        _persistir_dedupe(
-            fp_identity, plat, list(cupons), alma_v, tipo,
-            ids_globais, list(benef), (norm.cupom or "").upper(),
-              )
+        # O claim que DECIDE (g._atomic_mem) já foi registrado no
+        # bloco atômico acima. dedupe_temp saiu do caminho operacional:
+        # era espelho durável sem leitor (Frente B).
 
         log_ded.info(
             f"✅ [PASSOU] {identity} tipo={tipo} chat={chat} "
