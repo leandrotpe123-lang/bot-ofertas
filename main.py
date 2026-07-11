@@ -62,14 +62,12 @@ async def _health_check() -> None:
                 with _db() as db:
                     n_links = db.execute(
                         "SELECT COUNT(*) FROM links_cache").fetchone()[0]
-                    n_dedup = db.execute(
-                        "SELECT COUNT(*) FROM dedupe_temp").fetchone()[0]
                     n_sat   = db.execute(
                         "SELECT COUNT(*) FROM saturacao").fetchone()[0]
             except Exception:
-                n_links = n_dedup = n_sat = "?"
+                n_links = n_sat = "?"
             log_hc.info(
-                f"💚 links={n_links} | dedupe={n_dedup} | sat={n_sat} | "
+                f"💚 links={n_links} | claims={len(g._atomic_mem)} | sat={n_sat} | "
                 f"anti-loop={len(g._IDS_PROC)} | fila={len(g._buf)} "
                 f"w={g._w_ativos} | PIL={'OK' if _PIL_OK else 'OFF'}"
             )
