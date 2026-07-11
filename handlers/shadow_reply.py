@@ -139,9 +139,8 @@ async def handle_humanizado(ctx: ShadowContext):
 async def _safe_restock(identity: str):
     try:
         fp = _fp4(f"identity|{identity}")
-        with _db() as db:
-            db.execute("DELETE FROM dedupe_temp WHERE fp = ?", (fp,))
-
+        # Destrava o claim que DECIDE (g._atomic_mem). dedupe_temp saiu do
+        # caminho operacional (Frente B): o DELETE ali era no-op.
         if hasattr(g, '_atomic_lck_obj') and g._atomic_lck_obj:
             async with g._atomic_lck_obj:
                 g._atomic_mem.pop(fp, None)
