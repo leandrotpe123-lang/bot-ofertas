@@ -178,40 +178,9 @@ def db_cupom_idx_registrar(plat: str, codigos: list, identity: str) -> int:
         log_db.error(f"❌ db_cupom_idx_registrar: {e}")
         return 0
 
-
-def db_set_dedupe(fp: str, plat: str, cupons: list, alma: str,
-                  camp: str, id_prod: str = "",
-                  benef: list = None, cupom_id: str = ""):
-    try:
-        with _db() as db:
-            db.execute(
-                "INSERT OR REPLACE INTO dedupe_temp"
-                "(fp,plat,cupons,alma,camp,id_prod,benef,cupom_id,ts)"
-                " VALUES(?,?,?,?,?,?,?,?,?)",
-                (fp, plat, json.dumps(cupons or []), alma or "",
-                 camp or "geral", id_prod or "",
-                 json.dumps(benef or []), cupom_id or "", time.time()))
-    except Exception as e:
-        log_db.error(f"❌ db_set_dedupe: {e}")
-        
-def db_buscar_janela_rapida(plat: str, janela: float = 900) -> list:
-    try:
-        limite = time.time() - janela
-        with _db() as db:
-            rows = db.execute(
-                "SELECT fp,cupons,alma,id_prod,benef,ts"
-                " FROM dedupe_temp WHERE plat=? AND ts>=? ORDER BY ts DESC",
-                (plat, limite)).fetchall()
-        return [
-            {"fp": r[0], "cupons": json.loads(r[1] or "[]"),
-             "alma": r[2] or "",
-             "id_prod": r[3] or "", "benef": json.loads(r[4] or "[]"),
-             "ts": r[5]}
-            for r in rows
-        ]
-    except Exception as e:
-        log_db.error(f"❌ db_janela: {e}")
-        return []
+# ── dedupe_temp: fora do caminho operacional (Frente B) ───────────
+# O claim que decide vive em g._atomic_mem. A tabela permanece no .db
+# apenas como histórico legado — sem escrita e sem leitor no pipeline.
 
 # ── saturacao ─────────────────────────────────────────────────────
 def db_registrar_sat(plat: str, sku: str = ""):
