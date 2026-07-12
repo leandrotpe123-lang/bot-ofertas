@@ -74,6 +74,45 @@ _RE_CASHBACK_LINHA = re.compile(
 )
 
 
+# ── C2: ANÁLISE SINTÁTICA DO TÍTULO — cupom SUJEITO vs COMPLEMENTO ──
+# O caso (a) do detector disparava com QUALQUER menção de "cupom" no
+# título, sem perguntar se o cupom era o ASSUNTO ou apenas um adorno de
+# um produto. Duas evidências de que o cupom é COMPLEMENTO:
+#
+#   1. Vem após pontuação/conectivo:  "(cupom X)", "- use o cupom X",
+#      ", cupom X", "com cupom X", "no cupom X".
+#   2. Um PREÇO aparece ANTES dele:   "Air Fryer R$299 cupom AIR20"
+#      → o produto é o sujeito; o cupom só barateia.
+#
+# Sutileza importante: em "Cupom R$50 OFF" o preço vem DEPOIS da palavra
+# — é o VALOR DO DESCONTO, não o preço de um produto. Por isso a regra
+# compara POSIÇÕES, e não a mera presença de "R$".
+_RE_CUPOM_COMPLEMENTO = re.compile(
+    r'(?:[(\[\-–—,]\s*|'
+    r'\b(?:use|usando|utilize|aplique|com|no|na|c/|via|pelo)\s+(?:o\s+|a\s+)?)'
+    r'(?:cupom|cupons|c[oó]digo|coupon)\b',
+    re.I,
+)
+_RE_PRECO_TITULO = re.compile(r'R\$\s?\d[\d.,]*', re.I)
+
+
+def _cupom_e_sujeito(titulo: str) -> bool:
+    """O cupom é o SUJEITO do título (assunto), ou só um complemento?
+
+    True  → "CUPOM Amazon 20% OFF", "Novo codigo liberado"
+    False → "Echo Dot R$249 (cupom ECHO10)", "Fone JBL - use o cupom X"
+    """
+    m = _RE_TITULO_CUPOM.search(titulo)
+    if not m:
+        return False
+    if _RE_CUPOM_COMPLEMENTO.search(titulo):
+        return False
+    mp = _RE_PRECO_TITULO.search(titulo)
+    if mp and mp.start() < m.start():
+        return False
+    return True
+
+
 def _eh_lista_cupons(texto: str) -> bool:
     """
     Detecta se o post é uma LISTA DE CUPONS (não um cupom único).
@@ -106,8 +145,10 @@ def _eh_post_cupom(texto: str) -> bool:
         return False
     titulo = linhas[0]
 
-    # Caso (a): palavra "cupom" no título
-    if _RE_TITULO_CUPOM.search(titulo):
+    # Caso (a) — C2: palavra "cupom" no título E sendo o SUJEITO.
+    # Antes bastava a menção, o que lia "Fone JBL R$199 (cupom: DESC10)"
+    # como post de cupom. Agora o cupom precisa ser o assunto, não adorno.
+    if _cupom_e_sujeito(titulo):
         return True
 
     # Caso (b): título já é "R$ X OFF: CODIGO" / "X% OFF: CODIGO"
