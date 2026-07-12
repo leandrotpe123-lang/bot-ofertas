@@ -22,11 +22,12 @@ CONSUMO DE IDENTIDADE DERIVADA:
   única leitura legítima do mapa é o nível de fallback operacional NÃO
   semântico de _id_url, explicitamente reconhecido.
 
-EFEITOS COLATERAIS RECONHECIDOS (herdados — comportamento preservado):
-  Esta camada NÃO é pura nesta fase. _id_cupom_indexado (a) muta
-  norm._cupom_novos e (b) escreve no índice cupom_idx no banco. Esse
-  comportamento é vigente e viaja junto com as funções de identidade;
-  purificar é passo posterior, fora do escopo desta extração.
+DELEGAÇÃO DE EFEITO (C4.2):
+  A memória de códigos foi extraída para pipeline.memoria_cupom, que é o
+  dono único do índice cupom_idx e da contagem norm._cupom_novos. Esta
+  camada DERIVA identidade e DELEGA a resolução por código — não lê nem
+  escreve banco por conta própria. O efeito colateral continua existindo,
+  mas agora tem casa própria e fronteira declarada.
 
 NÃO faz:
   - decisão de duplicidade / claim / janela  (deduplicação)
@@ -39,12 +40,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-import config
-from database import (
-    db_cupom_idx_buscar,
-    db_cupom_idx_registrar,
-)
 from pipeline.estado_evento import _KW_EVENTO
+from pipeline.memoria_cupom import resolver_identidade
 from pipeline.normalizacao import MensagemNormalizada
 from utils.cupom import _KW_CUPOM
 from utils.hashes import _fp4
@@ -64,7 +61,6 @@ __all__ = [
 # True  → identidade de cupom por CÓDIGO COMPARTILHADO (índice).
 # False → comportamento antigo (um código / fingerprint do conjunto).
 # Vire False para reverter NA HORA se algum cupom legítimo sumir.
-_CUPOM_IDX_ON = True
 
 # ─────────────────────────────────────────────────────────────────
 # Classificação do ASSUNTO do post → pipeline.assunto (C1)
@@ -129,33 +125,6 @@ def tipo_de_oferta(norm: MensagemNormalizada) -> str:
 # ─────────────────────────────────────────────────────────────────
 # IDENTIDADE CANÔNICA — coração do sistema anti-duplicação
 # ─────────────────────────────────────────────────────────────────
-def _id_cupom_indexado(norm, plat: str, texto: str, fallback: str) -> str:
-    """Resolve a identidade de cupom pelo ÍNDICE POR CÓDIGO.
-
-    Se QUALQUER código do post já foi visto (plat + código) dentro da
-    janela de cupom, reusa a identidade daquele post. Senão usa
-    `fallback` (identidade nova). Em ambos os casos registra TODOS os
-    códigos sob a identidade resolvida — preserva todos, não só um. O
-    link nunca participa: a chave é código + plataforma."""
-    codes = sorted(set(
-        c.upper() for c in norm.cupons if c
-    ))
-    if not codes:
-        return fallback
-    janela = float(config._JANELA_CUPOM_S)
-    existente = db_cupom_idx_buscar(plat, codes, janela)
-    identity = existente or fallback
-    # max() é guarda DEFENSIVA. Desde o D1 o efeito roda 1x por mensagem
-    # nova (identidade_canonica, via enriquecimento). Se algum caminho
-    # reexecutar, registrar devolve 0 para códigos já indexados — o max
-    # preserva a contagem real. (Fase 2: o valor é congelado em
-    # MensagemEnriquecida.cupons_novos APÓS o efeito.)
-    norm._cupom_novos = max(
-        getattr(norm, "_cupom_novos", 0),
-        db_cupom_idx_registrar(plat, codes, identity))
-    return identity
-
-
 def _id_post_cupom(norm, plat, texto):
     # POST DE CUPOM vence produto: quando o cupom é o ASSUNTO do post
     # (_eh_post_cupom), a oferta É o cupom — não o produto-veículo. Dois
@@ -164,9 +133,7 @@ def _id_post_cupom(norm, plat, texto):
     if not norm.cupom or not eh_post_cupom(texto):
         return None
     fallback = f"{plat}|cup|{norm.cupom.upper()}"
-    if _CUPOM_IDX_ON:
-        return _id_cupom_indexado(norm, plat, texto, fallback)
-    return fallback
+    return resolver_identidade(norm, plat, fallback)
 
 
 def _id_produto(norm, plat, texto):
@@ -187,9 +154,7 @@ def _id_cupom_sem_produto(norm, plat, texto):
     if not norm.cupom or norm.ids_globais:
         return None
     fallback = f"{plat}|cup|{norm.cupom.upper()}"
-    if _CUPOM_IDX_ON:
-        return _id_cupom_indexado(norm, plat, texto, fallback)
-    return fallback
+    return resolver_identidade(norm, plat, fallback)
 
 
 def _id_cashback(norm, plat, texto):
@@ -256,15 +221,15 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
     alfabeto de ID da plataforma (P7): o lex-menor puro elegia camp/cash/
     cup para SKUs minúsculos (ex.: Magalu) por acidente.
 
-    A grudação transitiva por código (_id_cupom_indexado) segue aplicada
-    por cima em ambos os ramos: se qualquer código do post já foi visto
-    na janela, a identidade da corrente sobrepõe a base.
+    A grudação transitiva por código (memoria_cupom.resolver_identidade)
+    segue aplicada por cima em ambos os ramos: se qualquer código do post
+    já foi visto na janela, a identidade da corrente sobrepõe a base.
     """
     if norm.ids_globais:
         base = f"{norm.plat}|{min(norm.ids_globais)}"
     else:
         base = sorted(identidades(norm))[0]
-    return _id_cupom_indexado(norm, norm.plat, norm.texto_limpo, base)
+    return resolver_identidade(norm, norm.plat, base)
 
 
 @dataclass(frozen=True)
