@@ -223,10 +223,103 @@ def _extrair_pct_cashback(texto: str) -> str:
     m = _RE_PCT.search(primeiras)
     return m.group(1) if m else ""
 
+# ── C3.1: DESCRITOR DE BENEFÍCIO — identidade do cupom SEM CÓDIGO ──
+# Cupom com código usa o código. Cupom sem código precisa de uma
+# identidade ESTÁVEL — nunca o hash do texto, que erra nos dois sentidos:
+# colapsa distintos ("20% OFF" e "15% OFF" viram a mesma alma, pois _alma
+# normaliza percentuais) e separa iguais (reordenação muda o hash).
+#
+# O descritor é COMPOSTO e CANÔNICO: todos os sinais presentes, sempre na
+# mesma ordem (pct → vlr → frete → 1acompra). A mesma oferta descrita de
+# formas diferentes produz a MESMA chave.
+#
+# Vocabulário UNIVERSAL de e-commerce — zero conhecimento de marketplace.
+# Um marketplace novo funciona automaticamente.
+_RE_BEN_PCT = re.compile(r'(\d{1,3})\s?%')
+_RE_BEN_VLR = re.compile(r'R\$\s?(\d[\d.]*)', re.I)
+_RE_BEN_FRETE = re.compile(r'\bfrete\b', re.I)
+_RE_BEN_1A_COMPRA = re.compile(
+    r'\bprimeir[ao]\s+compra\b|\b1[ªa]\s+compra\b|'
+    r'\bnovos?\s+usu[aá]rios?\b|\bnovas?\s+contas?\b',
+    re.I,
+)
+# Valor precedido de condição de MÍNIMO não é benefício — é restrição.
+# "Cupom R$30 OFF acima de R$150" → o benefício é R$30; R$150 é condição.
+_RE_BEN_CONDICAO = re.compile(
+    r'(?:acima\s+de|a\s+partir\s+de|em\s+compras\s+(?:de|acima)|'
+    r'min(?:imo)?\.?\s+(?:de)?|nas?\s+compras?\s+de|para\s+compras\s+de)'
+    r'\s*R?\$?\s?\d',
+    re.I,
+)
+
+_ESCOPO_BENEFICIO = 300
+_PCT_MIN, _PCT_MAX = 1, 100
+
+
+def _pct_do_beneficio(texto: str) -> Optional[int]:
+    """Primeiro percentual VÁLIDO (1..100). A regex aceita até 3 dígitos
+    para cobrir "100% OFF"; a guarda de intervalo descarta lixo ("999%")
+    sem invalidar um percentual legítimo que venha depois no texto."""
+    for m in _RE_BEN_PCT.finditer(texto):
+        valor = int(m.group(1))
+        if _PCT_MIN <= valor <= _PCT_MAX:
+            return valor
+    return None
+
+
+def _vlr_do_beneficio(texto: str, tem_pct: bool) -> Optional[str]:
+    """Valor em R$ que seja BENEFÍCIO (não condição de mínimo).
+    Se já há percentual, qualquer R$ no texto é condição, não benefício."""
+    if tem_pct:
+        return None
+    for m in _RE_BEN_VLR.finditer(texto):
+        antes = texto[max(0, m.start() - 30):m.start()]
+        if _RE_BEN_CONDICAO.search(antes + m.group(0)):
+            continue
+        return m.group(1).replace(".", "")
+    return None
+
+
 # ─────────────────────────────────────────────────────────────────
 # API PÚBLICA — o único contrato exposto. As regex e os detectores
 # internos (_RE_*, _eh_*) permanecem privados deste módulo.
 # ─────────────────────────────────────────────────────────────────
+def beneficio_do_cupom(texto: str) -> str:
+    """Descritor CANÔNICO e ESTÁVEL do benefício de um cupom SEM código.
+
+    É a IDENTIDADE do cupom quando não há código extraível — nunca o hash
+    do texto. Composto (todos os sinais) e em ordem fixa, para que a mesma
+    oferta descrita de formas diferentes produza a MESMA chave.
+
+    Retornos: 'pct:20' | 'vlr:30' | 'frete' | '1acompra' |
+              'pct:15+frete' | 'vlr:30+1acompra' | 'geral'
+
+    'geral' é o bucket CONSERVADOR e consciente: cupom sem benefício
+    identificável ("Novo Cupom Shopee"). Cupons genéricos da mesma
+    plataforma convergem nele dentro da janela. Se em produção ele passar
+    a unificar ofertas distintas com frequência, deve ser refinado com
+    sinais adicionais — mantendo a natureza genérica, sem regra de
+    marketplace.
+    """
+    t = texto[:_ESCOPO_BENEFICIO]
+    partes: list[str] = []
+
+    pct = _pct_do_beneficio(t)
+    if pct is not None:
+        partes.append(f"pct:{pct}")
+
+    vlr = _vlr_do_beneficio(t, tem_pct=pct is not None)
+    if vlr:
+        partes.append(f"vlr:{vlr}")
+
+    if _RE_BEN_FRETE.search(t):
+        partes.append("frete")
+    if _RE_BEN_1A_COMPRA.search(t):
+        partes.append("1acompra")
+
+    return "+".join(partes) if partes else "geral"
+
+
 def eh_lista_cupons(texto: str) -> bool:
     """O post é uma LISTA de cupons (2+ linhas 'R$X OFF em R$Y: COD')?"""
     return _eh_lista_cupons(texto)
