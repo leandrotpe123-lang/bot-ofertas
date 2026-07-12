@@ -235,7 +235,9 @@ def _extrair_pct_cashback(texto: str) -> str:
 #
 # Vocabulário UNIVERSAL de e-commerce — zero conhecimento de marketplace.
 # Um marketplace novo funciona automaticamente.
-_RE_BEN_PCT = re.compile(r'(\d{1,3})\s?%')
+# \b impede casar SUBSTRING de número maior: sem ele, "1050%" casaria
+# "050" (=50) e passaria na guarda de intervalo — lixo disfarçado de válido.
+_RE_BEN_PCT = re.compile(r'\b(\d{1,3})\s?%')
 _RE_BEN_VLR = re.compile(r'R\$\s?(\d[\d.]*)', re.I)
 _RE_BEN_FRETE = re.compile(r'\bfrete\b', re.I)
 _RE_BEN_1A_COMPRA = re.compile(
