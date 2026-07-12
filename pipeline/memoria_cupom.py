@@ -20,16 +20,27 @@
 # norm.cupons, que é vazio nesse caso.
 #
 # C4.2 (refactor puro): extraído byte-a-byte de identidade_oferta, que com
-# isso volta a ser uma camada PURA de derivação. O comportamento é
-# idêntico; o alinhamento da janela ao ciclo de 25 min é o C4.3.
+# isso volta a ser uma camada PURA de derivação.
+#
+# C4.3 (janela): a memória vive EXATAMENTE o ciclo. A janela deriva de
+# vida_oferta.VIDA_OFERTA_S — a autoridade única do tempo (Frente 0) —
+# em vez de ter relógio próprio. Antes eram 30 min contra 25 do ciclo:
+# um código de ciclo JÁ MORTO ainda sequestrava a identidade de um post
+# novo (histórico governando o presente). Agora a memória expira junto
+# com o ciclo que a criou.
+#
+# NÃO confundir com config._JANELA_CUPOM_S, que permanece e continua
+# servindo o CLAIM ATÔMICO da deduplicação (deduplicacao._janela_por_tipo).
+# São perguntas de negócio diferentes — "este código já foi visto?" versus
+# "esta identidade já foi reivindicada?" — e não se unificam só porque
+# ambas usam tempo.
 from __future__ import annotations
 
-import config
 from database import (
     db_cupom_idx_buscar,
     db_cupom_idx_registrar,
 )
-
+from pipeline.vida_oferta import VIDA_OFERTA_S
 # Kill-switch da memória de códigos. Desligar faz a identidade cair no
 # fallback puro (sem grudação) — útil para isolar o efeito em diagnóstico.
 CUPOM_IDX_ON = True
@@ -58,7 +69,8 @@ def resolver_identidade(norm, plat: str, fallback: str) -> str:
     if not codes:
         return fallback
 
-    janela = float(config._JANELA_CUPOM_S)
+    # A memória de códigos vive o ciclo — nem um segundo a mais (C4.3).
+    janela = float(VIDA_OFERTA_S) 
     existente = db_cupom_idx_buscar(plat, codes, janela)
     identity = existente or fallback
     # max() é guarda DEFENSIVA. Desde o D1 o efeito roda 1x por mensagem
