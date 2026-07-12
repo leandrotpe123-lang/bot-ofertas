@@ -70,22 +70,48 @@ class TestEhPostCupom:
     def test_produto_puro_nao_e_cupom(self, texto):
         assert eh_post_cupom(texto) is False
 
-    # ── DEFEITO CONHECIDO (linha de base do C2) ──
-    # O detector dispara com QUALQUER menção de "cupom" no título, sem
-    # distinguir o cupom como SUJEITO ("CUPOM Amazon 20% OFF") do cupom
-    # como COMPLEMENTO ("Fone JBL R$199 (cupom: DESC10)" — o sujeito é
-    # o produto). Hoje é inócuo: ancoras() ignora o resultado quando há
-    # produto. Se o C3 desse autoridade sem o C2, dois produtos distintos
-    # com o mesmo código colapsariam na mesma família.
+    # ── C2: CORRIGIDO — cupom como COMPLEMENTO não é assunto ──
+    # HISTÓRICO (decisão arquitetural deliberada, não regressão):
+    #   No C1 estes casos retornavam True. Era um DEFEITO conhecido e
+    #   documentado (os antigos testes FALSO_POSITIVO_C1): o detector
+    #   disparava com qualquer menção de "cupom" no título, sem
+    #   distinguir o cupom como SUJEITO do cupom como COMPLEMENTO.
+    #   Era inócuo enquanto o classificador não tinha autoridade sobre a
+    #   família — mas teria colapsado dois produtos distintos com o mesmo
+    #   código numa única oferta assim que o C3 desse essa autoridade.
+    #   O C2 endureceu o caso (a) com análise sintática do título
+    #   (_cupom_e_sujeito): cupom precedido de conectivo/pontuação, ou
+    #   com preço aparecendo ANTES dele, é adorno de um produto.
+    #   A inversão True → False abaixo é o OBJETIVO do C2 cumprido.
     @pytest.mark.parametrize("texto", [
-        "Fone JBL R$199 (cupom: DESC10)",
-        "Echo Dot R$249 - use o cupom ECHO10",
+        "Fone JBL R$199 (cupom: DESC10)",       # parênteses
+        "Echo Dot R$249 - use o cupom ECHO10",  # conectivo "use o"
+        "Echo Dot por R$ 249 (cupom ECHO10)",
+        "Air Fryer 4L R$299 cupom AIR20",       # preço antes do cupom
+        "Smart TV 4K R$1.799 (codigo TV10)",
+        "Notebook Dell no cupom NOTE10",        # conectivo "no"
+        "Air Fryer, cupom AIR20",               # vírgula
+        "Monitor LG R$699 [codigo LG24]",       # colchete
     ])
-    def test_FALSO_POSITIVO_C1_cupom_como_complemento(self, texto):
-        # Congela o comportamento ATUAL. O C2 deve inverter para False.
-        assert eh_post_cupom(texto) is True, (
-            "Defeito conhecido: cupom como complemento e' lido como assunto"
+    def test_C2_cupom_como_complemento_e_PRODUTO(self, texto):
+        assert eh_post_cupom(texto) is False, (
+            "cupom como complemento de um produto NAO e' assunto de cupom"
         )
+
+    # ── C2: o cupom como SUJEITO continua sendo CUPOM ──
+    # Guarda contra o endurecimento ter ido longe demais. Note o caso
+    # "Cupom R$50 OFF": o preço vem DEPOIS da palavra — é o valor do
+    # desconto, não o preço de um produto. Por isso a regra compara
+    # POSIÇÕES, e não a mera presença de "R$".
+    @pytest.mark.parametrize("titulo", [
+        "CUPOM Amazon 20% OFF",
+        "Cupom R$50 OFF na Amazon",
+        "Cupom de R$ 30 na primeira compra",
+        "ULTIMAS HORAS: cupom AMZ20",
+        "Novo codigo Amazon liberado",
+    ])
+    def test_C2_cupom_como_sujeito_continua_CUPOM(self, titulo):
+        assert eh_post_cupom(titulo) is True
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -209,4 +235,4 @@ class TestPureza:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
-
+    
