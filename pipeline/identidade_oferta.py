@@ -101,7 +101,7 @@ def tipo_de_oferta(norm: MensagemNormalizada) -> str:
         return "produto"
 
     # P2: é post-cupom (cupom domina o título) → cupom
-    if norm.cupom and _eh_post_cupom(texto):
+    if norm.cupom and eh_post_cupom(texto):
         return "cupom"
 
     # P3: tem cupom mas sem ID — cupom standalone
@@ -112,11 +112,11 @@ def tipo_de_oferta(norm: MensagemNormalizada) -> str:
     #  com ids_globais; este ramo havia se tornado inalcançável.)
 
     # P5: cashback sem cupom code
-    if _eh_post_cashback(texto, norm.tem_sinal_cashback):
+    if eh_post_cashback(texto, norm.tem_sinal_cashback):
         return "evento"
 
     # P6: campanha/evento — consome o campo derivado tem_host_campanha
-    if _eh_post_evento(texto, norm.tem_host_campanha):
+    if eh_post_evento(texto, norm.tem_host_campanha):
         return "evento"
 
     # Fallback
@@ -160,7 +160,7 @@ def _id_post_cupom(norm, plat, texto):
     # (_eh_post_cupom), a oferta É o cupom — não o produto-veículo. Dois
     # posts do mesmo código (ex.: CURTEAI) com produtos diferentes são a
     # MESMA oferta. Produto só vence quando NÃO é post de cupom.
-    if not norm.cupom or not _eh_post_cupom(texto):
+    if not norm.cupom or not eh_post_cupom(texto):
         return None
     fallback = f"{plat}|cup|{norm.cupom.upper()}"
     if _CUPOM_IDX_ON:
@@ -192,16 +192,16 @@ def _id_cupom_sem_produto(norm, plat, texto):
 
 
 def _id_cashback(norm, plat, texto):
-    if not _eh_post_cashback(texto, norm.tem_sinal_cashback) or norm.cupom:
+    if not eh_post_cashback(texto, norm.tem_sinal_cashback) or norm.cupom:
         return None
-    pct = _extrair_pct_cashback(texto)
+    pct = extrair_pct_cashback(texto)
     if not pct:
         return None
     return f"{plat}|cash|{pct}"
 
 
 def _id_campanha(norm, plat, texto):
-    if not _eh_post_evento(texto, norm.tem_host_campanha):
+    if not eh_post_evento(texto, norm.tem_host_campanha):
         return None
     if norm.chave_campanha:
         return f"{plat}|camp|{norm.chave_campanha}"
@@ -314,8 +314,8 @@ def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
         for cod in norm.cupons:
             _add("cupom", f"{plat}|cup|{cod.upper()}")
 
-        if _eh_post_cashback(texto, norm.tem_sinal_cashback):
-            pct = _extrair_pct_cashback(texto)
+        if eh_post_cashback(texto, norm.tem_sinal_cashback):
+            pct = extrair_pct_cashback(texto)
             if pct:
                 _add("cashback", f"{plat}|cash|{pct}")
 
