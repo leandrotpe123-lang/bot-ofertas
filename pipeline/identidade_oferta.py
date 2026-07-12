@@ -304,6 +304,24 @@ def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
             vistos.add(chave)
             saida.append(Ancora(especie, chave))
 
+  # ══ C3 — AUTORIDADE DO ASSUNTO ══
+    # Quando o CUPOM é o assunto do post (classificador endurecido no C2),
+    # a oferta É o cupom — o produto no link é apenas VEÍCULO/ilustração e
+    # NÃO ancora. Sem isso, o mesmo cupom relâmpago ilustrado com produtos
+    # diferentes por grupos diferentes viraria N ofertas distintas.
+    #
+    # A âncora é EXCLUSIVA (só o cupom), nunca aditiva: se o produto
+    # ilustrativo também ancorasse, um post-vitrine capturaria a oferta
+    # legítima daquele produto quando ela chegasse.
+    #
+    # Segurança: o C2 garante que "Echo Dot R$249 (cupom ECHO10)" NÃO é
+    # post de cupom (cupom como complemento) — logo produtos distintos que
+    # compartilham um código genérico seguem em famílias separadas.
+    if norm.cupons and eh_post_cupom(texto):
+        for cod in norm.cupons:
+            _add("cupom", f"{plat}|cup|{cod.upper()}")
+        return saida
+
     for pid in norm.ids_globais:
         _add("produto", f"{plat}|{pid}")
 
