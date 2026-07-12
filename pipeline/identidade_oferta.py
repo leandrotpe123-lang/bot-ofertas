@@ -208,7 +208,7 @@ def _id_campanha(norm, plat, texto):
     candidatos = [
         m for m in (
             _KW_EVENTO.search(texto[:200]),
-            _RE_CALENDARIO_COMERCIAL.search(texto[:200]),
+            buscar_calendario_comercial(texto),
         ) if m
     ]
     if candidatos:
