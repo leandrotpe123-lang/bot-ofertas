@@ -17,6 +17,7 @@
 import pytest
 
 from pipeline.assunto import (
+    beneficio_do_cupom,
     buscar_calendario_comercial,
     eh_lista_cupons,
     eh_post_cashback,
@@ -24,6 +25,105 @@ from pipeline.assunto import (
     eh_post_evento,
     extrair_pct_cashback,
 )
+
+
+# ═════════════════════════════════════════════════════════════════
+# beneficio_do_cupom — IDENTIDADE do cupom SEM código (C3.1)
+# ═════════════════════════════════════════════════════════════════
+class TestBeneficioDoCupom:
+    """O descritor substitui o hash do texto como identidade.
+
+    MOTIVO (bug real corrigido): _alma() normaliza percentuais e valores
+    ('20%' -> PCT, 'R$30' -> VALOR). Logo, por hash, "Cupom 20% OFF" e
+    "Cupom 15% OFF" produziam a MESMA alma e COLAPSAVAM numa familia so —
+    uma oferta legitima era engolida como duplicata.
+    """
+
+    # ── percentual (1..100; regex aceita 3 digitos) ──
+    @pytest.mark.parametrize("texto,esperado", [
+        ("Cupom 20% OFF Mercado Livre", "pct:20"),
+        ("Cupom 50% OFF Shopee", "pct:50"),
+        ("Cupom 100% OFF", "pct:100"),      # 3 digitos legitimo
+        ("Cupom 5% OFF", "pct:5"),
+        ("Cupom 1% OFF", "pct:1"),
+    ])
+    def test_percentual_valido(self, texto, esperado):
+        assert beneficio_do_cupom(texto) == esperado
+
+    # ── guarda de intervalo: lixo NAO vira pct ──
+    @pytest.mark.parametrize("texto", [
+        "Cupom 999% OFF",
+        "Cupom 0% OFF",
+        "Cupom 150% OFF",
+    ])
+    def test_percentual_invalido_e_descartado(self, texto):
+        assert beneficio_do_cupom(texto) == "geral"
+
+    def test_lixo_nao_derruba_percentual_legitimo(self):
+        # A varredura CONTINUA: 999% e' descartado, 30% e' capturado.
+        assert beneficio_do_cupom("Ate 999%... Cupom 30% OFF") == "pct:30"
+
+    def test_lixo_nao_derruba_outro_sinal(self):
+        assert beneficio_do_cupom("Cupom 999% frete gratis") == "frete"
+
+    # ── valor ──
+    def test_valor(self):
+        assert beneficio_do_cupom("Cupom de R$50 Mercado Livre") == "vlr:50"
+
+    def test_valor_com_condicao_de_minimo(self):
+        # "acima de R$150" e' CONDICAO, nao beneficio. O beneficio e' R$30.
+        assert beneficio_do_cupom("Cupom R$30 OFF acima de R$150") == "vlr:30"
+
+    def test_percentual_vence_valor_de_condicao(self):
+        # Havendo percentual, o R$ no texto e' condicao — nao entra.
+        assert beneficio_do_cupom(
+            "Cupom 20% OFF em compras acima de R$100") == "pct:20"
+
+    # ── frete e primeira compra ──
+    def test_frete(self):
+        assert beneficio_do_cupom("Cupom de frete gratis") == "frete"
+
+    def test_primeira_compra(self):
+        assert beneficio_do_cupom("Cupom novos usuarios") == "1acompra"
+
+    # ── COMPOSICAO (ordem canonica fixa) ──
+    @pytest.mark.parametrize("texto,esperado", [
+        ("Cupom 15% + frete gratis", "pct:15+frete"),
+        ("Cupom de R$30 na primeira compra", "vlr:30+1acompra"),
+        ("Cupom 100% OFF (frete)", "pct:100+frete"),
+    ])
+    def test_descritor_composto(self, texto, esperado):
+        assert beneficio_do_cupom(texto) == esperado
+
+    # ── bucket geral (conservador, consciente) ──
+    @pytest.mark.parametrize("texto", [
+        "🔥 Novo Cupom Shopee",
+        "Resgate seu cupom exclusivo",
+        "Cupom liberado hoje as 20h",
+        "Cupom disponivel no app",
+        "Cupom para usuarios selecionados",
+    ])
+    def test_bucket_geral(self, texto):
+        assert beneficio_do_cupom(texto) == "geral"
+
+    # ── ESTABILIDADE (a propriedade que o hash nao tinha) ──
+    def test_ESTAVEL_mesma_oferta_textos_diferentes(self):
+        # A mesma oferta descrita de 3 formas → MESMO descritor.
+        a = beneficio_do_cupom("🔥 Cupom 20% OFF Mercado Livre\nResgate as 19h")
+        b = beneficio_do_cupom("Novo Cupom Mercado Livre 20% OFF\nUse amanha")
+        c = beneficio_do_cupom("CUPOM ML 20% — corre!")
+        assert a == b == c == "pct:20"
+
+    def test_CRITICO_beneficios_distintos_nao_colapsam(self):
+        # Por hash, "20%" e "15%" colapsavam (ambos viram PCT em _alma).
+        assert beneficio_do_cupom("Cupom 20% OFF") != \
+               beneficio_do_cupom("Cupom 15% OFF")
+        assert beneficio_do_cupom("Cupom de R$30") != \
+               beneficio_do_cupom("Cupom de R$50")
+
+    def test_deterministico(self):
+        t = "Cupom 15% + frete gratis"
+        assert len({beneficio_do_cupom(t) for _ in range(5)}) == 1
 
 
 # ═════════════════════════════════════════════════════════════════
