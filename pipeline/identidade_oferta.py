@@ -74,6 +74,7 @@ _CUPOM_IDX_ON = True
 # ancoras() decide exatamente como antes.
 # ─────────────────────────────────────────────────────────────────
 from pipeline.assunto import (          # noqa: E402
+    beneficio_do_cupom,
     buscar_calendario_comercial,
     eh_post_cashback,
     eh_post_cupom,
@@ -274,8 +275,9 @@ class Ancora:
     chave: str
 
 
-_ESPECIE_POR_TAG = {"cup": "cupom", "camp": "campanha",
-                    "cash": "cashback", "url": "fallback", "txt": "fallback"}
+_ESPECIE_POR_TAG = {"cup": "cupom", "cupb": "cupom-beneficio",
+                    "camp": "campanha", "cash": "cashback",
+                    "url": "fallback", "txt": "fallback"}
 
 
 def _especie_da_chave(chave: str) -> str:
@@ -304,7 +306,7 @@ def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
             vistos.add(chave)
             saida.append(Ancora(especie, chave))
 
-  # ══ C3 — AUTORIDADE DO ASSUNTO ══
+    # ══ C3 — AUTORIDADE DO ASSUNTO ══
     # Quando o CUPOM é o assunto do post (classificador endurecido no C2),
     # a oferta É o cupom — o produto no link é apenas VEÍCULO/ilustração e
     # NÃO ancora. Sem isso, o mesmo cupom relâmpago ilustrado com produtos
@@ -317,9 +319,21 @@ def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
     # Segurança: o C2 garante que "Echo Dot R$249 (cupom ECHO10)" NÃO é
     # post de cupom (cupom como complemento) — logo produtos distintos que
     # compartilham um código genérico seguem em famílias separadas.
-    if norm.cupons and eh_post_cupom(texto):
-        for cod in norm.cupons:
-            _add("cupom", f"{plat}|cup|{cod.upper()}")
+    if eh_post_cupom(texto):
+        if norm.cupons:
+            # COM código: o código É a identidade.
+            for cod in norm.cupons:
+                _add("cupom", f"{plat}|cup|{cod.upper()}")
+        else:
+            # C3.1 — SEM código: o BENEFÍCIO é a identidade, nunca o hash
+            # do texto. Cobre cupom resgatado no app / por link / banner
+            # ("🔥 Novo Cupom Shopee", "Cupom 20% OFF ML — resgate às 19h").
+            # Mesmo benefício + mesma plataforma → mesma oferta.
+            # cupb| NÃO é código: não entra no cupom_idx (que só indexa
+            # códigos reais) — garantido por construção, pois o efeito de
+            # cupom só roda sobre norm.cupons, aqui vazio.
+            _add("cupom-beneficio",
+                 f"{plat}|cupb|{beneficio_do_cupom(texto)}")
         return saida
 
     for pid in norm.ids_globais:
@@ -354,4 +368,4 @@ def identidades(norm: "MensagemNormalizada") -> list[str]:
     atuais (fallback de edição na publicação; ramo sem-produto da
     canônica). A doutrina de emissão vive em ancoras()."""
     return [a.chave for a in ancoras(norm)]
-
+  
