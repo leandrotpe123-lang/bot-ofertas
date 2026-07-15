@@ -226,7 +226,9 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
     já foi visto na janela, a identidade da corrente sobrepõe a base.
     """
     if norm.ids_globais:
-        base = f"{norm.plat}|{min(norm.ids_globais)}"
+        _idents = getattr(norm, "idents", None) or [
+            (norm.plat, pid, "") for pid in norm.ids_globais]
+        base = min(f"{p}|{i}" for p, i, _ in _idents)  
     else:
         base = sorted(identidades(norm))[0]
     return resolver_identidade(norm, norm.plat, base)
@@ -301,8 +303,10 @@ def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
                  f"{plat}|cupb|{beneficio_do_cupom(texto)}")
         return saida
 
-    for pid in norm.ids_globais:
-        _add("produto", f"{plat}|{pid}")
+    _idents = getattr(norm, "idents", None) or [
+        (plat, pid, "") for pid in norm.ids_globais]
+    for plat_link, pid, _tipo in _idents:
+        _add("produto", f"{plat_link}|{pid}") 
 
     for k in norm.chaves_campanha:
         _add("campanha", f"{plat}|camp|{k}")
