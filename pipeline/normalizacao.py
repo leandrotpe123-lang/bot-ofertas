@@ -209,6 +209,10 @@ class MensagemNormalizada:
     tem_midia:         bool
     media_obj:         object
     ids_globais:       List[str]    = field(default_factory=list)
+    # Vínculo POR LINK que a plataforma entrega via contrato e que a
+    # travessia PRESERVA: (plataforma_do_link, id_produto, tipo_link).
+    # ids_globais é projeção de idents — mesma passada de derivação.
+    idents: List[Tuple[str, str, str]] = field(default_factory=list)
     # Lista completa de cupons — snapshot derivado UMA vez na normalização
     # (extrair_todos_cupons sobre texto_limpo). Consumida por identidade e
     # score; o representante norm.cupom (extrair_cupom) é derivação distinta.
@@ -241,19 +245,21 @@ class MensagemNormalizada:
 #   (orig) nem sobre URL encurtada. A URL afiliada longa é a única
 #   fonte canônica de identidade.
 # ─────────────────────────────────────────────────────────────────
-def _identificador_de(url: str) -> str:
+def _identidade_de(url: str) -> Optional[Tuple[str, str, str]]:
     """
-    Devolve o identificador puro do produto de uma URL afiliada
-    longa, ou string vazia quando a URL não pertence a uma
-    plataforma ou não corresponde a um produto individual.
+    Devolve (plataforma, id_produto, tipo_link) de uma URL afiliada
+    longa — a estrutura que a plataforma entrega via contrato — ou
+    None quando a URL não pertence a uma plataforma ou não
+    corresponde a um produto individual.
     """
     plataforma = registry.resolver(url)
     if plataforma is None:
-        return ""
+        return None
     ident = plataforma.extrai_identidade(url)
     if ident.id_produto is AUSENTE:
-        return ""
-    return str(ident.id_produto)
+        return None
+    return (plataforma.identificador, str(ident.id_produto),
+            ident.tipo_link.value)
 
 
 def _eh_host_de_campanha(url: str) -> bool:
@@ -485,10 +491,12 @@ async def normalizar(
     urls_longas = list(canonicas.values())
 
     ids_globais: List[str] = []
+    idents: List[Tuple[str, str, str]] = []
     for conv in urls_longas:
-        ident = _identificador_de(conv)
-        if ident and ident not in ids_globais:
-            ids_globais.append(ident)
+        trio = _identidade_de(conv)
+        if trio and trio[1] not in ids_globais:
+            ids_globais.append(trio[1])
+            idents.append(trio)
 
     sku = ids_globais[0] if ids_globais else ""
 
@@ -526,7 +534,8 @@ async def normalizar(
         mapa=mapa_publicacao, preservar=preservar_lst, plat=plat_dom,
         cupom=cupom, cupons=cupons, sku=sku, tem_midia=bruta.tem_midia,
         media_obj=bruta.media_obj,
-        ids_globais=ids_globais, chave_campanha=chave_campanha,
+        ids_globais=ids_globais, idents=idents,
+        chave_campanha=chave_campanha,
         chaves_campanha=chaves_campanha,
         tem_host_campanha=tem_host_campanha,
         tem_sinal_cashback=tem_sinal_cashback,
