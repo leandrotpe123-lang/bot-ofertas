@@ -80,6 +80,6 @@ def resolver_identidade(norm, plat: str, fallback: str) -> str:
     # MensagemEnriquecida.cupons_novos APÓS o efeito.)
     norm._cupom_novos = max(
         getattr(norm, "_cupom_novos", 0),
-        db_cupom_idx_registrar(plat, codes, identity))
+        db_cupom_idx_registrar(plat, codes, identity, janela))
     return identity
   
