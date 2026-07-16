@@ -150,23 +150,25 @@ def db_cupom_idx_buscar(plat: str, codigos: list, janela_s: float) -> Optional[s
         return None
 
 
-def db_cupom_idx_registrar(plat: str, codigos: list, identity: str) -> int:
+def db_cupom_idx_registrar(plat: str, codigos: list, identity: str,
+                           janela_s: float) -> int:
     """Registra TODOS os códigos do post sob a MESMA identity
     (plat + código → identity), com ts atual (janela deslizante).
     Preserva todos os códigos — não só um. Retorna QUANTOS códigos
-    eram NOVOS (não estavam no índice) — usado pela exceção de
-    reativação 'passa se vier com mais códigos'."""
+    eram NOVOS dentro da janela (Frente 0 §2: a novidade é medida
+    contra o ciclo) — insumo do ramo CUPOM_ENRIQUECIDO da evolução."""
     cods = [c.upper() for c in (codigos or []) if c]
     if not cods or not identity:
         return 0
     agora = time.time()
+    limite = agora - janela_s
     try:
         with _db() as cx:
             ph = ",".join("?" * len(cods))
             ja = {r[0] for r in cx.execute(
                 f"SELECT codigo FROM cupom_idx"
-                f" WHERE plat=? AND codigo IN ({ph})",
-                (plat, *cods)).fetchall()}
+                f" WHERE plat=? AND codigo IN ({ph}) AND ts>=?",
+                (plat, *cods, limite)).fetchall()}
             cx.executemany(
                 "INSERT INTO cupom_idx(plat,codigo,identity,ts)"
                 " VALUES(?,?,?,?)"
