@@ -69,8 +69,14 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # ══ VIDA DA OFERTA — a autoridade é vida_oferta.viva() ══
     # Fora da vida do ciclo: estado FINAL, congelado — nada mais evolui
     # (nem score, nem imagem, nem cupom). O valor mora no dono, não aqui.
+    # Mensagem NOVA que casa em ciclo morto nasce como CICLO NOVO
+    # (Frente 0 §6 / Fase 3: fora da vida não há veto — há renascimento
+    # por novo envio). Edição não cria ciclo: mantém o veto.
     if not na_janela:
-        return Decisao(IGNORAR, "JANELA_ENCERRADA",
+        if is_edit:
+            return Decisao(IGNORAR, "JANELA_ENCERRADA",
+                           na_janela=na_janela, score_atual=score_atual)
+        return Decisao(PUBLICAR, "JANELA_ENCERRADA_NOVO_CICLO",
                        na_janela=na_janela, score_atual=score_atual)
 
     # ══ RENASCIMENTO — regra de negócio F-R (#1) ══
