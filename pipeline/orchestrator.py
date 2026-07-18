@@ -39,7 +39,7 @@ from pipeline.identidade import checar_e_marcar
 from pipeline.ingestao import ingerir
 from pipeline.montagem import montar
 from pipeline.normalizacao import normalizar
-from pipeline.publicacao import delay_saturacao, enviar
+from pipeline.publicacao import delay_saturacao, destino_vivo_de_origem, enviar
 from pipeline.vida_oferta import VIDA_OFERTA_S
 
 
@@ -144,6 +144,18 @@ async def _pipeline(event, is_edit: bool = False) -> None:
             f"🧭 TL | id={msg_id} chat={bruta.chat} | DESCARTE | "
             f"motivo=JA_PROCESSADO")
         return
+
+    # ── Fast-path ORIGEM (Fase 1): NEW de origem já publicada nem entra
+    #    no pipeline — evita efeito colateral no cupom_idx, claim e SAT.
+    #    Best-effort sem lock; a autoridade (com lock) é a publicação.
+    if not is_edit:
+        _dv = destino_vivo_de_origem(bruta.chat, msg_id)
+        if _dv:
+            log_sys.info(
+                f"🧭 TL | id={msg_id} chat={bruta.chat} | DESCARTE | "
+                f"motivo=ORIGEM_JA_PUBLICADA dest={_dv}")
+            return
+    
     # ── Shadow reply (somente mensagens novas que são reply) ──────
     if bruta.is_reply and bruta.reply_to > 0 and not is_edit:
         from handlers.shadow_reply import processar_shadow_reply
