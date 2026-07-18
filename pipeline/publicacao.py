@@ -17,6 +17,8 @@ import globals as g
 from logger import log_out, log_sys, _idade_str
 from pipeline.deduplicacao import calcular_score, identidades
 from pipeline.decisao import decidir
+from pipeline import origem
+from pipeline.vida_oferta import viva
 from pipeline.saida import (
     _enviar_msg,
     _editar_inner_no_sem,
@@ -149,6 +151,21 @@ async def delay_saturacao(plat: str, texto: str) -> float:
     if await _burst_count() >= _SAT_BURST_LIM: delay += 4.0
     return delay
 
+def destino_vivo_de_origem(chat: str, msg_id: int):
+    """Ponte Origem→Oferta: consulta o vínculo (infra pura, I7) e valida
+    aqui a VIDA do post apontado (autoridade: vida_oferta). Devolve o
+    dest do post lógico VIVO, ou None (vínculo morto → fluxo normal,
+    coerente com F4/renascimento por ciclo novo)."""
+    if not chat or not msg_id:
+        return None
+    dest = origem.consultar(chat, msg_id)
+    if not dest:
+        return None
+    estado = db_get_post(dest)
+    if estado and viva(estado.get("janela_fim") or 0.0, time.time()):
+        return dest
+    return None
+
 
 async def enviar(montada: MensagemMontada,
                  norm: Optional[MensagemNormalizada] = None,
@@ -175,6 +192,25 @@ async def enviar(montada: MensagemMontada,
     elif norm is not None:
         ofertas = identidades(norm)
         score   = calcular_score(norm)
+
+# ── Camada 0: ORIGEM (Fase 1 do MB) — lock mais externo (I6) ──
+    if norm is not None:
+        async with await origem.lock_origem(norm.chat, norm.msg_id):
+            dest_fix = destino_vivo_de_origem(norm.chat, norm.msg_id)
+            if dest_fix and not is_edit:
+                log_out.info(
+                    f"🔗 [ORIGEM_JA_PUBLICADA] ({norm.chat},{norm.msg_id})"
+                    f"→post:{dest_fix} — NEW absorvido (I3)")
+                return True
+            if ofertas:
+                async with contextlib.AsyncExitStack() as stack:
+                    for of in sorted(ofertas):
+                        await stack.enter_async_context(
+                            await _get_identity_lock(of))
+                    return await _enviar_inner(
+                        montada, norm, ofertas, score, is_edit, dest_fix)
+            return await _enviar_inner(
+                montada, norm, ofertas, score, is_edit, dest_fix)
 
     if ofertas:
         async with contextlib.AsyncExitStack() as stack:
@@ -287,7 +323,9 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             sent.id, ofertas_familia, d.novo_score, montada.texto,
             montada.plat, norm.chat,
             estado.get("janela_fim", 0), edit_count + 1,
-            estado.get("shadow_reply_id", 0))
+            estado.get("shadow_reply_id", 0),
+            chat_origem=norm.chat if norm else "",
+            msg_id_origem=montada.msg_id)
         if d.motivo == "TROCA_IMG_BOA":
             log_out.info(f"✅ [IMG_TROCADA_OK] {identity} (substitui)")
         else:
@@ -354,7 +392,9 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
             db_registrar_post(
                 sent.id, ofertas, score, montada.texto,
                 montada.plat, norm.chat if norm else "",
-                janela_fim, 0, 0)
+                janela_fim, 0, 0,
+                chat_origem=norm.chat if norm else "",
+                msg_id_origem=montada.msg_id)
             log_out.info(
                 f"🧭 TL | id={montada.msg_id} "
                 f"chat={norm.chat if norm else ''} | JANELA_CRIADA | "
@@ -404,7 +444,8 @@ async def _enviar_inner(montada: MensagemMontada,
                         norm: Optional[MensagemNormalizada],
                         ofertas: list,
                         score: int,
-                        is_edit: bool = False) -> bool:
+                        is_edit: bool = False,
+                        dest_fix=None) -> bool:
     """Corpo real de enviar() — dentro dos locks de oferta. Acha o post
     parente por sobreposição, trava o post candidato, re-verifica sob o
     lock e decide pelo score (decisão intocada)."""
@@ -412,8 +453,11 @@ async def _enviar_inner(montada: MensagemMontada,
         loop = asyncio.get_running_loop()
         identity = ofertas[0] if ofertas else None   # rótulo de log
 
-        if norm is not None and ofertas:
-            candidatos = db_overlap_posts(ofertas)
+        if norm is not None and (ofertas or dest_fix):
+            # Alvo FIXADO pelo vínculo de Origem (I2): edit de origem
+            # vinculada nunca re-casa por conteúdo em outro post.
+            candidatos = ([(dest_fix, 0)] if dest_fix
+                          else db_overlap_posts(ofertas)) 
             if len(candidatos) > 1:
                 log_out.debug(
                     f"🧬 [FAMILIA_MULTI] {len(candidatos)} posts em sobreposição "
@@ -427,6 +471,10 @@ async def _enviar_inner(montada: MensagemMontada,
                     agora = time.time()
                     d = decidir(norm, montada, score, estado, agora, is_edit)
                     if d.acao != "PUBLICAR":
+                        if norm is not None:
+                            # Encontro registra (I1): edits futuros desta
+                            # origem roteiam direto ao mesmo post lógico.
+                            origem.registrar(norm.chat, norm.msg_id, msg_id_rel)
                         identity = f"post:{msg_id_rel}"
                         _log_decisao(d, montada, norm, estado, score, agora, identity)
 
