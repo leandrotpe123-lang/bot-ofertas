@@ -59,6 +59,10 @@ def _init_db():
             plat TEXT NOT NULL, codigo TEXT NOT NULL,
             identity TEXT NOT NULL, ts REAL NOT NULL,
             PRIMARY KEY(plat, codigo));
+        CREATE TABLE IF NOT EXISTS origem_post(
+            chat TEXT NOT NULL, msg_id INTEGER NOT NULL,
+            dest INTEGER NOT NULL, ts REAL NOT NULL,
+            PRIMARY KEY(chat, msg_id));
         CREATE INDEX IF NOT EXISTS idx_lc_plat     ON links_cache(plat);
         CREATE INDEX IF NOT EXISTS idx_lc_ts       ON links_cache(ts);
         CREATE INDEX IF NOT EXISTS idx_dt_plat     ON dedupe_temp(plat,ts);
@@ -311,9 +315,12 @@ def db_ofertas_de_post(msg_id_dest: int) -> list[str]:
 def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
                       texto: str, plat: str, lider: str = "",
                       janela_fim: float = 0.0, edit_count: int = 0,
-                      shadow_reply_id: int = 0):
+                      shadow_reply_id: int = 0,
+                      chat_origem: str = "", msg_id_origem: int = 0):
     """Upsert do estado do post + mapeamento de cada oferta→post.
-    Serve para publicação nova E evolução (idempotente)."""
+    Serve para publicação nova E evolução (idempotente).
+    Se (chat_origem, msg_id_origem) vierem, grava o vínculo Origem na
+    MESMA transação (invariantes I4/I5 — cobertura por construção)."""
     try:
         agora = time.time()
         with _db() as db:
@@ -329,8 +336,36 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
                     "INSERT OR REPLACE INTO oferta_index"
                     "(identity,msg_id_dest,ts) VALUES(?,?,?)",
                     (oferta, msg_id_dest, agora))
+            if chat_origem and msg_id_origem:
+                db.execute(
+                    "INSERT OR REPLACE INTO origem_post"
+                    "(chat,msg_id,dest,ts) VALUES(?,?,?,?)",
+                    (chat_origem, msg_id_origem, msg_id_dest, agora))
     except Exception as e:
         log_db.error(f"❌ db_registrar_post: {e}")
+
+def db_origem_get(chat: str, msg_id: int):
+    """Vínculo Origem (Fase 1): dest do post lógico desta origem, ou None."""
+    try:
+        with _db() as db:
+            row = db.execute(
+                "SELECT dest FROM origem_post WHERE chat=? AND msg_id=?",
+                (chat, msg_id)).fetchone()
+        return int(row[0]) if row else None
+    except Exception as e:
+        log_db.error(f"❌ db_origem_get: {e}")
+        return None
+
+
+def db_origem_set(chat: str, msg_id: int, dest: int):
+    """REPLACE idempotente do vínculo Origem (I1)."""
+    try:
+        with _db() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO origem_post(chat,msg_id,dest,ts)"
+                " VALUES(?,?,?,?)", (chat, msg_id, dest, time.time()))
+    except Exception as e:
+        log_db.error(f"❌ db_origem_set: {e}")
 
 
 def db_remover_post(msg_id_dest: int):
@@ -386,6 +421,7 @@ def db_limpar():
             db.execute("DELETE FROM post_estado  WHERE ts<?", (agora - 30 * 86400,))
             db.execute("DELETE FROM oferta_index WHERE ts<?", (agora - 30 * 86400,))
             db.execute("DELETE FROM cupom_idx    WHERE ts<?", (agora - 30 * 86400,))
+            db.execute("DELETE FROM origem_post  WHERE ts<?", (agora - 30 * 86400,))
         if len(_raw_cache) > 3000:
             for k in list(_raw_cache.keys())[:1000]:
                 del _raw_cache[k]
