@@ -13,7 +13,7 @@ GRUPOS_ORIGEM  = [
     "promotom", "fumotom", "botofera", "fadadoscupons",
     "SamuelF3lipePromo", "fadapromos",
     
-GRUPO_DESTINO  = "@FullPromotion"
+GRUPO_DESTINO  = "fullpromotion"
 
 # ── Encurtador próprio ────────────────────────────────────────────
 _RAILWAY_DOMAIN = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
