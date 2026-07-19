@@ -12,6 +12,7 @@ SESSION_STRING = os.environ.get("TELEGRAM_SESSION", "")
 GRUPOS_ORIGEM  = [
     "promotom", "fumotom", "botofera", "fadadoscupons",
     "SamuelF3lipePromo", "fadapromos",
+]
     
 GRUPO_DESTINO  = "fullpromotion"
 
