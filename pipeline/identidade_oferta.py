@@ -71,6 +71,8 @@ __all__ = [
 # ─────────────────────────────────────────────────────────────────
 from pipeline.assunto import (          # noqa: E402
     beneficio_do_cupom,
+    beneficio_e_de_loja,
+    tem_preco_de_item,
     buscar_calendario_comercial,
     eh_post_cashback,
     eh_post_cupom,
@@ -286,7 +288,15 @@ def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
     # Segurança: o C2 garante que "Echo Dot R$249 (cupom ECHO10)" NÃO é
     # post de cupom (cupom como complemento) — logo produtos distintos que
     # compartilham um código genérico seguem em famílias separadas.
-    if eh_post_cupom(texto):
+    # Gate R1×R2 (MB ratificado): com produto identificado, o cupom só
+    # ancora exclusivo se o post caracterizar CLARAMENTE benefício de
+    # loja; na dúvida, prevalece o produto (cupom vira atributo).
+    # R2+ (emenda ratificada): 2+ códigos e nenhum preço de item →
+    # a lista de códigos É a oferta; o produto presente é vitrine.
+    if eh_post_cupom(texto) and (
+            not norm.ids_globais
+            or beneficio_e_de_loja(texto)
+            or (len(norm.cupons) >= 2 and not tem_preco_de_item(texto))):
         if norm.cupons:
             # COM código: o código É a identidade.
             for cod in norm.cupons:
