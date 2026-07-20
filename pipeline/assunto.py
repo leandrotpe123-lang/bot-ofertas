@@ -321,6 +321,49 @@ def beneficio_do_cupom(texto: str) -> str:
 
     return "+".join(partes) if partes else "geral"
 
+_RE_ESCOPO_LOJA = re.compile(
+    r"\b(em\s+tudo|todo\s+o\s+site|site\s+(?:todo|inteiro)|no\s+app|"
+    r"acima\s+de\s+r?\$|para\s+compras\s+de|"
+    r"sem\s+(?:valor\s+)?m[ií]nimo|primeira\s+compra)\b", re.I)
+
+# Preço DE ITEM: "por R$249" / "R$1.799" — um valor que NÃO é desconto
+# (sem OFF/desconto grudado). É o sinal de que o post vende o item (R1).
+_RE_PRECO_ITEM = re.compile(
+    r"(?:\bpor\s+)?r\$\s*\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?"
+    r"(?!\s*(?:de\s+)?(?:off|desc))", re.I)
+_RE_DESC_VAL = re.compile(
+    r"r\$\s*\d+[.,]?\d*\s*(?:de\s+)?(?:off|desc)", re.I)
+
+
+def tem_preco_de_item(t: str) -> bool:
+    """Existe valor R$ que não seja desconto (OFF)?"""
+    descontos = {m.start() for m in _RE_DESC_VAL.finditer(t)}
+    for m in _RE_PRECO_ITEM.finditer(t):
+        if not any(abs(m.start() - d) <= 4 for d in descontos):
+            return True
+    return False
+
+
+def beneficio_e_de_loja(texto: str) -> bool:
+    """
+    Discriminador R1×R2 — executa a TABELA do MB ratificado:
+      · escopo-loja explícito ("em tudo", "no app", "acima de R$",
+        "sem mínimo", "1ª compra") + benefício (%, R$-OFF, frete) → LOJA
+      · benefício de desconto SEM preço de item no post → LOJA
+        (o MB: "X% OFF ... sem preço de item → R2"; nada vende o item)
+      · qualquer preço de item presente e sem escopo → dúvida → ITEM
+        (zona cinzenta ratificada: prevalece o produto)
+    O dono desta regra é o MB — este código apenas a executa.
+    """
+    t = texto[:_ESCOPO_BENEFICIO]
+    beneficio = bool(_RE_BEN_PCT.search(t) or _RE_BEN_VLR.search(t)
+                     or _RE_BEN_FRETE.search(t))
+    if not beneficio:
+        return False
+    if _RE_ESCOPO_LOJA.search(t):
+        return True
+    return not tem_preco_de_item(t)
+
 
 def eh_lista_cupons(texto: str) -> bool:
     """O post é uma LISTA de cupons (2+ linhas 'R$X OFF em R$Y: COD')?"""
