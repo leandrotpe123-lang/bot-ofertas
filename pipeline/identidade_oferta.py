@@ -70,9 +70,9 @@ __all__ = [
 # ancoras() decide exatamente como antes.
 # ─────────────────────────────────────────────────────────────────
 from pipeline.assunto import (          # noqa: E402
-    beneficio_do_cupom,
     beneficio_e_de_loja,
     tem_preco_de_item,
+    tema_da_campanha,
     buscar_calendario_comercial,
     eh_post_cashback,
     eh_post_cupom,
@@ -227,7 +227,12 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
     segue aplicada por cima em ambos os ramos: se qualquer código do post
     já foi visto na janela, a identidade da corrente sobrepõe a base.
     """
-    if norm.ids_globais:
+    if _eh_entidade_cupom(norm):
+        # [F-C4 / INV-E5] A natureza decidida pelo gate alimenta TODAS
+        # as camadas: se a entidade é a campanha de cupom, a canônica
+        # (claims/dedup) é a do cupom — nunca a do produto-vitrine.
+        base = sorted(identidades(norm))[0]
+    elif norm.ids_globais: 
         _idents = getattr(norm, "idents", None) or [
             (norm.plat, pid, "") for pid in norm.ids_globais]
         base = min(f"{p}|{i}" for p, i, _ in _idents)  
@@ -254,6 +259,16 @@ def _especie_da_chave(chave: str) -> str:
     # prática; cupom lá é inalcançável — união não-vazia quando há código).
     partes = chave.split("|", 2)
     return _ESPECIE_POR_TAG.get(partes[1], "produto") if len(partes) >= 2 else "produto"
+
+def _eh_entidade_cupom(norm) -> bool:
+    """[F-C4 / INV-E5] Decisão ÚNICA de natureza cupom-como-entidade
+    (gate R1×R2 + R2+). Alimenta âncoras E canônica — nenhuma camada
+    pode enxergar uma natureza diferente das demais."""
+    texto = norm.texto_limpo
+    return eh_post_cupom(texto) and (
+        not norm.ids_globais
+        or beneficio_e_de_loja(texto)
+        or (len(norm.cupons) >= 2 and not tem_preco_de_item(texto)))
 
 
 def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
@@ -293,24 +308,22 @@ def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
     # loja; na dúvida, prevalece o produto (cupom vira atributo).
     # R2+ (emenda ratificada): 2+ códigos e nenhum preço de item →
     # a lista de códigos É a oferta; o produto presente é vitrine.
-    if eh_post_cupom(texto) and (
-            not norm.ids_globais
-            or beneficio_e_de_loja(texto)
-            or (len(norm.cupons) >= 2 and not tem_preco_de_item(texto))):
+    if _eh_entidade_cupom(norm):
         if norm.cupons:
-            # COM código: o código É a identidade.
+            # COM código: o código É a identidade (elemento mais estável
+            # disponível — INV-E3; troca de código na vida da campanha é
+            # responsabilidade do Motor de Estado, Fase 3).
             for cod in norm.cupons:
                 _add("cupom", f"{plat}|cup|{cod.upper()}")
         else:
-            # C3.1 — SEM código: o BENEFÍCIO é a identidade, nunca o hash
-            # do texto. Cobre cupom resgatado no app / por link / banner
-            # ("🔥 Novo Cupom Shopee", "Cupom 20% OFF ML — resgate às 19h").
-            # Mesmo benefício + mesma plataforma → mesma oferta.
+            # [F-C4] SEM código: a identidade é o TEMA da campanha
+            # (INV-E2/E3: benefício/percentual/limite são ESTADO e nunca
+            # entram na chave). Sem tema → "geral" (bucket do ciclo, R5).
             # cupb| NÃO é código: não entra no cupom_idx (que só indexa
             # códigos reais) — garantido por construção, pois o efeito de
             # cupom só roda sobre norm.cupons, aqui vazio.
             _add("cupom-beneficio",
-                 f"{plat}|cupb|{beneficio_do_cupom(texto)}")
+                 f"{plat}|cupb|{tema_da_campanha(texto)}")
         return saida
 
     _idents = getattr(norm, "idents", None) or [
@@ -326,9 +339,12 @@ def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
             _add("cupom", f"{plat}|cup|{cod.upper()}")
 
         if eh_post_cashback(texto, norm.tem_sinal_cashback):
-            pct = extrair_pct_cashback(texto)
-            if pct:
-                _add("cashback", f"{plat}|cash|{pct}")
+    # [F-C4 / INV-E2] O MB nomeia cashback como ESTADO: o
+            # percentual varia (e pode faltar) entre mensagens legítimas
+            # da mesma campanha. A identidade é a NATUREZA na plataforma
+            # dentro do ciclo (tolerância declarada: campanhas de
+            # cashback simultâneas na mesma plataforma colapsam).
+            _add("cashback", f"{plat}|cash")
 
     if saida:
         return saida
