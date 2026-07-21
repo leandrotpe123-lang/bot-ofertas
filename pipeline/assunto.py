@@ -287,7 +287,11 @@ def _vlr_do_beneficio(texto: str, tem_pct: bool) -> Optional[str]:
 # internos (_RE_*, _eh_*) permanecem privados deste módulo.
 # ─────────────────────────────────────────────────────────────────
 def beneficio_do_cupom(texto: str) -> str:
-    """Descritor CANÔNICO e ESTÁVEL do benefício de um cupom SEM código.
+    """[F-C4 / INV-E2] REBAIXADA a extratora de ESTADO: benefício é
+    atributo evolutivo da campanha, nunca identidade. A identidade da
+    campanha sem código é o TEMA (tema_da_campanha). Mantida para
+    exibição/score e para o futuro INV-E4 fino (F-C5).
+    Descritor CANÔNICO e ESTÁVEL do benefício de um cupom SEM código.
 
     É a IDENTIDADE do cupom quando não há código extraível — nunca o hash
     do texto. Composto (todos os sinais) e em ordem fixa, para que a mesma
@@ -363,6 +367,38 @@ def beneficio_e_de_loja(texto: str) -> bool:
     if _RE_ESCOPO_LOJA.search(t):
         return True
     return not tem_preco_de_item(t)
+
+
+_TEMAS_CAMPANHA = {
+    # forma escrita → chave canônica. Vocabulário é DETALHE DE
+    # IMPLEMENTAÇÃO (MB INV-E3): evolui por observação de produção sem
+    # alterar o princípio "elemento textual mais estável da campanha".
+    "vip": "vip",
+    "moeda": "moeda", "moedas": "moeda",
+    "frete gratis": "frete", "frete grátis": "frete",
+    "aniversario": "aniversario", "aniversário": "aniversario",
+    "relampago": "relampago", "relâmpago": "relampago",
+    "primeira compra": "primeira_compra",
+    "assinante": "assinante", "assinantes": "assinante",
+}
+_RE_TEMA_CAMPANHA = re.compile(
+    r"\b(vip|moedas?|frete\s+gr[aá]tis|anivers[aá]rio|rel[aâ]mpago|"
+    r"primeira\s+compra|assinantes?)\b", re.I)
+
+
+def tema_da_campanha(texto: str) -> str:
+    """
+    [F-C4] Identidade da campanha SEM código (INV-E3): o elemento
+    textual mais estável — o nome que as fontes repetem ao falar da
+    mesma campanha. Sem tema reconhecível → "geral" (bucket temporal
+    da plataforma; tolerância conservadora ratificada, R5).
+    Números NUNCA entram (INV-E2: limites/percentuais são estado).
+    """
+    m = _RE_TEMA_CAMPANHA.search(texto[:_ESCOPO_BENEFICIO])
+    if not m:
+        return "geral"
+    bruto = re.sub(r"\s+", " ", m.group(1).lower())
+    return _TEMAS_CAMPANHA.get(bruto, "geral")
 
 
 def eh_lista_cupons(texto: str) -> bool:
