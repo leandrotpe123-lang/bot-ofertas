@@ -215,6 +215,10 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         log_sys.error(f"❌ montar: {e}")
         return
 
+    # ── RASTRO temporário — remover após diagnóstico ──────────────
+    from pipeline.rastro import rastrear
+    rastrear(bruta, norm, montada)
+
     # ── Camada 5: Publicação ──────────────────────────────────────
     await enviar(montada, norm=norm, enr=enr, is_edit=is_edit)
 
