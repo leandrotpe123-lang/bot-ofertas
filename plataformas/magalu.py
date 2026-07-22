@@ -78,9 +78,21 @@ _HOSTS_CAMPANHA = frozenset({
     "magazineluiza.com.br", "magazinevoce.com.br",
 })
 
-# ── Padrão de extração do identificador de produto ────────────────
-_P_PRODUTO = re.compile(r'/(?:[^/]+/)?p/([a-z0-9]{5,})(?:/|$|[?#])', re.I)
-
+# ── Padrões de extração do identificador de produto ───────────────
+# Rotas OFICIAIS de produto da Magalu. Cada padrão é ancorado numa
+# rota explícita: a ancoragem é requisito de SEGURANÇA, não de
+# estilo. O fragmento [a-z0-9]{5,} casaria segmentos de slug (ex.:
+# "mochila"), de modo que qualquer extração posicional não ancorada
+# produziria falsos positivos — e um falso positivo funde produtos
+# distintos numa mesma entidade: falha silenciosa e destrutiva.
+# Ambas as rotas partilham o MESMO namespace de identificador; a
+# rota do divulgador é apenas outra gramática de URL para o mesmo
+# produto. Para ampliar quando surgir um formato novo, acrescente o
+# padrão aqui — é o ÚNICO lugar de decisão.
+_P_PRODUTO = [
+    re.compile(r'/(?:[^/]+/)?p/([a-z0-9]{5,})(?:/|$|[?#])', re.I),
+    re.compile(r'/divulgador/oferta/([a-z0-9]{5,})(?:/|$|[?#])', re.I),
+]
 
 # ── Parâmetros de rastreamento a remover na limpeza ───────────────
 _PARAMS_REMOVER = frozenset({
@@ -98,6 +110,21 @@ def _bate_dominio(netloc: str, dominios: frozenset) -> bool:
         if netloc == d or netloc.endswith("." + d):
             return True
     return False
+
+
+def _extrair_id_produto(parsed) -> str:
+    """
+    Extrai o identificador de produto da Magalu a partir do caminho,
+    ou cadeia vazia se nenhuma rota oficial de produto casar.
+
+    Pura e determinística. A ordem de _P_PRODUTO é a ordem de
+    precedência: a rota canônica /p/<id> é avaliada primeiro.
+    """
+    for padrao in _P_PRODUTO:
+        m = padrao.search(parsed.path)
+        if m:
+            return m.group(1)
+    return ""
 
 
 def _eh_url_magalu(url: str) -> bool:
@@ -142,9 +169,8 @@ def extrai_identidade(url: str) -> IdentidadeProduto:
         )
 
     parsed = urlparse(url)
-    correspondencia = _P_PRODUTO.search(parsed.path)
-    if correspondencia:
-        id_produto = correspondencia.group(1)
+    id_produto = _extrair_id_produto(parsed)
+    if id_produto:
         return IdentidadeProduto(
             tipo_link=TipoLink.PRODUTO,
             id_produto=id_produto,
