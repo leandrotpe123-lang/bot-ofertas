@@ -222,6 +222,16 @@ def extrair_todos_cupons(texto: str, code_entities: list = None) -> List[str]:
     Extrai todos os cupons distintos presentes em um texto.
     Aplica as mesmas estratégias de `extrair_cupom`, acumulando
     resultados únicos em ordem de descoberta.
+
+    GARANTIA DE LITERALIDADE (contratual):
+      Quando code_entities NÃO é fornecido, todo código devolvido é
+      a forma MAIÚSCULA de um recorte literal do texto de entrada:
+      as quatro estratégias textuais extraem exclusivamente por
+      correspondência sobre o próprio texto. Consumidores que
+      LOCALIZAM o código no texto para aplicar apresentação (ver
+      montagem._crases) dependem desta propriedade. Qualquer
+      evolução que normalize ou transforme o código devolvido DEVE
+      preservá-la ou revisar esses consumidores explicitamente.
     """
     encontrados: List[str] = []
     visto = set()
