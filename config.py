@@ -10,7 +10,7 @@ API_ID         = int(os.environ.get("API_ID", 0))
 API_HASH       = os.environ.get("API_HASH", "")
 SESSION_STRING = os.environ.get("TELEGRAM_SESSION", "")
 GRUPOS_ORIGEM  = [
-    "promotom", "fumotom", "botofera", "fadadoscupons",
+    "promotom", "fumotom", "ofertasconvertidas", "fadadoscupons",
     "SamuelF3lipePromo", "fadapromos",
 ]
     
