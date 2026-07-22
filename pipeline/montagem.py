@@ -14,7 +14,7 @@ from pipeline.normalizacao import (
     _tem_emoji,
 )
 from pipeline.estado_evento import _KW_EVENTO
-from utils.cupom import _FALSO_CUPOM, _KW_CUPOM
+from utils.cupom import _FALSO_CUPOM, _KW_CUPOM, extrair_todos_cupons
 
 # ─────────────────────────────────────────────────────────────────
 # Dataclass de saída
@@ -410,20 +410,24 @@ def _crases(
     if not _KW_CUPOM.search(linha):
         return linha
 
-    def _sub(m: re.Match) -> str:
-        c = m.group(0)
+    # A AUTORIDADE do que é cupom é utils.cupom (MB: soberania do
+    # módulo). A montagem NÃO reconhece cupom — apenas localiza os
+    # literais já reconhecidos e aplica a apresentação do Telegram.
+    # Nenhuma gramática de cupom vive aqui.
+    codigos = extrair_todos_cupons(linha)
 
-        if c in _FALSO_CUPOM or len(c) < 4:
-            return c
+    if not codigos:
+        return linha
 
-        return f"`{c}`"
+    # Mais longos primeiro: evita que um código prefixo de outro
+    # consuma a alternativa antes da forma completa.
+    alvo = sorted(set(codigos), key=len, reverse=True)
 
-    return re.sub(
-        r'\b([A-Z][A-Z0-9_-]{4,20})\b',
-        _sub,
-        linha,
+    padrao = re.compile(
+        r'\b(?:' + "|".join(re.escape(c) for c in alvo) + r')\b'
     )
 
+    return padrao.sub(lambda m: f"`{m.group(0)}`", linha)
 
 # ─────────────────────────────────────────────────────────────────
 # MONTAGEM DE TEXTO
