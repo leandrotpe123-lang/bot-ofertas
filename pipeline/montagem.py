@@ -14,7 +14,7 @@ from pipeline.normalizacao import (
     _tem_emoji,
 )
 from pipeline.estado_evento import _KW_EVENTO
-from utils.cupom import _FALSO_CUPOM, _KW_CUPOM, extrair_todos_cupons
+from utils.cupom import _KW_CUPOM, extrair_todos_cupons
 
 # ─────────────────────────────────────────────────────────────────
 # Dataclass de saída
@@ -512,27 +512,25 @@ def montar_texto(norm: MensagemNormalizada) -> str:
         # ─────────────────────────────────────────────
         if _KW_CUPOM.search(l):
 
-            cupons_linha = re.findall(
-                r'\b([A-Z][A-Z0-9_-]{3,19})\b',
-                l,
-            )
+            # A AUTORIDADE do que é cupom é utils.cupom (MB: soberania
+            # do módulo). A montagem NÃO reconhece cupom — ela apenas
+            # evita repetir visualmente o mesmo código no mesmo post.
+            codigos = extrair_todos_cupons(l)
 
-            cupons_novos = [
-                c for c in cupons_linha
-                if c not in _FALSO_CUPOM
-                and c not in cupons_vistos
-            ]
+            novos = [c for c in codigos if c not in cupons_vistos]
 
-            if cupons_linha and not cupons_novos:
+            # Só suprime quando há cupom REAL e TODOS já foram
+            # renderizados antes. Sem cupom reconhecido, a linha é
+            # preservada: em dúvida, apresentação nunca apaga.
+            if codigos and not novos:
 
                 log_enr.debug(
-                    f"🔁 Cupom duplicado suprimido: {l[:60]}"
+                    f"🔁 [MONTAGEM] Cupom repetido suprimido: {l[:60]}"
                 )
 
                 continue
 
-            cupons_vistos.update(cupons_novos)
-
+            cupons_vistos.update(novos)
         eh_titulo = primeiro
 
         l = _crases(
