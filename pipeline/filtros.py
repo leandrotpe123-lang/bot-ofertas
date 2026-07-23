@@ -207,6 +207,7 @@ _RE_ENUM = re.compile(
     r'|[\u2460-\u2473]'
     r'|\(\s*\d{1,2}\s*\)'
     r'|\d{1,2}\s*[.)\-–]'
+    r'|\d{1,2}\s*(?=https?://)'
     r')\s*'
 )
 
@@ -325,10 +326,13 @@ def _renumerar(blocos: list) -> list:
             # não carrega informação alguma — a linha some.
             blocos[i] = blocos[i][1:]
             continue
+        inline = bool(_RE_URL_BLOCO.match(limpa))
         if len(idx) == 1:
             blocos[i][0] = limpa
         elif usa_emoji and n <= len(_ENUM_EMOJI):
             blocos[i][0] = f"{_ENUM_EMOJI[n - 1]} {limpa}"
+        elif inline:
+            blocos[i][0] = f"{n} {limpa}"
         else:
             blocos[i][0] = f"{n}. {limpa}"
     return blocos
@@ -363,3 +367,34 @@ def filtrar_blocos(texto: str, mapa: dict, preservar=()) -> str:
         saida.extend(b)
         vazio = False
     return "\n".join(saida).strip()
+
+# ══════════════════════════════════════════════════════════════════
+# VETO DE POST — mecânica de canal, não oferta
+# ══════════════════════════════════════════════════════════════════
+# Alguns posts não são ofertas: são mecânica do canal de origem
+# (gerar link por bot, mandar produto no chat) ou benefício restrito
+# a quem é membro daquele grupo. Republicá-los polui o destino e
+# entrega algo que o leitor não consegue usar.
+#
+# As expressões são DELIBERADAMENTE estreitas: exigem a locução
+# inteira, não palavras soltas. "exclusivo" sozinho é comum em
+# oferta legítima ("Cupons exclusivos Shopee VIP") e NÃO veta;
+# apenas "exclusivo do grupo" veta. Mesmo critério para "gere o
+# link" e "mande no chat", que descrevem a mecânica do canal.
+#
+# Na dúvida, publica: só veta com a locução completa presente.
+
+_RE_VETO_POST = re.compile(
+    r'exclusiv[oa]s?\s+d[oe]\s+(?:grupo|canal)'
+    r'|d[oe]\s+(?:grupo|canal)\s+exclusiv'
+    r'|ger(?:e|ar|a)\s+(?:o\s+|seu\s+|um\s+)?link'
+    r'|man(?:de|da|dar)\s+(?:o\s+)?(?:produto\s+)?no\s+chat'
+    r'|envi(?:e|ar)\s+(?:o\s+)?(?:produto\s+)?no\s+chat',
+    re.I,
+)
+
+
+def deve_descartar(texto: str) -> str:
+    """Motivo do veto do post inteiro, ou cadeia vazia se publicável."""
+    m = _RE_VETO_POST.search(_sem_acento(texto or ""))
+    return m.group(0).strip() if m else ""
