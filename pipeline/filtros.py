@@ -2,7 +2,7 @@
 
 Responsabilidade ÚNICA: decidir quais linhas do texto permanecem e
 quais são removidas. NÃO transforma a forma do texto (normalização) e
-NÃO decide o que uma URL é — para isso consulta as autoridades.
+NÃO decide o que uma URL é — para isso consulta as autoridades
 
 ═══════════════════════════════════════════════════════════════════
 PRINCÍPIO DA PRESERVAÇÃO
