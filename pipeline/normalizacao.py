@@ -359,6 +359,12 @@ async def normalizar(
         return None
 
     from pipeline.filtros import filtrar
+    from pipeline.filtros import deve_descartar
+    veto = deve_descartar(bruta.texto)
+    if veto:
+        log_nrm.info(f"🚫 Post vetado | motivo='{veto}' | @{bruta.chat}")
+        return None
+
     texto_limpo = filtrar(limpar_texto(bruta.texto))
     if not tem_contexto(texto_limpo):
         return None
