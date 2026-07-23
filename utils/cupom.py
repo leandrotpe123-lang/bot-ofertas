@@ -263,9 +263,27 @@ def extrair_todos_cupons(texto: str, code_entities: list = None) -> List[str]:
                 add(m.group(1))
 
     if _KW_CUPOM.search(texto):
-        for linha in texto.splitlines():
-            if _KW_CUPOM.search(linha):
-                for m in _KW_COD.finditer(linha):
+        # [F-C2] Estratégia 4 SIMÉTRICA a extrair_cupom (:207-216): a
+        # mesma janela de 4 linhas após a keyword. R3/INV-E1 — o código
+        # é a identidade da campanha independente de o formato colocá-lo
+        # na linha da keyword ou nas seguintes. Assimetria anterior fazia
+        # o MESMO cupom nascer com identidades diferentes por formato.
+        #
+        # ⚠️ NÃO REVERTER SEM REVISÃO DE MB. Esta simetria não é
+        # heurística opcional de extração: os códigos que ela torna
+        # visíveis alimentam REGRAS DE NEGÓCIO RATIFICADAS —
+        #   · R3  — mesmo código = mesma campanha (convergência entre
+        #           formatos; é o que faz 2 posts virarem 1);
+        #   · R2+ — post com 2+ códigos e sem preço de item é oferta de
+        #           LOJA, não de produto (identidade_oferta:
+        #           _eh_entidade_cupom). Reverter a simetria desliga
+        #           silenciosamente o R2+ nos formatos multilinha.
+        linhas = texto.splitlines()
+        for i, linha in enumerate(linhas):
+            if not _KW_CUPOM.search(linha):
+                continue
+            for j in range(i, min(i + 4, len(linhas))):
+                for m in _KW_COD.finditer(linhas[j]):
                     add(m.group(1))
 
     return encontrados
