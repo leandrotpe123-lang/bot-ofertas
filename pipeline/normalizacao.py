@@ -77,27 +77,6 @@ __all__ = [
 # LIMPEZA DE TEXTO
 # ─────────────────────────────────────────────────────────────────
 _RE_INVISIVEIS = re.compile(r'[\u200b\u200c\u200d\u00a0\u2060\ufeff]')
-_RE_GRUPO_EXT  = re.compile(
-    r'https?://(?:t\.me|telegram\.me|telegram\.org|chat\.whatsapp\.com)[^\s]*',
-    re.I,
-)
-_RE_LIXO_STRUCT = re.compile(
-    r'^\s*(?:-?\s*An[uú]ncio|Publicidade|:::+|---+|===+)\s*$',
-    re.I,
-)
-_RE_CTA = re.compile(
-    r'^\s*(?:link\s+(?:do\s+)?produto|link\s+da\s+oferta|resgate\s+aqui|'
-    r'clique\s+aqui|acesse\s+aqui|compre\s+aqui|grupo\s+vip|'
-    r'entrar\s+no\s+grupo|acessar\s+grupo)\s*:?\s*$',
-    re.I,
-)
-_RE_REDES = re.compile(
-    r'^\s*(?:redes\s+\w+|[-–]\s*grupo\s*(?:cupons?|promoções?|vip)?\s*:?\s*$|'
-    r'[-–]\s*(?:chat|twitter|whatsapp|instagram|tiktok|youtube)\s*:?\s*$|'
-    r'acesse\s+nossas\s+redes)',
-    re.I,
-)
-_RE_ROTULO    = re.compile(r'^\s*[-–•]\s*\w[\w\s]{0,30}:\s*$')
 _RE_EMOJI_CHK = re.compile(
     r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF\u2B50\u2B55]"
 )
@@ -107,65 +86,16 @@ def _tem_emoji(s: str) -> bool:
     return bool(_RE_EMOJI_CHK.search(s))
 
 
-def _eh_header_canal(linha: str) -> bool:
-    l = linha.strip()
-    if not l or _tem_emoji(l[0]):
-        return False
-    if re.match(r'^[A-ZÀ-Ú][\w\s]{2,30}\s*/\s*[\w\s]{2,30}', l):
-        return True
-    if re.match(r'^[A-ZÀÁÂÃÉÊÍÓÔÕÚ\s]{4,30}[\s🔥💥⚡🚀]+$', l, re.UNICODE):
-        return True
-    return False
-
-
 def limpar_texto(texto: str) -> str:
+    """Normaliza a FORMA do texto: remove caracteres invisíveis e
+    unifica quebras de linha. NÃO decide política de conteúdo — isso
+    é de pipeline.filtros, consumido em `normalizar`.
     """
-    Remove ruído estrutural do texto: caracteres invisíveis, headers
-    de canal, blocos de redes sociais, chamadas para ação vazias e
-    links para grupos externos. Preserva o conteúdo promocional.
-    """
-    texto = (
+    return (
         _RE_INVISIVEIS.sub(" ", texto)
         .replace("\r\n", "\n")
         .replace("\r", "\n")
     )
-    linhas = texto.split("\n")
-    saida: List[str] = []
-    vazio = False
-    em_redes = False
-    primeira = True
-    for linha in linhas:
-        l = linha.strip()
-        if not l:
-            if not vazio:
-                saida.append("")
-            vazio = True
-            em_redes = False
-            continue
-        vazio = False
-        if primeira:
-            primeira = False
-            if _eh_header_canal(l):
-                continue
-        if _RE_REDES.match(l):
-            em_redes = True
-            continue
-        if em_redes:
-            if _RE_ROTULO.match(l) or not l:
-                continue
-            if not re.match(r'https?://', l):
-                em_redes = False
-            else:
-                continue
-        if _RE_CTA.match(l) or _RE_LIXO_STRUCT.match(l):
-            continue
-        if _RE_GRUPO_EXT.search(l):
-            l = _RE_GRUPO_EXT.sub("", l).strip()
-            if not l:
-                continue
-        saida.append(l)
-    return "\n".join(saida).strip()
-
 
 # ─────────────────────────────────────────────────────────────────
 # VIABILIDADE DO TEXTO
@@ -428,7 +358,8 @@ async def normalizar(
     if not bruta.texto.strip():
         return None
 
-    texto_limpo = limpar_texto(bruta.texto)
+    from pipeline.filtros import filtrar
+    texto_limpo = filtrar(limpar_texto(bruta.texto))
     if not tem_contexto(texto_limpo):
         return None
 
