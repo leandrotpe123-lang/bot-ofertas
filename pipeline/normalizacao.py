@@ -449,6 +449,13 @@ async def normalizar(
     # de identidade e este ponto sem revisão arquitetural.
     mapa_publicacao, n_encurtadas = _encurtar_mapa(mapa)
 
+    # Política de bloco: só permanece o bloco que gerou oferta
+    # publicável. Depende do mapa de publicação, por isso roda
+    # aqui e não junto da filtragem de linha.
+    from pipeline.filtros import filtrar_blocos
+    texto_limpo = filtrar_blocos(
+        texto_limpo, mapa_publicacao, preservar_lst)
+
     log_nrm.info(
     f"✅ {len(mapa_publicacao)}/{len(converter)} | "
     f"plat={plat_dom or 'none'} cupom='{cupom}' sku={sku} "
