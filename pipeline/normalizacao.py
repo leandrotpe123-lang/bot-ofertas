@@ -437,6 +437,21 @@ async def normalizar(
 
     sku = ids_globais[0] if ids_globais else ""
 
+    # [F-C2 / R3-adendo] CONSOLIDAÇÃO: um identificador da própria
+    # entidade observada nunca é outra entidade. Código que coincide
+    # com um id de produto derivado DESTE post é o mesmo produto visto
+    # por outro ângulo — não entra na identidade nem na memória de
+    # cupons. Comparação genérica contra ids_globais: esta é a única
+    # camada onde os dois fatos coexistem, e nenhuma plataforma,
+    # prefixo ou formato é assumido.
+    if ids_globais:
+        _ids_da_entidade = {i.upper() for i in ids_globais}
+        cupons = [c for c in cupons if c.upper() not in _ids_da_entidade]
+        if cupom and cupom.upper() in _ids_da_entidade:
+            # Recua para o primeiro cupom legítimo (já consolidado),
+            # em vez de zerar: o post pode ter cupom real além do id.
+            cupom = cupons[0] if cupons else ""
+
     # Identidade de campanha: chave_campanha e tem_host_campanha
     # DEVEM derivar da mesma população de URLs — as URLs de campanha
     # — para que sejam coerentes entre si. A chave_campanha jamais
