@@ -263,11 +263,11 @@ def extrair_todos_cupons(texto: str, code_entities: list = None) -> List[str]:
                 add(m.group(1))
 
     if _KW_CUPOM.search(texto):
-        # [F-C2] Estratégia 4 SIMÉTRICA a extrair_cupom (:207-216): a
-        # mesma janela de 4 linhas após a keyword. R3/INV-E1 — o código
-        # é a identidade da campanha independente de o formato colocá-lo
-        # na linha da keyword ou nas seguintes. Assimetria anterior fazia
-        # o MESMO cupom nascer com identidades diferentes por formato.
+        # [F-C2] Estratégia 4 SIMÉTRICA a extrair_cupom: a mesma janela
+        # de 4 linhas após a keyword. R3/INV-E1 — o código é a identidade
+        # da campanha independente de o formato colocá-lo na linha da
+        # keyword ou nas seguintes. A assimetria anterior fazia o MESMO
+        # cupom nascer com identidades diferentes por formato.
         #
         # ⚠️ NÃO REVERTER SEM REVISÃO DE MB. Esta simetria não é
         # heurística opcional de extração: os códigos que ela torna
