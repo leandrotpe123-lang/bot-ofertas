@@ -15,6 +15,7 @@ from pipeline.normalizacao import (
 )
 from pipeline.estado_evento import _KW_EVENTO
 from utils.cupom import _KW_CUPOM, extrair_todos_cupons
+from utils import marcacao
 
 # ─────────────────────────────────────────────────────────────────
 # Dataclass de saída
@@ -289,13 +290,7 @@ def _proteger_url_md(url: str) -> str:
     Protege URLs contra interpretação de Markdown do Telegram.
     """
 
-    return (
-        url.replace('\\', '\\\\')
-           .replace('*', '\\*')
-           .replace('`', '\\`')
-           .replace('[', '\\[')
-    )
-
+    return marcacao.proteger_url(url)
 
 # ─────────────────────────────────────────────────────────────────
 # MOTOR SEMÂNTICO PROFISSIONAL
@@ -404,30 +399,17 @@ def _crases(
     eh_titulo: bool = False,
 ) -> str:
 
-    if "http" in linha or eh_titulo or "`" in linha:
-        return linha
-
-    if not _KW_CUPOM.search(linha):
+    if eh_titulo:
         return linha
 
     # A AUTORIDADE do que é cupom é utils.cupom (MB: soberania do
-    # módulo). A montagem NÃO reconhece cupom — apenas localiza os
-    # literais já reconhecidos e aplica a apresentação do Telegram.
-    # Nenhuma gramática de cupom vive aqui.
-    codigos = extrair_todos_cupons(linha)
-
-    if not codigos:
+    # módulo). A montagem NÃO reconhece cupom e NÃO conhece o dialeto
+    # do Telegram: consulta a autoridade e entrega os literais a
+    # utils.marcacao, que aplica a apresentação.
+    if not _KW_CUPOM.search(linha):
         return linha
 
-    # Mais longos primeiro: evita que um código prefixo de outro
-    # consuma a alternativa antes da forma completa.
-    alvo = sorted(set(codigos), key=len, reverse=True)
-
-    padrao = re.compile(
-        r'\b(?:' + "|".join(re.escape(c) for c in alvo) + r')\b'
-    )
-
-    return padrao.sub(lambda m: f"`{m.group(0)}`", linha)
+    return marcacao.codigo(linha, extrair_todos_cupons(linha))
 
 # ─────────────────────────────────────────────────────────────────
 # MONTAGEM DE TEXTO
@@ -538,7 +520,12 @@ def montar_texto(norm: MensagemNormalizada) -> str:
             eh_titulo=eh_titulo,
         )
 
-        if not _tem_emoji(l):
+        # Item semântico: a linha carrega classificação — emoji posto
+        # pelo divulgador na origem, ou atribuído pelo motor semântico.
+        # É este fato, e não a forma do texto, que habilita o negrito.
+        eh_item = _tem_emoji(l)
+
+        if not eh_item:
 
             emoji = _emoji_linha(
                 l,
@@ -552,8 +539,13 @@ def montar_texto(norm: MensagemNormalizada) -> str:
 
             if emoji:
                 l = f"{emoji} {l}"
+                eh_item = True
 
         primeiro = False
+
+        # Marcação terminal: nenhuma camada semântica lê o texto depois
+        # daqui (I-M1). A elegibilidade é o veredito acima (I-M7).
+        l = marcacao.negrito(l, eh_item)
 
         saida.append(l)
 
