@@ -16,6 +16,7 @@ from pipeline.normalizacao import (
 from pipeline.estado_evento import _KW_EVENTO
 from utils.cupom import _KW_CUPOM, extrair_todos_cupons
 from utils import marcacao
+from pipeline import papel
 
 # ─────────────────────────────────────────────────────────────────
 # Dataclass de saída
@@ -56,6 +57,28 @@ class MensagemMontada:
 # ─────────────────────────────────────────────────────────────────
 # EMOJIS FIXOS
 # ─────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────
+# PALETA — PAPEL → EMOJI
+#
+# Ratificada contra o corpus do canal de referência. Trocar um emoji
+# é editar esta tabela: a classificação vive em pipeline.papel e não
+# é tocada. Papel sem entrada aqui não recebe emoji nem negrito.
+# ─────────────────────────────────────────────────────────────────
+_EMOJI_POR_PAPEL: Dict[str, str] = {
+    papel.TITULO:   "🔥",
+    papel.PRECO:    "💵",
+    papel.CUPOM:    "🎟",
+    papel.RESGATE:  "⭐",
+    papel.PARCELA:  "⭐",
+    papel.LINK:     "✅",
+    papel.VARIANTE: "🔹",
+    papel.CARRINHO: "🛒",
+    papel.FRETE:    "🚚",
+    papel.AVISO:    "⚠️",
+    papel.GATILHO:  "",
+}
+
 
 _EMOJI_TITULO_OFERTA = "🔥"
 _EMOJI_TITULO_CUPOM  = "🚨"
@@ -304,94 +327,33 @@ def _emoji_linha(
     total_bloco: int = 0,
     linha_anterior: str = "",
     proxima_linha: str = "",
+    proxima_conteudo: str = "",
 ) -> Optional[str]:
+    """
+    Adaptador puro: consulta o papel e devolve o emoji da paleta.
+
+    NÃO classifica. A autoridade sobre o que a linha é pertence a
+    pipeline.papel. Aqui só existe a tradução papel → desenho.
+    """
 
     l = (linha or "").strip()
 
     if not l:
         return None
 
-    # Já possui emoji manual
+    # Emoji posto pelo divulgador na origem é preservado.
     if _tem_emoji(l):
         return None
 
-    # ═══════════════════════════════════════════════════════════
-    # TÍTULOS
-    # ═══════════════════════════════════════════════════════════
-    if eh_titulo:
+    p = papel.classificar(
+        l,
+        eh_titulo=eh_titulo,
+        is_multi=is_multi,
+        proxima_linha=proxima_linha,
+        proxima_conteudo=proxima_conteudo,
+    )
 
-        if _eh_titulo_evento(l):
-            return _EMOJI_TITULO_EVENTO
-
-        if _eh_titulo_cupom(l):
-            return _EMOJI_TITULO_CUPOM
-
-        return _EMOJI_TITULO_OFERTA
-
-    # ═══════════════════════════════════════════════════════════
-    # CARRINHO
-    # ═══════════════════════════════════════════════════════════
-    if _KW_CARRINHO.search(l):
-        return _EMOJI_CARRINHO
-
-    # ═══════════════════════════════════════════════════════════
-    # PARCELAMENTO
-    # ═══════════════════════════════════════════════════════════
-    if _KW_PARCELA.search(l):
-        return _EMOJI_PARCELA
-
-    # ═══════════════════════════════════════════════════════════
-    # FRETE
-    # ═══════════════════════════════════════════════════════════
-    if _KW_FRETE.search(l):
-        return _EMOJI_FRETE
-
-    # ═══════════════════════════════════════════════════════════
-    # RESGATE
-    # PRIORIDADE ALTA
-    # ═══════════════════════════════════════════════════════════
-    if _KW_RESGATE.search(l):
-        return _EMOJI_RESGATE
-
-    # ═══════════════════════════════════════════════════════════
-    # LINKS
-    # ═══════════════════════════════════════════════════════════
-    if _KW_LINK_PROD.search(l):
-        return _EMOJI_LINK
-
-    # ═══════════════════════════════════════════════════════════
-    # DESCONTO / CUPOM / CASHBACK
-    # ═══════════════════════════════════════════════════════════
-    if _eh_linha_cupom(l):
-        return _EMOJI_DESCONTO
-
-    # ═══════════════════════════════════════════════════════════
-    # MULTI-ITEM
-    #
-    # Contexto:
-    #   bloco multi-produto
-    #   OU linha variante/preço
-    # ═══════════════════════════════════════════════════════════
-    if is_multi and _eh_multi_item_real(l):
-        return _EMOJI_MULTI
-
-    # Contexto adicional:
-    # Se linha anterior foi desconto/cupom
-    # e próxima linha é URL,
-    # provavelmente é bloco variante.
-    if (
-        _eh_multi_item_real(l)
-        and _RE_URL_RENDER.search(proxima_linha or "")
-    ):
-        return _EMOJI_MULTI
-
-    # ═══════════════════════════════════════════════════════════
-    # PREÇO PURO
-    # ═══════════════════════════════════════════════════════════
-    if _eh_preco_puro(l):
-        return _EMOJI_PRECO
-
-    return None
+    return _EMOJI_POR_PAPEL.get(p) or None
 
 
 def _crases(
@@ -440,6 +402,11 @@ def montar_texto(norm: MensagemNormalizada) -> str:
 
         linha_anterior = linhas[idx - 1] if idx > 0 else ""
         proxima_linha  = linhas[idx + 1] if idx + 1 < total_linhas else ""
+
+        proxima_conteudo = next(
+            (x.strip() for x in linhas[idx + 1:] if x.strip()),
+            "",
+        )
 
         if not l:
             saida.append("")
@@ -535,6 +502,7 @@ def montar_texto(norm: MensagemNormalizada) -> str:
                 total_bloco=total_linhas,
                 linha_anterior=linha_anterior,
                 proxima_linha=proxima_linha,
+                proxima_conteudo=proxima_conteudo,
             )
 
             if emoji:
