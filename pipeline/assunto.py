@@ -339,12 +339,69 @@ _RE_DESC_VAL = re.compile(
     r"r\$\s*\d+[.,]?\d*\s*(?:de\s+)?(?:off|desc)", re.I)
 
 
+# ══════════ CONDIÇÃO DO BENEFÍCIO — PONTO ÚNICO DE EVOLUÇÃO ══════════
+# [F-C6] Hipótese de implementação.
+# Derivada do corpus observado em produção.
+# Se validada, poderá originar uma regra oficial do MB.
+#   "Valor monetário usado como CONDIÇÃO para o benefício (compra
+#    mínima ou limite do desconto) não deve ser interpretado como
+#    preço do produto."
+# O CONCEITO é o que importa; as formas abaixo são apenas como os
+# grupos o escrevem hoje. Toda evolução de vocabulário acontece AQUI —
+# em nenhum outro ponto do código.
+#
+# Cada forma implementada tem evidência em mensagem real de produção:
+_COND_PISO = (          # piso: compra mínima para o cupom valer
+    "em",               # Shopee/Amazon: "R$129 OFF em R$599: AQU3C808AF"
+    "acima de",         # Mercado Livre: "R$100 OFF acima de R$899"
+)
+_COND_TETO = (          # teto: desconto máximo concedido
+    "limite",           # ML/Shopee: "15% OFF acima de R$79, limite R$60"
+)
+# Mesmo papel semântico, porém SEM evidência no corpus de produção.
+# NÃO implementadas por decisão explícita: o vocabulário evolui por
+# observação, nunca por antecipação. Ao aparecer em mensagem real,
+# mover a forma para _COND_PISO/_COND_TETO — e mais nada muda.
+_COND_EXPANSAO_FUTURA = (
+    "a partir de", "nas compras de", "em pedidos de", "mínimo",
+    "limitado a", "até", "máximo", "para compras de",
+)
+
+_RE_COND_BENEFICIO = re.compile(
+    r"\b(?:" + "|".join(f.replace(" ", r"\s+")
+                        for f in _COND_PISO + _COND_TETO)
+    + r")\s*(r?\$)", re.I)
+
+
+def _condicoes_do_beneficio(t: str) -> set:
+    """Posições dos valores que são CONDIÇÃO de um benefício.
+    O marcador (piso/teto) só qualifica quando há benefício ANTES dele
+    na mesma linha — a condição é *do benefício*. Sem benefício, "em
+    R$899" é preço ("sai em R$899"), não compra mínima. Fidelidade ao
+    conceito, sem ampliar vocabulário."""
+    pos = set()
+    base = 0
+    for linha in t.splitlines(keepends=True):
+        for m in _RE_COND_BENEFICIO.finditer(linha):
+            antes = linha[:m.start()]
+            if (_RE_BEN_PCT.search(antes) or _RE_DESC_VAL.search(antes)
+                    or _RE_BEN_FRETE.search(antes)):
+                pos.add(base + m.start(1))
+        base += len(linha)
+    return pos
+
+
 def tem_preco_de_item(t: str) -> bool:
-    """Existe valor R$ que não seja desconto (OFF)?"""
+    """Existe valor R$ que seja preço do PRODUTO — isto é, que não seja
+    desconto (OFF) nem condição do benefício (piso/teto)?"""
     descontos = {m.start() for m in _RE_DESC_VAL.finditer(t)}
+    condicoes = _condicoes_do_beneficio(t)
     for m in _RE_PRECO_ITEM.finditer(t):
-        if not any(abs(m.start() - d) <= 4 for d in descontos):
-            return True
+        if any(abs(m.start() - d) <= 4 for d in descontos):
+            continue
+        if any(abs(m.start() - c) <= 2 for c in condicoes):
+            continue
+        return True
     return False
 
 
