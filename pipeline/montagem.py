@@ -242,6 +242,12 @@ _RE_ANUNCIO = re.compile(
     re.I,
 )
 
+# Bullet de origem (traço/ponto) que alguns canais colam antes de
+# linhas estruturais ("-Resgate", "-Link produto"). Removido APENAS
+# quando um emoji é prefixado — assim gatilho ("-PREÇÃO, ainda tem!")
+# e specs ("-i5 1334U...") preservam o traço.
+_RE_BULLET_PREFIXO = re.compile(r'^\s*[-–—•·]\s*')
+
 _RE_URL_RENDER = re.compile(
     r'https?://[^\s\)\]>,"\'<\u200b\u200c]+'
 )
@@ -506,6 +512,7 @@ def montar_texto(norm: MensagemNormalizada) -> str:
             )
 
             if emoji:
+                l = _RE_BULLET_PREFIXO.sub("", l)
                 l = f"{emoji} {l}"
                 eh_item = True
 
