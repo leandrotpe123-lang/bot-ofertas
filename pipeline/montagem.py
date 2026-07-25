@@ -105,6 +105,16 @@ _RE_ANUNCIO = re.compile(
 # e specs ("-i5 1334U...") preservam o traço.
 _RE_BULLET_PREFIXO = re.compile(r'^\s*[-–—•·]\s*')
 
+# Bullet colado logo APÓS um emoji vindo da origem ("🎟 -Shopee").
+# A F-P1 só limpa quando o bot atribui o emoji; quando o emoji já veio
+# da origem, a linha é preservada por _tem_emoji e o traço sobra. Aqui
+# o traço é removido só quando está imediatamente após o emoji — traço
+# de conteúdo ("🔹 Item - R$ 110", faixa de preço) não é tocado.
+_RE_EMOJI_BULLET = re.compile(
+    r'^([\U0001F300-\U0001FAFF\U00002600-\U000027BF'
+    r'\U0001F900-\U0001F9FF\u2B50\u2B55]\uFE0F?\s+)[-–—•·]\s*'
+)
+
 _RE_URL_RENDER = re.compile(
     r'https?://[^\s\)\]>,"\'<\u200b\u200c]+'
 )
@@ -318,6 +328,10 @@ def montar_texto(norm: MensagemNormalizada) -> str:
                 l = _RE_BULLET_PREFIXO.sub("", l)
                 l = f"{emoji} {l}"
                 eh_item = True
+
+        else:
+            # Emoji veio da origem: limpa bullet colado logo após ele.
+            l = _RE_EMOJI_BULLET.sub(r"\1", l)
 
         primeiro = False
 
