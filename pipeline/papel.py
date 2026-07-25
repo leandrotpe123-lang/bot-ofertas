@@ -27,6 +27,11 @@ I-P3  CUPOM vence RESGATE. Provado por corpus: "Resgate todos os
       cupons desta página" é cupom; "Resgate aqui" é resgate. A
       presença de âncora de cupom decide, não o verbo.
 
+I-P7  Ponteiro de resgate não repete cupom. "Resgate o cupom aqui:"
+      aponta para um cupom já declarado — é RESGATE. Só quando a linha
+      é ponteiro "aqui" E não traz benefício próprio; com benefício
+      ("20% OFF") ou sem "aqui" ("do anúncio"), permanece CUPOM.
+
 I-P4  Âncora forte, nunca verbo solto. Vocabulário só admite termo
       que identifique o papel sozinho. Verbo genérico ("acesse",
       "clique", "ative") classifica descrição livre como se fosse
@@ -94,6 +99,24 @@ _RE_CUPOM_FORTE = re.compile(
 # Âncora FRACA: só classifica quando a linha não é monetária.
 # "R$ 15 - Desconto na Finalização" é PREÇO, não cupom.
 _RE_CUPOM_FRACA = re.compile(r'\bdesconto\b', re.I)
+
+# Benefício próprio: percentual/valor de desconto declarado NA linha.
+# É o que distingue uma linha que DECLARA um cupom de uma que só
+# aponta para onde resgatá-lo.
+_RE_BENEFICIO = re.compile(
+    r'('
+    r'\d+\s*%\s*off|'
+    r'r\$\s*[\d.,]+\s*off|'
+    r'off\s+em\s+r\$|'
+    r'off\s+acima|'
+    r'off\s+sem\s+m[ií]nimo|'
+    r'limite\s*r\$'
+    r')',
+    re.I,
+)
+
+# Ponteiro de resgate "aqui": "Resgate ... aqui".
+_RE_RESGATE_APONTA = re.compile(r'\bresgat\w*\b.*\baqui\b', re.I)
 
 _RE_PARCELA = re.compile(r'\b\d+\s*x\s*sem\s+juros\b', re.I)
 
@@ -169,6 +192,13 @@ def classificar(
     if eh_titulo:
         return TITULO
 
+    # ── AVISO ──────────────────────────────────────────────────
+    # Antes de CUPOM: "Importante! Aplique os Cupons..." é aviso,
+    # apesar de conter âncora de cupom. A âncora é o INÍCIO da
+    # linha, o que a torna estreita o bastante para vir primeiro.
+    if _RE_AVISO.match(l):
+        return AVISO
+
     # ── CARRINHO ───────────────────────────────────────────────
     if _RE_CARRINHO.match(l):
         return CARRINHO
@@ -185,6 +215,17 @@ def classificar(
     # ── CUPOM (âncora forte) ───────────────────────────────────
     # ANTES de RESGATE (I-P3).
     if _RE_CUPOM_FORTE.search(l):
+
+        # Exceção (I-P7): ponteiro de resgate "Resgate o cupom aqui:"
+        # menciona cupom mas NÃO declara benefício próprio — ele aponta
+        # para um cupom declarado noutra linha. É RESGATE, não repete o
+        # 🎟. A âncora "aqui" + ausência de benefício é o que separa de
+        # "Resgate cupom 20% OFF aqui:" (tem benefício → CUPOM) e de
+        # "Resgate todos os cupons desta página:" (não é ponteiro
+        # "aqui" → CUPOM).
+        if _RE_RESGATE_APONTA.search(l) and not _RE_BENEFICIO.search(l):
+            return RESGATE
+
         return CUPOM
 
     # ── PREÇO ──────────────────────────────────────────────────
@@ -205,10 +246,6 @@ def classificar(
     if _RE_LINK.search(l):
         return LINK
 
-    # ── AVISO ──────────────────────────────────────────────────
-    if _RE_AVISO.match(l):
-        return AVISO
-
     # ── VARIANTE ───────────────────────────────────────────────
     if is_multi and _RE_VARIANTE.search(l):
         return VARIANTE
@@ -217,4 +254,3 @@ def classificar(
         return VARIANTE
 
     return None
-
