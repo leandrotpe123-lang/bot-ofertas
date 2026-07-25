@@ -13,7 +13,6 @@ from pipeline.normalizacao import (
     MensagemNormalizada,
     _tem_emoji,
 )
-from pipeline.estado_evento import _KW_EVENTO
 from utils.cupom import _KW_CUPOM, extrair_todos_cupons
 from utils import marcacao
 from pipeline import papel
@@ -80,57 +79,6 @@ _EMOJI_POR_PAPEL: Dict[str, str] = {
 }
 
 
-_EMOJI_TITULO_OFERTA = "🔥"
-_EMOJI_TITULO_CUPOM  = "🚨"
-_EMOJI_TITULO_EVENTO = "⚠️"
-
-_EMOJI_DESCONTO = "🎟"
-_EMOJI_PRECO    = "💵"
-
-_EMOJI_RESGATE  = "🎯"
-_EMOJI_LINK     = "✅"
-
-_EMOJI_MULTI    = "🔹"
-_EMOJI_CARRINHO = "🛒"
-
-_EMOJI_FRETE    = "🚚"
-_EMOJI_PARCELA  = "💳"
-
-
-# Compatibilidade retroativa
-_EMJ: Dict[str, List[str]] = {
-    "titulo_oferta": [_EMOJI_TITULO_OFERTA],
-    "titulo_cupom":  [_EMOJI_TITULO_CUPOM],
-    "titulo_evento": [_EMOJI_TITULO_EVENTO],
-
-    "desconto":      [_EMOJI_DESCONTO],
-    "preco_produto": [_EMOJI_PRECO],
-
-    "resgate":       [_EMOJI_RESGATE],
-    "carrinho":      [_EMOJI_CARRINHO],
-
-    "frete":         [_EMOJI_FRETE],
-    "multi_item":    [_EMOJI_MULTI],
-
-    "link_prod":     [_EMOJI_LINK],
-
-    "parcelamento":  [_EMOJI_PARCELA],
-}
-
-_EMJ_IDX: Dict[str, int] = {k: 0 for k in _EMJ}
-
-
-def _prox_emoji(cat: str) -> str:
-    """
-    Compatibilidade retroativa.
-    Mantido para não quebrar chamadas antigas.
-    """
-    try:
-        return _EMJ[cat][0]
-    except Exception:
-        return ""
-
-
 # ─────────────────────────────────────────────────────────────────
 # REGEX
 # PRIORIDADE IMPORTA
@@ -138,97 +86,6 @@ def _prox_emoji(cat: str) -> str:
 
 _KW_PRECO = re.compile(
     r'^\s*r\$\s*[\d.,]+',
-    re.I,
-)
-
-_KW_DESCONTO = re.compile(
-    r'\b('
-    r'cupom|'
-    r'cupons|'
-    r'cashback|'
-    r'c[oó]digo|'
-    r'desconto|'
-    r'resgate\s+todos\s+os\s+cupons|'
-    r'\d+\s*%\s*off|'
-    r'r\$\s*[\d.,]+\s*off|'
-    r'off\s+em\s+r\$|'
-    r'limite\s*r\$'
-    r')\b',
-    re.I,
-)
-
-_KW_FRETE = re.compile(
-    r'\b('
-    r'frete\s+gr[aá]tis|'
-    r'frete\s+gr[aá]t|'
-    r'entrega\s+gr[aá]tis|'
-    r'sem\s+frete|'
-    r'frete\s+0'
-    r')\b',
-    re.I,
-)
-
-_KW_RESGATE = re.compile(
-    r'\b('
-    r'resgate|'
-    r'resgatar|'
-    r'acesse|'
-    r'ative|'
-    r'ativar|'
-    r'use\s+o\s+cupom|'
-    r'pegue\s+aqui'
-    r')\b',
-    re.I,
-)
-
-_KW_CARRINHO = re.compile(
-    r'\b(?:carrinho|cart)\b',
-    re.I,
-)
-
-_KW_LINK_PROD = re.compile(
-    r'\b('
-    r'link\s+produto|'
-    r'link\s+oferta|'
-    r'link\s+lista|'
-    r'clique|'
-    r'mostrar\s+mais|'
-    r'teste\s+aqui|'
-    r'veja\s+aqui|'
-    r'acessar'
-    r')\b',
-    re.I,
-)
-
-_KW_PARCELA = re.compile(
-    r'\b\d+\s*x\s*sem\s+juros\b',
-    re.I,
-)
-
-# Ex:
-# 8/256GB - R$ 1599
-# Branco - R$ 99
-# Azul - R$ 120
-_KW_MULTI_ITEM = re.compile(
-    r'^('
-    r'\d+\/\d+\s*gb|'
-    r'\d+\/\d+|'
-    r'[a-zà-ÿ0-9\s\-\+]{2,50}\s*[-–]\s*r\$'
-    r')',
-    re.I,
-)
-
-_KW_URGENCIA = re.compile(
-    r'\b('
-    r'esgotando|'
-    r'últimas?\s+unidades|'
-    r'acabando|'
-    r'corre|'
-    r'corra|'
-    r'voando|'
-    r'pre[cç][aã]o|'
-    r'por\s+tempo\s+limitado'
-    r')\b',
     re.I,
 )
 
@@ -252,66 +109,12 @@ _RE_URL_RENDER = re.compile(
     r'https?://[^\s\)\]>,"\'<\u200b\u200c]+'
 )
 
-_RE_JA_EMOJI = re.compile(
-    r'^[🎟💵⭐✅🔹🛒🚚💳🔥🚨⚠️]'
-)
-
-
 # ─────────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────────
 
 def _contar_produtos(texto: str) -> int:
     return sum(1 for l in texto.splitlines() if _KW_PRECO.search(l))
-
-
-def _eh_linha_cupom(linha: str) -> bool:
-    return bool(
-        _KW_DESCONTO.search(linha)
-        or _KW_CUPOM.search(linha)
-    )
-
-
-def _eh_preco_puro(linha: str) -> bool:
-    """
-    Detecta linha monetária REAL.
-
-    Ex:
-      R$ 599
-      R$ 1299 no pix
-
-    NÃO:
-      R$ 100 OFF
-    """
-
-    l = linha.strip()
-
-    if _eh_linha_cupom(l):
-        return False
-
-    return bool(_KW_PRECO.search(l))
-
-
-def _eh_multi_item_real(linha: str) -> bool:
-    return bool(_KW_MULTI_ITEM.search(linha))
-
-
-def _eh_titulo_evento(linha: str) -> bool:
-    return bool(_KW_EVENTO.search(linha))
-
-
-def _eh_titulo_cupom(linha: str) -> bool:
-    return bool(_KW_CUPOM.search(linha))
-
-
-def _normalizar_linha_contexto(linha: str) -> str:
-    """
-    Normalização leve para análise semântica.
-
-    NÃO altera render final.
-    """
-
-    return re.sub(r'\s+', ' ', linha.strip().lower())
 
 
 def _proteger_url_md(url: str) -> str:
