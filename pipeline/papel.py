@@ -118,6 +118,22 @@ _RE_BENEFICIO = re.compile(
 # Ponteiro de resgate "aqui": "Resgate ... aqui".
 _RE_RESGATE_APONTA = re.compile(r'\bresgat\w*\b.*\baqui\b', re.I)
 
+# Início estrutural: a linha COMEÇA com uma declaração de cupom
+# (Cupom:, código, benefício "X% OFF"/"R$ Y OFF") ou com uma ação
+# (Resgate...). Frase descritiva que apenas MENCIONA cupom no meio
+# ("Shopee está dando cupom de 15% OFF...") começa com um sujeito e
+# NÃO casa — deixa de ser cupom e vira texto livre (sem emoji/negrito,
+# traço da origem preservado), como no canal de referência.
+_RE_INICIO_ESTRUTURAL = re.compile(
+    r'^[\s\-–—•·]*('
+    r'cupom|cupons|c[oó]digo|voucher|cashback|'
+    r'resgat\w*|'
+    r'\d+\s*%\s*off|r\$\s*[\d.,]+\s*off|'
+    r'ganhe\b'
+    r')',
+    re.I,
+)
+
 _RE_PARCELA = re.compile(r'\b\d+\s*x\s*sem\s+juros\b', re.I)
 
 _RE_FRETE = re.compile(
@@ -213,9 +229,11 @@ def classificar(
     if _RE_FRETE.search(l):
         return FRETE
 
-    # ── CUPOM (âncora forte) ───────────────────────────────────
-    # ANTES de RESGATE (I-P3).
-    if _RE_CUPOM_FORTE.search(l):
+    # ── CUPOM (âncora forte + início estrutural) ───────────────
+    # ANTES de RESGATE (I-P3). Exige âncora de cupom E que a linha
+    # COMECE como declaração/ação estrutural — frase descritiva que
+    # só menciona cupom no meio não é capturada (I-P8).
+    if _RE_CUPOM_FORTE.search(l) and _RE_INICIO_ESTRUTURAL.match(l):
 
         # Exceção (I-P7): ponteiro de resgate "Resgate o cupom aqui:"
         # menciona cupom mas NÃO declara benefício próprio — ele aponta
