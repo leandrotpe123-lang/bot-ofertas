@@ -141,10 +141,11 @@ _RE_LINK = re.compile(
 
 _RE_AVISO = re.compile(r'^\s*(importante|aten[çc][ãa]o|aviso)\b', re.I)
 
-# Variante de um mesmo produto. Vocabulário PRESERVADO do motor
-# anterior — a lacuna do separador "=" é frente própria (F-M3).
+# Variante de um mesmo produto. Separadores aceitos entre rótulo e
+# preço: "-", "–", "=", ":". A âncora r\$ após o separador impede
+# linha estrutural com ":" (Cupom:, Resgate aqui:) de casar.
 _RE_VARIANTE = re.compile(
-    r'^(\d+\/\d+\s*gb|\d+\/\d+|[a-zà-ÿ0-9\s\-\+]{2,50}\s*[-–]\s*r\$)',
+    r'^(\d+\/\d+\s*gb|\d+\/\d+|[a-zà-ÿ0-9\s\-\+]{2,50}\s*[-–=:]\s*r\$)',
     re.I,
 )
 
