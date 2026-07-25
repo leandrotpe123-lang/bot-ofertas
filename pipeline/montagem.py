@@ -112,7 +112,7 @@ _RE_BULLET_PREFIXO = re.compile(r'^\s*[-–—•·]\s*')
 # de conteúdo ("🔹 Item - R$ 110", faixa de preço) não é tocado.
 _RE_EMOJI_BULLET = re.compile(
     r'^([\U0001F300-\U0001FAFF\U00002600-\U000027BF'
-    r'\U0001F900-\U0001F9FF\u2B50\u2B55]\uFE0F?\s+)[-–—•·]\s*'
+    r'\U0001F900-\U0001F9FF\u2B50\u2B55]\uFE0F?)\s*[-–—•·]\s*' 
 )
 
 _RE_URL_RENDER = re.compile(
@@ -331,7 +331,7 @@ def montar_texto(norm: MensagemNormalizada) -> str:
 
         else:
             # Emoji veio da origem: limpa bullet colado logo após ele.
-            l = _RE_EMOJI_BULLET.sub(r"\1", l)
+            l = _RE_EMOJI_BULLET.sub(r"\1 ", l)
 
         primeiro = False
 
