@@ -86,6 +86,28 @@ def _reconhecida_por_autoridade(url: str) -> bool:
     return classificar_universal(url) in ("mundial", "preservar", "expandir")
 
 
+def _podar_rotulo_orfao(saida: list) -> None:
+    """Remove o rótulo cujo referente acabou de ser descartado.
+
+    A função é agnóstica à causa do descarte: ela não sabe nem deve
+    saber por que a linha foi removida. Cabe ao chamador invocá-la
+    imediatamente após descartar uma linha que possa ser o referente
+    do último rótulo acumulado.
+
+    O rótulo é identificado estruturalmente por `_eh_rotulo`, mantendo
+    uma única definição de "linha que anuncia conteúdo, mas não é
+    conteúdo" em todo o módulo.
+
+    Pré-condição: deve ser chamada antes de qualquer novo `append` em
+    `saida`, pois a decisão é baseada na cauda da lista.
+    """
+    i = len(saida) - 1
+    while i >= 0 and not saida[i]:
+        i -= 1
+    if i >= 0 and _eh_rotulo(saida[i]) and not _RE_URL_BLOCO.search(saida[i]):
+        del saida[i:]
+
+
 def filtrar(texto: str) -> str:
     """Aplica a política de conteúdo linha a linha.
 
@@ -122,6 +144,7 @@ def filtrar(texto: str) -> str:
                 # não é de grupo indica que o bloco já terminou.
                 if (_RE_GRUPO_EXT.search(l)
                         and not _reconhecida_por_autoridade(l)):
+                    _podar_rotulo_orfao(saida)
                     continue
                 em_redes = False
         if _RE_CTA.match(l) or _RE_LIXO_STRUCT.match(l):
@@ -129,6 +152,7 @@ def filtrar(texto: str) -> str:
         if _RE_GRUPO_EXT.search(l):
             l = _RE_GRUPO_EXT.sub("", l).strip()
             if not l:
+                _podar_rotulo_orfao(saida)
                 continue
         saida.append(l)
     return "\n".join(saida).strip()
