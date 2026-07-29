@@ -34,7 +34,6 @@ CONTRATO COM A DEDUPLICAÇÃO:
 
 Operações que constituem a normalização:
   - limpeza estrutural do texto (limpar_texto)
-  - verificação de viabilidade do texto (tem_contexto)
   - resolução e afiliação de links (via registry e contrato)
   - derivação de identidade (produto e campanha)
   - encurtamento terminal das URLs de publicação
@@ -69,7 +68,7 @@ from utils.urls import _netloc, host_canonico_campanha, chaves_canonicas_campanh
 
 # ── API pública do módulo ─────────────────────────────────────────
 __all__ = [
-    "MensagemNormalizada", "normalizar", "limpar_texto", "tem_contexto",
+    "MensagemNormalizada", "normalizar", "limpar_texto",
     "_tem_emoji",
 ]
 
@@ -96,32 +95,6 @@ def limpar_texto(texto: str) -> str:
         .replace("\r\n", "\n")
         .replace("\r", "\n")
     )
-
-# ─────────────────────────────────────────────────────────────────
-# VIABILIDADE DO TEXTO
-# ─────────────────────────────────────────────────────────────────
-def tem_contexto(texto: str) -> bool:
-    """
-    Verifica se o texto possui conteúdo promocional relevante o
-    suficiente para prosseguir.
-    """
-    linhas = [
-        l.strip() for l in texto.splitlines()
-        if l.strip() and not re.match(r'https?://', l.strip())
-    ]
-    if not linhas:
-        return False
-    total = " ".join(linhas)
-    indicadores = [
-        r'off', r'%', r'r\$', r'cupom', r'desconto', r'promoção', r'oferta',
-        r'grátis', r'evento', r'live', r'relâmpago', r'flash', r'volta',
-        r'normalizou', r'a\s+partir', r'ativo', r'disponivel', r'pix',
-        r'voltando', r'reativado', r'jogos?\s+gr[aá]tis',
-    ]
-    for ind in indicadores:
-        if re.search(ind, total, re.I):
-            return True
-    return len(total) > 20
 
 # ─────────────────────────────────────────────────────────────────
 # CONTRATO DE SAÍDA
@@ -358,16 +331,17 @@ async def normalizar(
     if not bruta.texto.strip():
         return None
 
-    from pipeline.filtros import filtrar
-    from pipeline.filtros import deve_descartar
+    from pipeline.institucional import deve_descartar, tem_contexto
     veto = deve_descartar(bruta.texto)
     if veto:
         log_nrm.info(f"🚫 Post vetado | motivo='{veto}' | @{bruta.chat}")
         return None
 
-    texto_limpo = filtrar(limpar_texto(bruta.texto))
-    if not tem_contexto(texto_limpo):
+    if not tem_contexto(bruta.texto):
         return None
+
+    from pipeline.filtros import filtrar
+    texto_limpo = filtrar(limpar_texto(bruta.texto))
 
     converter:     List[str] = []
     preservar_lst: List[str] = []
