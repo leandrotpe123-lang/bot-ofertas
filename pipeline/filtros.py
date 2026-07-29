@@ -30,11 +30,6 @@ import unicodedata
 from plataformas import registry
 from utils.categorias_universais import classificar_universal
 
-# _tem_emoji é primitivo de texto hospedado em normalizacao e
-# compartilhado com montagem. Importado para não duplicá-lo. O ciclo
-# é quebrado pelo import tardio de `filtrar` em normalizacao.normalizar.
-from pipeline.normalizacao import _tem_emoji
-
 # ── Reconhecimento de grupo externo ───────────────────────────────
 _RE_GRUPO_EXT = re.compile(
     r'https?://(?:t\.me|telegram\.me|telegram\.org|chat\.whatsapp\.com)[^\s]*',
@@ -75,16 +70,6 @@ _RE_REDES = re.compile(
 
 _RE_ROTULO = re.compile(r'^\s*[-–•]\s*\w[\w\s]{0,30}:\s*$')
 
-# ── Vocabulário de cabeçalho de canal ─────────────────────────────
-_KW_CANAL = re.compile(
-    r'\b(?:ofertas?|promo(?:s|ç(?:ão|ões))?|descontos?|achadinhos?|'
-    r'liquida(?:ção|ções)|canal)\b',
-    re.I,
-)
-_RE_DIGITO = re.compile(r'\d')
-
-_LIMITE_HEADER = 30
-
 
 def _reconhecida_por_autoridade(url: str) -> bool:
     """A autoridade reconhece esta URL como parte da oferta?
@@ -101,33 +86,6 @@ def _reconhecida_por_autoridade(url: str) -> bool:
     return classificar_universal(url) in ("mundial", "preservar", "expandir")
 
 
-def _eh_header_canal(linha: str) -> bool:
-    """Cabeçalho de canal — remoção exige EVIDÊNCIA POSITIVA.
-
-    Quatro condições CUMULATIVAS. Falhando qualquer uma, preserva:
-
-      1. não começa com emoji;
-      2. curta (<= 30 caracteres) — nome de canal é curto;
-      3. NENHUM dígito — títulos de e-commerce carregam modelo,
-         medida ou quantidade ("C/50", "43", "500ml", "M/G");
-      4. contém vocabulário de canal.
-
-    O antigo padrão de barra ("^[A-ZÀ-Ú][\\w\\s]{2,30}\\s*/\\s*...")
-    foi REMOVIDO: não tinha poder discriminante — casava qualquer
-    frase capitalizada com barra, e barra é notação padrão de
-    e-commerce brasileiro. Apagava "Paçoca Quadrada C/50 Unidades",
-    "Kit Panelas C/5 Peças", "Fralda Pampers M/G".
-    """
-    l = linha.strip()
-    if not l or _tem_emoji(l[0]):
-        return False
-    if len(l) > _LIMITE_HEADER:
-        return False
-    if _RE_DIGITO.search(l):
-        return False
-    return bool(_KW_CANAL.search(l))
-
-
 def filtrar(texto: str) -> str:
     """Aplica a política de conteúdo linha a linha.
 
@@ -139,7 +97,6 @@ def filtrar(texto: str) -> str:
     saida = []
     vazio = False
     em_redes = False
-    primeira = True
     for linha in linhas:
         l = linha.strip()
         if not l:
@@ -149,10 +106,6 @@ def filtrar(texto: str) -> str:
             em_redes = False
             continue
         vazio = False
-        if primeira:
-            primeira = False
-            if _eh_header_canal(l):
-                continue
         if _RE_REDES.match(l):
             em_redes = True
             continue
@@ -367,34 +320,3 @@ def filtrar_blocos(texto: str, mapa: dict, preservar=()) -> str:
         saida.extend(b)
         vazio = False
     return "\n".join(saida).strip()
-
-# ══════════════════════════════════════════════════════════════════
-# VETO DE POST — mecânica de canal, não oferta
-# ══════════════════════════════════════════════════════════════════
-# Alguns posts não são ofertas: são mecânica do canal de origem
-# (gerar link por bot, mandar produto no chat) ou benefício restrito
-# a quem é membro daquele grupo. Republicá-los polui o destino e
-# entrega algo que o leitor não consegue usar.
-#
-# As expressões são DELIBERADAMENTE estreitas: exigem a locução
-# inteira, não palavras soltas. "exclusivo" sozinho é comum em
-# oferta legítima ("Cupons exclusivos Shopee VIP") e NÃO veta;
-# apenas "exclusivo do grupo" veta. Mesmo critério para "gere o
-# link" e "mande no chat", que descrevem a mecânica do canal.
-#
-# Na dúvida, publica: só veta com a locução completa presente.
-
-_RE_VETO_POST = re.compile(
-    r'exclusiv[oa]s?\s+d[oe]\s+(?:grupo|canal)'
-    r'|d[oe]\s+(?:grupo|canal)\s+exclusiv'
-    r'|ger(?:e|ar|a)\s+(?:o\s+|seu\s+|um\s+)?link'
-    r'|man(?:de|da|dar)\s+(?:o\s+)?(?:produto\s+)?no\s+chat'
-    r'|envi(?:e|ar)\s+(?:o\s+)?(?:produto\s+)?no\s+chat',
-    re.I,
-)
-
-
-def deve_descartar(texto: str) -> str:
-    """Motivo do veto do post inteiro, ou cadeia vazia se publicável."""
-    m = _RE_VETO_POST.search(_sem_acento(texto or ""))
-    return m.group(0).strip() if m else ""
