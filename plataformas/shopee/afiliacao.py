@@ -70,6 +70,7 @@ _REPASSE_DIRETO = frozenset({"flapremios.com.br"})
 _LINKS_FIXOS_POR_PATH = {
     "/user/voucher-wallet": "https://s.shopee.com.br/8pkZllbmly",
     "/cart":               "https://s.shopee.com.br/1qapQu2VFM",
+    "/m/cupom-de-desconto": "https://s.shopee.com.br/6AjowpqGMh",
 }
 
 
@@ -201,7 +202,6 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     # chamar o serviço de afiliados. Decidido sobre a URL FINAL.
     fixo = _link_fixo(url_expandida)
     if fixo:
-        log_nrm.info(f"📌 SHP link fixo por path: {url_expandida[:60]}")
         return fixo 
 
     # Chamada ao serviço de afiliados, sobre a URL limpa.
