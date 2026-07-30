@@ -9,12 +9,11 @@ Camadas chamadas em sequência:
     1. Ingestão       → pipeline.ingestao.ingerir
     2. Idempotência   → pipeline.idempotencia.ja_processado
     3. Coalescing     → pipeline.coalescing.deve_coalescer
-    4. Shadow reply   → handlers.shadow_reply (condicional)
-    5. Normalização   → pipeline.normalizacao.normalizar
-    6. Deduplicação   → pipeline.deduplicacao.deve_enviar_async
-    7. Saturação      → pipeline.publicacao.delay_saturacao
-    8. Montagem       → pipeline.montagem.montar
-    9. Publicação     → pipeline.publicacao.enviar (com is_edit)
+    4. Normalização   → pipeline.normalizacao.normalizar
+    5. Deduplicação   → pipeline.deduplicacao.deve_enviar_async
+    6. Saturação      → pipeline.publicacao.delay_saturacao
+    7. Montagem       → pipeline.montagem.montar
+    8. Publicação     → pipeline.publicacao.enviar (com is_edit)
 
 NÃO faz:
   - leitura de texto do evento (ingestão é a fonte oficial)
@@ -155,14 +154,6 @@ async def _pipeline(event, is_edit: bool = False) -> None:
                 f"🧭 TL | id={msg_id} chat={bruta.chat} | DESCARTE | "
                 f"motivo=ORIGEM_JA_PUBLICADA dest={_dv}")
             return
-    
-    # ── Shadow reply (somente mensagens novas que são reply) ──────
-    if bruta.is_reply and bruta.reply_to > 0 and not is_edit:
-        from handlers.shadow_reply import processar_shadow_reply
-        handled = await processar_shadow_reply(bruta)
-        if handled:
-            return
-
     log_sys.info(
         f"{'✏️' if is_edit else '📩'} @{bruta.chat} | "
         f"id={msg_id} | q={len(g._buf)} w={g._w_ativos}"
