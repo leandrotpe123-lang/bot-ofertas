@@ -20,6 +20,7 @@ import json
 import os
 import time
 from typing import Optional
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -31,6 +32,7 @@ from utils.url_resolver import desencurtar
 from utils.urls import _netloc, _sanitizar_url
 
 from .links import (
+    _DOMINIOS,
     _ENCURTADORES,
     _IDENTIFICADOR,
     _bate_dominio,
@@ -54,6 +56,51 @@ _TIMEOUT_AFILIACAO = 12
 # serviço de afiliados. É política de afiliação, não classificação.
 _REPASSE_DIRETO = frozenset({"flapremios.com.br"})
 
+# ── Tabela de configuração: link fixo por path ────────────────────
+# Substituição de URL DECLARADA, não inferida. Cada entrada mapeia um
+# PATH normalizado (minúsculo, sem barra final) para um link afiliado
+# que o dono do bot já possui.
+#
+# Para cobrir uma página nova, ACRESCENTE UMA LINHA aqui. A lógica do
+# gate não conhece nenhum path e não muda.
+#
+# É política de afiliação, não classificação: mesma natureza de
+# _REPASSE_DIRETO, e sem efeito sobre a taxonomia de links — links.py
+# permanece a única fonte do conhecimento de URL da Shopee.
+_LINKS_FIXOS_POR_PATH = {
+    "/user/voucher-wallet": "https://s.shopee.com.br/8pkZllbmly",
+    "/cart":               "https://s.shopee.com.br/1qapQu2VFM",
+}
+
+
+def _link_fixo(url: str) -> str:
+    """
+    Consulta _LINKS_FIXOS_POR_PATH para uma URL FINAL e devolve o link
+    configurado, ou cadeia vazia quando o path não está na tabela.
+
+    CRITÉRIO ÚNICO — dois testes, nada além deles:
+      1. host de VITRINE da Shopee (em _DOMINIOS, fora de
+         _ENCURTADORES; subdomínio conta);
+      2. path normalizado IGUAL a uma chave da tabela.
+
+    NÃO assume nada sobre a página remota: nem que seja pública, nem
+    permanente, nem que o serviço de afiliados a aceite ou recuse. Não
+    lê query, fragmento, texto do post nem estado. Pura e
+    determinística.
+
+    Host encurtador está fora por definição: nele o path é código
+    opaco, não rota — é o que impede que um link curto devolvido sem
+    expansão (desencurtar devolve a URL recebida em falha de rede)
+    acione uma entrada da tabela.
+
+    Path fora da tabela devolve cadeia vazia e o fluxo de afiliação
+    segue intacto.
+    """
+    netloc = _netloc(url)
+    if netloc in _ENCURTADORES or not _bate_dominio(netloc, _DOMINIOS):
+        return ""
+    caminho = (urlparse(url).path or "").rstrip("/").lower()
+    return _LINKS_FIXOS_POR_PATH.get(caminho, "")
 
 async def _chamar_servico_afiliados(
     url_produto: str, sessao: aiohttp.ClientSession,
@@ -149,6 +196,13 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         except Exception as e:
             log_nrm.warning(f"⚠️ SHP expansão falhou: {e}")
             return AUSENTE
+
+    # Tabela de link fixo por path: publica o link configurado, sem
+    # chamar o serviço de afiliados. Decidido sobre a URL FINAL.
+    fixo = _link_fixo(url_expandida)
+    if fixo:
+        log_nrm.info(f"📌 SHP link fixo por path: {url_expandida[:60]}")
+        return fixo 
 
     # Chamada ao serviço de afiliados, sobre a URL limpa.
     url_limpa = limpa_url(url_expandida)
