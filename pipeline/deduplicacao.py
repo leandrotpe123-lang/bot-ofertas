@@ -29,7 +29,6 @@ from __future__ import annotations
 import time
 from typing import Optional, Tuple
 
-import config
 import globals as g
 from logger import log_ded
 from pipeline.reativacao import eh_reativacao
@@ -127,13 +126,6 @@ async def _atomic_check_and_claim(fp: str, janela: float) -> Tuple[bool, Optiona
         g._atomic_mem[fp] = agora
         return False, ts
 
-
-def _janela_por_tipo(tipo: str) -> float:
-    """Retorna a janela de dedupe em segundos pelo tipo da oferta."""
-    if tipo == "cupom":   return float(config._JANELA_CUPOM_S)
-    if tipo == "produto": return float(config._JANELA_PRODUTO_S)
-    return float(config._JANELA_EVENTO_S)
-
 # ─────────────────────────────────────────────────────────────────
 # REATIVAÇÃO
 # ─────────────────────────────────────────────────────────────────
@@ -167,11 +159,10 @@ async def deve_enviar_async(enr: MensagemEnriquecida) -> bool:
         benef       = _benef_set(texto)
         chat        = (norm.chat or "").lower()
 
-        # ── TIPO + IDENTIDADE + JANELA (prontos do enriquecimento) ─
+        # ── TIPO + IDENTIDADE (prontos do enriquecimento) ─────────
         #   Consumidos de enr; o efeito de cupom já ocorreu lá, 1x.
         tipo     = enr.tipo
         identity = enr.canonica
-        janela   = _janela_por_tipo(tipo)
 
         # ── REATIVAÇÃO ────────────────────────────────────────────
         # Permite a reativação real passar (uma vez por evento), mas
@@ -202,23 +193,6 @@ async def deve_enviar_async(enr: MensagemEnriquecida) -> bool:
                 f"chat={chat} → enviar() decide"
             )
             return True
-
-        # ── CHECK + CLAIM ATÔMICO ────────────────────────────────
-        fp_identity = _fp4(f"identity|{identity}")
-        na_janela, ts_anterior = await _atomic_check_and_claim(
-            fp_identity, janela,
-        )
-        if na_janela:
-            log_ded.info(
-                f"🔄 [IDENTITY_NA_JANELA] {identity} tipo={tipo} "
-                f"delta={int(time.monotonic() - ts_anterior)}s "
-                f"chat={chat} → enviar() decide"
-            )
-            return True
-
-        # O claim que DECIDE (g._atomic_mem) já foi registrado no
-        # bloco atômico acima. dedupe_temp saiu do caminho operacional:
-        # era espelho durável sem leitor (Frente B).
 
         log_ded.info(
             f"✅ [PASSOU] {identity} tipo={tipo} chat={chat} "
