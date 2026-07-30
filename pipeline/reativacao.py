@@ -8,7 +8,7 @@ Puro: sem estado, sem I/O, sem banco, sem Telegram. CONSOME o vocabulário
 canônico de retorno (dono: pipeline.estado_evento._RE_RETORNO) — não
 declara vocabulário próprio. NÃO decide se o ciclo está vivo (dono:
 vida_oferta), NÃO executa o renascimento (dono: publicação), NÃO detecta
-reply social (isso é R2 — responsabilidade do shadow_reply, fora daqui).
+reply social (R2 — subsistema removido em F0; não pertence a esta camada).
 
 Consumidores: pipeline.deduplicacao (throttle anti-flood — consome a
 detecção; a decisão de frequência permanece lá) e, futuramente,
