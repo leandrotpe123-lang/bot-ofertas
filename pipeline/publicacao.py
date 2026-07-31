@@ -8,7 +8,7 @@ from typing import Optional
 from telethon.errors import FloodWaitError
 
 import config
-from config import GRUPO_DESTINO, _EXECUTOR
+from config import GRUPO_DESTINO
 from pipeline.vida_oferta import estampar
 from database import (db_registrar_sat, db_get_post, db_overlap_posts,
                       db_registrar_post, db_remover_post,
@@ -28,7 +28,6 @@ from pipeline.montagem import MensagemMontada
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.enriquecimento import MensagemEnriquecida
 from pipeline.estado_evento import _KW_EVENTO
-from utils.helpers import ler_mapa, salvar_mapa
 
 
 # ── Constantes de saturação ──────────────────────────────────────
@@ -312,12 +311,6 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
         f"score {d.score_atual}→{d.novo_score} chat={norm.chat}")
     sent = await _substituir_post_com_midia(msg_id_dest, montada)
     if sent:
-        mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-        mp[str(montada.msg_id)] = sent.id
-        try:
-            await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
-        except Exception as e:
-            log_sys.error(f"❌ salvar_mapa: {e}")
         db_remover_post(msg_id_dest)
         db_registrar_post(
             sent.id, ofertas_familia, d.novo_score, montada.texto,
@@ -402,13 +395,6 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
         except Exception as e:
             log_sys.error(
                 f"❌ db_registrar_post FALHOU pós-envio: {e}", exc_info=True)
-
-    try:
-        mp = await loop.run_in_executor(_EXECUTOR, ler_mapa)
-        mp[str(montada.msg_id)] = sent.id
-        await loop.run_in_executor(_EXECUTOR, salvar_mapa, mp)
-    except Exception as e:
-        log_sys.error(f"❌ salvar_mapa: {e}")
 
     try:
         await _marcar(montada.msg_id)
