@@ -3,7 +3,7 @@ Camada 4 — Deduplicação e score.
 
 NOTA (Front 1 — extração): a identidade de oferta foi extraída para
 pipeline.identidade_oferta. Esta camada CONSOME identidades()/
-identidade_canonica()/tipo_de_oferta() de lá e as REEXPORTA por
+identidade_canonica() de lá e as REEXPORTA por
 compatibilidade (consumidores atuais não mudam nesta fase). O score
 (calcular_score) permanece aqui; sua extração é o Front 2.
 
@@ -37,11 +37,10 @@ from pipeline.reativacao import eh_reativacao
 # Estas três funções são importadas aqui e REEXPORTADAS para que os
 # consumidores atuais (publicacao, testes) sigam importando de
 # pipeline.deduplicacao sem mudança nesta fase. identidade_canonica e
-# tipo_de_oferta também são usadas internamente por deve_enviar_async.
+# identidade_canonica também é usada internamente por deve_enviar_async.
 from pipeline.identidade_oferta import (
     identidade_canonica,
     identidades,
-    tipo_de_oferta,
 )
 # calcular_score foi extraído para pipeline.score (Front 2, passo 2.1);
 # reexportado aqui para publicacao e testes seguirem importando da dedup.
