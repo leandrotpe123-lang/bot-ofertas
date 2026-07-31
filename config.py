@@ -35,9 +35,6 @@ _EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 _SEM_ENVIO: Optional[asyncio.Semaphore] = None
 _SEM_HTTP:  Optional[asyncio.Semaphore] = None
 
-# ── Persistência JSON ─────────────────────────────────────────────
-ARQUIVO_MAPEAMENTO = "map_mensagens.json"
-
 # ── DB ────────────────────────────────────────────────────────────
 _DB_PATH         = "foguetao.db"
 CACHE_TTL        = 86400
