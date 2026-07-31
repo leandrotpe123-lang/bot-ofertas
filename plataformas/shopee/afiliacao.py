@@ -71,6 +71,7 @@ _LINKS_FIXOS_POR_PATH = {
     "/user/voucher-wallet": "https://s.shopee.com.br/8pkZllbmly",
     "/cart":               "https://s.shopee.com.br/1qapQu2VFM",
     "/m/cupom-de-desconto": "https://s.shopee.com.br/6AjowpqGMh",
+    "/m/shopeevip":        "https://s.shopee.com.br/6AjqXCz9ys",
 }
 
 
