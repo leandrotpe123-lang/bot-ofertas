@@ -15,7 +15,8 @@ from database import (db_registrar_sat, db_get_post, db_overlap_posts,
                       db_ofertas_de_post)
 import globals as g
 from logger import log_out, log_sys, _idade_str
-from pipeline.deduplicacao import calcular_score, identidades
+from pipeline.deduplicacao import calcular_score
+from pipeline.identidade_oferta import identidades
 from pipeline.decisao import decidir
 from pipeline import origem
 from pipeline.vida_oferta import viva
