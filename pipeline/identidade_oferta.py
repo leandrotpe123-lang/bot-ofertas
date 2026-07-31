@@ -40,7 +40,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from pipeline.estado_evento import _KW_EVENTO
 from pipeline.memoria_cupom import resolver_identidade
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.natureza import eh_entidade_cupom
@@ -72,101 +71,12 @@ __all__ = [
 # ─────────────────────────────────────────────────────────────────
 from pipeline.assunto import (          # noqa: E402
     tema_da_campanha,
-    buscar_calendario_comercial,
     eh_post_cashback,
-    eh_post_cupom,
-    eh_post_evento,
-    extrair_pct_cashback,
 )
 
 # ─────────────────────────────────────────────────────────────────
 # IDENTIDADE CANÔNICA — coração do sistema anti-duplicação
 # ─────────────────────────────────────────────────────────────────
-def _id_post_cupom(norm, plat, texto):
-    # POST DE CUPOM vence produto: quando o cupom é o ASSUNTO do post
-    # (_eh_post_cupom), a oferta É o cupom — não o produto-veículo. Dois
-    # posts do mesmo código (ex.: CURTEAI) com produtos diferentes são a
-    # MESMA oferta. Produto só vence quando NÃO é post de cupom.
-    if not norm.cupom or not eh_post_cupom(texto):
-        return None
-    fallback = f"{plat}|cup|{norm.cupom.upper()}"
-    return resolver_identidade(norm, plat, fallback)
-
-
-def _id_produto(norm, plat, texto):
-    # Produto vence cupom APENAS quando NÃO é post de cupom (esse caso já
-    # foi resolvido por _id_post_cupom acima). Aqui: produto comum, cujo
-    # cupom eventual é melhoria avaliada por SCORE em enviar(), não dup.
-    if not norm.ids_globais:
-        return None
-    return f"{plat}|{min(norm.ids_globais)}"
-
-
-def _id_cupom_sem_produto(norm, plat, texto):
-    # AUTORIDADE DO CUPOM — fato objetivo, não heurística de formato.
-    # Condição exclusiva: cupom válido extraído E ausência de produto.
-    # `not norm.ids_globais` é redundante com a precedência (produto já
-    # foi avaliado antes), mas é DECLARADO aqui para que a autoridade do
-    # nível não dependa da posição na sequência.
-    if not norm.cupom or norm.ids_globais:
-        return None
-    fallback = f"{plat}|cup|{norm.cupom.upper()}"
-    return resolver_identidade(norm, plat, fallback)
-
-
-def _id_cashback(norm, plat, texto):
-    if not eh_post_cashback(texto, norm.tem_sinal_cashback) or norm.cupom:
-        return None
-    pct = extrair_pct_cashback(texto)
-    if not pct:
-        return None
-    return f"{plat}|cash|{pct}"
-
-
-def _id_campanha(norm, plat, texto):
-    if not eh_post_evento(texto, norm.tem_host_campanha):
-        return None
-    if norm.chave_campanha:
-        return f"{plat}|camp|{norm.chave_campanha}"
-    candidatos = [
-        m for m in (
-            _KW_EVENTO.search(texto[:200]),
-            buscar_calendario_comercial(texto),
-        ) if m
-    ]
-    if candidatos:
-        primeiro = min(candidatos, key=lambda m: m.start())
-        return f"{plat}|camp|{primeiro.group(0).lower()}"
-    return None
-
-
-def _id_url(norm, plat, texto):
-    # Fallback operacional NÃO semântico — única leitura do mapa aqui.
-    if not norm.mapa:
-        return None
-    primeira_url = next(iter(norm.mapa.values()), None)
-    if not primeira_url:
-        return None
-    return f"{plat}|url|{_cache_key(primeira_url)}"
-
-
-def _id_texto(norm, plat, texto):
-    # Fallback terminal: nunca devolve None.
-    return f"{plat}|txt|{_fp4(_alma(texto))}"
-
-
-# A ordem desta tupla É a precedência. Não há precedência implícita.
-_HIERARQUIA_IDENTIDADE = (
-    _id_post_cupom, 
-    _id_produto,
-    _id_cupom_sem_produto,
-    _id_cashback,
-    _id_campanha,
-    _id_url,
-    _id_texto,
-)
-
-
 def identidade_canonica(norm: "MensagemNormalizada") -> str:
     """
     Chave estável de dedupe, eleita por PRECEDÊNCIA DE ESPÉCIE (MB §11.10).
@@ -188,9 +98,7 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
         # (claims/dedup) é a do cupom — nunca a do produto-vitrine.
         base = sorted(identidades(norm))[0]
     elif norm.ids_globais: 
-        _idents = getattr(norm, "idents", None) or [
-            (norm.plat, pid, "") for pid in norm.ids_globais]
-        base = min(f"{p}|{i}" for p, i, _ in _idents)  
+        base = min(f"{p}|{i}" for p, i, _ in norm.idents)
     else:
         base = sorted(identidades(norm))[0]
     return resolver_identidade(norm, norm.plat, base)
@@ -202,18 +110,6 @@ class Ancora:
     string historicamente emitida por identidades() — que agora é VISTA."""
     especie: str   # "produto" | "cupom" | "campanha" | "cashback" | "fallback"
     chave: str
-
-
-_ESPECIE_POR_TAG = {"cup": "cupom", "cupb": "cupom-beneficio",
-                    "camp": "campanha", "cash": "cashback",
-                    "url": "fallback", "txt": "fallback"}
-
-
-def _especie_da_chave(chave: str) -> str:
-    # Só para chaves nascidas no FALLBACK da hierarquia (camp/url/txt na
-    # prática; cupom lá é inalcançável — união não-vazia quando há código).
-    partes = chave.split("|", 2)
-    return _ESPECIE_POR_TAG.get(partes[1], "produto") if len(partes) >= 2 else "produto"
 
 
 def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
@@ -271,10 +167,8 @@ def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
                  f"{plat}|cupb|{tema_da_campanha(texto)}")
         return saida
 
-    _idents = getattr(norm, "idents", None) or [
-        (plat, pid, "") for pid in norm.ids_globais]
-    for plat_link, pid, _tipo in _idents:
-        _add("produto", f"{plat_link}|{pid}") 
+    for plat_link, pid, _tipo in norm.idents:
+        _add("produto", f"{plat_link}|{pid}")
 
     for k in norm.chaves_campanha:
         _add("campanha", f"{plat}|camp|{k}")
@@ -293,14 +187,15 @@ def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
 
     if saida:
         return saida
-    # Fallback AUTOSSUFICIENTE — mesma hierarquia, mesmos efeitos (inalcançáveis
-    # para cupom aqui), byte-idêntico por construção.
-    for resolver in _HIERARQUIA_IDENTIDADE:
-        ident = resolver(norm, plat, texto)
-        if ident is not None:
-            return [Ancora(_especie_da_chave(ident), ident)]
-    chave = f"{plat}|txt|{_fp4(_alma(texto))}"
-    return [Ancora("fallback", chave)]
+
+    # ── Cauda: sem oferta estruturada ────────────────────────────
+    # MB §11.9 (ratificado): evento é FALLBACK, não espécie própria —
+    # âncora por palavra-chave colidia entre eventos distintos da mesma
+    # mecânica. Ordem: link primeiro, texto como terminal. Nunca vazio.
+    primeira_url = next(iter(norm.mapa.values()), None) if norm.mapa else None
+    if primeira_url:
+        return [Ancora("fallback", f"{plat}|url|{_cache_key(primeira_url)}")]
+    return [Ancora("fallback", f"{plat}|txt|{_fp4(_alma(texto))}")]
 
 
 def identidades(norm: "MensagemNormalizada") -> list[str]:
