@@ -27,7 +27,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pipeline.normalizacao import MensagemNormalizada
-from pipeline.identidade_oferta import tipo_de_oferta, identidade_canonica, ancoras, Ancora
+from pipeline.identidade_oferta import identidade_canonica, ancoras, Ancora
+from pipeline.natureza import natureza
 from pipeline.score import calcular_score
 
 
@@ -61,7 +62,7 @@ def enriquecer(norm: MensagemNormalizada) -> MensagemEnriquecida:
     ocorre, 1x, como antes. As camadas a jusante consomem tipo/canonica
     prontos, sem redisparar o efeito.
     """
-    tipo     = tipo_de_oferta(norm)
+    tipo     = natureza(norm)
     canonica = identidade_canonica(norm)          # efeito de cupom AQUI, 1x
     ancs     = ancoras(norm)                      # puro (autoritativa, P6)
     ofertas  = [a.chave for a in ancs]            # projeção == identidades(norm)
