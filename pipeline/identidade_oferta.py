@@ -11,7 +11,7 @@ Superfície pública (estável):
   - identidades(norm)         -> list[str]  : conjunto per-oferta
   - ancoras(norm)             -> list[Ancora]: âncoras TIPADAS (P6) — autoritativa
   - identidades(norm)         -> list[str]  : projeção plana de ancoras()
-  - tipo_de_oferta(norm)      -> str        : "produto" | "cupom" | "evento"
+  - Natureza da oferta: ver pipeline.natureza (dono único)
 
 CONSUMO DE IDENTIDADE DERIVADA:
   A identidade de produto e de campanha é derivada pela normalização —
@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from pipeline.estado_evento import _KW_EVENTO
 from pipeline.memoria_cupom import resolver_identidade
 from pipeline.normalizacao import MensagemNormalizada
+from pipeline.natureza import eh_entidade_cupom
 from utils.cupom import _KW_CUPOM
 from utils.hashes import _fp4
 from utils.textos import _alma
@@ -53,7 +54,7 @@ from utils.urls import _cache_key
 __all__ = [
     "identidades",
     "identidade_canonica",
-    "tipo_de_oferta",
+    "ancoras",
 ]
 
 
@@ -70,8 +71,6 @@ __all__ = [
 # ancoras() decide exatamente como antes.
 # ─────────────────────────────────────────────────────────────────
 from pipeline.assunto import (          # noqa: E402
-    beneficio_e_de_loja,
-    tem_preco_de_item,
     tema_da_campanha,
     buscar_calendario_comercial,
     eh_post_cashback,
@@ -79,50 +78,6 @@ from pipeline.assunto import (          # noqa: E402
     eh_post_evento,
     extrair_pct_cashback,
 )
-
-# ─────────────────────────────────────────────────────────────────
-# TIPO DA OFERTA
-# ─────────────────────────────────────────────────────────────────
-def tipo_de_oferta(norm: MensagemNormalizada) -> str:
-    """
-    Detecta o TIPO da oferta (independente de plataforma).
-      - "cupom"   : tem cupom code claro E é post centrado em cupom
-      - "produto" : tem ID de produto (ASIN, SKU, ItemID)
-      - "evento"  : campanha/roleta/sem ID claro
-    """
-    texto = norm.texto_limpo
-
-    # P1: tem ID de produto → produto. PRIORIDADE PRODUTO sobre cupom:
-    # um produto pode trazer cupom embutido (ex.: Shopee); a presença
-    # de id de produto define o tipo, e o cupom passa a ser ATRIBUTO
-    # do produto, não um evento de cupom separado.
-    if norm.ids_globais:
-        return "produto"
-
-    # P2: é post-cupom (cupom domina o título) → cupom
-    if norm.cupom and eh_post_cupom(texto):
-        return "cupom"
-
-    # P3: tem cupom mas sem ID — cupom standalone
-    if norm.cupom and not norm.ids_globais:
-        return "cupom"
-
-    # (P4 removido: a prioridade de produto em P1 já cobre todo caso
-    #  com ids_globais; este ramo havia se tornado inalcançável.)
-
-    # P5: cashback sem cupom code
-    if eh_post_cashback(texto, norm.tem_sinal_cashback):
-        return "evento"
-
-    # P6: campanha/evento — consome o campo derivado tem_host_campanha
-    if eh_post_evento(texto, norm.tem_host_campanha):
-        return "evento"
-
-    # Fallback
-    if norm.cupom:
-        return "cupom"
-    return "evento"
-
 
 # ─────────────────────────────────────────────────────────────────
 # IDENTIDADE CANÔNICA — coração do sistema anti-duplicação
@@ -227,7 +182,7 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
     segue aplicada por cima em ambos os ramos: se qualquer código do post
     já foi visto na janela, a identidade da corrente sobrepõe a base.
     """
-    if _eh_entidade_cupom(norm):
+    if eh_entidade_cupom(norm):
         # [F-C4 / INV-E5] A natureza decidida pelo gate alimenta TODAS
         # as camadas: se a entidade é a campanha de cupom, a canônica
         # (claims/dedup) é a do cupom — nunca a do produto-vitrine.
@@ -259,16 +214,6 @@ def _especie_da_chave(chave: str) -> str:
     # prática; cupom lá é inalcançável — união não-vazia quando há código).
     partes = chave.split("|", 2)
     return _ESPECIE_POR_TAG.get(partes[1], "produto") if len(partes) >= 2 else "produto"
-
-def _eh_entidade_cupom(norm) -> bool:
-    """[F-C4 / INV-E5] Decisão ÚNICA de natureza cupom-como-entidade
-    (gate R1×R2 + R2+). Alimenta âncoras E canônica — nenhuma camada
-    pode enxergar uma natureza diferente das demais."""
-    texto = norm.texto_limpo
-    return eh_post_cupom(texto) and (
-        not norm.ids_globais
-        or beneficio_e_de_loja(texto)
-        or (len(norm.cupons) >= 2 and not tem_preco_de_item(texto)))
 
 
 def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
@@ -308,7 +253,7 @@ def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
     # loja; na dúvida, prevalece o produto (cupom vira atributo).
     # R2+ (emenda ratificada): 2+ códigos e nenhum preço de item →
     # a lista de códigos É a oferta; o produto presente é vitrine.
-    if _eh_entidade_cupom(norm):
+    if eh_entidade_cupom(norm):
         if norm.cupons:
             # COM código: o código É a identidade (elemento mais estável
             # disponível — INV-E3; troca de código na vida da campanha é
