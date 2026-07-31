@@ -28,33 +28,20 @@ def _init_db():
         CREATE TABLE IF NOT EXISTS links_cache(
             url_orig TEXT PRIMARY KEY, url_conv TEXT NOT NULL,
             url_canon TEXT, plat TEXT NOT NULL, ts REAL NOT NULL);
-        CREATE TABLE IF NOT EXISTS dedupe_temp(
-            fp TEXT PRIMARY KEY, plat TEXT NOT NULL, cupons TEXT,
-            alma TEXT, camp TEXT, id_prod TEXT, benef TEXT,
-            cupom_id TEXT, ts REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS saturacao(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             plat TEXT NOT NULL, sku TEXT, ts REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS short_links(
             code TEXT PRIMARY KEY, url TEXT NOT NULL, ts REAL NOT NULL);
-        CREATE TABLE IF NOT EXISTS oferta_estado(
-            identity TEXT PRIMARY KEY, msg_id_dest INTEGER NOT NULL,
-            score INTEGER NOT NULL DEFAULT 0, texto TEXT NOT NULL DEFAULT '',
-            plat TEXT NOT NULL DEFAULT '', lider TEXT DEFAULT '',
-            janela_fim REAL DEFAULT 0, edit_count INTEGER DEFAULT 0,
-            shadow_reply_id INTEGER DEFAULT 0, ts REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS post_estado(
             msg_id_dest INTEGER PRIMARY KEY,
             score INTEGER NOT NULL DEFAULT 0, texto TEXT NOT NULL DEFAULT '',
             plat TEXT NOT NULL DEFAULT '', lider TEXT DEFAULT '',
             janela_fim REAL DEFAULT 0, edit_count INTEGER DEFAULT 0,
-            shadow_reply_id INTEGER DEFAULT 0, ts REAL NOT NULL);
+            ts REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS oferta_index(
             identity TEXT PRIMARY KEY, msg_id_dest INTEGER NOT NULL,
             ts REAL NOT NULL);
-        CREATE TABLE IF NOT EXISTS shadow_reply(
-            identity TEXT PRIMARY KEY, msg_id INTEGER NOT NULL,
-            enviado INTEGER DEFAULT 0, ts REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS cupom_idx(
             plat TEXT NOT NULL, codigo TEXT NOT NULL,
             identity TEXT NOT NULL, ts REAL NOT NULL,
@@ -65,24 +52,12 @@ def _init_db():
             PRIMARY KEY(chat, msg_id));
         CREATE INDEX IF NOT EXISTS idx_lc_plat     ON links_cache(plat);
         CREATE INDEX IF NOT EXISTS idx_lc_ts       ON links_cache(ts);
-        CREATE INDEX IF NOT EXISTS idx_dt_plat     ON dedupe_temp(plat,ts);
-        CREATE INDEX IF NOT EXISTS idx_dt_id       ON dedupe_temp(id_prod);
-        CREATE INDEX IF NOT EXISTS idx_dt_cupom    ON dedupe_temp(cupom_id);
         CREATE INDEX IF NOT EXISTS idx_sat         ON saturacao(plat,ts);
         CREATE INDEX IF NOT EXISTS idx_sl_code     ON short_links(code);
-        CREATE INDEX IF NOT EXISTS idx_oe_identity ON oferta_estado(identity);
-        CREATE INDEX IF NOT EXISTS idx_oe_plat     ON oferta_estado(plat);
         CREATE INDEX IF NOT EXISTS idx_oi_dest     ON oferta_index(msg_id_dest);
         CREATE INDEX IF NOT EXISTS idx_ci_lookup   ON cupom_idx(plat,codigo,ts);
     """)
     for tabela, col, tipo in [
-        ("dedupe_temp",   "benef",            "TEXT"),
-        ("dedupe_temp",   "id_prod",          "TEXT"),
-        ("dedupe_temp",   "cupom_id",          "TEXT"),
-        ("oferta_estado", "lider",            "TEXT"),
-        ("oferta_estado", "janela_fim",       "REAL"),
-        ("oferta_estado", "edit_count",       "INTEGER"),
-        ("oferta_estado", "shadow_reply_id",  "INTEGER"),
         ("links_cache",   "url_canon",        "TEXT"),
     ]:
         try:
@@ -184,10 +159,6 @@ def db_cupom_idx_registrar(plat: str, codigos: list, identity: str,
         log_db.error(f"❌ db_cupom_idx_registrar: {e}")
         return 0
 
-# ── dedupe_temp: fora do caminho operacional (Frente B) ───────────
-# O claim que decide vive em g._atomic_mem. A tabela permanece no .db
-# apenas como histórico legado — sem escrita e sem leitor no pipeline.
-
 # ── saturacao ─────────────────────────────────────────────────────
 def db_registrar_sat(plat: str, sku: str = ""):
     try:
@@ -210,51 +181,14 @@ def db_count_sat(plat: str, janela: float = 1800) -> int:
         log_db.error(f"❌ db_count_sat: {e}")
         return 0
 
-# ── oferta_estado ─────────────────────────────────────────────────
-def db_get_estado(identity: str) -> Optional[dict]:
-    try:
-        with _db() as db:
-            row = db.execute(
-                "SELECT msg_id_dest,score,texto,plat,lider,janela_fim,"
-                "edit_count,shadow_reply_id,ts"
-                " FROM oferta_estado WHERE identity=?",
-                (identity,)).fetchone()
-        if row:
-            return {
-                "msg_id_dest": row[0], "score": row[1], "texto": row[2],
-                "plat": row[3], "lider": row[4] or "",
-                "janela_fim": row[5] or 0.0, "edit_count": row[6] or 0,
-                "shadow_reply_id": row[7] or 0, "ts": row[8],
-            }
-    except Exception as e:
-        log_db.error(f"❌ db_get_estado: {e}")
-    return None
-
-def db_set_estado(identity: str, msg_id_dest: int, score: int,
-                  texto: str, plat: str, lider: str = "",
-                  janela_fim: float = 0.0, edit_count: int = 0,
-                  shadow_reply_id: int = 0):
-    try:
-        with _db() as db:
-            db.execute(
-                "INSERT OR REPLACE INTO oferta_estado"
-                "(identity,msg_id_dest,score,texto,plat,lider,"
-                "janela_fim,edit_count,shadow_reply_id,ts)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (identity, msg_id_dest, score, texto, plat, lider,
-                 janela_fim, edit_count, shadow_reply_id, time.time()))
-    except Exception as e:
-        log_db.error(f"❌ db_set_estado: {e}")
-
 # ── post_estado / oferta_index (modelo container/oferta) ──────────
 def db_get_post(msg_id_dest: int) -> Optional[dict]:
-    """Estado real do post. MESMA forma de dict que db_get_estado
-    (sem 'identity'), para decidir(...) consumir sem mudança."""
+    """Estado real do post, consumido por decidir(...)."""
     try:
         with _db() as db:
             row = db.execute(
                 "SELECT msg_id_dest,score,texto,plat,lider,janela_fim,"
-                "edit_count,shadow_reply_id,ts"
+                "edit_count,ts"
                 " FROM post_estado WHERE msg_id_dest=?",
                 (msg_id_dest,)).fetchone()
         if row:
@@ -262,7 +196,7 @@ def db_get_post(msg_id_dest: int) -> Optional[dict]:
                 "msg_id_dest": row[0], "score": row[1], "texto": row[2],
                 "plat": row[3], "lider": row[4] or "",
                 "janela_fim": row[5] or 0.0, "edit_count": row[6] or 0,
-                "shadow_reply_id": row[7] or 0, "ts": row[8],
+                "ts": row[7],
             }
     except Exception as e:
         log_db.error(f"❌ db_get_post: {e}")
@@ -315,7 +249,6 @@ def db_ofertas_de_post(msg_id_dest: int) -> list[str]:
 def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
                       texto: str, plat: str, lider: str = "",
                       janela_fim: float = 0.0, edit_count: int = 0,
-                      shadow_reply_id: int = 0,
                       chat_origem: str = "", msg_id_origem: int = 0):
     """Upsert do estado do post + mapeamento de cada oferta→post.
     Serve para publicação nova E evolução (idempotente).
@@ -327,10 +260,10 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
             db.execute(
                 "INSERT OR REPLACE INTO post_estado"
                 "(msg_id_dest,score,texto,plat,lider,"
-                "janela_fim,edit_count,shadow_reply_id,ts)"
-                " VALUES(?,?,?,?,?,?,?,?,?)",
+                "janela_fim,edit_count,ts)"
+                " VALUES(?,?,?,?,?,?,?,?)",
                 (msg_id_dest, score, texto, plat, lider,
-                 janela_fim, edit_count, shadow_reply_id, agora))
+                 janela_fim, edit_count, agora))
             for oferta in ofertas:
                 db.execute(
                     "INSERT OR REPLACE INTO oferta_index"
@@ -413,11 +346,8 @@ def db_limpar():
     try:
         agora = time.time()
         with _db() as db:
-            db.execute("DELETE FROM dedupe_temp  WHERE ts<?", (agora - TTL_DEDUPE,))
             db.execute("DELETE FROM saturacao    WHERE ts<?", (agora - TTL_DEDUPE,))
             db.execute("DELETE FROM links_cache  WHERE ts<?", (agora - TTL_LINK_INATIVO,))
-            db.execute("DELETE FROM oferta_estado WHERE ts<?", (agora - 30 * 86400,))
-            db.execute("DELETE FROM shadow_reply  WHERE ts<?", (agora - 30 * 86400,))
             db.execute("DELETE FROM post_estado  WHERE ts<?", (agora - 30 * 86400,))
             db.execute("DELETE FROM oferta_index WHERE ts<?", (agora - 30 * 86400,))
             db.execute("DELETE FROM cupom_idx    WHERE ts<?", (agora - 30 * 86400,))
