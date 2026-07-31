@@ -49,12 +49,6 @@ from pipeline.score import calcular_score
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.enriquecimento import MensagemEnriquecida
 from utils.hashes import _fp4
-from utils.textos import (
-    _alma,
-    _cupons_set,
-    _benef_set,
-)
-
 
 # ── Constantes ───────────────────────────────────────────────────
 # Janela curta usada APENAS pra reativação ("voltou", "reativado").
@@ -154,9 +148,6 @@ async def deve_enviar_async(enr: MensagemEnriquecida) -> bool:
         texto       = norm.texto_limpo
         plat        = norm.plat
         ids_globais = norm.ids_globais
-        cupons      = _cupons_set(texto)
-        alma_v      = _alma(texto)
-        benef       = _benef_set(texto)
         chat        = (norm.chat or "").lower()
 
         # ── TIPO + IDENTIDADE (prontos do enriquecimento) ─────────
