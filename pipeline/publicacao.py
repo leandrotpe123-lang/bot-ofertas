@@ -279,8 +279,7 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
         db_registrar_post(
             msg_id_dest, ofertas_familia, d.novo_score, montada.texto,
             montada.plat, norm.chat,
-            estado.get("janela_fim", 0), edit_count + 1,
-            estado.get("shadow_reply_id", 0))
+            estado.get("janela_fim", 0), edit_count + 1)
         if d.motivo == "CUPOM_ENRIQUECIDO":
             log_out.info(
                 f"💎 [CUPOM_ENRIQUECIDO] {identity} "
@@ -316,7 +315,6 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             sent.id, ofertas_familia, d.novo_score, montada.texto,
             montada.plat, norm.chat,
             estado.get("janela_fim", 0), edit_count + 1,
-            estado.get("shadow_reply_id", 0),
             chat_origem=norm.chat if norm else "",
             msg_id_origem=montada.msg_id)
         if d.motivo == "TROCA_IMG_BOA":
@@ -343,8 +341,7 @@ async def _aplicar_sincronizacao(montada, norm, score, estado, msg_id_dest,
     db_registrar_post(
         msg_id_dest, ofertas_familia, score, montada.texto,
         montada.plat, estado.get("lider", "") or norm.chat,
-        estado.get("janela_fim", 0), estado.get("edit_count", 0),
-        estado.get("shadow_reply_id", 0))
+        estado.get("janela_fim", 0), estado.get("edit_count", 0))
     log_out.info(
         f"🔁 [SINCRONIZADO] {identity} chat={norm.chat} score={score} "
         f"edit_count={estado.get('edit_count', 0)} (preservado)")
