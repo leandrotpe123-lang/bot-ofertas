@@ -262,7 +262,7 @@ def _log_decisao(d, montada, norm, estado: dict, score: int,
             f"atual={score} salvo={d.score_atual} chat={norm.chat}")
 
 async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
-                            edit_count, ofertas_familia, identity, loop) -> bool:
+                            edit_count, ofertas_familia, identity) -> bool:
     """Executa a EVOLUÇÃO de um post existente: edita no lugar ou, em
     fallback autorizado, substitui com mídia. Persiste o novo estado com
     a união da família. Sem decisão — o caminho já foi decidido a montante."""
@@ -353,9 +353,9 @@ async def _aplicar_sincronizacao(montada, norm, score, estado, msg_id_dest,
 
 
 async def _aplicar_novo_envio(montada, norm, ofertas, score,
-                              identity, loop) -> bool:
+                              identity) -> bool:
     """Executa a PUBLICAÇÃO de um post novo: envia com retry, registra a
-    janela e dispara os efeitos colaterais (mapa, idempotência, saturação,
+    janela e dispara os efeitos colaterais (idempotência, saturação,
     burst). Sem decisão — chamado quando não há post parente vivo."""
     img = montada.imagem
     sent = None
@@ -436,7 +436,6 @@ async def _enviar_inner(montada: MensagemMontada,
     parente por sobreposição, trava o post candidato, re-verifica sob o
     lock e decide pelo score (decisão intocada)."""
     async with config._SEM_ENVIO:
-        loop = asyncio.get_running_loop()
         identity = ofertas[0] if ofertas else None   # rótulo de log
 
         if norm is not None and (ofertas or dest_fix):
@@ -479,7 +478,7 @@ async def _enviar_inner(montada: MensagemMontada,
                                 f"RENASCIMENTO | supersede={msg_id_rel}")
                             return await _aplicar_novo_envio(
                                 montada, norm, ofertas_renasce, score,
-                                identity, loop)
+                                identity)
 
                         if d.acao == "SINCRONIZAR":
                             # Edição do líder → espelha o conteúdo no post,
@@ -516,7 +515,7 @@ async def _enviar_inner(montada: MensagemMontada,
 
                         return await _aplicar_evolucao(
                             montada, norm, d, estado, msg_id_dest,
-                            edit_count, ofertas_familia, identity, loop)
+                            edit_count, ofertas_familia, identity)
                     # d.acao == PUBLICAR: estado sumiu sob o lock (substituído/
                     # limpo por outra task) → cai para NOVO ENVIO
 
@@ -524,5 +523,5 @@ async def _enviar_inner(montada: MensagemMontada,
         # NOVO ENVIO (sem post parente vivo)
         # ═════════════════════════════════════════════════════════════
         return await _aplicar_novo_envio(
-            montada, norm, ofertas, score, identity, loop)
+            montada, norm, ofertas, score, identity)
 
