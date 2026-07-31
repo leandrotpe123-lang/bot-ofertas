@@ -382,7 +382,7 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
             db_registrar_post(
                 sent.id, ofertas, score, montada.texto,
                 montada.plat, norm.chat if norm else "",
-                janela_fim, 0, 0,
+                janela_fim, 0,
                 chat_origem=norm.chat if norm else "",
                 msg_id_origem=montada.msg_id)
             log_out.info(
