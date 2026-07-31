@@ -34,13 +34,10 @@ from logger import log_ded
 from pipeline.reativacao import eh_reativacao
 # ── Camada fina de compatibilidade (Front 1, passo de extração) ──
 # A identidade de oferta foi extraída para pipeline.identidade_oferta.
-# Estas três funções são importadas aqui e REEXPORTADAS para que os
-# consumidores atuais (publicacao, testes) sigam importando de
-# pipeline.deduplicacao sem mudança nesta fase. identidade_canonica e
-# identidade_canonica também é usada internamente por deve_enviar_async.
+# identidade_canonica é consumida internamente por deve_enviar_async.
+# A derivação da identidade pertence a pipeline.identidade_oferta.
 from pipeline.identidade_oferta import (
     identidade_canonica,
-    identidades,
 )
 # calcular_score foi extraído para pipeline.score (Front 2, passo 2.1);
 # reexportado aqui para publicacao e testes seguirem importando da dedup.
