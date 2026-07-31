@@ -41,29 +41,6 @@ def _alma(t: str) -> str:
         w for w in t.split()
         if w not in _RUIDO_NORM and (len(w) > 2 or "attr_" in w)
     ))
-
-
-def _cupons(t: str) -> frozenset:
-    return frozenset(re.findall(r'\b([A-Z0-9_-]{4,20})\b', t))
-
-
-def _cupons_set(t: str) -> frozenset:
-    return _cupons(t)
-
-
-def _benef(t: str) -> frozenset:
-    b = set()
-    if re.search(r'frete\s+gr[aá]t', t, re.I):
-        b.add("frete_gratis")
-    for m in re.findall(r'(\d+)\s*%?\s*off', t, re.I):
-        b.add(f"off_{m}")
-    for m in re.findall(r'r\$\s*([\d.,]+)\s*off', t, re.I):
-        b.add(f"valor_off_{m.replace('.','').replace(',','')}")
-    return frozenset(b)
-
-
-def _benef_set(t: str) -> frozenset:
-    return _benef(t)
     
 
 def _sim(a: str, b: str) -> float:
@@ -72,9 +49,4 @@ def _sim(a: str, b: str) -> float:
     if min(len(a), len(b)) / max(len(a), len(b)) < 0.6:
         return 0.0
     return SequenceMatcher(None, a, b).ratio()
-
-
-def _normalizar_valor(t: str) -> str:
-    vals = re.findall(r'r\$\s*([\d.,]+)', t, re.I)
-    return "|".join(sorted(v.replace('.', '').replace(',', '.') for v in vals))
     
