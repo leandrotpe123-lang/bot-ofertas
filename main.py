@@ -37,7 +37,7 @@ from client import client
 from config import (
     API_ID, API_HASH, SESSION_STRING,
     GRUPOS_ORIGEM, GRUPO_DESTINO,
-    _PIL_OK, _EXECUTOR,
+    _PIL_OK,
 )
 
 from database import _init_db, _db, db_limpar
@@ -162,12 +162,6 @@ async def main() -> None:
         if not conectado:
             log_sys.error("❌ Sessão inválida — encerrando sem restart.")
             break
-
-    # Shutdown limpo
-    try:
-        _EXECUTOR.shutdown(wait=False)
-    except Exception:
-        pass
 
 
 if __name__ == "__main__":
