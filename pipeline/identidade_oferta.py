@@ -33,7 +33,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from pipeline.memoria_cupom import resolver_identidade
+from pipeline.memoria_cupom import buscar_identidade
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.natureza import eh_entidade_cupom
 from utils.cupom import _KW_CUPOM
@@ -99,7 +99,7 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
         base = sorted(identidades(norm))[0]
     if not gate:
         return base
-    return resolver_identidade(norm, norm.plat, base)
+    return buscar_identidade(norm, norm.plat, base)
 
 
 @dataclass(frozen=True)
