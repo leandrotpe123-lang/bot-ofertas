@@ -1,6 +1,5 @@
 """Configuração central — variáveis de ambiente, constantes, grupos."""
 from __future__ import annotations
-import concurrent.futures
 import os
 from typing import Optional
 import asyncio
@@ -26,9 +25,6 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.3 Safari/605.1.15",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36",
 ]
-
-# ── Executor ──────────────────────────────────────────────────────
-_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 # ── Semáforos (inicializados em globals._init_globals) ────────────
 # Declarados aqui como None; atribuídos no loop correto.
