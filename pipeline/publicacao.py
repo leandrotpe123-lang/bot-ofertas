@@ -15,8 +15,6 @@ from database import (db_registrar_sat, db_get_post, db_overlap_posts,
                       db_ofertas_de_post)
 import globals as g
 from logger import log_out, log_sys, _idade_str
-from pipeline.deduplicacao import calcular_score
-from pipeline.identidade_oferta import identidades
 from pipeline.decisao import decidir
 from pipeline import origem
 from pipeline.vida_oferta import viva
@@ -178,20 +176,13 @@ async def enviar(montada: MensagemMontada,
     compartilham qualquer oferta. A camada 2 (lock do post) é aplicada
     dentro de _enviar_inner.
 
-    ofertas/score vêm PRONTOS do enriquecimento no caminho NOVO (enr
-    presente). Na EDIÇÃO (enr ausente) derivam de norm, como antes — sem
-    redisparar o efeito de cupom, pois nem identidades() nem calcular_score()
-    o produzem; identidade_canonica (único ponto do efeito) roda 1x, só no
-    enriquecimento.
+    ofertas/score vêm PRONTOS do enriquecimento em AMBOS os caminhos —
+    esta camada CONSOME e nunca deriva (P2/P5). A edição recebe a porta
+    pura (derivar); o efeito de memória de cupom ocorre 1x, só na
+    publicação nova, dentro de enriquecer().
     """
-    ofertas: list = []
-    score: int = 0
-    if enr is not None:
-        ofertas = enr.ofertas
-        score   = enr.score
-    elif norm is not None:
-        ofertas = identidades(norm)
-        score   = calcular_score(norm)
+    ofertas: list = enr.ofertas if enr is not None else []
+    score:   int  = enr.score   if enr is not None else 0
 
 # ── Camada 0: ORIGEM (Fase 1 do MB) — lock mais externo (I6) ──
     if norm is not None:
