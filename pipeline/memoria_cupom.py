@@ -29,8 +29,6 @@
 # novo (histórico governando o presente). Agora a memória expira junto
 # com o ciclo que a criou.
 #
-# NÃO confundir com config._JANELA_CUPOM_S, que permanece e continua
-# servindo o CLAIM ATÔMICO da deduplicação (deduplicacao._janela_por_tipo).
 # São perguntas de negócio diferentes — "este código já foi visto?" versus
 # "esta identidade já foi reivindicada?" — e não se unificam só porque
 # ambas usam tempo.
