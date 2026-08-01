@@ -357,6 +357,8 @@ _COND_PISO = (          # piso: compra mínima para o cupom valer
 )
 _COND_TETO = (          # teto: desconto máximo concedido
     "limite",           # ML/Shopee: "15% OFF acima de R$79, limite R$60"
+    "até",              # Magalu/Pelando: "20% OFF até R$ 500: PELANDO20"
+    "ate",              #   idem, sem acento
 )
 # Mesmo papel semântico, porém SEM evidência no corpus de produção.
 # NÃO implementadas por decisão explícita: o vocabulário evolui por
@@ -364,9 +366,8 @@ _COND_TETO = (          # teto: desconto máximo concedido
 # mover a forma para _COND_PISO/_COND_TETO — e mais nada muda.
 _COND_EXPANSAO_FUTURA = (
     "a partir de", "nas compras de", "em pedidos de", "mínimo",
-    "limitado a", "até", "máximo", "para compras de",
+    "limitado a", "máximo", "para compras de",
 )
-
 _RE_COND_BENEFICIO = re.compile(
     r"\b(?:" + "|".join(f.replace(" ", r"\s+")
                         for f in _COND_PISO + _COND_TETO)
