@@ -11,8 +11,9 @@ NÃO faz (é do orquestrador, publicacao.py):
   - decisão de score / janela;
   - conhecimento da identidade da oferta.
 
-O semáforo _SEM_ENVIO mora aqui de propósito: não é estado de negócio,
-é controle de throughput / proteção de FloodWait do Telegram.
+_SEM_ENVIO é consumido aqui (declarado em config, instanciado em
+globals._init_globals): não é estado de negócio, é controle de
+throughput / proteção de FloodWait do Telegram.
 """
 from __future__ import annotations
 
