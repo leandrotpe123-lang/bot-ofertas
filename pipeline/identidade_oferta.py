@@ -89,10 +89,13 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
     cup para SKUs minúsculos (ex.: Magalu) por acidente.
 
     A grudação transitiva por código (memoria_cupom.resolver_identidade)
-    segue aplicada por cima em ambos os ramos: se qualquer código do post
-    já foi visto na janela, a identidade da corrente sobrepõe a base.
+    só se aplica quando a natureza é cupom-entidade (MB §11.7a/b): num
+    post de PRODUTO o código é atributo, não sujeito — redirecionar a
+    canônica por ele uniria produtos distintos (viola R4/I4) e faria a
+    canônica divergir das âncoras, que permanecem no produto.
     """
-    if eh_entidade_cupom(norm):
+    gate = eh_entidade_cupom(norm)
+    if gate:
         # [F-C4 / INV-E5] A natureza decidida pelo gate alimenta TODAS
         # as camadas: se a entidade é a campanha de cupom, a canônica
         # (claims/dedup) é a do cupom — nunca a do produto-vitrine.
@@ -101,6 +104,8 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
         base = min(f"{p}|{i}" for p, i, _ in norm.idents)
     else:
         base = sorted(identidades(norm))[0]
+    if not gate:
+        return base
     return resolver_identidade(norm, norm.plat, base)
 
 
