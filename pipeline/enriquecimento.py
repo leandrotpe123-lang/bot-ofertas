@@ -9,7 +9,8 @@ o que recebem, sem recalcular identidade, tipo, score ou cupom por conta
 própria.
 
 Superfície pública:
-  - enriquecer(norm) -> MensagemEnriquecida
+  - derivar(norm)    -> MensagemEnriquecida   (puro, todos os caminhos)
+  - enriquecer(norm) -> MensagemEnriquecida   (derivar + efeito, só NOVO)
 
 efeito preservado (frequência/ordem), e que desde a Fase 2 o valor é congelado em cupons_novos após o efeito (P8), com norm._cupom_novos mantido como ponte legada para decisao:78/publicacao:251 até a fase que tocar esses módulos.
 
@@ -24,12 +25,13 @@ NÃO faz:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.identidade_oferta import identidade_canonica, ancoras, Ancora
 from pipeline.natureza import natureza
 from pipeline.score import calcular_score
+from pipeline.memoria_cupom import registrar_uso
 
 
 @dataclass(frozen=True)
@@ -53,22 +55,39 @@ class MensagemEnriquecida:
     ancoras:  tuple[Ancora, ...] = ()
     cupons_novos: int = 0
 
-def enriquecer(norm: MensagemNormalizada) -> MensagemEnriquecida:
-    """Produz os derivados prontos a partir do snapshot normalizado.
+def derivar(norm: MensagemNormalizada) -> MensagemEnriquecida:
+    """DERIVAÇÃO PURA — determinística, sem I/O e sem mutação.
 
-    A ORDEM reproduz exatamente a de deduplicacao.deve_enviar_async: tipo
-    primeiro (puro), identidade canônica depois — e é dentro de
-    identidade_canonica que o efeito de cupom (cupom_idx + norm._cupom_novos)
-    ocorre, 1x, como antes. As camadas a jusante consomem tipo/canonica
-    prontos, sem redisparar o efeito.
+    Roda em TODOS os caminhos (novo e edição). Produz o contrato
+    completo exceto cupons_novos, que é fruto do efeito e só existe
+    quando o efeito roda. Chamar duas vezes devolve o mesmo resultado.
     """
-    tipo     = natureza(norm)
-    canonica = identidade_canonica(norm)          # efeito de cupom AQUI, 1x
-    ancs     = ancoras(norm)                      # puro (autoritativa, P6)
-    ofertas  = [a.chave for a in ancs]            # projeção == identidades(norm)
-    score    = calcular_score(norm)
-    novos    = getattr(norm, "_cupom_novos", 0)   # congela PÓS-efeito (P8)
+    ancs = ancoras(norm)                          # autoritativa (P6)
     return MensagemEnriquecida(
-        norm=norm, tipo=tipo, canonica=canonica,
-        ofertas=ofertas, score=score,
-        ancoras=tuple(ancs), cupons_novos=novos)
+        norm=norm,
+        tipo=natureza(norm),
+        canonica=identidade_canonica(norm),       # PURA desde F1e
+        ofertas=[a.chave for a in ancs],          # projeção de ancoras()
+        score=calcular_score(norm),
+        ancoras=tuple(ancs),
+        cupons_novos=0)
+
+
+def enriquecer(norm: MensagemNormalizada) -> MensagemEnriquecida:
+    """DERIVAÇÃO + EFEITO — exclusivo do caminho NOVO (P9).
+
+    Deriva e, em seguida, aplica o efeito de memória de cupom: registra
+    os códigos sob a identidade eleita e conta os inéditos. O efeito
+    ocorre 1x por mensagem, DEPOIS da derivação, e nunca em edições —
+    é o que impede um mesmo código de ser recontado como novo a cada
+    edição do post.
+    """
+    base = derivar(norm)
+    if base.tipo != "cupom":
+        # F1c: num post de PRODUTO o código é atributo, não sujeito —
+        # não indexa e não conta novidade. Consome a natureza já
+        # decidida; não reclassifica.
+        return base
+    novos = registrar_uso(norm, norm.plat, base.canonica)
+    return replace(base, cupons_novos=novos)
+  
