@@ -1,9 +1,8 @@
-"""Utilitários de texto: normalização, alma, similaridade, benefícios."""
+"""Utilitários de texto: alma canônica e similaridade."""
 from __future__ import annotations
 import re
 import unicodedata
 from difflib import SequenceMatcher
-from typing import Optional
 
 # ── Constantes de deduplicação ────────────────────────────────────
 _RUIDO_NORM = frozenset({
@@ -16,8 +15,6 @@ _RUIDO_NORM = frozenset({
     "shopee","amazon","magalu","magazineluiza","magazine",
 })
 _RE_EMJ_NORM = re.compile(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF]+", re.UNICODE)
-_SIM_FORTE   = 0.82
-_SIM_MEDIO   = 0.70
 
 
 def _rm_acentos(t: str) -> str:
