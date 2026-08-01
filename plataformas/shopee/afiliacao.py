@@ -72,6 +72,7 @@ _LINKS_FIXOS_POR_PATH = {
     "/cart":               "https://s.shopee.com.br/1qapQu2VFM",
     "/m/cupom-de-desconto": "https://s.shopee.com.br/6AjowpqGMh",
     "/shopeevip":        "https://s.shopee.com.br/6AjqXCz9ys",
+    "/m/espaco-tecnologia": "https://s.shopee.com.br/2VqZm3mz6m",
 }
 
 
