@@ -1,16 +1,13 @@
 """
-Camada 4 — Deduplicação e score.
+Camada 4 — Throttle de reativação.
 
-NOTA (Front 1 — extração): a identidade de oferta foi extraída para
-pipeline.identidade_oferta. Esta camada CONSOME identidades()/
-identidade_canonica() de lá e as REEXPORTA por
-compatibilidade (consumidores atuais não mudam nesta fase). O score
-(calcular_score) permanece aqui; sua extração é o Front 2.
+Responsabilidade única: barrar flood de reposts de reativação. Não
+deriva identidade, não calcula score e não reexporta nada: consome
+enr.canonica e enr.tipo, prontos do enriquecimento (P2/P8).
 
-Responsabilidade única: decidir duplicidade. A deduplicação é a
-autoridade de DECISÃO sobre duplicidade; não é autoridade de
-derivação de identidade.
-
+A decisão de família vive na publicação; a janela do ciclo, em
+vida_oferta. O claim de identidade foi aposentado em F4 — não
+decidia (ambos os ramos passavam).
 CONSUMO DE IDENTIDADE DERIVADA:
   A identidade — de produto e de campanha — é derivada pela
   normalização, autoridade única dessa derivação, sobre as URLs
@@ -33,15 +30,7 @@ import globals as g
 from logger import log_ded
 from pipeline.reativacao import eh_reativacao
 # ── Camada fina de compatibilidade (Front 1, passo de extração) ──
-# A identidade de oferta foi extraída para pipeline.identidade_oferta.
-# identidade_canonica é consumida internamente por deve_enviar_async.
-# A derivação da identidade pertence a pipeline.identidade_oferta.
-from pipeline.identidade_oferta import (
-    identidade_canonica,
-)
-# calcular_score foi extraído para pipeline.score (Front 2, passo 2.1);
-# reexportado aqui para publicacao e testes seguirem importando da dedup.
-from pipeline.score import calcular_score
+
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.enriquecimento import MensagemEnriquecida
 from utils.hashes import _fp4
