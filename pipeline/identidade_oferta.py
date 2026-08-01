@@ -30,13 +30,11 @@ NÃO faz:
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from pipeline.memoria_cupom import buscar_identidade
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.natureza import eh_entidade_cupom
-from utils.cupom import _KW_CUPOM
 from utils.hashes import _fp4
 from utils.textos import _alma
 from utils.urls import _cache_key
