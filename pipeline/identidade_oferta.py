@@ -22,13 +22,6 @@ CONSUMO DE IDENTIDADE DERIVADA:
   única leitura legítima do mapa é o nível de fallback operacional NÃO
   semântico de _id_url, explicitamente reconhecido.
 
-DELEGAÇÃO DE EFEITO (C4.2):
-  A memória de códigos foi extraída para pipeline.memoria_cupom, que é o
-  dono único do índice cupom_idx e da contagem norm._cupom_novos. Esta
-  camada DERIVA identidade e DELEGA a resolução por código — não lê nem
-  escreve banco por conta própria. O efeito colateral continua existindo,
-  mas agora tem casa própria e fronteira declarada.
-
 NÃO faz:
   - decisão de duplicidade / claim / janela  (deduplicação)
   - cálculo de score                         (deduplicação → score)
