@@ -43,41 +43,35 @@ from pipeline.vida_oferta import VIDA_OFERTA_S
 # fallback puro (sem grudação) — útil para isolar o efeito em diagnóstico.
 CUPOM_IDX_ON = True
 
+def buscar_identidade(norm, plat: str, fallback: str) -> str:
+    """CONSULTA PURA do índice por código — sem escrita, sem mutação.
 
-def resolver_identidade(norm, plat: str, fallback: str) -> str:
-    """Resolve a identidade de cupom pelo ÍNDICE POR CÓDIGO.
-
-    Se QUALQUER código do post já foi visto (plat + código) dentro da
-    janela de cupom, reusa a identidade daquele post. Senão usa
-    `fallback` (identidade nova). Em ambos os casos registra TODOS os
-    códigos sob a identidade resolvida — preserva todos, não só um. O
-    link nunca participa: a chave é código + plataforma.
-
-    EFEITO COLATERAL (deliberado, e a razão de este módulo existir):
-    muta `norm._cupom_novos` com a contagem de códigos INÉDITOS — insumo
-    do ramo CUPOM_ENRIQUECIDO da evolução. O valor é congelado em
-    MensagemEnriquecida.cupons_novos logo após, pelo enriquecimento.
+    Se qualquer código do post já foi visto (plat + código) dentro da
+    janela, devolve a identidade da corrente à qual ele pertence.
+    Senão devolve `fallback`. Pode ser chamada N vezes com o mesmo
+    resultado: é o que permite a derivação ser pura (F1e).
     """
     if not CUPOM_IDX_ON:
         return fallback
-
-    codes = sorted(set(
-        c.upper() for c in norm.cupons if c
-    ))
+    codes = sorted(set(c.upper() for c in norm.cupons if c))
     if not codes:
         return fallback
+    return db_cupom_idx_buscar(plat, codes, float(VIDA_OFERTA_S)) or fallback
 
-    # A memória de códigos vive o ciclo — nem um segundo a mais (C4.3).
-    janela = float(VIDA_OFERTA_S) 
-    existente = db_cupom_idx_buscar(plat, codes, janela)
-    identity = existente or fallback
-    # max() é guarda DEFENSIVA. Desde o D1 o efeito roda 1x por mensagem
-    # nova (identidade_canonica, via enriquecimento). Se algum caminho
-    # reexecutar, registrar devolve 0 para códigos já indexados — o max
-    # preserva a contagem real. (Fase 2: o valor é congelado em
-    # MensagemEnriquecida.cupons_novos APÓS o efeito.)
-    norm._cupom_novos = max(
-        getattr(norm, "_cupom_novos", 0),
-        db_cupom_idx_registrar(plat, codes, identity, janela))
-    return identity
-  
+
+def registrar_uso(norm, plat: str, identity: str) -> int:
+    """EFEITO — registra TODOS os códigos do post sob `identity` e
+    devolve quantos eram INÉDITOS na janela.
+
+    Roda 1x por mensagem, só no caminho NOVO (P9), chamada
+    explicitamente por enriquecimento.enriquecer DEPOIS da derivação.
+    Muta `norm._cupom_novos` como ponte legada para decisao/publicacao.
+    """
+    if not CUPOM_IDX_ON:
+        return 0
+    codes = sorted(set(c.upper() for c in norm.cupons if c))
+    if not codes:
+        return 0
+    novos = db_cupom_idx_registrar(plat, codes, identity, float(VIDA_OFERTA_S))
+    norm._cupom_novos = max(getattr(norm, "_cupom_novos", 0), novos)
+    return novos
