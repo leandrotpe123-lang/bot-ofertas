@@ -26,8 +26,12 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36",
 ]
 
-# ── Semáforos (inicializados em globals._init_globals) ────────────
-# Declarados aqui como None; atribuídos no loop correto.
+# ── Semáforos de throughput (recursos de runtime) ─────────────────
+# Exceção consciente à pureza declarativa deste módulo: config é a
+# única folha do grafo de imports alcançável por plataformas,
+# pipeline e saída. Movê-los para globals criaria o ciclo
+# plataformas → globals → plataformas.contrato no boot. Declarados
+# None aqui; instanciados por globals._init_globals, dentro do loop.
 _SEM_ENVIO: Optional[asyncio.Semaphore] = None
 _SEM_HTTP:  Optional[asyncio.Semaphore] = None
 
