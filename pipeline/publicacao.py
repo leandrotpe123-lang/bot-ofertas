@@ -167,7 +167,7 @@ def destino_vivo_de_origem(chat: str, msg_id: int):
 
 async def enviar(montada: MensagemMontada,
                  norm: Optional[MensagemNormalizada] = None,
-                 enr: Optional[MensagemEnriquecida] = None,
+                 *, enr: MensagemEnriquecida,
                  is_edit: bool = False) -> bool:
     """
     Publica ou edita mensagem no grupo destino.
@@ -180,9 +180,13 @@ async def enviar(montada: MensagemMontada,
     esta camada CONSOME e nunca deriva (P2/P5). A edição recebe a porta
     pura (derivar); o efeito de memória de cupom ocorre 1x, só na
     publicação nova, dentro de enriquecer().
+    `enr` é obrigatório e keyword-only: depois da F1d o orchestrator
+    sempre o produz (derivar na edição, enriquecer no novo). Um guard
+    tolerando None faria a publicação seguir com ofertas=[] — sem locks
+    de identidade e sem família — em silêncio. O contrato recusa.
     """
-    ofertas: list = enr.ofertas if enr is not None else []
-    score:   int  = enr.score   if enr is not None else 0
+    ofertas: list = enr.ofertas
+    score:   int  = enr.score
 
 # ── Camada 0: ORIGEM (Fase 1 do MB) — lock mais externo (I6) ──
     if norm is not None:
