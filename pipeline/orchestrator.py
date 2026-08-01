@@ -33,7 +33,7 @@ import globals as g
 from config import _MAX_IDADE_NOVA_S
 from logger import log_sys, _idade_str, _idade_seg
 from pipeline.deduplicacao import deve_enviar_async
-from pipeline.enriquecimento import enriquecer
+from pipeline.enriquecimento import derivar, enriquecer
 from pipeline.identidade import checar_e_marcar
 from pipeline.ingestao import ingerir
 from pipeline.montagem import montar
@@ -172,13 +172,15 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         return
 
     # ── Camada 3a: Enriquecimento (derivados prontos p/ consumo) ─
-    #   Só no fluxo de publicação nova (not is_edit) — preserva que o
-    #   efeito de cupom de identidade_canonica NÃO roda em edições,
-    #   exatamente como quando vivia em deve_enviar_async.
+    #   Roda em AMBOS os caminhos. A edição usa a porta PURA (derivar),
+    #   preservando que o efeito de memória de cupom não ocorre em
+    #   edições — a fronteira é a função, não o if.
     # ── Camada 3: Deduplicação + saturação (somente novas) ───────
-    enr = None
+    # Um só produtor de derivados (P2/P5): derivar() é puro e roda em
+    # ambos os caminhos; enriquecer() adiciona o efeito de memória de
+    # cupom, exclusivo da publicação nova (P9).
+    enr = derivar(norm) if is_edit else enriquecer(norm)
     if not is_edit:
-        enr = enriquecer(norm)
         try:
             if not await deve_enviar_async(enr):
                 log_sys.info(
