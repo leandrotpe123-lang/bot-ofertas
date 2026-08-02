@@ -170,53 +170,6 @@ def _filtrar_codes_validos(code_entities: list) -> List[str]:
 
 
 # ── Extração ──────────────────────────────────────────────────────
-def extrair_cupom_de_codes(code_entities: list) -> str:
-    """Retorna o primeiro cupom válido entre os trechos de código."""
-    validos = _filtrar_codes_validos(code_entities)
-    return validos[0] if validos else ""
-
-
-def extrair_cupom(texto: str, code_entities: list = None) -> str:
-    """
-    Extrai o cupom principal de um texto, aplicando uma hierarquia
-    de estratégias em ordem de confiança decrescente:
-
-      1. trechos formatados como código (alta confiança)
-      2. linhas em formato de lista de cupons
-      3. pares chave-valor ("cupom: CODIGO")
-      4. proximidade de palavra-chave de cupom
-    """
-    if code_entities:
-        c = extrair_cupom_de_codes(code_entities)
-        if c:
-            return c
-
-    if _RE_LISTA_CUPONS.search(texto):
-        for linha in texto.splitlines():
-            m = re.search(r':\s*([A-Z0-9][A-Z0-9_-]{3,19})\b', linha)
-            if m:
-                c = m.group(1).upper()
-                if _eh_cupom_valido(c):
-                    return c
-
-    for m in _RE_KV_CUPOM.finditer(texto):
-        c = m.group(1).upper()
-        if _eh_cupom_valido(c):
-            return c
-
-    if _KW_CUPOM.search(texto):
-        linhas = texto.splitlines()
-        for i, linha in enumerate(linhas):
-            if not _KW_CUPOM.search(linha):
-                continue
-            for j in range(i, min(i + 4, len(linhas))):
-                for m in _KW_COD.finditer(linhas[j]):
-                    c = m.group(1).upper()
-                    if _eh_cupom_valido(c):
-                        return c
-    return ""
-
-
 def extrair_todos_cupons(texto: str, code_entities: list = None) -> List[str]:
     """
     Extrai todos os cupons distintos presentes em um texto.
