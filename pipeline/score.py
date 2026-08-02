@@ -65,7 +65,7 @@ def calcular_score(norm: MensagemNormalizada) -> int:
         score += 3
     if re.search(r'r\$\s*[\d.,]+', texto, re.I):
         score += 2
-    if norm.cupom:
+    if norm.cupons:
         score += 2
     if re.search(r'\d+\s*%\s*off', texto, re.I):
         score += 2
