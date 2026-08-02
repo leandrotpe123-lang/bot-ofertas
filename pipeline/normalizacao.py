@@ -61,7 +61,7 @@ from pipeline.ingestao import MensagemBruta
 from plataformas import registry
 from plataformas.contrato import AUSENTE, Afiliacao
 from utils.cache_links import consultar_link
-from utils.cupom import extrair_cupom, extrair_todos_cupons
+from utils.cupom import extrair_todos_cupons
 from utils.encurtador import encurtar
 from utils.url_resolver import desencurtar
 from utils.urls import _netloc, host_canonico_campanha, chaves_canonicas_campanha
@@ -107,7 +107,6 @@ class MensagemNormalizada:
     mapa:              Dict[str, str]
     preservar:         List[str]
     plat:              str
-    cupom:             str
     sku:               str
     tem_midia:         bool
     media_obj:         object
@@ -118,7 +117,7 @@ class MensagemNormalizada:
     idents: List[Tuple[str, str, str]] = field(default_factory=list)
     # Lista completa de cupons — snapshot derivado UMA vez na normalização
     # (extrair_todos_cupons sobre texto_limpo). Consumida por identidade e
-    # score; o representante norm.cupom (extrair_cupom) é derivação distinta.
+    # score. É o ÚNICO fato de cupom do contrato (Cupom-1).
     cupons:            List[str]    = field(default_factory=list)
     # ── Identidade de campanha derivada — CONTRATO COM A DEDUPLICAÇÃO.
     # Derivados das URLs afiliadas LONGAS, antes do encurtamento.
@@ -129,9 +128,8 @@ class MensagemNormalizada:
     tem_host_campanha: bool         = False
     tem_sinal_cashback: bool        = False
     # Entidades de código (monospace) capturadas na ingestão — insumo que
-    # normalizar() usa para derivar norm.cupom E norm.cupons. Após Cupom-1
-    # o pipeline consome norm.cupons; este campo é insumo interno e sai do
-    # contrato no Cupom-2.
+    # normalizar() usa para derivar norm.cupons. Este campo é insumo
+    # interno e sai do contrato no Cupom-2.
     code_entities:     List[str]    = field(default_factory=list)
     # ──────────────────────────────────────────────────────────────
     is_reply:          bool         = False
@@ -390,7 +388,6 @@ async def normalizar(
         return None
 
     plat_dom = max(set(plats), key=plats.count) if plats else ""
-    cupom    = extrair_cupom(texto_limpo, getattr(bruta, "code_entities", None))
     cupons   = extrair_todos_cupons(texto_limpo, getattr(bruta, "code_entities", None))
 
     # ── DERIVAÇÃO DE IDENTIDADE ───────────────────────────────────
@@ -421,10 +418,6 @@ async def normalizar(
     if ids_globais:
         _ids_da_entidade = {i.upper() for i in ids_globais}
         cupons = [c for c in cupons if c.upper() not in _ids_da_entidade]
-        if cupom and cupom.upper() in _ids_da_entidade:
-            # Recua para o primeiro cupom legítimo (já consolidado),
-            # em vez de zerar: o post pode ter cupom real além do id.
-            cupom = cupons[0] if cupons else ""
 
     # Identidade de campanha: chave_campanha e tem_host_campanha
     # DEVEM derivar da mesma população de URLs — as URLs de campanha
@@ -453,7 +446,7 @@ async def normalizar(
 
     log_nrm.info(
     f"✅ {len(mapa_publicacao)}/{len(converter)} | "
-    f"plat={plat_dom or 'none'} cupom='{cupom}' sku={sku} "
+    f"plat={plat_dom or 'none'} cupons={cupons} sku={sku} "
     f"ids_globais={ids_globais} "
     f"chave_campanha='{chave_campanha}' "
     f"chaves_campanha={chaves_campanha} "
@@ -465,7 +458,7 @@ async def normalizar(
     return MensagemNormalizada(
         msg_id=bruta.msg_id, chat=bruta.chat, texto_limpo=texto_limpo,
         mapa=mapa_publicacao, preservar=preservar_lst, plat=plat_dom,
-        cupom=cupom, cupons=cupons, sku=sku, tem_midia=bruta.tem_midia,
+        cupons=cupons, sku=sku, tem_midia=bruta.tem_midia,
         media_obj=bruta.media_obj,
         ids_globais=ids_globais, idents=idents,
         chave_campanha=chave_campanha,
