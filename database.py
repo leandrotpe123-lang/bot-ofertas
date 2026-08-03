@@ -264,6 +264,32 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
                 " VALUES(?,?,?,?,?,?,?,?)",
                 (msg_id_dest, score, texto, plat, lider,
                  janela_fim, edit_count, agora))
+            # ── [F11c-MEDIÇÃO] instrumentação temporária ──────────
+            # Registra quando uma âncora TROCA de dono estando o dono
+            # anterior VIVO — o caso que produz contaminação cruzada
+            # entre campanhas. Somente leitura; não altera o registro.
+            # Falha aqui jamais pode abortar a gravação: try próprio.
+            # RENASCER produz um caso LEGÍTIMO (o post novo assume as
+            # âncoras do antigo) — correlacione com 🐣 RENASCIMENTO,
+            # emitido logo antes com o mesmo msg_id.
+            try:
+                if ofertas:
+                    _m = ",".join("?" * len(ofertas))
+                    for _id, _dono in db.execute(
+                            f"SELECT oi.identity, oi.msg_id_dest"
+                            f"  FROM oferta_index oi"
+                            f"  JOIN post_estado pe"
+                            f"    ON pe.msg_id_dest = oi.msg_id_dest"
+                            f" WHERE oi.identity IN ({_m})"
+                            f"   AND oi.msg_id_dest <> ?"
+                            f"   AND pe.janela_fim > ?",
+                            tuple(ofertas) + (msg_id_dest, agora)).fetchall():
+                        log_db.info(
+                            f"⚠️ [ANCORA_ROUBADA] {_id} | "
+                            f"dono {_dono} → {msg_id_dest} | "
+                            f"n_ofertas={len(ofertas)}")
+            except Exception:
+                pass
             for oferta in ofertas:
                 db.execute(
                     "INSERT OR REPLACE INTO oferta_index"
