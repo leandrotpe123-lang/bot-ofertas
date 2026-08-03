@@ -268,7 +268,8 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
             # Registra quando uma âncora TROCA de dono estando o dono
             # anterior VIVO — o caso que produz contaminação cruzada
             # entre campanhas. Somente leitura; não altera o registro.
-            # Falha aqui jamais pode abortar a gravação: try próprio.
+            # Falha aqui jamais pode abortar a gravação: try próprio,
+            # registrando em DEBUG — nunca silencioso.
             # RENASCER produz um caso LEGÍTIMO (o post novo assume as
             # âncoras do antigo) — correlacione com 🐣 RENASCIMENTO,
             # emitido logo antes com o mesmo msg_id.
@@ -288,8 +289,8 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
                             f"⚠️ [ANCORA_ROUBADA] {_id} | "
                             f"dono {_dono} → {msg_id_dest} | "
                             f"n_ofertas={len(ofertas)}")
-            except Exception:
-                pass
+            except Exception as _e:
+                log_db.debug(f"[F11c-MEDIÇÃO] falhou: {_e}")
             for oferta in ofertas:
                 db.execute(
                     "INSERT OR REPLACE INTO oferta_index"
