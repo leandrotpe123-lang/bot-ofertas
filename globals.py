@@ -4,7 +4,7 @@
 v80.4 — Auditoria sênior aplicada
 ═══════════════════════════════════════════════════════════════════
 Cirurgias incluídas:
-  • Cirurgia 11 (Bug #24)  — _identity_locks_lck inicializado aqui
+  • Cirurgia 11 (Bug #24)  — _EXCLUSAO_POOLS_LOCK inicializado aqui
   • Cirurgia 20 (Bug #34)  — _session_lock protege _get_session
 ═══════════════════════════════════════════════════════════════════
 """
@@ -37,11 +37,11 @@ _w_lck:          Optional[asyncio.Lock]  = None
 _IDS_LOCK:       Optional[asyncio.Lock]  = None
 _atomic_lck_obj: Optional[asyncio.Lock]  = None
 
-# CIRURGIA 11 (Bug #24): lock global pra _IDENTITY_LOCKS em publicacao.py.
-# Antes era inicializado lazy DENTRO de publicacao._get_identity_lock,
-# com race possível (2 tasks ambas viam None e ambas criavam Lock —
+# CIRURGIA 11 (Bug #24): mutex global dos pools de lock em pipeline/exclusao.py.
+# Antes era inicializado lazy DENTRO do getter do lock, com race
+# possível (2 tasks ambas viam None e ambas criavam Lock —
 # último wins, primeiro fica órfão).
-_identity_locks_lck: Optional[asyncio.Lock] = None
+_EXCLUSAO_POOLS_LOCK: Optional[asyncio.Lock] = None
 
 # CIRURGIA 20 (Bug #34): lock pra proteger lazy init de _http_session
 _session_lock: Optional[asyncio.Lock] = None
@@ -98,7 +98,7 @@ def _init_globals():
     """
     global _buf_lck, _buf_evt, _w_lck, _w_ativos
     global _IDS_LOCK, _atomic_lck_obj
-    global _identity_locks_lck, _session_lock
+    global _EXCLUSAO_POOLS_LOCK, _session_lock
     import config as _cfg
 
     # Containers mutáveis: clear() pra manter mesmo objeto
@@ -116,8 +116,8 @@ def _init_globals():
     _w_lck              = asyncio.Lock()
     _IDS_LOCK           = asyncio.Lock()
     _atomic_lck_obj     = asyncio.Lock()
-    _identity_locks_lck = asyncio.Lock()   # ← Cirurgia 11
-    _session_lock       = asyncio.Lock()   # ← Cirurgia 20
+    _EXCLUSAO_POOLS_LOCK = asyncio.Lock()  
+    _session_lock       = asyncio.Lock() 
 
     # Semáforos do config (só podem ser criados dentro do loop async)
     _cfg._SEM_ENVIO = asyncio.Semaphore(3)
