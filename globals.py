@@ -35,7 +35,6 @@ _buf_lck:        Optional[asyncio.Lock]  = None
 _buf_evt:        Optional[asyncio.Event] = None
 _w_lck:          Optional[asyncio.Lock]  = None
 _IDS_LOCK:       Optional[asyncio.Lock]  = None
-_BURST_LOCK:     Optional[asyncio.Lock]  = None
 _atomic_lck_obj: Optional[asyncio.Lock]  = None
 
 # CIRURGIA 11 (Bug #24): lock global pra _IDENTITY_LOCKS em publicacao.py.
@@ -52,7 +51,6 @@ _buf:      list       = []
 _coal:     dict       = {}
 _w_ativos: int        = 0
 _IDS_PROC: set        = set()
-_burst:    list       = []
 _atomic_mem: Dict[str, float] = {}
 
 # ── HTTP Session singleton ────────────────────────────────────────
@@ -87,7 +85,7 @@ def _init_globals():
     Inicializa locks/eventos asyncio + zera caches em memória.
 
     REGRAS:
-      - Containers mutáveis (_buf, _IDS_PROC, _burst, _atomic_mem,
+      - Containers mutáveis (_buf, _IDS_PROC, _atomic_mem,
         _coal): usa .clear() pra MANTER o mesmo objeto (evita bug
         de outros módulos que importaram com `from globals import _buf`
         ficarem apontando pra objeto antigo).
@@ -99,7 +97,7 @@ def _init_globals():
       - _w_ativos (int): mantém reassign — int é imutável.
     """
     global _buf_lck, _buf_evt, _w_lck, _w_ativos
-    global _IDS_LOCK, _BURST_LOCK, _atomic_lck_obj
+    global _IDS_LOCK, _atomic_lck_obj
     global _identity_locks_lck, _session_lock
     import config as _cfg
 
@@ -107,7 +105,6 @@ def _init_globals():
     _buf.clear()
     _coal.clear()
     _IDS_PROC.clear()
-    _burst.clear()
     _atomic_mem.clear()
 
     # Contador int: reassign
@@ -118,7 +115,6 @@ def _init_globals():
     _buf_evt            = asyncio.Event()
     _w_lck              = asyncio.Lock()
     _IDS_LOCK           = asyncio.Lock()
-    _BURST_LOCK         = asyncio.Lock()
     _atomic_lck_obj     = asyncio.Lock()
     _identity_locks_lck = asyncio.Lock()   # ← Cirurgia 11
     _session_lock       = asyncio.Lock()   # ← Cirurgia 20
