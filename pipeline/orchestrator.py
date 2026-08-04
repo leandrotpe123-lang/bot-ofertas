@@ -11,9 +11,8 @@ Camadas chamadas em sequência:
     3. Coalescing     → pipeline.coalescing.deve_coalescer
     4. Normalização   → pipeline.normalizacao.normalizar
     5. Deduplicação   → pipeline.deduplicacao.deve_enviar_async
-    6. Saturação      → pipeline.saturacao.delay_saturacao
-    7. Montagem       → pipeline.montagem.montar
-    8. Publicação     → pipeline.publicacao.enviar (com is_edit)
+    6. Montagem       → pipeline.montagem.montar
+    7. Publicação     → pipeline.publicacao.enviar (com is_edit)
 
 NÃO faz:
   - leitura de texto do evento (ingestão é a fonte oficial)
@@ -39,7 +38,6 @@ from pipeline.ingestao import ingerir
 from pipeline.montagem import montar
 from pipeline.normalizacao import normalizar
 from pipeline.publicacao import destino_vivo_de_origem, enviar
-from pipeline.saturacao import delay_saturacao
 from pipeline.vida_oferta import VIDA_OFERTA_S
 
 
@@ -192,15 +190,6 @@ async def _pipeline(event, is_edit: bool = False) -> None:
             log_sys.error(f"❌ deve_enviar: {e}")
             return
 
-        try:
-            delay = await delay_saturacao(norm.plat, norm.texto_limpo)
-            if delay > 0:
-                log_sys.info(
-                    f"🧭 TL | id={msg_id} chat={norm.chat} | SAT_DELAY | "
-                    f"delay={delay:.1f}s")
-                await asyncio.sleep(delay)
-        except Exception as e:
-            log_sys.error(f"❌ saturacao: {e}")
 
     # ── Camada 4: Montagem ────────────────────────────────────────
     try:
