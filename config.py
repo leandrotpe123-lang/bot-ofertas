@@ -38,7 +38,6 @@ _SEM_HTTP:  Optional[asyncio.Semaphore] = None
 # ── DB ────────────────────────────────────────────────────────────
 _DB_PATH         = "foguetao.db"
 CACHE_TTL        = 86400
-TTL_DEDUPE       = 86400
 TTL_SCHEDULER    = 30 * 86400
 TTL_LINK_INATIVO = 7 * 86400
 
