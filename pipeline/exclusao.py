@@ -39,7 +39,7 @@ _POST_LOCKS_TS: dict = {}         # msg_id_dest -> last_access_monotonic
 
 
 async def _obter(pool: dict, pool_ts: dict, chave, rotulo: str) -> asyncio.Lock:
-    async with g._identity_locks_lck:
+    async with g._EXCLUSAO_POOLS_LOCK:
         lock = pool.get(chave)
         if lock is None:
             lock = asyncio.Lock()
