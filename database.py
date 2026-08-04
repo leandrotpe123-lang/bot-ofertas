@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from threading import Lock
 from typing import Optional
 
-from config import _DB_PATH, TTL_DEDUPE, TTL_LINK_INATIVO, TTL_SCHEDULER
+from config import _DB_PATH, TTL_LINK_INATIVO, TTL_SCHEDULER
 from logger import log_db
 
 _db_conn: Optional[sqlite3.Connection] = None
@@ -28,9 +28,6 @@ def _init_db():
         CREATE TABLE IF NOT EXISTS links_cache(
             url_orig TEXT PRIMARY KEY, url_conv TEXT NOT NULL,
             url_canon TEXT, plat TEXT NOT NULL, ts REAL NOT NULL);
-        CREATE TABLE IF NOT EXISTS saturacao(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            plat TEXT NOT NULL, sku TEXT, ts REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS short_links(
             code TEXT PRIMARY KEY, url TEXT NOT NULL, ts REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS post_estado(
@@ -52,7 +49,6 @@ def _init_db():
             PRIMARY KEY(chat, msg_id));
         CREATE INDEX IF NOT EXISTS idx_lc_plat     ON links_cache(plat);
         CREATE INDEX IF NOT EXISTS idx_lc_ts       ON links_cache(ts);
-        CREATE INDEX IF NOT EXISTS idx_sat         ON saturacao(plat,ts);
         CREATE INDEX IF NOT EXISTS idx_sl_code     ON short_links(code);
         CREATE INDEX IF NOT EXISTS idx_oi_dest     ON oferta_index(msg_id_dest);
         CREATE INDEX IF NOT EXISTS idx_ci_lookup   ON cupom_idx(plat,codigo,ts);
@@ -158,28 +154,7 @@ def db_cupom_idx_registrar(plat: str, codigos: list, identity: str,
     except Exception as e:
         log_db.error(f"❌ db_cupom_idx_registrar: {e}")
         return 0
-
-# ── saturacao ─────────────────────────────────────────────────────
-def db_registrar_sat(plat: str, sku: str = ""):
-    try:
-        with _db() as db:
-            db.execute(
-                "INSERT INTO saturacao(plat,sku,ts) VALUES(?,?,?)",
-                (plat, sku or "", time.time()))
-    except Exception as e:
-        log_db.error(f"❌ db_sat: {e}")
-
-def db_count_sat(plat: str, janela: float = 1800) -> int:
-    try:
-        limite = time.time() - janela
-        with _db() as db:
-            row = db.execute(
-                "SELECT COUNT(*) FROM saturacao WHERE plat=? AND ts>=?",
-                (plat, limite)).fetchone()
-        return row[0] if row else 0
-    except Exception as e:
-        log_db.error(f"❌ db_count_sat: {e}")
-        return 0
+        
 
 # ── post_estado / oferta_index (modelo container/oferta) ──────────
 def db_get_post(msg_id_dest: int) -> Optional[dict]:
@@ -346,7 +321,6 @@ def db_limpar():
     try:
         agora = time.time()
         with _db() as db:
-            db.execute("DELETE FROM saturacao    WHERE ts<?", (agora - TTL_DEDUPE,))
             db.execute("DELETE FROM links_cache  WHERE ts<?", (agora - TTL_LINK_INATIVO,))
             db.execute("DELETE FROM post_estado  WHERE ts<?", (agora - 30 * 86400,))
             db.execute("DELETE FROM oferta_index WHERE ts<?", (agora - 30 * 86400,))
