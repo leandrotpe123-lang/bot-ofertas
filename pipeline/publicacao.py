@@ -1,4 +1,4 @@
-"""Camada 6 — Publicação: envio, edição, controle de saturação e disputa."""
+"""Camada 6 — Publicação: envio, edição e disputa."""
 from __future__ import annotations
 import asyncio
 import contextlib
@@ -16,6 +16,7 @@ from database import (db_get_post, db_overlap_posts,
 import globals as g
 from logger import log_out, log_sys, _idade_str
 from pipeline.decisao import decidir
+from pipeline import exclusao
 from pipeline import origem
 from pipeline.vida_oferta import viva
 from pipeline.saida import (
@@ -26,72 +27,6 @@ from pipeline.saida import (
 from pipeline.montagem import MensagemMontada
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.enriquecimento import MensagemEnriquecida
-
-
-# ─────────────────────────────────────────────────────────────────
-# Lock pessimista por identidade
-# Garante exclusão mútua entre tasks processando a mesma oferta.
-# ─────────────────────────────────────────────────────────────────
-_IDENTITY_LOCKS: dict = {}        # identity -> asyncio.Lock
-_IDENTITY_LOCKS_TS: dict = {}     # identity -> last_access_monotonic
-_IDENTITY_LOCK_TTL = 600.0        # 10 min sem uso → descarta
-
-
-async def _get_identity_lock(identity: str) -> asyncio.Lock:
-    """Lock dedicado por identidade. Garante exclusão mútua entre
-    tasks processando o mesmo cupom/produto/evento."""
-    async with g._identity_locks_lck:
-        lock = _IDENTITY_LOCKS.get(identity)
-        if lock is None:
-            lock = asyncio.Lock()
-            _IDENTITY_LOCKS[identity] = lock
-        _IDENTITY_LOCKS_TS[identity] = time.monotonic()
-
-        # Cleanup oportunista
-        if len(_IDENTITY_LOCKS) > 200:
-            agora = time.monotonic()
-            antigos = [
-                k for k, ts in _IDENTITY_LOCKS_TS.items()
-                if agora - ts > _IDENTITY_LOCK_TTL
-            ]
-            for k in antigos:
-                lk = _IDENTITY_LOCKS.get(k)
-                if lk is not None and not lk.locked():
-                    _IDENTITY_LOCKS.pop(k, None)
-                    _IDENTITY_LOCKS_TS.pop(k, None)
-            if antigos:
-                log_sys.debug(
-                    f"🧹 identity_locks cleanup: removidos {len(antigos)} | "
-                    f"restam {len(_IDENTITY_LOCKS)}"
-                )
-        return lock
-
-_POST_LOCKS: dict = {}        # msg_id_dest -> asyncio.Lock
-_POST_LOCKS_TS: dict = {}     # msg_id_dest -> last_access_monotonic
-
-
-async def _get_post_lock(msg_id_dest: int) -> asyncio.Lock:
-    """Camada 2: lock dedicado por post de destino. Protege a mutação
-    concorrente do MESMO post quando duas mensagens de famílias por
-    ofertas DISTINTAS convergem para ele (ex.: {A} e {B} → post {A,B})."""
-    async with g._identity_locks_lck:
-        lock = _POST_LOCKS.get(msg_id_dest)
-        if lock is None:
-            lock = asyncio.Lock()
-            _POST_LOCKS[msg_id_dest] = lock
-        _POST_LOCKS_TS[msg_id_dest] = time.monotonic()
-        if len(_POST_LOCKS) > 200:
-            agora = time.monotonic()
-            antigos = [
-                k for k, ts in _POST_LOCKS_TS.items()
-                if agora - ts > _IDENTITY_LOCK_TTL
-            ]
-            for k in antigos:
-                lk = _POST_LOCKS.get(k)
-                if lk is not None and not lk.locked():
-                    _POST_LOCKS.pop(k, None)
-                    _POST_LOCKS_TS.pop(k, None)
-        return lock
 
 
 def _escolher_post(candidatos: list) -> int:
@@ -173,7 +108,7 @@ async def enviar(montada: MensagemMontada,
                 async with contextlib.AsyncExitStack() as stack:
                     for of in sorted(ofertas):
                         await stack.enter_async_context(
-                            await _get_identity_lock(of))
+                            await exclusao.lock_identidade(of))
                     return await _enviar_inner(
                         montada, norm, ofertas, score, is_edit, dest_fix)
             return await _enviar_inner(
@@ -182,7 +117,7 @@ async def enviar(montada: MensagemMontada,
     if ofertas:
         async with contextlib.AsyncExitStack() as stack:
             for of in sorted(ofertas):
-                await stack.enter_async_context(await _get_identity_lock(of))
+                await stack.enter_async_context(await exclusao.lock_identidade(of))
             return await _enviar_inner(montada, norm, ofertas, score, is_edit)
 
     return await _enviar_inner(montada, norm, ofertas, score, is_edit)
@@ -404,7 +339,7 @@ async def _enviar_inner(montada: MensagemMontada,
             if candidatos:
                 msg_id_rel = _escolher_post(candidatos)
                 log_out.info(f"🔎 [OVERLAP_MATCH] post:{msg_id_rel} casou por ofertas_compartilhadas={sorted(set(ofertas) & set(db_ofertas_de_post(msg_id_rel)))} | candidato={sorted(ofertas)}")
-                post_lock = await _get_post_lock(msg_id_rel)
+                post_lock = await exclusao.lock_post(msg_id_rel)
                 async with post_lock:
                     estado = db_get_post(msg_id_rel)   # re-verifica sob o lock
                     agora = time.time()
