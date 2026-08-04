@@ -10,13 +10,13 @@ from telethon.errors import FloodWaitError
 import config
 from config import GRUPO_DESTINO
 from pipeline.vida_oferta import estampar
-from database import (db_get_post, db_overlap_posts,
-                      db_registrar_post, db_remover_post,
-                      db_ofertas_de_post)
+from database import (db_get_post,
+                      db_registrar_post, db_remover_post)
 import globals as g
 from logger import log_out, log_sys, _idade_str
 from pipeline.decisao import decidir
 from pipeline import exclusao
+from pipeline import familia
 from pipeline import origem
 from pipeline.vida_oferta import viva
 from pipeline.saida import (
@@ -27,20 +27,6 @@ from pipeline.saida import (
 from pipeline.montagem import MensagemMontada
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.enriquecimento import MensagemEnriquecida
-
-
-def _escolher_post(candidatos: list) -> int:
-    """Post da família: maior sobreposição; empate → desempate estável
-    (maior score → ts mais recente → maior msg_id_dest). `candidatos`
-    já vem ordenado por sobreposição desc de db_overlap_posts."""
-    max_n = candidatos[0][1]
-    empatados = [mid for mid, n in candidatos if n == max_n]
-    if len(empatados) == 1:
-        return empatados[0]
-    def _chave(mid: int):
-        p = db_get_post(mid) or {}
-        return (p.get("score", 0), p.get("ts", 0.0), mid)
-    return max(empatados, key=_chave)
 
 
 async def _marcar(msg_id: int):
@@ -330,15 +316,8 @@ async def _enviar_inner(montada: MensagemMontada,
         if norm is not None and (ofertas or dest_fix):
             # Alvo FIXADO pelo vínculo de Origem (I2): edit de origem
             # vinculada nunca re-casa por conteúdo em outro post.
-            candidatos = ([(dest_fix, 0)] if dest_fix
-                          else db_overlap_posts(ofertas)) 
-            if len(candidatos) > 1:
-                log_out.debug(
-                    f"🧬 [FAMILIA_MULTI] {len(candidatos)} posts em sobreposição "
-                    f"p/ ofertas={ofertas} — escolhendo o melhor candidato")
-            if candidatos:
-                msg_id_rel = _escolher_post(candidatos)
-                log_out.info(f"🔎 [OVERLAP_MATCH] post:{msg_id_rel} casou por ofertas_compartilhadas={sorted(set(ofertas) & set(db_ofertas_de_post(msg_id_rel)))} | candidato={sorted(ofertas)}")
+            msg_id_rel = familia.post_da_familia(ofertas, dest_fix)
+            if msg_id_rel is not None:
                 post_lock = await exclusao.lock_post(msg_id_rel)
                 async with post_lock:
                     estado = db_get_post(msg_id_rel)   # re-verifica sob o lock
@@ -360,8 +339,7 @@ async def _enviar_inner(montada: MensagemMontada,
                             # as âncoras ao post novo — o antigo é orfanado do
                             # índice e vira histórico (a mensagem antiga
                             # permanece no canal, por decisão de negócio).
-                            ofertas_renasce = sorted(
-                                set(db_ofertas_de_post(msg_id_rel)) | set(ofertas))
+                            ofertas_renasce = familia.unir(msg_id_rel, ofertas)
                             log_out.info(
                                 f"🐣 TL | id={montada.msg_id} chat={norm.chat} | "
                                 f"RENASCIMENTO | supersede={msg_id_rel}")
@@ -374,8 +352,7 @@ async def _enviar_inner(montada: MensagemMontada,
                             # SEM incrementar edit_count (não é evolução).
                             # Preserva família (união), líder, janela e o
                             # próprio contador.
-                            ofertas_familia = sorted(
-                                set(db_ofertas_de_post(msg_id_rel)) | set(ofertas))
+                            ofertas_familia = familia.unir(msg_id_rel, ofertas)
                             return await _aplicar_sincronizacao(
                                 montada, norm, score, estado, msg_id_rel,
                                 ofertas_familia, identity)
@@ -399,8 +376,7 @@ async def _enviar_inner(montada: MensagemMontada,
                         # isto, o registro gravaria só as ofertas da mensagem e
                         # descartaria as exclusivas do post — quebrando a
                         # conectividade e duplicando a família.
-                        ofertas_familia = sorted(
-                            set(db_ofertas_de_post(msg_id_dest)) | set(ofertas))
+                        ofertas_familia = familia.unir(msg_id_dest, ofertas)
 
                         return await _aplicar_evolucao(
                             montada, norm, d, estado, msg_id_dest,
