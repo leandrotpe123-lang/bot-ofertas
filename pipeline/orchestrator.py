@@ -11,7 +11,7 @@ Camadas chamadas em sequência:
     3. Coalescing     → pipeline.coalescing.deve_coalescer
     4. Normalização   → pipeline.normalizacao.normalizar
     5. Deduplicação   → pipeline.deduplicacao.deve_enviar_async
-    6. Saturação      → pipeline.publicacao.delay_saturacao
+    6. Saturação      → pipeline.saturacao.delay_saturacao
     7. Montagem       → pipeline.montagem.montar
     8. Publicação     → pipeline.publicacao.enviar (com is_edit)
 
@@ -38,7 +38,8 @@ from pipeline.identidade import checar_e_marcar
 from pipeline.ingestao import ingerir
 from pipeline.montagem import montar
 from pipeline.normalizacao import normalizar
-from pipeline.publicacao import delay_saturacao, destino_vivo_de_origem, enviar
+from pipeline.publicacao import destino_vivo_de_origem, enviar
+from pipeline.saturacao import delay_saturacao
 from pipeline.vida_oferta import VIDA_OFERTA_S
 
 
