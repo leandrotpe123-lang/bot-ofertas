@@ -10,13 +10,14 @@ from telethon.errors import FloodWaitError
 import config
 from config import GRUPO_DESTINO
 from pipeline.vida_oferta import estampar
-from database import (db_registrar_sat, db_get_post, db_overlap_posts,
+from database import (db_get_post, db_overlap_posts,
                       db_registrar_post, db_remover_post,
                       db_ofertas_de_post)
 import globals as g
 from logger import log_out, log_sys, _idade_str
 from pipeline.decisao import decidir
 from pipeline import origem
+from pipeline import saturacao
 from pipeline.vida_oferta import viva
 from pipeline.saida import (
     _enviar_msg,
@@ -26,13 +27,6 @@ from pipeline.saida import (
 from pipeline.montagem import MensagemMontada
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.enriquecimento import MensagemEnriquecida
-from pipeline.estado_evento import _KW_EVENTO
-
-
-# ── Constantes de saturação ──────────────────────────────────────
-_SAT_MAX_PLAT  = 10
-_SAT_BURST_LIM = 6
-_SAT_BURST_JAN = 60
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -127,27 +121,6 @@ async def _foi_processado(msg_id: int) -> bool:
     async with g._IDS_LOCK:
         return msg_id in g._IDS_PROC
 
-
-async def _burst_add():
-    async with g._BURST_LOCK:
-        agora = time.monotonic(); g._burst.append(agora)
-        while g._burst and agora - g._burst[0] > _SAT_BURST_JAN:
-            g._burst.pop(0)
-
-
-async def _burst_count() -> int:
-    async with g._BURST_LOCK:
-        agora = time.monotonic()
-        return sum(1 for t in g._burst if agora - t <= _SAT_BURST_JAN)
-
-
-async def delay_saturacao(plat: str, texto: str) -> float:
-    from database import db_count_sat
-    if _KW_EVENTO.search(texto): return 0.0
-    delay = 0.0
-    if db_count_sat(plat) >= _SAT_MAX_PLAT: delay += 6.0
-    if await _burst_count() >= _SAT_BURST_LIM: delay += 4.0
-    return delay
 
 def destino_vivo_de_origem(chat: str, msg_id: int):
     """Ponte Origem→Oferta: consulta o vínculo (infra pura, I7) e valida
@@ -395,12 +368,12 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
         log_sys.error(f"❌ _marcar: {e}")
 
     try:
-        db_registrar_sat(montada.plat, montada.sku)
+        saturacao.registrar_saturacao(montada.plat, montada.sku)
     except Exception as e:
         log_sys.error(f"❌ db_registrar_sat: {e}")
 
     try:
-        await _burst_add()
+        await saturacao.registrar_burst()
     except Exception:
         pass
 
