@@ -17,7 +17,6 @@ import globals as g
 from logger import log_out, log_sys, _idade_str
 from pipeline.decisao import decidir
 from pipeline import origem
-from pipeline import saturacao
 from pipeline.vida_oferta import viva
 from pipeline.saida import (
     _enviar_msg,
@@ -366,17 +365,6 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
         await _marcar(montada.msg_id)
     except Exception as e:
         log_sys.error(f"❌ _marcar: {e}")
-
-    try:
-        saturacao.registrar_saturacao(montada.plat, montada.sku)
-    except Exception as e:
-        log_sys.error(f"❌ db_registrar_sat: {e}")
-
-    try:
-        await saturacao.registrar_burst()
-    except Exception:
-        pass
-
     if norm is not None and norm.is_override:
         log_out.info(f"🔓 [OVERRIDE_OK] Post liberado publicado | id={sent.id}")
 
