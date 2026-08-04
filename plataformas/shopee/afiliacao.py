@@ -73,7 +73,7 @@ _LINKS_FIXOS_POR_PATH = {
     "/m/cupom-de-desconto": "https://s.shopee.com.br/6AjowpqGMh",
     "/shopeevip":        "https://s.shopee.com.br/6AjqXCz9ys",
     "/m/espaco-tecnologia": "https://s.shopee.com.br/2VqZm3mz6m",
-    "/m/dia-dos-pais":      "https://s.shopee.com.br/4LIItd2F3C",
+    "/dia-dos-pais":      "https://s.shopee.com.br/4LIItd2F3C",
 }
 
 
