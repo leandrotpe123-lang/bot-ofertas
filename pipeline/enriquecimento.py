@@ -12,8 +12,10 @@ Superfície pública:
   - derivar(norm)    -> MensagemEnriquecida   (puro, todos os caminhos)
   - enriquecer(norm) -> MensagemEnriquecida   (derivar + efeito, só NOVO)
 
-efeito preservado (frequência/ordem), e que desde a Fase 2 o valor é congelado em cupons_novos após o efeito (P8), com norm._cupom_novos mantido como ponte legada para decisao:78/publicacao:251 até a fase que tocar esses módulos.
-
+O efeito de memória de cupom (frequência e ordem preservadas) é
+congelado em `cupons_novos` (P8). Este contrato é a via ÚNICA pela
+qual o valor chega a decisao e publicacao: nada viaja por atributo
+dinâmico em `norm`.
 Composição, não herança: MensagemEnriquecida carrega a REFERÊNCIA a norm
 mais os derivados; não estende MensagemNormalizada nem mistura o contrato
 do snapshot bruto com o contrato de consumo pronto.
@@ -39,8 +41,8 @@ class MensagemEnriquecida:
     """Snapshot normalizado + derivados prontos para consumo.
 
     Imutável: os derivados são calculados uma vez, na fronteira do
-    enriquecimento. `norm` é a referência viva ao snapshot — cujo atributo
-    dinâmico _cupom_novos permanece a fonte única do efeito de cupom.
+    enriquecimento. `norm` é a referência viva ao snapshot, nunca mutada;
+    `cupons_novos` é a fonte ÚNICA do efeito de cupom.
 
     Expõe `tipo` e `canonica` (consumidos pela deduplicação) e, desde o
     Corte 2, `ofertas` e `score` prontos — consumidos pela publicação no
