@@ -80,6 +80,7 @@ async def enviar(montada: MensagemMontada,
     """
     ofertas: list = enr.ofertas
     score:   int  = enr.score
+    cupons_novos: int = enr.cupons_novos
 
 # ── Camada 0: ORIGEM (Fase 1 do MB) — lock mais externo (I6) ──
     if norm is not None:
@@ -96,17 +97,21 @@ async def enviar(montada: MensagemMontada,
                         await stack.enter_async_context(
                             await exclusao.lock_identidade(of))
                     return await _enviar_inner(
-                        montada, norm, ofertas, score, is_edit, dest_fix)
+                        montada, norm, ofertas, score, is_edit, dest_fix,
+                        cupons_novos)
             return await _enviar_inner(
-                montada, norm, ofertas, score, is_edit, dest_fix)
+                montada, norm, ofertas, score, is_edit, dest_fix,
+                cupons_novos)
 
     if ofertas:
         async with contextlib.AsyncExitStack() as stack:
             for of in sorted(ofertas):
                 await stack.enter_async_context(await exclusao.lock_identidade(of))
-            return await _enviar_inner(montada, norm, ofertas, score, is_edit)
+            return await _enviar_inner(montada, norm, ofertas, score, is_edit,
+                                       cupons_novos=cupons_novos)
 
-    return await _enviar_inner(montada, norm, ofertas, score, is_edit)
+    return await _enviar_inner(montada, norm, ofertas, score, is_edit,
+                               cupons_novos=cupons_novos)
 
 def _log_decisao(d, montada, norm, estado: dict, score: int,
                  agora: float, identity: str) -> None:
@@ -151,7 +156,8 @@ def _log_decisao(d, montada, norm, estado: dict, score: int,
             f"atual={score} salvo={d.score_atual} chat={norm.chat}")
 
 async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
-                            edit_count, ofertas_familia, identity) -> bool:
+                            edit_count, ofertas_familia, identity,
+                            cupons_novos: int = 0) -> bool:
     """Executa a EVOLUÇÃO de um post existente: edita no lugar ou, em
     fallback autorizado, substitui com mídia. Persiste o novo estado com
     a união da família. Sem decisão — o caminho já foi decidido a montante."""
@@ -172,7 +178,7 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
         if d.motivo == "CUPOM_ENRIQUECIDO":
             log_out.info(
                 f"💎 [CUPOM_ENRIQUECIDO] {identity} "
-                f"novos={getattr(norm, '_cupom_novos', 0)} "
+                f"novos={cupons_novos} "
                 f"score={d.novo_score} chat={norm.chat}")
         elif d.motivo == "TROCA_IMG_BOA":
             log_out.info(f"✅ [IMG_TROCADA_OK] {identity}")
@@ -306,7 +312,8 @@ async def _enviar_inner(montada: MensagemMontada,
                         ofertas: list,
                         score: int,
                         is_edit: bool = False,
-                        dest_fix=None) -> bool:
+                        dest_fix=None,
+                        cupons_novos: int = 0) -> bool:
     """Corpo real de enviar() — dentro dos locks de oferta. Acha o post
     parente por sobreposição, trava o post candidato, re-verifica sob o
     lock e decide pelo score (decisão intocada)."""
@@ -322,7 +329,8 @@ async def _enviar_inner(montada: MensagemMontada,
                 async with post_lock:
                     estado = db_get_post(msg_id_rel)   # re-verifica sob o lock
                     agora = time.time()
-                    d = decidir(norm, montada, score, estado, agora, is_edit)
+                    d = decidir(norm, montada, score, estado, agora, is_edit,
+                                cupons_novos)
                     if d.acao != "PUBLICAR":
                         if norm is not None:
                             # Encontro registra (I1): edits futuros desta
@@ -380,7 +388,8 @@ async def _enviar_inner(montada: MensagemMontada,
 
                         return await _aplicar_evolucao(
                             montada, norm, d, estado, msg_id_dest,
-                            edit_count, ofertas_familia, identity)
+                            edit_count, ofertas_familia, identity,
+                            cupons_novos)
                     # d.acao == PUBLICAR: estado sumiu sob o lock (substituído/
                     # limpo por outra task) → cai para NOVO ENVIO
 
