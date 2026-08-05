@@ -65,7 +65,8 @@ def registrar_uso(norm, plat: str, identity: str) -> int:
 
     Roda 1x por mensagem, só no caminho NOVO (P9), chamada
     explicitamente por enriquecimento.enriquecer DEPOIS da derivação.
-    Muta `norm._cupom_novos` como ponte legada para decisao/publicacao.
+    PURA quanto a `norm`: não escreve nada no snapshot. O valor viaja
+    pelo retorno, congelado em MensagemEnriquecida.cupons_novos (P8).
     """
     if not CUPOM_IDX_ON:
         return 0
@@ -73,5 +74,4 @@ def registrar_uso(norm, plat: str, identity: str) -> int:
     if not codes:
         return 0
     novos = db_cupom_idx_registrar(plat, codes, identity, float(VIDA_OFERTA_S))
-    norm._cupom_novos = max(getattr(norm, "_cupom_novos", 0), novos)
     return novos
