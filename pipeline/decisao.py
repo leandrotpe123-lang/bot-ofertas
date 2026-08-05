@@ -53,7 +53,8 @@ class Decisao:
 
 
 def decidir(norm, montada, score: int, estado: dict | None,
-            agora: float, is_edit: bool = False) -> Decisao:
+            agora: float, is_edit: bool = False,
+            cupons_novos: int = 0) -> Decisao:
     """Decide a ação para um candidato: PUBLICAR (sem estado vivo),
     EVOLUIR ou IGNORAR (com estado). Não executa nada."""
     if not estado:
@@ -113,8 +114,7 @@ def decidir(norm, montada, score: int, estado: dict | None,
     tem_orcamento = edit_count < _MAX_EDITS
 
     # ── CUPOM ENRIQUECIDO: código(s) novo(s) → edita o mesmo post ──
-    novos_cup = getattr(norm, "_cupom_novos", 0)
-    if novos_cup > 0:
+    if cupons_novos > 0:
         if not tem_orcamento:
             return Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
                            na_janela=na_janela, score_atual=score_atual)
