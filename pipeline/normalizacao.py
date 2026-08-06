@@ -58,6 +58,7 @@ from globals import _get_session, _get_final, _log_cache_stats
 from logger import log_nrm
 from utils.categorias_universais import classificar_universal, eh_encurtador_generico
 from pipeline.ingestao import MensagemBruta
+from pipeline.normalizacao_texto import _tem_emoji, limpar_texto
 from plataformas import registry
 from plataformas.contrato import AUSENTE, Afiliacao
 from utils.cache_links import consultar_link
@@ -71,30 +72,6 @@ __all__ = [
     "MensagemNormalizada", "normalizar", "limpar_texto",
     "_tem_emoji",
 ]
-
-# ─────────────────────────────────────────────────────────────────
-# LIMPEZA DE TEXTO
-# ─────────────────────────────────────────────────────────────────
-_RE_INVISIVEIS = re.compile(r'[\u200b\u200c\u200d\u00a0\u2060\ufeff]')
-_RE_EMOJI_CHK = re.compile(
-    r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF\u2B50\u2B55]"
-)
-
-
-def _tem_emoji(s: str) -> bool:
-    return bool(_RE_EMOJI_CHK.search(s))
-
-
-def limpar_texto(texto: str) -> str:
-    """Normaliza a FORMA do texto: remove caracteres invisíveis e
-    unifica quebras de linha. NÃO decide política de conteúdo — isso
-    é de pipeline.filtros, consumido em `normalizar`.
-    """
-    return (
-        _RE_INVISIVEIS.sub(" ", texto)
-        .replace("\r\n", "\n")
-        .replace("\r", "\n")
-    )
 
 # ─────────────────────────────────────────────────────────────────
 # CONTRATO DE SAÍDA
