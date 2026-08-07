@@ -42,3 +42,4 @@ def limpar_texto(texto: str) -> str:
         .replace("\r\n", "\n")
         .replace("\r", "\n")
     )
+    
