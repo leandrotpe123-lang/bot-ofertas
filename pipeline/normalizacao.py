@@ -49,7 +49,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from globals import _get_final, _log_cache_stats
+from globals import _log_cache_stats
 from logger import log_nrm
 from pipeline.ingestao import MensagemBruta
 from pipeline.normalizacao_identidade import (
@@ -127,9 +127,8 @@ async def normalizar(
       2. resolução e afiliação dos links (URLs afiliadas LONGAS)
       3. derivação de identidade — produto E campanha — sobre as
          URLs afiliadas LONGAS
-      4. determinação do estado de evento
-      5. encurtamento terminal do mapa — ÚLTIMA transformação
-      6. construção da MensagemNormalizada
+      4. encurtamento terminal do mapa — ÚLTIMA transformação
+      5. construção da MensagemNormalizada
     """
     if not bruta.texto.strip():
         return None
