@@ -49,7 +49,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from database import db_get_link
 from globals import _get_final, _log_cache_stats
 from logger import log_nrm
 from pipeline.ingestao import MensagemBruta
