@@ -47,7 +47,6 @@ NÃO faz:
 from __future__ import annotations
 
 import asyncio
-import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -58,6 +57,11 @@ from globals import _get_session, _get_final, _log_cache_stats
 from logger import log_nrm
 from utils.categorias_universais import classificar_universal, eh_encurtador_generico
 from pipeline.ingestao import MensagemBruta
+from pipeline.normalizacao_identidade import (
+    derivar_campanha,
+    derivar_produto,
+    remover_cupons_da_entidade,
+)
 from pipeline.normalizacao_texto import _tem_emoji, limpar_texto
 from plataformas import registry
 from plataformas.contrato import AUSENTE, Afiliacao
@@ -65,7 +69,7 @@ from utils.cache_links import consultar_link
 from utils.cupom import extrair_todos_cupons
 from utils.encurtador import encurtar
 from utils.url_resolver import desencurtar
-from utils.urls import _netloc, host_canonico_campanha, chaves_canonicas_campanha
+from utils.urls import _netloc
 
 # ── API pública do módulo ─────────────────────────────────────────
 __all__ = [
@@ -112,66 +116,6 @@ class MensagemNormalizada:
     is_reply:          bool         = False
     reply_to:          int          = 0
     is_override:       bool         = False
-
-
-# ─────────────────────────────────────────────────────────────────
-# DERIVAÇÃO DE IDENTIDADE
-#
-# INVARIANTE FORMAL DO PIPELINE:
-#   A derivação de identidade opera EXCLUSIVAMENTE sobre a URL
-#   afiliada LONGA (conv), nunca sobre a URL original do texto
-#   (orig) nem sobre URL encurtada. A URL afiliada longa é a única
-#   fonte canônica de identidade.
-# ─────────────────────────────────────────────────────────────────
-def _identidade_de(url: str) -> Optional[Tuple[str, str, str]]:
-    """
-    Devolve (plataforma, id_produto, tipo_link) de uma URL afiliada
-    longa — a estrutura que a plataforma entrega via contrato — ou
-    None quando a URL não pertence a uma plataforma ou não
-    corresponde a um produto individual.
-    """
-    plataforma = registry.resolver(url)
-    if plataforma is None:
-        return None
-    ident = plataforma.extrai_identidade(url)
-    if ident.id_produto is AUSENTE:
-        return None
-    return (plataforma.identificador, str(ident.id_produto),
-            ident.tipo_link.value)
-
-
-def _eh_host_de_campanha(url: str) -> bool:
-    """
-    Verdadeiro se o host de uma única URL pertence à união de hosts
-    de campanha composta a partir das plataformas registradas.
-    Predicado unitário, sobre a URL afiliada LONGA, usando _netloc.
-    A semântica de casamento (igualdade ou sufixo) é idêntica à do
-    conjunto hardcoded anterior, preservando o comportamento.
-    """
-    host = _netloc(url)
-    hosts = registry.compor_capacidade("hosts_campanha").keys()
-    for h in hosts:
-        if host == h or host.endswith("." + h):
-            return True
-    return False
-
-def _tem_sinal_cashback(texto: str) -> bool:
-    """
-    Verdadeiro se a PRIMEIRA linha não-vazia do texto casa algum
-    padrão de cashback composto a partir das plataformas registradas
-    (união de sinais_cashback). Opera sobre a MESMA linha-título que a
-    deduplicação usa em _eh_post_cashback, preservando o escopo e,
-    portanto, o comportamento. Cada padrão é regex, casado com
-    re.IGNORECASE (equivalente ao re.I do regex anterior).
-    """
-    linhas = [l for l in texto.strip().split("\n") if l.strip()]
-    if not linhas:
-        return False
-    titulo = linhas[0]
-    for padrao in registry.compor_capacidade("sinais_cashback").keys():
-        if re.search(padrao, titulo, re.IGNORECASE):
-            return True
-    return False
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -375,36 +319,13 @@ async def normalizar(
     # (ids_globais, sku) e campanha (chave_campanha, tem_host_campanha).
     urls_longas = list(canonicas.values())
 
-    ids_globais: List[str] = []
-    idents: List[Tuple[str, str, str]] = []
-    for conv in urls_longas:
-        trio = _identidade_de(conv)
-        if trio and trio[1] not in ids_globais:
-            ids_globais.append(trio[1])
-            idents.append(trio)
+    ids_globais, idents, sku = derivar_produto(urls_longas)
 
-    sku = ids_globais[0] if ids_globais else ""
+    cupons = remover_cupons_da_entidade(cupons, ids_globais)
 
-    # [F-C2 / R3-adendo] CONSOLIDAÇÃO: um identificador da própria
-    # entidade observada nunca é outra entidade. Código que coincide
-    # com um id de produto derivado DESTE post é o mesmo produto visto
-    # por outro ângulo — não entra na identidade nem na memória de
-    # cupons. Comparação genérica contra ids_globais: esta é a única
-    # camada onde os dois fatos coexistem, e nenhuma plataforma,
-    # prefixo ou formato é assumido.
-    if ids_globais:
-        _ids_da_entidade = {i.upper() for i in ids_globais}
-        cupons = [c for c in cupons if c.upper() not in _ids_da_entidade]
-
-    # Identidade de campanha: chave_campanha e tem_host_campanha
-    # DEVEM derivar da mesma população de URLs — as URLs de campanha
-    # — para que sejam coerentes entre si. A chave_campanha jamais
-    # pode ser derivada de uma URL de produto ou de landing.
-    urls_campanha     = [u for u in urls_longas if _eh_host_de_campanha(u)]
-    tem_host_campanha = bool(urls_campanha)
-    chave_campanha    = host_canonico_campanha(urls_campanha)
-    chaves_campanha   = chaves_canonicas_campanha(urls_campanha)
-    tem_sinal_cashback = _tem_sinal_cashback(texto_limpo)
+    (tem_host_campanha, chave_campanha,
+     chaves_campanha, tem_sinal_cashback) = derivar_campanha(
+        urls_longas, texto_limpo)
 
     # ── ENCURTAMENTO TERMINAL ─────────────────────────────────────
     # ÚLTIMA transformação antes do retorno. Toda a identidade —
