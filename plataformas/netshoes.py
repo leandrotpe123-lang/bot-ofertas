@@ -83,7 +83,7 @@ def reconhece(url: str) -> bool:
     """URL da Netshoes. Pura, sem I/O.
 
     Reconhece também a saída de afilia() — a URL afiliada segue no mesmo
-    domínio —, o que normalizacao._encurtar_mapa exige para acionar o
+    domínio —, o que normalizacao_links._encurtar_mapa exige para acionar o
     encurtador.
     """
     if not url:
