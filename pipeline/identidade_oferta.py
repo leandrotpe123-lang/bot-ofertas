@@ -37,7 +37,6 @@ from pipeline.normalizacao import MensagemNormalizada
 from pipeline.natureza import eh_entidade_cupom
 from utils.hashes import _fp4
 from utils.textos import _alma
-from utils.urls import _cache_key
 
 
 # ── API pública ──────────────────────────────────────────────────
@@ -188,9 +187,12 @@ def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
     # MB §11.9 (ratificado): evento é FALLBACK, não espécie própria —
     # âncora por palavra-chave colidia entre eventos distintos da mesma
     # mecânica. Ordem: link primeiro, texto como terminal. Nunca vazio.
-    primeira_url = next(iter(norm.mapa.values()), None) if norm.mapa else None
-    if primeira_url:
-        return [Ancora("fallback", f"{plat}|url|{_cache_key(primeira_url)}")]
+    # Fonte: pipeline.normalizacao (autoridade única de derivação). A
+    # chave já chega derivada da URL afiliada LONGA canônica; esta
+    # camada apenas a rotula. NÃO ler norm.mapa aqui: o mapa é forma
+    # de publicação e a URL curta jamais participa de identidade.
+    if norm.ancora_url:
+        return [Ancora("fallback", f"{plat}|url|{norm.ancora_url}")]
     return [Ancora("fallback", f"{plat}|txt|{_fp4(_alma(texto))}")]
 
 
