@@ -183,7 +183,6 @@ async def normalizar(
     # publicação. Nenhuma lógica pode ser inserida entre a derivação
     # de identidade e este ponto sem revisão arquitetural.
     mapa_publicacao, n_encurtadas = _encurtar_mapa(mapa)
-    log_nrm.info(f"🔬 CAN2 id={bruta.msg_id} plat={plat_dom or 'none'} can={next(iter(canonicas.values()), '')[:70]} pub={next(iter(mapa_publicacao.values()), '')[:70]}")
 
     # Política de bloco: só permanece o bloco que gerou oferta
     # publicável. Depende do mapa de publicação, por isso roda
