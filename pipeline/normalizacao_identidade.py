@@ -21,7 +21,7 @@ from typing import List, NamedTuple, Optional, Tuple
 
 from plataformas import registry
 from plataformas.contrato import AUSENTE
-from utils.urls import _netloc, host_canonico_campanha, chaves_canonicas_campanha
+from utils.urls import _cache_key, _netloc, host_canonico_campanha, chaves_canonicas_campanha
 
 __all__ = [
     "IdentidadeProduto",
@@ -29,6 +29,7 @@ __all__ = [
     "derivar_produto",
     "remover_cupons_da_entidade",
     "derivar_campanha",
+    "derivar_ancora_url",
 ]
 
 # ─────────────────────────────────────────────────────────────────
@@ -173,4 +174,26 @@ def derivar_campanha(
     return IdentidadeCampanha(
         tem_host_campanha, chave_campanha, chaves_campanha, tem_sinal_cashback
     )
-    
+
+def derivar_ancora_url(urls_longas: List[str]) -> str:
+    """
+    Identidade de FALLBACK: a chave de URL que ancora o post quando
+    nenhuma oferta estruturada (produto, campanha, cupom, cashback)
+    foi reconhecida.
+
+    Deriva da PRIMEIRA URL afiliada LONGA — a mesma população que
+    alimenta produto e campanha, e a única que carrega a rota
+    semântica. A URL de publicação (possivelmente encurtada) JAMAIS
+    participa: era o que fazia dois posts da mesma página nascerem
+    com identidades distintas.
+
+    Preserva a seleção posicional histórica (o primeiro link
+    convertido) e o formato de chave (_cache_key).
+
+    Cadeia vazia quando não há URL: o consumidor cai no terminal de
+    texto, exatamente como antes.
+    """
+    primeira = next(iter(urls_longas), "")
+    return _cache_key(primeira) if primeira else ""
+
+
