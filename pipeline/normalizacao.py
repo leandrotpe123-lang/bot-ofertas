@@ -201,7 +201,7 @@ async def normalizar(
     f"ids_globais={ids_globais} "
     f"chave_campanha='{chave_campanha}' "
     f"chaves_campanha={chaves_campanha} "
-    f"ancora_url={ancora_url[:70]} "
+    f"ancora_url=…{ancora_url[-60:]} len={len(ancora_url)} "
     f"encurtadas={n_encurtadas} " 
     f"override={is_override}"
   )
