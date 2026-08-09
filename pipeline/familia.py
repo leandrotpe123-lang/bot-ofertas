@@ -67,7 +67,8 @@ def post_da_familia(ofertas: list, dest_fix=None):
             f"🧬 [FAMILIA_MULTI] {len(candidatos)} posts em sobreposição "
             f"p/ ofertas={ofertas} — escolhendo o melhor candidato")
     if not candidatos:
+        log_out.info(f"🔬 P4 NO_MATCH fix={dest_fix or '-'} candidato={sorted(ofertas)}")
         return None
     msg_id_rel = _escolher_post(candidatos)
-    log_out.info(f"🔎 [OVERLAP_MATCH] post:{msg_id_rel} casou por ofertas_compartilhadas={compartilhadas(msg_id_rel, ofertas)} | candidato={sorted(ofertas)}")
+    log_out.info(f"🔎 [OVERLAP_MATCH] post:{msg_id_rel} casou por ofertas_compartilhadas={compartilhadas(msg_id_rel, ofertas)} | candidato={sorted(ofertas)} | candidatos={[c[0] for c in candidatos]} fix={dest_fix or '-'} post_ofertas={db_ofertas_de_post(msg_id_rel)}")
     return msg_id_rel
