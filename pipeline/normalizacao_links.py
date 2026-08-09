@@ -239,6 +239,7 @@ async def resolver_e_afiliar(
             canonicas[orig] = canonica
             if plat not in ("mundial", "preservar"):
                 plats.append(plat)
-
+            log_nrm.info(f"🔬 CAN1 id={msg_id} n={len(canonicas)} pub={next(iter(mapa.values()), '')[:70]} can={next(iter(canonicas.values()), '')[:70]}")
+   243	    return LinksResolvidos(mapa, canonicas, plats)
     return LinksResolvidos(mapa, canonicas, plats)
   
