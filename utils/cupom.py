@@ -169,6 +169,29 @@ def _filtrar_codes_validos(code_entities: list) -> List[str]:
                 validos.append(palavra.upper())
     return validos
 
+# ══ SONDA TEMPORÁRIA — MEDIÇÃO DE BLOCO (não altera comportamento) ══
+# Mede quantos códigos a FORMA de item de cupom encontraria, sem
+# alimentar o retorno. Serve só para dimensionar o gap em produção
+# antes de qualquer decisão. Remover após o levantamento.
+_SONDA_VALOR = re.compile(r'(?:r\$\s*[\d.,]+|\d+\s*%)', re.I)
+_SONDA_ITEM = re.compile(r'^(?P<pre>[^:]{0,80}?):\s*(?P<pos>[A-Z0-9][A-Z0-9_,\s/-]{2,80})$')
+
+
+def _sonda_forma_item(linha: str) -> List[str]:
+    """Códigos que a FORMA de item de cupom reconheceria nesta linha."""
+    l = linha.strip()
+    if "http" in l.lower():
+        return []
+    m = _SONDA_ITEM.match(l)
+    if not m or not _SONDA_VALOR.search(m.group("pre")):
+        return []
+    achados = []
+    for c in re.split(r'[,\s/]+', m.group("pos")):
+        cu = c.upper()
+        if c and _eh_cupom_valido(cu) and cu not in achados:
+            achados.append(cu)
+    return achados
+
 
 # ── Extração ──────────────────────────────────────────────────────
 def extrair_todos_cupons(texto: str, code_entities: list = None) -> List[str]:
@@ -239,6 +262,13 @@ def extrair_todos_cupons(texto: str, code_entities: list = None) -> List[str]:
             for j in range(i, min(i + 4, len(linhas))):
                 for m in _KW_COD.finditer(linhas[j]):
                     add(m.group(1))
+
+    forma = []
+    for _l in texto.splitlines():
+        for _c in _sonda_forma_item(_l):
+            if _c not in forma:
+                forma.append(_c)
+    log_nrm.info(f"🔬 P0b forma_itens={len(forma)} codigos_forma={forma} extraidos={len(encontrados)} gap={[c for c in forma if c not in encontrados]}")
                   
     log_nrm.info(f"🔬 P0 cupons={encontrados} codes_in={len(code_entities or [])} kv={bool(_RE_KV_CUPOM.search(texto))} lista={bool(_RE_LISTA_CUPONS.search(texto))} linhas_lista={sum(1 for l in texto.splitlines() if _RE_LINHA_CUPOM_LISTA.search(l))} kw={bool(_KW_CUPOM.search(texto))} n_linhas={len(texto.splitlines())}")
     return encontrados
