@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from logger import log_enr
 from pipeline.memoria_cupom import buscar_identidade
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.natureza import eh_entidade_cupom
