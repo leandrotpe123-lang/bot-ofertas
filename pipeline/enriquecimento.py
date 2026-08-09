@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from logger import log_enr
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.identidade_oferta import identidade_canonica, ancoras, Ancora
 from pipeline.natureza import natureza
@@ -65,7 +66,7 @@ def derivar(norm: MensagemNormalizada) -> MensagemEnriquecida:
     quando o efeito roda. Chamar duas vezes devolve o mesmo resultado.
     """
     ancs = ancoras(norm)                          # autoritativa (P6)
-    return MensagemEnriquecida(
+    enr = MensagemEnriquecida(
         norm=norm,
         tipo=natureza(norm),
         canonica=identidade_canonica(norm),       # PURA desde F1e
@@ -73,6 +74,8 @@ def derivar(norm: MensagemNormalizada) -> MensagemEnriquecida:
         score=calcular_score(norm),
         ancoras=tuple(ancs),
         cupons_novos=0)
+    log_enr.info(f"🔬 P3 id={norm.msg_id} tipo={enr.tipo} canonica={enr.canonica} ofertas={enr.ofertas} cupons={norm.cupons} codes={len(norm.code_entities)} score={enr.score}")
+    return enr
 
 
 def enriquecer(norm: MensagemNormalizada) -> MensagemEnriquecida:
