@@ -196,11 +196,12 @@ async def normalizar(
         texto_limpo, mapa_publicacao, preservar_lst)
 
     log_nrm.info(
-    f"✅ {len(mapa_publicacao)}/{len(converter)} | "
+    f"✅ id={bruta.msg_id} {len(mapa_publicacao)}/{len(converter)} | "
     f"plat={plat_dom or 'none'} cupons={cupons} sku={sku} "
     f"ids_globais={ids_globais} "
     f"chave_campanha='{chave_campanha}' "
     f"chaves_campanha={chaves_campanha} "
+    f"ancora_url={ancora_url[:70]} "
     f"encurtadas={n_encurtadas} " 
     f"override={is_override}"
   )
