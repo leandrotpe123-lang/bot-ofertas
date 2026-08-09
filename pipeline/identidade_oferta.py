@@ -190,6 +190,7 @@ def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
     # mecânica. Ordem: link primeiro, texto como terminal. Nunca vazio.
     primeira_url = next(iter(norm.mapa.values()), None) if norm.mapa else None
     if primeira_url:
+        log_enr.info(f"🔬 CAN3 id={norm.msg_id} plat={plat} fonte=norm.mapa url={primeira_url[:70]} tem_canonica={hasattr(norm, 'canonicas')}")
         return [Ancora("fallback", f"{plat}|url|{_cache_key(primeira_url)}")]
     return [Ancora("fallback", f"{plat}|txt|{_fp4(_alma(texto))}")]
 
