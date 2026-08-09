@@ -19,7 +19,7 @@ def _log_decisao(d, montada, norm, estado: dict, score: int,
     apenas registra o veredito de decidir() e o detalhe por motivo.
     O controle de fluxo (evoluir/descartar) permanece no chamador."""
     log_out.debug(
-        f"🧭 TL | id={montada.msg_id} chat={norm.chat} | DECISAO | "
+        f"🧭 TL | id={montada.msg_id} chat={norm.chat} | DECISAO | dest={identity} "
         f"motivo={d.motivo} "
         f"na_janela={'sim' if d.na_janela else 'nao'} "
         f"score {d.score_atual}→{score} janela_restante="
