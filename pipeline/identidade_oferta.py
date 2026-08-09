@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from logger import log_ded
 from pipeline.memoria_cupom import buscar_identidade
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.natureza import eh_entidade_cupom
@@ -94,6 +95,7 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
         base = min(f"{p}|{i}" for p, i, _ in norm.idents)
     else:
         base = sorted(identidades(norm))[0]
+    log_ded.info(f"🔬 P2 id={norm.msg_id} plat={norm.plat} gate={gate} cupons={norm.cupons} sku={norm.sku} camp={norm.chaves_campanha} ancora_url={norm.ancora_url[:50]} base={base}")
     if not gate:
         return base
     return buscar_identidade(norm, norm.plat, base)
