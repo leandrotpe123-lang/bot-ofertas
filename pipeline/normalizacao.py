@@ -53,6 +53,7 @@ from globals import _log_cache_stats
 from logger import log_nrm
 from pipeline.ingestao import MensagemBruta
 from pipeline.normalizacao_identidade import (
+    derivar_ancora_url,
     derivar_campanha,
     derivar_produto,
     remover_cupons_da_entidade,
@@ -102,9 +103,11 @@ class MensagemNormalizada:
     chaves_campanha:   List[str]    = field(default_factory=list)
     tem_host_campanha: bool         = False
     tem_sinal_cashback: bool        = False
+    # Identidade de FALLBACK derivada — chave de URL usada quando o post
+    # não tem oferta estruturada. Derivada da URL afiliada LONGA canônica
+    # pela normalização; os consumidores apenas a leem, nunca a recalculam.
+    ancora_url:        str          = ""
     # Entidades de código (monospace) capturadas na ingestão — insumo que
-    # normalizar() usa para derivar norm.cupons. Este campo é insumo
-    # interno e sai do contrato no Cupom-2.
     code_entities:     List[str]    = field(default_factory=list)
     # ──────────────────────────────────────────────────────────────
     is_reply:          bool         = False
@@ -176,6 +179,7 @@ async def normalizar(
      chaves_campanha, tem_sinal_cashback) = derivar_campanha(
         urls_longas, texto_limpo)
 
+    ancora_url = derivar_ancora_url(urls_longas)
     # ── ENCURTAMENTO TERMINAL ─────────────────────────────────────
     # ÚLTIMA transformação antes do retorno. Toda a identidade —
     # produto e campanha — já foi derivada acima sobre as URLs
@@ -212,6 +216,7 @@ async def normalizar(
         chaves_campanha=chaves_campanha,
         tem_host_campanha=tem_host_campanha,
         tem_sinal_cashback=tem_sinal_cashback,
+        ancora_url=ancora_url,
         code_entities=bruta.code_entities,
         is_reply=bruta.is_reply,
         reply_to=bruta.reply_to, is_override=is_override,
