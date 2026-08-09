@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from typing import List, Optional
+from logger import log_nrm
 
 
 # ── Palavra-chave de domínio ──────────────────────────────────────
@@ -238,5 +239,6 @@ def extrair_todos_cupons(texto: str, code_entities: list = None) -> List[str]:
             for j in range(i, min(i + 4, len(linhas))):
                 for m in _KW_COD.finditer(linhas[j]):
                     add(m.group(1))
-
+                  
+    log_nrm.info(f"🔬 P0 cupons={encontrados} codes_in={len(code_entities or [])} kv={bool(_RE_KV_CUPOM.search(texto))} lista={bool(_RE_LISTA_CUPONS.search(texto))} linhas_lista={sum(1 for l in texto.splitlines() if _RE_LINHA_CUPOM_LISTA.search(l))} kw={bool(_KW_CUPOM.search(texto))} n_linhas={len(texto.splitlines())}")
     return encontrados
