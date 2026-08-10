@@ -293,3 +293,4 @@ def extrair_todos_cupons(texto: str, code_entities: list = None) -> List[str]:
             add(c)
 
     log_nrm.info(f"🔬 P0 cupons={encontrados} codes_in={len(code_entities or [])} kv={bool(_RE_KV_CUPOM.search(texto))} lista={bool(_RE_LISTA_CUPONS.search(texto))} linhas_lista={sum(1 for l in texto.splitlines() if _RE_LINHA_CUPOM_LISTA.search(l))} kw={bool(_KW_CUPOM.search(texto))} n_linhas={len(texto.splitlines())}")
+    return encontrados
