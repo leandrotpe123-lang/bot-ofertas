@@ -170,13 +170,57 @@ def _filtrar_codes_validos(code_entities: list) -> List[str]:
     return validos
 
 
+# ── Forma estrutural de item de cupom ─────────────────────────────
+# Evidência ESTRUTURAL: a linha declara um benefício em valor ou
+# percentual e entrega o(s) código(s) após os dois-pontos.
+#
+#   "R$ 120 OFF em R$ 1000: INFLU120, TOMA120"
+#   "R$120 em R$1000: INFLU120"        ← sem OFF, mesma estrutura
+#   "10% em R$ 500: PROMO10"
+#
+# O literal "OFF" deixa de ser CONDIÇÃO para que um cupom exista:
+# ele é uma das formas de anunciar o benefício, não a única. A
+# exigência de valor ANTES dos dois-pontos é a barreira que impede
+# "Modelo: AGON32", "Cor: PRETO2024" e "SKU: 240419000" de virarem
+# cupom; a exclusão de linha com URL impede "Resgate aqui: https://".
+#
+# DONA ÚNICA desta evidência (MB: soberania de utils.cupom).
+# pipeline.assunto_especie CONSOME esta função — não redefine o
+# padrão. Qualquer evolução do formato acontece aqui, e só aqui.
+_RE_VALOR_BENEFICIO = re.compile(r'(?:r\$\s*[\d.,]+|\d+\s*%)', re.I)
+
+_RE_ITEM_CUPOM = re.compile(
+    r'^(?P<pre>[^:]{0,80}?):\s*(?P<pos>[A-Z0-9][A-Z0-9_,\s/-]{2,80})$'
+)
+
+
+def forma_item_cupom(linha: str) -> List[str]:
+    """Códigos que a FORMA de item de cupom reconhece nesta linha.
+
+    Devolve lista vazia quando a linha não tem a forma. Preserva a
+    GARANTIA DE LITERALIDADE: todo código devolvido é a forma
+    maiúscula de um recorte literal da linha.
+    """
+    l = linha.strip()
+    if "http" in l.lower():
+        return []
+    m = _RE_ITEM_CUPOM.match(l)
+    if not m or not _RE_VALOR_BENEFICIO.search(m.group("pre")):
+        return []
+    achados: List[str] = []
+    for bruto in re.split(r'[,\s/]+', m.group("pos")):
+        c = bruto.upper()
+        if bruto and c not in achados and _eh_cupom_valido(c):
+            achados.append(c)
+    return achados
+
+
 # ── Extração ──────────────────────────────────────────────────────
 def extrair_todos_cupons(texto: str, code_entities: list = None) -> List[str]:
     """
     Extrai todos os cupons distintos presentes em um texto.
     Aplica as mesmas estratégias de `extrair_cupom`, acumulando
-    resultados únicos em ordem de descoberta.
-
+    as cinco estratégias textuais extraem exclusivamente por
     GARANTIA DE LITERALIDADE (contratual):
       Quando code_entities NÃO é fornecido, todo código devolvido é
       a forma MAIÚSCULA de um recorte literal do texto de entrada:
@@ -239,6 +283,13 @@ def extrair_todos_cupons(texto: str, code_entities: list = None) -> List[str]:
             for j in range(i, min(i + 4, len(linhas))):
                 for m in _KW_COD.finditer(linhas[j]):
                     add(m.group(1))
-                  
+
+    # [F-C5] Estratégia 5 — FORMA ESTRUTURAL de item de cupom.
+    # Roda por ÚLTIMO: não altera a ordem de descoberta das anteriores,
+    # apenas acrescenta o que elas não viram. Cobre o formato em que o
+    # benefício é anunciado sem o literal "OFF".
+    for linha in texto.splitlines():
+        for c in forma_item_cupom(linha):
+            add(c)
+
     log_nrm.info(f"🔬 P0 cupons={encontrados} codes_in={len(code_entities or [])} kv={bool(_RE_KV_CUPOM.search(texto))} lista={bool(_RE_LISTA_CUPONS.search(texto))} linhas_lista={sum(1 for l in texto.splitlines() if _RE_LINHA_CUPOM_LISTA.search(l))} kw={bool(_KW_CUPOM.search(texto))} n_linhas={len(texto.splitlines())}")
-    return encontrados
