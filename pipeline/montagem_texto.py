@@ -177,6 +177,7 @@ def _emoji_linha(
 def _crases(
     linha: str,
     eh_titulo: bool = False,
+    cupons: List[str] = (),
 ) -> str:
 
     if eh_titulo:
@@ -184,12 +185,16 @@ def _crases(
 
     # A AUTORIDADE do que é cupom é utils.cupom (MB: soberania do
     # módulo). A montagem NÃO reconhece cupom e NÃO conhece o dialeto
-    # do Telegram: consulta a autoridade e entrega os literais a
-    # utils.marcacao, que aplica a apresentação.
-    if not _KW_CUPOM.search(linha):
-        return linha
-
-    return marcacao.codigo(linha, extrair_todos_cupons(linha))
+    # do Telegram: CONSOME a lista já derivada pela normalização e
+    # entrega os literais a utils.marcacao, que aplica a apresentação.
+    #
+    # Não re-extrai por linha. A extração por linha dependia de a
+    # palavra-chave estar NAQUELA linha — em lista de cupons ela está
+    # só no título, e nenhum código recebia crase. marcacao.codigo já
+    # marca apenas o que existir literalmente na linha, então receber
+    # a lista inteira é seguro e é o fato derivado, não uma segunda
+    # derivação.
+    return marcacao.codigo(linha, cupons)
 
 # ─────────────────────────────────────────────────────────────────
 # MONTAGEM DE TEXTO
@@ -303,6 +308,7 @@ def montar_texto(norm: MensagemNormalizada) -> str:
         l = _crases(
             l,
             eh_titulo=eh_titulo,
+            cupons=norm.cupons,
         )
 
         # Item semântico: a linha carrega classificação — emoji posto
