@@ -18,7 +18,7 @@ import re
 from typing import Optional
 
 from pipeline.estado_evento import _KW_EVENTO
-from utils.cupom import _KW_CUPOM
+from utils.cupom import _KW_CUPOM, forma_item_cupom
 
 # ─────────────────────────────────────────────────────────────────
 # Detecção do TIPO do post (define qual identidade usar)
@@ -43,19 +43,11 @@ _RE_CALENDARIO_COMERCIAL = re.compile(
     re.I,
 )
 
-# Padrão "lista de cupons" — formato típico:
-#   "🔥 R$ 100 OFF em R$ 900: INFLU100"
-_RE_LINHA_CUPOM_LISTA = re.compile(
-    r'(?:r\$\s*\d+|\d+\s*%)\s+off(?:\s+em\s+r\$\s*\d+)?\s*:\s*[A-Z0-9][A-Z0-9_-]{3,19}',
-    re.I,
-)
-
-# Padrão "OFF: CODIGO" no título
-_RE_TITULO_OFF_COD = re.compile(
-    r'(?:r\$\s*\d+|\d+\s*%)\s+off(?:\s+em\s+r\$\s*\d+)?\s*:\s*[A-Z0-9][A-Z0-9_-]{3,19}',
-    re.I,
-)
-
+# Padrão "lista de cupons" e "OFF: CODIGO" no título: a forma da
+# linha de item de cupom é SOBERANIA de utils.cupom
+# (forma_item_cupom). Este módulo CONSOME a evidência; não redefine
+# o padrão. As duas regexes que existiam aqui eram cópias
+# byte-idênticas da que vive lá — três verdades para o mesmo fato.
 # Linha de cashback (sem precisar de "OFF" literal). Usado pra
 # detectar posts Shopee de cashback como post-cupom.
 _RE_CASHBACK_LINHA = re.compile(
@@ -111,7 +103,7 @@ def _eh_lista_cupons(texto: str) -> bool:
     linhas = texto.strip().split("\n")
     linhas_lista = sum(
         1 for l in linhas
-        if _RE_LINHA_CUPOM_LISTA.search(l)
+        if forma_item_cupom(l)
     )
     return linhas_lista >= 2
 
@@ -142,7 +134,7 @@ def _eh_post_cupom(texto: str) -> bool:
         return True
 
     # Caso (b): título já é "R$ X OFF: CODIGO" / "X% OFF: CODIGO"
-    if _RE_TITULO_OFF_COD.search(titulo):
+    if forma_item_cupom(titulo):
         return True
 
     # Caso (c): 2+ linhas formato lista (reusa _eh_lista_cupons)
