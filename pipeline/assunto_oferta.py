@@ -10,7 +10,9 @@
 #
 # NÃO classifica espécie de assunto (cupom/cashback/evento): isso é
 # pipeline.assunto_especie. Não importa aquele módulo, nem é
-# importado por ele. Não conhece _KW_CUPOM nem _KW_EVENTO.
+# importado por ele. Não conhece _KW_CUPOM nem _KW_EVENTO. CONSOME de
+# utils.cupom a evidência ESTRUTURAL de item de cupom
+# (forma_item_cupom) — recorte de linha, não vocabulário.
 #
 # Camada PURA: zero I/O. As regex NÃO saem daqui; o contrato público
 # da camada é reexportado por pipeline.assunto.
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional
+from utils.cupom import forma_item_cupom
 
 # ── C3.1: DESCRITOR DE BENEFÍCIO — identidade do cupom SEM CÓDIGO ──
 # Cupom com código usa o código. Cupom sem código precisa de uma
@@ -185,12 +188,45 @@ def _condicoes_do_beneficio(t: str) -> set:
     return pos
 
 
+def _faixas_de_item_cupom(t: str) -> list:
+    """Intervalos [inicio, fim) das linhas que são ITEM DE CUPOM.
+
+    [F-C6] Terceira forma do mesmo conceito. Numa linha cuja ESTRUTURA
+    é a de um item de cupom, todo valor monetário pertence ao cupom —
+    um é o benefício, o outro é a sua condição. Nenhum descreve o preço
+    de um produto. Vale mesmo sem o literal OFF, que é o que as duas
+    formas anteriores (_RE_DESC_VAL e _COND_PISO/_COND_TETO) exigiam.
+
+    A evidência estrutural é SOBERANIA de utils.cupom
+    (forma_item_cupom). Este módulo CONSOME o recorte; não redefine o
+    padrão nem passa a conhecer vocabulário de palavra-chave.
+
+    Exclusão POR LINHA: preço de produto em qualquer outra linha
+    continua contando normalmente.
+    """
+    faixas = []
+    base = 0
+    for linha in t.splitlines(keepends=True):
+        if forma_item_cupom(linha):
+            faixas.append((base, base + len(linha)))
+        base += len(linha)
+    # LISTA, não linha solta. "Fone R$ 199: JBL10" é ambíguo — pode ser
+    # produto com cupom. Duas ou mais linhas com a mesma forma são uma
+    # tabela de cupons. Abaixo de dois, nada é excluído e a leitura
+    # anterior prevalece.
+    return faixas if len(faixas) >= 2 else []
+
+
 def tem_preco_de_item(t: str) -> bool:
     """Existe valor R$ que seja preço do PRODUTO — isto é, que não seja
-    desconto (OFF) nem condição do benefício (piso/teto)?"""
+    desconto (OFF), condição do benefício (piso/teto), nem valor de uma
+    linha estruturalmente reconhecida como item de cupom?"""
     descontos = {m.start() for m in _RE_DESC_VAL.finditer(t)}
     condicoes = _condicoes_do_beneficio(t)
+    itens_cupom = _faixas_de_item_cupom(t)
     for m in _RE_PRECO_ITEM.finditer(t):
+        if any(ini <= m.start() < fim for ini, fim in itens_cupom):
+            continue
         if any(abs(m.start() - d) <= 4 for d in descontos):
             continue
         if any(abs(m.start() - c) <= 2 for c in condicoes):
