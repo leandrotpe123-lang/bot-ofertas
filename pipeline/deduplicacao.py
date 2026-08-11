@@ -22,11 +22,14 @@ CONSUMO DE IDENTIDADE DERIVADA:
   legítima do mapa nesta camada é o nível 6 da identidade canônica,
   fallback operacional NÃO semântico e explicitamente reconhecido.
 """
+#
+# Implementação do mecanismo de claim: pipeline.deduplicacao_claim.
+# Este arquivo retém a POLÍTICA — detectar reativação, escolher a
+# janela por tipo, decidir e logar. _atomic_check_and_claim é
+# CHAMADO aqui, não reexportado.
 from __future__ import annotations
 import time
-from typing import Optional, Tuple
 
-import globals as g
 from logger import log_ded
 from pipeline.reativacao import eh_reativacao
 # ── Camada fina de compatibilidade (Front 1, passo de extração) ──
@@ -34,6 +37,9 @@ from pipeline.reativacao import eh_reativacao
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.enriquecimento import MensagemEnriquecida
 from utils.hashes import _fp4
+
+# Contrato INTERNO da camada — ver cabeçalho de deduplicacao_claim.
+from pipeline.deduplicacao_claim import _atomic_check_and_claim
 
 # ── Constantes ───────────────────────────────────────────────────
 # Janela curta usada APENAS pra reativação ("voltou", "reativado").
@@ -47,63 +53,6 @@ _JANELA_REATIVACAO_CUPOM_S = 600.0
 # Detecção de reativação: delegada ao dono canônico (pipeline.reativacao.
 # eh_reativacao). Esta camada mantém APENAS o throttle anti-flood acima —
 # não detecta linguagem de retorno por conta própria.
-
-
-# ─────────────────────────────────────────────────────────────────
-# Atomic locks (in-memory, evita race entre tasks)
-# ─────────────────────────────────────────────────────────────────
-async def _get_atomic_lck():
-    return g._atomic_lck_obj
-
-
-_ATOMIC_TTL_MAX = 4 * 60 * 60      # 4h
-_ATOMIC_CLEANUP_THRESHOLD = 500
-
-
-def _cleanup_atomic_mem_locked() -> int:
-    """
-    Remove entradas antigas de g._atomic_mem.
-    DEVE ser chamado com g._atomic_lck_obj já adquirido.
-    """
-    if len(g._atomic_mem) <= _ATOMIC_CLEANUP_THRESHOLD:
-        return 0
-    agora = time.monotonic()
-    antigos = [
-        k for k, ts in g._atomic_mem.items()
-        if agora - ts > _ATOMIC_TTL_MAX
-    ]
-    for k in antigos:
-        g._atomic_mem.pop(k, None)
-    return len(antigos)
-
-
-async def _atomic_check_and_claim(fp: str, janela: float) -> Tuple[bool, Optional[float]]:
-    """
-    Atômico: verifica se fp existe DENTRO da janela e, se não, faz claim.
-    Retorna (na_janela, ts_existente).
-      - na_janela=True  → identidade já está sendo processada/foi recente
-      - na_janela=False → claim feito agora, primeira vez nessa janela
-
-    Tudo em UM lock pra evitar race entre check e claim. Ao reentrar
-    dentro da janela, atualiza o timestamp pra estender.
-    """
-    async with (await _get_atomic_lck()):
-        agora = time.monotonic()
-        # Cleanup oportunista
-        removidos = _cleanup_atomic_mem_locked()
-        if removidos:
-            log_ded.debug(
-                f"🧹 _atomic_mem cleanup: removidos {removidos} | "
-                f"restam {len(g._atomic_mem)}"
-            )
-        ts = g._atomic_mem.get(fp)
-        if ts is not None and (agora - ts) < janela:
-            # Atualiza pra estender
-            g._atomic_mem[fp] = agora
-            return True, ts
-        # Claim
-        g._atomic_mem[fp] = agora
-        return False, ts
 
 # ─────────────────────────────────────────────────────────────────
 # REATIVAÇÃO
@@ -181,3 +130,4 @@ async def deve_enviar_async(enr: MensagemEnriquecida) -> bool:
         # ofertas legítimas.
         log_ded.error(f"❌ ERRO DEDUPE: {e}", exc_info=True)
         return True
+                             
