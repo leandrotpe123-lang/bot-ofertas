@@ -65,21 +65,45 @@ async def _enviar_msg(texto: str, img) -> object:
 # ─────────────────────────────────────────────────────────────────
 async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
                                 imagem_nova=None,
-                                exigir_imagem: bool = False) -> bool:
+                                exigir_imagem: bool = False,
+                                trocar_midia: bool = True) -> bool:
     """Edita mensagem sem adquirir _SEM_ENVIO. Use APENAS dentro de
     funções que já seguram o semáforo.
 
     Com exigir_imagem=True, se a edição COM imagem falhar (post nasceu
     sem mídia), devolve False SEM editar só o texto, para o chamador cair
-    no fallback de substituição (deletar+repostar)."""
+    no fallback de substituição (deletar+repostar).
+
+    [FASE 1] SEPARAÇÃO CONTEÚDO × MÍDIA
+    ------------------------------------
+    `trocar_midia` é a AUTORIZAÇÃO EXPLÍCITA para a mídia ser tocada.
+    Sem ela, `imagem_nova` é IGNORADA e a chamada edita apenas a
+    legenda — a mídia publicada permanece intacta.
+
+    Isto existe porque, no primitivo original, decidir o TEXTO
+    arrastava a MÍDIA junto: passar `imagem_nova` fazia o
+    edit_message usar `file=`, que SUBSTITUI a mídia do post. Não
+    havia caminho para "evolui o texto, mantém a imagem".
+
+    Default True: preserva byte-a-byte o comportamento de todo caller
+    que não se pronuncia. A separação é OPT-IN de quem decide.
+
+    Invariante: `trocar_midia=False` NUNCA altera a mídia publicada.
+    Invariante: `trocar_midia=True` reproduz exatamente o comportamento
+                anterior, inclusive o fallback de exigir_imagem.
+    ATENÇÃO: `exigir_imagem=True` com `trocar_midia=False` é
+    contraditório — sem autorização não há imagem a exigir. A Fase 2
+    (política de mídia) é quem deve impedir essa combinação."""
     from client import client
+    # A mídia só entra na chamada se houver AUTORIZAÇÃO e imagem.
+    midia = imagem_nova if trocar_midia else None
     for t in range(1, 4):
         try:
-            if imagem_nova:
+            if midia:
                 try:
                     await client.edit_message(
                         GRUPO_DESTINO, msg_id_dest, texto_novo,
-                        parse_mode="md", file=imagem_nova,
+                        parse_mode="md", file=midia,
                     )
                 except Exception as e_img:
                     if exigir_imagem:
