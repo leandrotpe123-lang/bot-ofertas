@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import heapq
+import itertools
 import time
 
 import globals as g
@@ -39,6 +40,17 @@ _PRIO_EDIT = 0
 _PRIO_NOVA = 1
 
 
+# Desempate estável da heap. `event` (telethon events.NewMessage.Event)
+# não implementa __lt__: com prio E ts idênticos, o heapq avançaria para
+# ele e levantaria TypeError, perdendo a mensagem silenciosamente. O
+# contador é sempre distinto e crescente, então a comparação nunca passa
+# dele. Ordem preservada: itens com prio+ts distintos seguem decididos
+# por prio e ts, exatamente como antes; o contador só arbitra empates,
+# e nesse caso aplica FIFO (o que chegou primeiro sai primeiro).
+# next() é chamado sob g._buf_lck, e é atômico em CPython.
+_seq = itertools.count()
+
+
 # ── Fila de entrada ───────────────────────────────────────────────
 async def _enfileirar(event, is_edit: bool) -> None:
     async with g._buf_lck:
@@ -46,7 +58,8 @@ async def _enfileirar(event, is_edit: bool) -> None:
             log_sys.warning(f"⚠️ Fila cheia | id={event.message.id}")
             return
         prio = _PRIO_EDIT if is_edit else _PRIO_NOVA
-        heapq.heappush(g._buf, (prio, time.monotonic(), event, is_edit))
+        heapq.heappush(
+            g._buf, (prio, time.monotonic(), next(_seq), event, is_edit))
         log_sys.info(
             f"🧭 TL | id={event.message.id} chat={event.chat_id} | FILA_IN | "
             f"tipo={'edit' if is_edit else 'new'} prio={prio} "
@@ -68,7 +81,7 @@ async def _worker_loop() -> None:
             if item is None:
                 break
 
-            prio, ts, event, is_edit = item
+            prio, ts, _seq_i, event, is_edit = item
 
             async with g._w_lck:
                 if g._w_ativos >= _WORKERS_MAX:
@@ -108,4 +121,3 @@ async def _iniciar_orchestrator() -> None:
         f"max_edits={_MAX_EDITS}"
     )
     asyncio.create_task(_worker_loop())
-
