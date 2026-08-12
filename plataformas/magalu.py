@@ -29,9 +29,10 @@ import aiohttp
 import config
 import os
 
-_MGL_PARTNER = os.environ.get("MAGALU_PARTNER_ID", "3440")
-_MGL_PROMOTER = os.environ.get("MAGALU_PROMOTER_ID", "5479317")
-_MGL_PID = os.environ.get("MAGALU_PID", "magazinevoce")
+_MGL_PARTNER = os.environ.get("MAGALU_PARTNER_ID", "")
+_MGL_PROMOTER = os.environ.get("MAGALU_PROMOTER_ID", "")
+_MGL_PID = os.environ.get("MAGALU_PID", "")
+_MGL_SLUG = os.environ.get("MAGALU_SLUG", "")
 from logger import log_nrm
 from plataformas.contrato import (
     AUSENTE,
@@ -101,6 +102,47 @@ _PARAMS_REMOVER = frozenset({
     "utm_campaign", "pid", "c", "af_force_deeplink",
     "deep_link_value", "isretargeting",
 })
+
+# ── Identidade de afiliação ───────────────────────────────────────
+# Campos que CARREGAM identidade de divulgador e, portanto, os
+# ÚNICOS que podem ser reescritos. Todo o resto da URL — produto,
+# SKU, rota, categoria, seleção, barra final, fragmento e qualquer
+# parâmetro desconhecido — é preservado por requisito de segurança.
+#
+# Duas naturezas na mesma tabela porque a operação sobre ambas é
+# idêntica: trocar o valor quando, e somente quando, o campo existe.
+#   identidade numérica do divulgador : promoter_id, utm_campaign, c
+#   configuração do programa          : partner_id, pid
+#
+# utm_source e utm_medium NÃO entram: são origem do programa, não
+# identidade individual do divulgador, e não devem ser tocados.
+_IDENTIDADE = {
+    "promoter_id":  _MGL_PROMOTER,
+    "utm_campaign": _MGL_PROMOTER,
+    "c":            _MGL_PROMOTER,
+    "partner_id":   _MGL_PARTNER,
+    "pid":          _MGL_PID,
+}
+
+# Subconjunto de natureza numérica. O guard só reconhece como
+# identificador estrangeiro um valor que ocupe um destes campos.
+_CAMPOS_DIVULGADOR = frozenset({"promoter_id", "utm_campaign", "c"})
+
+# Parâmetros cujo valor é, ele próprio, uma URL da Magalu.
+_PARAMS_ANINHADOS = ("deep_link_value",)
+
+# Domínio da gramática do divulgador, onde a identidade vive no slug
+# do caminho. Conjunto — e não cadeia — para ser consumido por
+# _bate_dominio, mantendo o mesmo reconhecimento de `reconhece`.
+_DOMINIOS_DIVULGADOR = frozenset({"magazinevoce.com.br"})
+
+# Reconhecimento de campo de identidade nos DOIS níveis de
+# codificação: separador literal (& =) e percent-encoded (%26 %3D).
+_P_CAMPO_IDENTIDADE = re.compile(
+    r'(?:(?<=[?&])|(?<=%26))'
+    r'(promoter_id|utm_campaign|c|partner_id|pid)(?:=|%3D)([^&#%]*)',
+    re.I,
+)
 
 
 # ── Funções de apoio ──────────────────────────────────────────────
@@ -214,31 +256,191 @@ def limpa_url(url: str) -> str:
 
 
 # ── Capacidade obrigatória: afiliação ─────────────────────────────
+def _eh_divulgador(url: str) -> bool:
+    """
+    Verdadeiro se a URL pertence ao host da gramática do divulgador,
+    onde a identidade do afiliado vive no slug do caminho.
+
+    Reusa _bate_dominio e _netloc, de modo que o reconhecimento aqui
+    seja EXATAMENTE o mesmo de `reconhece`: prefixo www. normalizado,
+    caixa normalizada, subdomínio aceito e sufixo forjado rejeitado.
+    Comparação por igualdade de cadeia seria mais frouxa num sentido
+    e mais estreita no outro — não usar.
+    """
+    return _bate_dominio(_netloc(url), _DOMINIOS_DIVULGADOR)
+
+
+def _partir_url(url: str) -> tuple:
+    """
+    Separa a URL em (base, query, fragmento, tinha_query) por corte
+    de cadeia, sem reserializar coisa alguma. A recomposição por
+    _juntar_url é exata: nenhum byte fora da query é tocado.
+    """
+    frag = ""
+    if "#" in url:
+        url, resto = url.split("#", 1)
+        frag = "#" + resto
+    if "?" in url:
+        base, query = url.split("?", 1)
+        return base, query, frag, True
+    return url, "", frag, False
+
+
+def _juntar_url(base: str, query: str, frag: str, tinha: bool) -> str:
+    """Recompõe exatamente o que _partir_url separou."""
+    return f"{base}?{query}{frag}" if tinha else f"{base}{query}{frag}"
+
+
+def _reescrever_identidade(query: str, nivel: str = "externo") -> str:
+    """
+    Reescreve o VALOR dos campos de identidade presentes na query.
+
+    Cirurgia de span: casa `campo=valor` e troca APENAS o valor. Não
+    acrescenta campo ausente, não remove campo, não reordena, não
+    reserializa e preserva a caixa original do nome do campo.
+
+    `nivel` seleciona o nível de codificação dos separadores:
+      externo → "&" e "="
+      interno → "%26" e "%3D", a query dentro de deep_link_value.
+
+    O nível interno é tratado NA FORMA CODIFICADA, sem decodificar e
+    recodificar. Decodificar e recodificar reescreveria também o
+    conteúdo que não é nosso; operar sobre a forma codificada não.
+    """
+    for nome, valor in _IDENTIDADE.items():
+        n = re.escape(nome)
+        if nivel == "externo":
+            padrao = re.compile(rf'(?<![^&])({n})=([^&#]*)', re.I)
+            igual = "="
+        else:
+            padrao = re.compile(
+                rf'(?:(?<=%26)|(?<=%3F))({n})%3D(.*?)(?=%26|$)', re.I
+            )
+            igual = "%3D"
+        query = padrao.sub(
+            lambda m, v=valor, e=igual: f"{m.group(1)}{e}{v}", query
+        )
+    return query
+
+
+def _reescrever_aninhado(query: str) -> str:
+    """
+    Aplica a mesma reescrita dentro dos parâmetros cujo valor é, ele
+    próprio, uma URL da Magalu. Preserva integralmente o conteúdo
+    aninhado: esquema, host, caminho e parâmetros desconhecidos.
+
+    Um segundo nível de aninhamento (deep_link_value dentro de
+    deep_link_value) não é tratado aqui deliberadamente: nunca foi
+    observado, e se ocorrer o guard de vazamento descarta a oferta
+    em vez de publicar identidade alheia.
+    """
+    for nome in _PARAMS_ANINHADOS:
+        padrao = re.compile(rf'(?<![^&])({re.escape(nome)})=([^&#]*)',
+                            re.I)
+        query = padrao.sub(
+            lambda m: f"{m.group(1)}="
+                      f"{_reescrever_identidade(m.group(2), 'interno')}",
+            query,
+        )
+    return query
+
+
+def _reescrever_slug(base: str) -> str:
+    """
+    Gramática do divulgador: no host magazinevoce a identidade do
+    afiliado é o PRIMEIRO segmento do caminho. Substitui apenas esse
+    segmento; o restante do caminho, inclusive a barra final e os
+    SKUs unidos por '+', permanece intacto. Cadeia vazia quando não
+    há slug configurado ou não há segmento a substituir.
+    """
+    if not _MGL_SLUG:
+        return ""
+    m = re.match(r'(https?://[^/?#]+)(/.*)?$', base, re.I)
+    if not m:
+        return ""
+    origem, caminho = m.group(1), m.group(2) or ""
+    segmentos = caminho.split("/")
+    indice = next((n for n, s in enumerate(segmentos) if s), None)
+    if indice is None:
+        return ""
+    segmentos[indice] = _MGL_SLUG
+    return origem + "/".join(segmentos)
+
+
+def _ids_estrangeiros(url: str) -> set:
+    """
+    Identificadores numéricos de divulgador presentes na URL que não
+    são o nosso. Reconhecidos por CAMPO, nunca por busca cega de
+    número solto — um número do produto jamais entra aqui.
+    """
+    return {
+        v for n, v in (
+            (m.group(1).lower(), m.group(2))
+            for m in _P_CAMPO_IDENTIDADE.finditer(url)
+        )
+        if n in _CAMPOS_DIVULGADOR and v.isdigit() and v != _MGL_PROMOTER
+    }
+
+
+def _incoerencias_identidade(url: str) -> list:
+    """
+    Campos de identidade presentes na URL cujo valor não é o nosso,
+    nos dois níveis de codificação. Lista vazia significa identidade
+    integralmente coerente.
+    """
+    return sorted({
+        f"{m.group(1).lower()}={m.group(2)}"
+        for m in _P_CAMPO_IDENTIDADE.finditer(url)
+        if m.group(2) != _IDENTIDADE[m.group(1).lower()]
+    })
+
+
+def _vazamento(url: str, estrangeiros: set) -> set:
+    """
+    Identificadores estrangeiros ainda presentes na QUERY da saída.
+    A varredura exclui o caminho por desenho: o caminho é preservado
+    integralmente e pode conter SKU numérico coincidente.
+    """
+    _, query, _, _ = _partir_url(url)
+    return {
+        i for i in estrangeiros
+        if re.search(rf'(?<!\d){re.escape(i)}(?!\d)', query)
+    }
+
+
 def _construir_url_afiliada(url: str) -> str:
     """
-    Aplica patch não-destrutivo dos parâmetros afiliados sobre a URL.
-    Substitui valores dos parâmetros canônicos APENAS quando já
-    presentes na URL. Não adiciona parâmetros ausentes. Não remove
-    parâmetros não afiliados. Preserva todo o restante intacto.
+    Transforma a URL afiliada recebida de um grupo monitorado na URL
+    equivalente sob a NOSSA identidade.
+
+    Princípio: preservar tudo e trocar só a identidade do divulgador.
+    Não reconstrói a URL, não inventa campo ausente, não altera
+    produto, SKU, rota, categoria, seleção, barra final, fragmento
+    nem parâmetros desconhecidos.
+
+    Pura, determinística e idempotente. Cadeia vazia quando não há
+    identidade a substituir — nunca devolve a entrada intacta, pois
+    entrada intacta é atribuição de outro divulgador.
+
+    Despacha por host. Cada host tem UMA gramática de identidade, e
+    as duas nunca se misturam:
+      magazineluiza.com.br → identidade nos parâmetros da query
+      magazinevoce.com.br  → identidade no slug do caminho
     """
-    canonicos = (
-        ("partner_id",        _MGL_PARTNER),
-        ("promoter_id",       _MGL_PROMOTER),
-        ("utm_source",        "divulgador"),
-        ("utm_medium",        "magalu"),
-        ("utm_campaign",      _MGL_PROMOTER),
-        ("pid",               _MGL_PID),
-        ("c",                 _MGL_PROMOTER),
-        ("af_force_deeplink", "true"),
-    )
+    base, query, frag, tinha = _partir_url(url)
 
-    for nome, valor in canonicos:
-        padrao = re.compile(rf'(?<=[?&]){re.escape(nome)}=[^&#]*')
-        novo = f"{nome}={quote(valor, safe='')}"
-        url = padrao.sub(novo, url, count=1)
+    if _eh_divulgador(url):
+        nova_base = _reescrever_slug(base)
+        if not nova_base:
+            return ""
+        return _juntar_url(nova_base, query, frag, tinha)
 
-    return url
+    if not query:
+        return ""
 
+    query = _reescrever_identidade(query)
+    query = _reescrever_aninhado(query)
+    return _juntar_url(base, query, frag, tinha)
 
 async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     """
@@ -279,6 +481,7 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         url = url_expandida
 
     # Construção da URL afiliada longa.
+    estrangeiros = _ids_estrangeiros(url)
     try:
         afiliada = _construir_url_afiliada(url)
     except Exception as exc:
@@ -287,10 +490,45 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         )
         return AUSENTE
 
+    if not afiliada:
+        log_nrm.warning(
+            "⚠️ MGL sem identidade de afiliação a substituir — descarta"
+        )
+        return AUSENTE
+
     if "magazineluiza" not in _netloc(afiliada) \
             and "magazinevoce" not in _netloc(afiliada):
         log_nrm.warning(f"⚠️ MGL afiliação inválida: {afiliada[:60]}")
         return AUSENTE
+
+    # Validação estrutural: todo campo de identidade PRESENTE na
+    # saída tem de conter o NOSSO valor, nos dois níveis de
+    # codificação. Não se assume que a transformação deu certo.
+    incoerentes = _incoerencias_identidade(afiliada)
+    if incoerentes:
+        log_nrm.warning(
+            f"⚠️ MGL identidade incoerente — descarta | {incoerentes}"
+        )
+        return AUSENTE
+
+    # Guard de vazamento: nenhum identificador de divulgador visto na
+    # entrada pode sobreviver na query da saída. Restrito à query, e
+    # nunca ao caminho — o caminho é preservado por desenho e pode
+    # conter SKU numérico que coincida com um identificador.
+    residuais = _vazamento(afiliada, estrangeiros)
+    if residuais:
+        log_nrm.warning(
+            f"⚠️ MGL vazamento de divulgador — descarta "
+            f"| ids={sorted(residuais)}"
+        )
+        return AUSENTE
+
+    # Confirmação do slug na gramática do divulgador.
+    if _eh_divulgador(afiliada):
+        segmentos = [s for s in urlparse(afiliada).path.split("/") if s]
+        if not segmentos or segmentos[0] != _MGL_SLUG:
+            log_nrm.warning("⚠️ MGL slug não confirmado — descarta")
+            return AUSENTE
 
     registrar_link(url, afiliada, _IDENTIFICADOR)
     log_nrm.info("✅ MGL afiliada (longa)")
