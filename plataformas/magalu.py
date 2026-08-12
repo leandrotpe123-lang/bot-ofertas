@@ -22,7 +22,8 @@ Baseline arquitetural: Documento 1 — Especificação do Contrato.
 from __future__ import annotations
 
 import re
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse, quote
+from urllib.parse import (parse_qs, unquote, urlencode, urlparse,
+                          urlunparse, quote)
 
 import aiohttp
 
@@ -130,6 +131,15 @@ _CAMPOS_DIVULGADOR = frozenset({"promoter_id", "utm_campaign", "c"})
 
 # Parâmetros cujo valor é, ele próprio, uma URL da Magalu.
 _PARAMS_ANINHADOS = ("deep_link_value",)
+
+# Parâmetros que carregam a URL de DESTINO na forma de bounce do
+# divulgador. Distintos de _PARAMS_ANINHADOS: ali o valor aninhado é
+# um espelho a corrigir; aqui o valor aninhado É a URL efetiva, e o
+# invólucro deve ser descartado.
+_PARAMS_DESTINO = ("url",)
+
+# Teto de desembrulhos encadeados de destino.
+_PROFUNDIDADE_DESTINO = 3
 
 # Domínio da gramática do divulgador, onde a identidade vive no slug
 # do caminho. Conjunto — e não cadeia — para ser consumido por
@@ -269,6 +279,25 @@ def _eh_divulgador(url: str) -> bool:
     """
     return _bate_dominio(_netloc(url), _DOMINIOS_DIVULGADOR)
 
+def _destino_embutido(query: str) -> str:
+    """
+    Extrai a URL de destino carregada num parâmetro de bounce.
+
+    A Magalu redireciona rotas do divulgador para a forma
+    `magazinevoce.com.br/<slug>/?url=<destino>`. Nessa forma o slug
+    do caminho é decorativo: quem manda é o destino. Devolve cadeia
+    vazia quando não há parâmetro de destino utilizável.
+    """
+    for nome in _PARAMS_DESTINO:
+        m = re.search(
+            rf'(?<![^&])({re.escape(nome)})=([^&#]*)', query, re.I
+        )
+        if m:
+            destino = unquote(m.group(2))
+            if destino.lower().startswith(("http://", "https://")):
+                return destino
+    return ""
+
 
 def _partir_url(url: str) -> tuple:
     """
@@ -407,8 +436,36 @@ def _vazamento(url: str, estrangeiros: set) -> set:
         if re.search(rf'(?<!\d){re.escape(i)}(?!\d)', query)
     }
 
+def _slug_estrangeiro(url: str) -> str:
+    """
+    Slug de divulgador presente na URL de entrada que não é o nosso.
+    Cadeia vazia quando a URL não é da gramática do divulgador ou já
+    está sob a nossa identidade.
+    """
+    if not _eh_divulgador(url):
+        return ""
+    base, _, _, _ = _partir_url(url)
+    m = re.match(r'https?://[^/?#]+(/[^?#]*)?$', base, re.I)
+    caminho = (m.group(1) or "") if m else ""
+    segmento = next((s for s in caminho.split("/") if s), "")
+    return "" if segmento.lower() == _MGL_SLUG.lower() else segmento
 
-def _construir_url_afiliada(url: str) -> str:
+
+def _vazamento_slug(url: str, slug: str) -> bool:
+    """
+    Verdadeiro se o slug estrangeiro sobrevive em qualquer ponto da
+    URL de saída, inclusive dentro de parâmetro aninhado. O slug é
+    alfanumérico, logo a forma codificada é idêntica à literal e uma
+    única varredura cobre os dois níveis.
+    """
+    if not slug:
+        return False
+    return bool(re.search(
+        rf'(?<![A-Za-z0-9]){re.escape(slug)}(?![A-Za-z0-9])', url, re.I
+    ))
+
+
+def _construir_url_afiliada(url: str, profundidade: int = 0) -> str:
     """
     Transforma a URL afiliada recebida de um grupo monitorado na URL
     equivalente sob a NOSSA identidade.
@@ -430,6 +487,16 @@ def _construir_url_afiliada(url: str) -> str:
     base, query, frag, tinha = _partir_url(url)
 
     if _eh_divulgador(url):
+        # Forma de bounce: magazinevoce.com.br/<slug>/?url=<destino>.
+        # Trocar apenas o slug do wrapper NÃO reafilia coisa alguma —
+        # a Magalu leva ao destino, e o destino carrega a identidade
+        # real do outro divulgador. Desembrulha e reprocessa desde o
+        # início, o que também permite mudar de gramática quando o
+        # destino é da loja e não do divulgador.
+        destino = _destino_embutido(query)
+        if (destino and _eh_url_magalu(destino)
+                and profundidade < _PROFUNDIDADE_DESTINO):
+            return _construir_url_afiliada(destino, profundidade + 1)
         nova_base = _reescrever_slug(base)
         if not nova_base:
             return ""
@@ -482,6 +549,7 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
 
     # Construção da URL afiliada longa.
     estrangeiros = _ids_estrangeiros(url)
+    slug_alheio  = _slug_estrangeiro(url)
     try:
         afiliada = _construir_url_afiliada(url)
     except Exception as exc:
@@ -522,6 +590,17 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
             f"| ids={sorted(residuais)}"
         )
         return AUSENTE
+
+    # Guard de slug: na gramática do divulgador não existe ID
+    # numérico, logo o guard de vazamento é cego ali. O slug do
+    # divulgador de origem não pode sobreviver em ponto algum da
+    # saída — nem no caminho, nem dentro de parâmetro aninhado.
+    if _vazamento_slug(afiliada, slug_alheio):
+        log_nrm.warning(
+            f"⚠️ MGL slug estrangeiro sobreviveu — descarta "
+            f"| slug={slug_alheio}"
+        )
+        return AUSENTE 
 
     # Confirmação do slug na gramática do divulgador.
     if _eh_divulgador(afiliada):
