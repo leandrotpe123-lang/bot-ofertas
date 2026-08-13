@@ -122,6 +122,13 @@ async def _enviar_inner(montada: MensagemMontada,
                         identity = f"post:{msg_id_rel}"
                         _log_decisao(d, montada, norm, estado, score, agora, identity)
 
+                        
+                        if d.acao == "IGNORAR" and d.trocar_midia:
+                            # [FASE 2] O texto não evolui, mas a mídia
+                            # pode. Uma decisão não mata a outra.
+                            return await _aplicar_upgrade_midia(
+                                montada, norm, d, estado, msg_id_rel,
+                                identity)
 
                         if d.acao == "RENASCER":
                             # Reativação em ciclo vivo → post NOVO. Absorve a
