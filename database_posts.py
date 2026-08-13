@@ -92,7 +92,7 @@ def db_ofertas_de_post(msg_id_dest: int) -> list[str]:
         log_db.error(f"❌ db_ofertas_de_post: {e}")
         return []
 
- def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
+def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
                       texto: str, plat: str, lider: str = "",
                       janela_fim: float = 0.0, edit_count: int = 0,
                       *, chat_origem: str = "", msg_id_origem: int = 0,
