@@ -15,10 +15,32 @@ Política preservada (idêntica à atual; afinar é passo posterior):
   - fora da janela, outro grupo com score <= líder → ignora (LIDER_TRAVADO);
   - teto de edições → ignora SOMENTE o ramo de evolução (Frente 0 §5):
     não encerra a família, não bloqueia sincronização/reativação/renascimento;
-  - score igual, imagem boa trocando imagem ruim na janela de mídia →
-    evolui (troca imagem);
   - score igual e texto quase idêntico → ignora (DUP_SILENCIOSO);
   - resto → ignora (SCORE_NAO_EVOLUI).
+
+[FASE 2] SEPARAÇÃO CONTEÚDO × MÍDIA
+------------------------------------
+A decisão de MÍDIA deixou de morar aqui. Este módulo decide o CONTEÚDO;
+pipeline.midia_politica decide a IMAGEM. As duas são calculadas em
+paralelo e viajam juntas na mesma Decisao, mas nenhuma manda na outra:
+
+  - `acao`/`motivo`      → o que acontece com o TEXTO
+  - `trocar_midia`       → o que acontece com a IMAGEM
+  - IGNORAR + trocar_midia=True é um resultado VÁLIDO e frequente
+    (o texto não evolui, mas a imagem sobe de classe).
+
+O antigo `TROCA_IMG_BOA` foi REMOVIDO. Ele era um EVOLUIR, e evolução
+grava o texto novo — trocar a imagem sobrescrevia o texto vencedor.
+Agora é TROCA/upgrade na política de mídia, sem consumir edit_count e
+sem depender de config._JANELA_REENVIO_MIDIA_S (uma imagem boa que
+chega 45s depois precisa poder substituir uma ruim).
+
+INVARIANTE: nenhum caminho de publicação pode alterar a mídia publicada
+contra politica_midia(). Por isso `permite_substituir` e
+`exigir_imagem` são REBAIXADOS por _com_midia() quando a política diz
+PRESERVA — senão o fallback de substituição (delete+repost) reintroduzia
+a imagem nova pela porta dos fundos, e de forma irrecuperável: guardamos
+midia_chat, não os bytes da imagem publicada.
 """
 from __future__ import annotations
 
@@ -27,6 +49,7 @@ from dataclasses import dataclass
 import config
 from config import _MAX_EDITS
 from pipeline.score import midia_ruim
+from pipeline.midia_politica import politica_midia
 from pipeline.vida_oferta import viva
 from pipeline.reativacao import eh_reativacao
 
@@ -45,6 +68,11 @@ class Decisao:
     novo_score: int = 0
     exigir_imagem: bool = False
     permite_substituir: bool = False
+    # [FASE 2] decisão de MÍDIA — independente da de conteúdo.
+    # Governa TODOS os caminhos que podem tocar a imagem publicada:
+    # edição, fallback de substituição e sincronização.
+    trocar_midia: bool = False
+    motivo_midia: str = ""
     # contexto p/ logs fiéis no chamador:
     na_janela: bool = False
     score_atual: int = 0
@@ -67,12 +95,34 @@ def decidir(norm, montada, score: int, estado: dict | None,
     ts_anterior = estado.get("ts", 0) or 0
     score_atual = estado["score"]
 
+    # ══ [FASE 2] POLÍTICA DE MÍDIA ══
+    # Calculada UMA vez, no topo, e anexada a toda Decisao que sair
+    # daqui. É independente de score, texto, líder, edit_count e
+    # janela — só olha a classe da imagem publicada contra a nova.
+    trocar_midia, motivo_midia = politica_midia(
+        montada.imagem, norm.chat, estado)
+
+    def _com_midia(d: Decisao) -> Decisao:
+        """Anexa a decisão de mídia e faz a política GOVERNAR os
+        caminhos de escrita de imagem. Sob PRESERVA, nem edit_message
+        (file=) nem o fallback de substituição podem entrar."""
+        d.trocar_midia = trocar_midia
+        d.motivo_midia = motivo_midia
+        d.permite_substituir = d.permite_substituir and trocar_midia
+        d.exigir_imagem = d.exigir_imagem and trocar_midia
+        return d
+
     # ══ VIDA DA OFERTA — a autoridade é vida_oferta.viva() ══
     # Fora da vida do ciclo: estado FINAL, congelado — nada mais evolui
     # (nem score, nem imagem, nem cupom). O valor mora no dono, não aqui.
     # Mensagem NOVA que casa em ciclo morto nasce como CICLO NOVO
     # (Frente 0 §6 / Fase 3: fora da vida não há veto — há renascimento
     # por novo envio). Edição não cria ciclo: mantém o veto.
+    #
+    # [FASE 2] Ciclo morto NÃO recebe upgrade de mídia: a Doutrina diz
+    # "estado FINAL, congelado — nem score, nem imagem". Estas duas
+    # saídas são as ÚNICAS que não passam por _com_midia(), e é
+    # deliberado: trocar_midia fica False.
     if not na_janela:
         if is_edit:
             return Decisao(IGNORAR, "JANELA_ENCERRADA",
@@ -88,6 +138,9 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # para o ramo de cupom abaixo. Frequência (1 por identidade/janela) é do
     # throttle da dedup — esta camada é pura e só reconhece o evento.
     # Só em mensagem NOVA (not is_edit): edição é sincronização (F‑S), não retorno.
+    #
+    # [FASE 2] RENASCER cria post NOVO: a mídia dele é a da própria
+    # mensagem, não uma troca no post antigo. trocar_midia fica False.
     if not is_edit and eh_reativacao(norm.texto_limpo):
         return Decisao(RENASCER, "RENASCIMENTO",
                        na_janela=na_janela, score_atual=score_atual)
@@ -100,10 +153,15 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # (is_edit); mensagem nova segue para evolução abaixo. Se a edição mudou
     # a identidade a ponto de não casar, o overlap nem trouxe este post →
     # vira post novo pelo fluxo normal (regra #6), não aqui.
+    #
+    # [FASE 2] A sincronização espelha o TEXTO do líder — a imagem
+    # continua governada pela política. Um líder de mídia ruim editando
+    # a própria mensagem NÃO rebaixa mais a imagem boa publicada.
     if is_edit and lider_atual and norm.chat == lider_atual:
-        return Decisao(SINCRONIZAR, "SINCRONIZACAO",
-                       na_janela=na_janela, score_atual=score_atual)
-      
+        return _com_midia(Decisao(SINCRONIZAR, "SINCRONIZACAO",
+                                  na_janela=na_janela,
+                                  score_atual=score_atual))
+
     # ══ TETO DE EVOLUÇÃO — Doutrina Frente 0 §5 ══
     # O teto trava SOMENTE o ramo de evolução; NÃO encerra a família.
     # A família só termina na fronteira do histórico (janela_fim <= agora),
@@ -111,50 +169,58 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # renascimento, quando existirem, entram ACIMA deste ponto e não são
     # afetados pelo teto. Por isso a verificação vive DENTRO de cada saída
     # de evolução — nunca como um portão acima de todas elas.
+    #
+    # [FASE 2] O teto é orçamento de EVOLUÇÃO TEXTUAL. Upgrade de mídia
+    # não o consome e não é bloqueado por ele: as saídas de
+    # EVOLUCAO_LIMITE_ATINGIDO passam por _com_midia() e podem sair com
+    # trocar_midia=True.
     tem_orcamento = edit_count < _MAX_EDITS
 
     # ── CUPOM ENRIQUECIDO: código(s) novo(s) → edita o mesmo post ──
     if cupons_novos > 0:
         if not tem_orcamento:
-            return Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
-                           na_janela=na_janela, score_atual=score_atual)
-        return Decisao(
+            return _com_midia(Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
+                                      na_janela=na_janela,
+                                      score_atual=score_atual))
+        return _com_midia(Decisao(
             EVOLUIR, "CUPOM_ENRIQUECIDO",
             novo_score=max(score, score_atual),
             exigir_imagem=False, permite_substituir=False,
-            na_janela=na_janela, score_atual=score_atual)
+            na_janela=na_janela, score_atual=score_atual))
 
     # ── DECISÃO 1: score MAIOR → evolui (edita; fallback substitui) ──
     if score > score_atual:
         if not tem_orcamento:
-            return Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
-                           na_janela=na_janela, score_atual=score_atual)
-        return Decisao(
+            return _com_midia(Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
+                                      na_janela=na_janela,
+                                      score_atual=score_atual))
+        return _com_midia(Decisao(
             EVOLUIR, "EVOLUI", novo_score=score,
             exigir_imagem=bool(montada.imagem), permite_substituir=True,
-            na_janela=na_janela, score_atual=score_atual)
+            na_janela=na_janela, score_atual=score_atual))
 
     # ── DECISÃO 2: score IGUAL ──
+    # [FASE 2] O ramo TROCA_IMG_BOA foi REMOVIDO daqui. Ele era um
+    # EVOLUIR — e evolução grava o texto novo, então trocar a imagem
+    # sobrescrevia o texto vencedor por um texto que não venceu.
+    # A troca virou TROCA/upgrade na política de mídia: acontece via
+    # IGNORAR + trocar_midia=True, sem tocar texto/score/líder/orçamento
+    # e sem a janela de config._JANELA_REENVIO_MIDIA_S.
     if score == score_atual:
         delta = int(agora - ts_anterior)
-        if (midia_ruim(lider_atual) and not midia_ruim(norm.chat)
-                and montada.imagem
-                and (agora - ts_anterior) < config._JANELA_REENVIO_MIDIA_S):
-            if not tem_orcamento:
-                return Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
-                               na_janela=na_janela, score_atual=score_atual)
-            return Decisao(
-                EVOLUIR, "TROCA_IMG_BOA", novo_score=score,
-                exigir_imagem=True, permite_substituir=True,
-                na_janela=na_janela, score_atual=score_atual, delta=delta)
 
         from utils.textos import _alma, _sim
         sim_v = _sim(_alma(montada.texto), _alma(texto_atual))
         if sim_v > 0.85:
-            return Decisao(IGNORAR, "DUP_SILENCIOSO",
-                           na_janela=na_janela, score_atual=score_atual,
-                           sim=sim_v)
+            # DUP_SILENCIOSO ignora o TEXTO — mas a mídia segue
+            # governada pela política: uma imagem boa chegando num
+            # texto duplicado ainda pode fazer upgrade.
+            return _com_midia(Decisao(IGNORAR, "DUP_SILENCIOSO",
+                                      na_janela=na_janela,
+                                      score_atual=score_atual,
+                                      sim=sim_v, delta=delta))
 
     # ── DECISÃO 3: resto → ignora ──
-    return Decisao(IGNORAR, "SCORE_NAO_EVOLUI",
-                   na_janela=na_janela, score_atual=score_atual)
+    return _com_midia(Decisao(IGNORAR, "SCORE_NAO_EVOLUI",
+                              na_janela=na_janela, score_atual=score_atual))
+  
