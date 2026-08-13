@@ -32,7 +32,7 @@ def db_get_post(msg_id_dest: int) -> Optional[dict]:
         with _db() as db:
             row = db.execute(
                 "SELECT msg_id_dest,score,texto,plat,lider,janela_fim,"
-                "edit_count,ts"
+                "edit_count,ts,midia_chat"
                 " FROM post_estado WHERE msg_id_dest=?",
                 (msg_id_dest,)).fetchone()
         if row:
@@ -41,6 +41,9 @@ def db_get_post(msg_id_dest: int) -> Optional[dict]:
                 "plat": row[3], "lider": row[4] or "",
                 "janela_fim": row[5] or 0.0, "edit_count": row[6] or 0,
                 "ts": row[7],
+                # NÃO normalizar com `or ""`: None (legado) e ""
+                # (post sem mídia) são estados DISTINTOS.
+                "midia_chat": row[8],
             }
     except Exception as e:
         log_db.error(f"❌ db_get_post: {e}")
@@ -89,11 +92,12 @@ def db_ofertas_de_post(msg_id_dest: int) -> list[str]:
         log_db.error(f"❌ db_ofertas_de_post: {e}")
         return []
 
-
-def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
+ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
                       texto: str, plat: str, lider: str = "",
                       janela_fim: float = 0.0, edit_count: int = 0,
-                      *, chat_origem: str = "", msg_id_origem: int = 0):
+                      *, chat_origem: str = "", msg_id_origem: int = 0,
+                      midia_chat: Optional[str] = None):
+
     """Upsert do estado do post + mapeamento de cada oferta→post.
     Serve para publicação nova E evolução (idempotente).
     Se (chat_origem, msg_id_origem) vierem, grava o vínculo Origem na
@@ -101,13 +105,21 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
     try:
         agora = time.time()
         with _db() as db:
+            # midia_chat=None significa PRESERVAR o valor atual (o
+            # COALESCE resolve contra a própria linha). Só quem decide
+            # mídia passa valor explícito — "" (post sem mídia) ou o
+            # chat de origem. Nunca gravamos NULL de propósito: NULL é
+            # exclusivamente o legado pré-Fase 2.
             db.execute(
                 "INSERT OR REPLACE INTO post_estado"
                 "(msg_id_dest,score,texto,plat,lider,"
-                "janela_fim,edit_count,ts)"
-                " VALUES(?,?,?,?,?,?,?,?)",
+                "janela_fim,edit_count,ts,midia_chat)"
+                " VALUES(?,?,?,?,?,?,?,?,"
+                " COALESCE(?,(SELECT midia_chat FROM post_estado"
+                "             WHERE msg_id_dest=?)))",
                 (msg_id_dest, score, texto, plat, lider,
-                 janela_fim, edit_count, agora))
+                 janela_fim, edit_count, agora,
+                 midia_chat, msg_id_dest))
             for oferta in ofertas:
                 db.execute(
                     "INSERT OR REPLACE INTO oferta_index"
