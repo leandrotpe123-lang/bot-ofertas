@@ -153,7 +153,7 @@ async def _enviar_inner(montada: MensagemMontada,
                             ofertas_familia = familia.unir(msg_id_rel, ofertas)
                             return await _aplicar_sincronizacao(
                                 montada, norm, score, estado, msg_id_rel,
-                                ofertas_familia, identity)
+                                ofertas_familia, identity, d)
 
                         if d.acao != "EVOLUIR":
                             log_out.info(
