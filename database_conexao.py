@@ -81,6 +81,7 @@ def _init_db():
     for tabela, col, tipo in [
         ("links_cache",   "url_canon",        "TEXT"),
         ("post_estado",   "midia_chat",       "TEXT"),
+        ("post_estado",   "score_versao",     "INTEGER"),
     ]:
         try:
             _db_conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {col} {tipo}")
