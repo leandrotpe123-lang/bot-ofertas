@@ -48,8 +48,8 @@ from dataclasses import dataclass
 
 import config
 from config import _MAX_EDITS
-from pipeline.score import midia_ruim
 from pipeline.midia_politica import politica_midia
+from pipeline.score import V_CONTEUDO, V_LEGADO, score_na_escala
 from pipeline.vida_oferta import viva
 from pipeline.reativacao import eh_reativacao
 
@@ -95,12 +95,19 @@ def decidir(norm, montada, score: int, estado: dict | None,
     ts_anterior = estado.get("ts", 0) or 0
     score_atual = estado["score"]
 
+    # [FASE 4] Toda comparacao acontece na ESCALA DO POST. Posts
+    # anteriores ao deploy (score_versao NULL) estao em v1; o candidato
+    # e projetado para v1 antes de comparar. Nunca cruzamos escalas.
+    versao_post = estado.get("score_versao") or V_LEGADO
+    score_cmp = score_na_escala(score, norm.chat, norm.tem_midia,
+                                versao_post)
+
     # ══ [FASE 2] POLÍTICA DE MÍDIA ══
     # Calculada UMA vez, no topo, e anexada a toda Decisao que sair
     # daqui. É independente de score, texto, líder, edit_count e
     # janela — só olha a classe da imagem publicada contra a nova.
     trocar_midia, motivo_midia = politica_midia(
-        montada.imagem, norm.chat, estado)
+        montada.imagem, norm.chat, estado, is_edit)
 
     def _com_midia(d: Decisao) -> Decisao:
         """Anexa a decisão de mídia e faz a política GOVERNAR os
@@ -182,14 +189,25 @@ def decidir(norm, montada, score: int, estado: dict | None,
             return _com_midia(Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
                                       na_janela=na_janela,
                                       score_atual=score_atual))
+        # [FASE 4] O max() só é válido DENTRO de uma escala. Contra um
+        # post v1, score_atual carrega peso histórico de mídia e `score`
+        # é conteúdo puro: o max() escolheria o maior NÚMERO, não o
+        # maior conteúdo, e _aplicar_evolucao gravaria esse valor com
+        # score_versao=V_CONTEUDO — um score v1 rotulado v2, que
+        # envenenaria toda comparação seguinte.
+        # Contra v1 usamos o score do candidato direto: é o único valor
+        # que sabemos ser conteúdo puro. O score do post v1 não é
+        # decomponível, então não há piso legítimo a preservar.
+        novo = (max(score, score_atual) if versao_post == V_CONTEUDO
+                else score)
         return _com_midia(Decisao(
             EVOLUIR, "CUPOM_ENRIQUECIDO",
-            novo_score=max(score, score_atual),
+            novo_score=novo,
             exigir_imagem=False, permite_substituir=False,
             na_janela=na_janela, score_atual=score_atual))
 
     # ── DECISÃO 1: score MAIOR → evolui (edita; fallback substitui) ──
-    if score > score_atual:
+    if score_cmp > score_atual:
         if not tem_orcamento:
             return _com_midia(Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
                                       na_janela=na_janela,
@@ -206,7 +224,7 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # A troca virou TROCA/upgrade na política de mídia: acontece via
     # IGNORAR + trocar_midia=True, sem tocar texto/score/líder/orçamento
     # e sem a janela de config._JANELA_REENVIO_MIDIA_S.
-    if score == score_atual:
+    if score_cmp == score_atual:
         delta = int(agora - ts_anterior)
 
         from utils.textos import _alma, _sim
@@ -223,4 +241,4 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # ── DECISÃO 3: resto → ignora ──
     return _com_midia(Decisao(IGNORAR, "SCORE_NAO_EVOLUI",
                               na_janela=na_janela, score_atual=score_atual))
-  
+              
