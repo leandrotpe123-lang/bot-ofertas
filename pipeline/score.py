@@ -11,7 +11,8 @@ Superfície pública (estável):
 O QUE CONSOME:
   Campos já derivados pela normalização (texto_limpo, mapa, cupom, sku,
   tem_midia, chat, code_entities) e a política de mídia por grupo de
-  origem (config._GRUPOS_IMG_RUIM / _SCORE_MIDIA_*). Não conhece detalhes
+  origem (config._GRUPOS_IMG_RUIM), hoje só para a política de mídia e
+  para a projeção de escala v1. Não conhece detalhes
   internos de nenhuma plataforma.
 
 O QUE NÃO FAZ:
@@ -52,11 +53,17 @@ def midia_ruim(chat: str) -> bool:
 
 def calcular_score(norm: MensagemNormalizada) -> int:
     """
-    Calcula score de qualidade do post.
-    Mídia tem peso configurável: grupos em config._GRUPOS_IMG_RUIM
-    recebem peso reduzido. A PRESENÇA de links/cupom mantém o peso
-    histórico; a QUANTIDADE (ofertas além da primeira) soma por cima,
-    com teto — é o que faz o post mais rico vencer pelo score (D3).
+    Calcula o score de CONTEÚDO do post — escala v2.
+
+    Mede exclusivamente riqueza da oferta: link, preço, cupom, %off,
+    R$off, piso, frete grátis e SKU. A PRESENÇA de links/cupom mantém o
+    peso histórico; a QUANTIDADE (ofertas além da primeira) soma por
+    cima, com teto — é o que faz o post mais rico vencer (D3).
+
+    NÃO participam do score: origem/grupo, qualidade da mídia, emoji,
+    formatação ou aparência. O vencedor do TEXTO é decidido só por
+    conteúdo; a IMAGEM é decidida em paralelo por
+    pipeline.midia_politica. As duas fontes podem ser grupos distintos.
     """
     texto = norm.texto_limpo
     score = 0
@@ -88,13 +95,45 @@ def calcular_score(norm: MensagemNormalizada) -> int:
     if n_cupons_extra:
         score += min(n_cupons_extra, _MAX_EXTRAS_CONTADOS) * _SCORE_POR_CUPOM_EXTRA
 
-    # Mídia: peso varia conforme grupo de origem. A identidade é numérica;
-    # resolvemos o @username via identidade p/ consultar a lista legível.
-    if norm.tem_midia:
-        if midia_ruim(norm.chat):
-            score += config._SCORE_MIDIA_RUIM
-        else:
-            score += config._SCORE_MIDIA_NORMAL
+    # [FASE 4] O peso de mídia FOI REMOVIDO daqui. Ele fazia a
+    # qualidade/origem da imagem decidir o vencedor do TEXTO: um grupo
+    # de midia boa vencia com ate 2 pontos de conteudo A MENOS
+    # (_SCORE_MIDIA_NORMAL 3 - _SCORE_MIDIA_RUIM 1). A imagem e decidida
+    # por pipeline.midia_politica; o score representa SOMENTE conteudo.
 
     return score
+
+
+# ── Escala de score — transicao v1 → v2 ───────────────────────────
+# v1 (legado): score = conteudo + peso de midia (comportamento antigo)
+# v2 (atual):  score = conteudo puro
+#
+# Posts anteriores ao deploy tem score na escala v1 e NAO sao
+# decomponiveis: post_estado nao registra se o post tem midia, e `lider`
+# diverge do dono da imagem no caminho "evolucao textual sem imagem".
+# Por isso NAO reconstruimos o legado — projetamos o CANDIDATO na escala
+# do post. O candidato e o unico lado de que sabemos tudo (chat,
+# tem_midia), entao a projecao e exata, sem inferencia.
+V_LEGADO = 1
+V_CONTEUDO = 2
+
+
+def _peso_midia(chat: str, tem_midia: bool) -> int:
+    """Peso que a escala v1 dava a midia. Codigo de TRANSICAO: some
+    quando nao houver mais post v1 vivo (<=_VIDA_OFERTA_S apos o deploy)."""
+    if not tem_midia:
+        return 0
+    return (config._SCORE_MIDIA_RUIM if midia_ruim(chat)
+            else config._SCORE_MIDIA_NORMAL)
+
+
+def score_na_escala(score_conteudo: int, chat: str, tem_midia: bool,
+                    versao: int) -> int:
+    """Projeta o score do CANDIDATO na escala do POST comparado.
+
+    Nunca decompoe o score do post. Garante que toda comparacao
+    acontece dentro de uma unica escala."""
+    if versao == V_LEGADO:
+        return score_conteudo + _peso_midia(chat, tem_midia)
+    return score_conteudo
       
