@@ -32,7 +32,7 @@ def db_get_post(msg_id_dest: int) -> Optional[dict]:
         with _db() as db:
             row = db.execute(
                 "SELECT msg_id_dest,score,texto,plat,lider,janela_fim,"
-                "edit_count,ts,midia_chat"
+                "edit_count,ts,midia_chat,score_versao"
                 " FROM post_estado WHERE msg_id_dest=?",
                 (msg_id_dest,)).fetchone()
         if row:
@@ -44,6 +44,8 @@ def db_get_post(msg_id_dest: int) -> Optional[dict]:
                 # NÃO normalizar com `or ""`: None (legado) e ""
                 # (post sem mídia) são estados DISTINTOS.
                 "midia_chat": row[8],
+                # NÃO normalizar: None = legado v1, 2 = conteúdo puro.
+                "score_versao": row[9],
             }
     except Exception as e:
         log_db.error(f"❌ db_get_post: {e}")
@@ -96,7 +98,8 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
                       texto: str, plat: str, lider: str = "",
                       janela_fim: float = 0.0, edit_count: int = 0,
                       *, chat_origem: str = "", msg_id_origem: int = 0,
-                      midia_chat: Optional[str] = None):
+                      midia_chat: Optional[str] = None,
+                      score_versao: Optional[int] = None):
 
     """Upsert do estado do post + mapeamento de cada oferta→post.
     Serve para publicação nova E evolução (idempotente).
@@ -113,13 +116,16 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
             db.execute(
                 "INSERT OR REPLACE INTO post_estado"
                 "(msg_id_dest,score,texto,plat,lider,"
-                "janela_fim,edit_count,ts,midia_chat)"
+                "janela_fim,edit_count,ts,midia_chat,score_versao)"
                 " VALUES(?,?,?,?,?,?,?,?,"
                 " COALESCE(?,(SELECT midia_chat FROM post_estado"
+                "             WHERE msg_id_dest=?)),"
+                " COALESCE(?,(SELECT score_versao FROM post_estado"
                 "             WHERE msg_id_dest=?)))",
                 (msg_id_dest, score, texto, plat, lider,
                  janela_fim, edit_count, agora,
-                 midia_chat, msg_id_dest))
+                 midia_chat, msg_id_dest,
+                 score_versao, msg_id_dest))
             for oferta in ofertas:
                 db.execute(
                     "INSERT OR REPLACE INTO oferta_index"
