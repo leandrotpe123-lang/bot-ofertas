@@ -40,6 +40,7 @@ from pipeline.saida import (
     _editar_inner_no_sem,
     _substituir_post_com_midia,
 )
+from pipeline.score import V_CONTEUDO
 from pipeline.vida_oferta import estampar
 
 # Contrato INTERNO da camada — ver cabeçalho de publicacao_estado.
@@ -75,7 +76,8 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             msg_id_dest, ofertas_familia, d.novo_score, montada.texto,
             montada.plat, norm.chat,
             estado.get("janela_fim", 0), edit_count + 1,
-            midia_chat=(norm.chat if d.trocar_midia else None))
+            midia_chat=(norm.chat if d.trocar_midia else None),
+            score_versao=V_CONTEUDO)
         if d.motivo == "CUPOM_ENRIQUECIDO":
             log_out.info(
                 f"💎 [CUPOM_ENRIQUECIDO] {identity} "
@@ -116,7 +118,8 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             estado.get("janela_fim", 0), edit_count + 1,
             chat_origem=norm.chat if norm else "",
             msg_id_origem=montada.msg_id,
-            midia_chat=(norm.chat if montada.imagem else ""))
+            midia_chat=(norm.chat if montada.imagem else ""),
+            score_versao=V_CONTEUDO)
         log_out.info(
             f"✅ [SUBSTITUIDO_OK] {identity} "
             f"novo_id={sent.id} score={d.novo_score}")
@@ -146,7 +149,8 @@ async def _aplicar_sincronizacao(montada, norm, score, estado, msg_id_dest,
         msg_id_dest, ofertas_familia, score, montada.texto,
         montada.plat, estado.get("lider", "") or norm.chat,
         estado.get("janela_fim", 0), estado.get("edit_count", 0),
-        midia_chat=(norm.chat if d.trocar_midia else None))
+        midia_chat=(norm.chat if d.trocar_midia else None),
+        score_versao=V_CONTEUDO)
     log_out.info(
         f"🔁 [SINCRONIZADO] {identity} chat={norm.chat} score={score} "
         f"edit_count={estado.get('edit_count', 0)} (preservado)"
@@ -184,10 +188,18 @@ async def _aplicar_upgrade_midia(montada, norm, d, estado, msg_id_dest,
     # índice para que o upsert não perca a família existente.
     db_registrar_post(
         msg_id_dest, db_ofertas_de_post(msg_id_dest),
-        estado.get("score", 0), texto_atual, montada.plat,
+        estado.get("score", 0), texto_atual,
+        # plat do POST, não do candidato: db_registrar_post é
+        # INSERT OR REPLACE e reescreve a linha inteira. Uma operação de
+        # MÍDIA não pode trocar a plataforma do post. Fallback só para
+        # legado com plat vazio.
+        estado.get("plat") or montada.plat,
         estado.get("lider", ""),
         estado.get("janela_fim", 0), estado.get("edit_count", 0),
         midia_chat=norm.chat)
+    # score_versao NAO e passado: o score nao foi tocado, entao rotular
+    # como v2 criaria um score v1 com etiqueta v2 — estado corrompido,
+    # pior que continuar legado. O post moderniza quando o TEXTO evoluir.
     log_out.info(
         f"🖼 [UPGRADE_MIDIA] {identity} {d.motivo_midia} "
         f"chat={norm.chat} texto=preservado "
@@ -237,7 +249,8 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
                 janela_fim, 0,
                 chat_origem=norm.chat if norm else "",
                 msg_id_origem=montada.msg_id,
-                midia_chat=((norm.chat if norm else "") if img else ""))
+                midia_chat=((norm.chat if norm else "") if img else ""),
+                score_versao=V_CONTEUDO)
             log_out.info(
                 f"🧭 TL | id={montada.msg_id} "
                 f"chat={norm.chat if norm else ''} | JANELA_CRIADA | "
@@ -263,4 +276,4 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
         f"ENVIADO | dest={sent.id} "
         f"idade_envio={_idade_str(norm.media_obj.date) if norm else '?'}")
     return True
-        
+            
