@@ -30,6 +30,7 @@ from pipeline.publicacao_aplicadores import (
     _aplicar_evolucao,
     _aplicar_novo_envio,
     _aplicar_sincronizacao,
+    _aplicar_upgrade_midia,
 )
 from pipeline.publicacao_estado import destino_vivo_de_origem
 from pipeline.publicacao_log import _log_decisao
@@ -188,4 +189,4 @@ async def _enviar_inner(montada: MensagemMontada,
         # ═════════════════════════════════════════════════════════════
         return await _aplicar_novo_envio(
             montada, norm, ofertas, score, identity)
-
+ 
