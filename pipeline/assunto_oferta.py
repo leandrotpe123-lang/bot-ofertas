@@ -12,7 +12,7 @@
 # pipeline.assunto_especie. Não importa aquele módulo, nem é
 # importado por ele. Não conhece _KW_CUPOM nem _KW_EVENTO. CONSOME de
 # utils.cupom a evidência ESTRUTURAL de item de cupom
-# (forma_item_cupom) — recorte de linha, não vocabulário.
+# (linha_e_item_de_cupom) — recorte de linha, não vocabulário.
 #
 # Camada PURA: zero I/O. As regex NÃO saem daqui; o contrato público
 # da camada é reexportado por pipeline.assunto.
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional
-from utils.cupom import forma_item_cupom
+from utils.cupom import linha_e_item_de_cupom
 
 # ── C3.1: DESCRITOR DE BENEFÍCIO — identidade do cupom SEM CÓDIGO ──
 # Cupom com código usa o código. Cupom sem código precisa de uma
@@ -198,7 +198,7 @@ def _faixas_de_item_cupom(t: str) -> list:
     formas anteriores (_RE_DESC_VAL e _COND_PISO/_COND_TETO) exigiam.
 
     A evidência estrutural é SOBERANIA de utils.cupom
-    (forma_item_cupom). Este módulo CONSOME o recorte; não redefine o
+    (linha_e_item_de_cupom). Este módulo CONSOME o predicado; não redefine o
     padrão nem passa a conhecer vocabulário de palavra-chave.
 
     Exclusão POR LINHA: preço de produto em qualquer outra linha
@@ -207,7 +207,7 @@ def _faixas_de_item_cupom(t: str) -> list:
     faixas = []
     base = 0
     for linha in t.splitlines(keepends=True):
-        if forma_item_cupom(linha):
+        if linha_e_item_de_cupom(linha):
             faixas.append((base, base + len(linha)))
         base += len(linha)
     # LISTA, não linha solta. "Fone R$ 199: JBL10" é ambíguo — pode ser
@@ -286,4 +286,3 @@ def tema_da_campanha(texto: str) -> str:
         return "geral"
     bruto = re.sub(r"\s+", " ", m.group(1).lower())
     return _TEMAS_CAMPANHA.get(bruto, "geral")
-
