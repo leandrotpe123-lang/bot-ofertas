@@ -18,7 +18,7 @@ import re
 from typing import Optional
 
 from pipeline.estado_evento import _KW_EVENTO
-from utils.cupom import _KW_CUPOM, forma_item_cupom
+from utils.cupom import _KW_CUPOM, linha_e_item_de_cupom
 
 # ─────────────────────────────────────────────────────────────────
 # Detecção do TIPO do post (define qual identidade usar)
@@ -45,7 +45,7 @@ _RE_CALENDARIO_COMERCIAL = re.compile(
 
 # Padrão "lista de cupons" e "OFF: CODIGO" no título: a forma da
 # linha de item de cupom é SOBERANIA de utils.cupom
-# (forma_item_cupom). Este módulo CONSOME a evidência; não redefine
+# (linha_e_item_de_cupom). Este módulo CONSOME a evidência; não redefine
 # o padrão. As duas regexes que existiam aqui eram cópias
 # byte-idênticas da que vive lá — três verdades para o mesmo fato.
 # Linha de cashback (sem precisar de "OFF" literal). Usado pra
@@ -103,7 +103,7 @@ def _eh_lista_cupons(texto: str) -> bool:
     linhas = texto.strip().split("\n")
     linhas_lista = sum(
         1 for l in linhas
-        if forma_item_cupom(l)
+        if linha_e_item_de_cupom(l)
     )
     return linhas_lista >= 2
 
@@ -134,7 +134,7 @@ def _eh_post_cupom(texto: str) -> bool:
         return True
 
     # Caso (b): título já é "R$ X OFF: CODIGO" / "X% OFF: CODIGO"
-    if forma_item_cupom(titulo):
+    if linha_e_item_de_cupom(titulo):
         return True
 
     # Caso (c): 2+ linhas formato lista (reusa _eh_lista_cupons)
@@ -236,5 +236,4 @@ def buscar_calendario_comercial(texto: str) -> Optional[re.Match]:
     precisa da posição (.start()) para ordenar candidatos —, nunca a
     regex, que permanece interna a este módulo."""
     return _RE_CALENDARIO_COMERCIAL.search(texto[:200])
-
 
