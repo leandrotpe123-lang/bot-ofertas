@@ -9,9 +9,9 @@ o que recebem, sem recalcular identidade, tipo, score ou cupom por conta
 própria.
 
 Superfície pública:
-  - derivar(norm)    -> MensagemEnriquecida   (puro, todos os caminhos)
-  - enriquecer(norm) -> MensagemEnriquecida   (derivar + efeito, só NOVO)
-
+  - derivar(norm)           -> MensagemEnriquecida  (puro, todos os caminhos)
+  - enriquecer(norm)        -> MensagemEnriquecida  (derivar + efeito, só NOVO)
+  - enriquecer_edicao(norm) -> MensagemEnriquecida  (derivar + aprendizado, só EDIÇÃO)
 O efeito de memória de cupom (frequência e ordem preservadas) é
 congelado em `cupons_novos` (P8). Este contrato é a via ÚNICA pela
 qual o valor chega a decisao e publicacao: nada viaja por atributo
@@ -34,7 +34,7 @@ from pipeline.normalizacao import MensagemNormalizada
 from pipeline.identidade_oferta import identidade_canonica, ancoras, Ancora
 from pipeline.natureza import natureza
 from pipeline.score import calcular_score
-from pipeline.memoria_cupom import registrar_uso
+from pipeline.memoria_cupom import registrar_uso, registrar_se_inedito
 
 
 @dataclass(frozen=True)
@@ -95,4 +95,29 @@ def enriquecer(norm: MensagemNormalizada) -> MensagemEnriquecida:
         return base
     novos = registrar_uso(norm, norm.plat, base.canonica)
     return replace(base, cupons_novos=novos)
+
+
+def enriquecer_edicao(norm: MensagemNormalizada) -> MensagemEnriquecida:
+    """DERIVAÇÃO + APRENDIZADO — exclusivo do caminho de EDIÇÃO.
+
+    Uma edição pode revelar um código que a mensagem original não
+    trazia: a fonte marcou depois, ou corrigiu um código errado. A
+    memória aprende esse código, para que mensagens FUTURAS de outros
+    grupos encontrem a mesma corrente.
+
+    Devolve `cupons_novos=0` DE PROPÓSITO — exatamente o que `derivar`
+    devolvia antes desta frente. Aprender uma âncora não é evoluir: a
+    decisão desta edição continua sendo tomada com os mesmos insumos de
+    sempre, e o efeito do aprendizado só aparece nas mensagens
+    seguintes. É esta linha que separa APRENDER de EVOLUIR.
+
+    O índice usado aqui só cresce (registrar_se_inedito): código já
+    vivo não é repontuado nem tem o ts renovado, ao contrário de
+    `enriquecer`, que é a porta legítima da publicação nova.
+    """
+    base = derivar(norm)
+    if base.tipo != "cupom":
+        return base
+    registrar_se_inedito(norm, norm.plat, base.canonica)
+    return base
   
