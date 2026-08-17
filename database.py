@@ -7,13 +7,15 @@
 #
 # Este arquivo é FACHADA: sem lógica, sem SQL, sem estado.
 #
-# Reexporta as 18 FUNÇÕES. _db_conn e _db_lock NÃO são reexportados:
+# Reexporta as 19 FUNÇÕES. _db_conn e _db_lock NÃO são reexportados:
 # nenhum consumidor os acessa, e reexportá-los seria bug — o import
 # liga por VALOR e capturaria o None anterior a _init_db().
 from __future__ import annotations
 
 from database_conexao import _db, _init_db
-from database_cupons import db_cupom_idx_buscar, db_cupom_idx_registrar
+from database_cupons import (db_cupom_idx_buscar,
+                             db_cupom_idx_registrar,
+                             db_cupom_idx_registrar_inedito)
 from database_links import (
     db_get_link,
     db_get_short,
