@@ -123,6 +123,18 @@ async def _enviar_inner(montada: MensagemMontada,
                         identity = f"post:{msg_id_rel}"
                         _log_decisao(d, montada, norm, estado, score, agora, identity)
 
+                        if d.acao == "IGNORAR" and d.na_janela:
+                            # [F6] APRENDER ≠ EVOLUIR. A mensagem já
+                            # casou validamente com este post (linha
+                            # 110) e o ciclo está vivo; se ela trouxe
+                            # âncora nova, a FAMÍLIA aprende — o texto
+                            # vencedor não muda. Sem isto a âncora se
+                            # perde e o próximo grupo que a use abre um
+                            # post duplicado.
+                            # A guarda `na_janela` é obrigatória: post
+                            # com ciclo encerrado não absorve nada.
+                            familia.absorver(msg_id_rel, ofertas)
+
                         
                         if d.acao == "IGNORAR" and d.trocar_midia:
                             # [FASE 2] O texto não evolui, mas a mídia
