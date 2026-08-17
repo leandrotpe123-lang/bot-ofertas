@@ -37,7 +37,9 @@ from __future__ import annotations
 from database import (
     db_cupom_idx_buscar,
     db_cupom_idx_registrar,
+    db_cupom_idx_registrar_inedito,
 )
+from logger import log_ded
 from pipeline.vida_oferta import VIDA_OFERTA_S
 # Kill-switch da memória de códigos. Desligar faz a identidade cair no
 # fallback puro (sem grudação) — útil para isolar o efeito em diagnóstico.
@@ -75,3 +77,38 @@ def registrar_uso(norm, plat: str, identity: str) -> int:
         return 0
     novos = db_cupom_idx_registrar(plat, codes, identity, float(VIDA_OFERTA_S))
     return novos
+
+
+def registrar_se_inedito(norm, plat: str, identity: str) -> int:
+    """EFEITO DE APRENDIZADO — usado no caminho de EDIÇÃO.
+
+    Uma edição pode revelar um código que a mensagem original não
+    trazia (a fonte marcou depois, ou corrigiu um código errado). A
+    memória precisa aprender esse código; o que ela NÃO pode é tratar
+    a edição como se fosse uma publicação nova.
+
+    Por isso o índice aqui só CRESCE: código vivo não tem ts renovado
+    nem identidade repontuada, e conflito é logado em vez de
+    sobrescrito. O código antigo de uma correção não é apagado — ele
+    simplesmente expira com o próprio ciclo.
+
+    Devolve quantos códigos eram INÉDITOS. O chamador
+    (enriquecimento.enriquecer_edicao) descarta esse número de
+    propósito: aprender uma âncora não dá à edição o direito de mudar
+    o texto vencedor. O valor existe para log e para futuras frentes.
+    """
+    if not CUPOM_IDX_ON:
+        return 0
+    codes = sorted(set(c.upper() for c in norm.cupons if c))
+    if not codes:
+        return 0
+    novos, conflitos = db_cupom_idx_registrar_inedito(
+        plat, codes, identity, float(VIDA_OFERTA_S))
+    for codigo, vigente in conflitos:
+        log_ded.info(
+            f"🔀 [CUPOM_IDX_CONFLITO] id={norm.msg_id} plat={plat} "
+            f"codigo={codigo} vigente={vigente} candidata={identity} "
+            f"→ ignorado (memória viva preservada)")
+    return novos
+
+
