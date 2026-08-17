@@ -94,6 +94,47 @@ def db_ofertas_de_post(msg_id_dest: int) -> list[str]:
         log_db.error(f"❌ db_ofertas_de_post: {e}")
         return []
 
+def db_absorver_ofertas(msg_id_dest: int, ofertas: list[str]) -> int:
+    """Aponta ofertas para um post SEM tocar em post_estado.
+
+    Escreve EXCLUSIVAMENTE em oferta_index. Nenhuma coluna de
+    post_estado — texto, score, lider, edit_count, janela_fim,
+    midia_chat, ts — é lida ou escrita aqui. É essa restrição, e não
+    disciplina do chamador, que garante que aprender uma âncora nova
+    jamais altere o vencedor textual, o orçamento de edição, a vida do
+    ciclo ou a mídia publicada.
+
+    NÃO REAPONTA âncora de outro post. `identity` é PRIMARY KEY de
+    oferta_index: um INSERT OR REPLACE cego roubaria a âncora do post
+    a que ela já pertence. Absorção é APRENDIZADO, não evolução — só
+    entram âncoras órfãs (ou já deste post). Reapontar é privilégio de
+    db_registrar_post, no caminho de evolução/renascimento.
+
+    Idempotente. Devolve quantas âncoras foram efetivamente
+    aprendidas; reexecutar com o mesmo conjunto devolve 0.
+    """
+    if not ofertas:
+        return 0
+    try:
+        agora = time.time()
+        with _db() as db:
+            aprendidas = 0
+            for oferta in ofertas:
+                row = db.execute(
+                    "SELECT msg_id_dest FROM oferta_index WHERE identity=?",
+                    (oferta,)).fetchone()
+                if row is not None:
+                    continue          # já tem dono — nunca rouba
+                db.execute(
+                    "INSERT INTO oferta_index(identity,msg_id_dest,ts)"
+                    " VALUES(?,?,?)",
+                    (oferta, msg_id_dest, agora))
+                aprendidas += 1
+        return aprendidas
+    except Exception as e:
+        log_db.error(f"❌ db_absorver_ofertas: {e}")
+        return 0
+
 def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
                       texto: str, plat: str, lider: str = "",
                       janela_fim: float = 0.0, edit_count: int = 0,
