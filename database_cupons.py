@@ -72,3 +72,58 @@ def db_cupom_idx_registrar(plat: str, codigos: list, identity: str,
         return 0
 
 
+def db_cupom_idx_registrar_inedito(plat: str, codigos: list, identity: str,
+                                   janela_s: float) -> tuple:
+    """Registra APENAS o que ainda não está vivo no índice.
+
+    Irmã de db_cupom_idx_registrar, para o caminho de EDIÇÃO. A
+    diferença é deliberada e não é otimização: aquela é a porta da
+    PUBLICAÇÃO NOVA, onde reivindicar a identidade e estampar o ts é o
+    comportamento correto; esta é a porta do APRENDIZADO, onde o índice
+    só pode CRESCER.
+
+    Invariantes:
+      I1  código vivo NUNCA tem o ts renovado — a memória expira junto
+          com o ciclo que a criou (memoria_cupom, C4.3). Renovar aqui
+          faria uma sequência de edições manter um código eterno, e o
+          histórico passaria a governar ciclos futuros.
+      I2  código vivo NUNCA é repontuado para outra identity — isso
+          sequestraria a corrente de outro post.
+      I3  código EXPIRADO é reclamável: a janela morreu, a identidade
+          está livre, e o registro é um registro novo.
+      I4  idempotente: reexecutar com o mesmo conjunto devolve 0.
+      I5  conflito (código vivo apontando para identity DIFERENTE) não
+          é silencioso: sai na lista devolvida para o chamador logar.
+          Ignora e segue — nunca sobrescreve.
+
+    Devolve (n_ineditos, conflitos), onde conflitos é uma lista de
+    (codigo, identity_vigente).
+    """
+    cods = sorted({c.upper() for c in (codigos or []) if c})
+    if not cods or not identity:
+        return 0, []
+    agora = time.time()
+    limite = agora - janela_s
+    try:
+        with _db() as cx:
+            ph = ",".join("?" * len(cods))
+            vivos = {r[0]: r[1] for r in cx.execute(
+                f"SELECT codigo,identity FROM cupom_idx"
+                f" WHERE plat=? AND codigo IN ({ph}) AND ts>=?",
+                (plat, *cods, limite)).fetchall()}
+            conflitos = [(c, vivos[c]) for c in cods
+                         if c in vivos and vivos[c] != identity]
+            novos = [c for c in cods if c not in vivos]
+            if novos:
+                cx.executemany(
+                    "INSERT INTO cupom_idx(plat,codigo,identity,ts)"
+                    " VALUES(?,?,?,?)"
+                    " ON CONFLICT(plat,codigo) DO UPDATE SET"
+                    " identity=excluded.identity, ts=excluded.ts",
+                    [(plat, c, identity, agora) for c in novos])
+            return len(novos), conflitos
+    except Exception as e:
+        log_db.error(f"❌ db_cupom_idx_registrar_inedito: {e}")
+        return 0, []
+
+
