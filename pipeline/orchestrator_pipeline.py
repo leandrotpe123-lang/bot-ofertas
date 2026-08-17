@@ -23,7 +23,7 @@ from __future__ import annotations
 import globals as g
 from logger import log_sys, _idade_str
 from pipeline.deduplicacao import deve_enviar_async
-from pipeline.enriquecimento import derivar, enriquecer
+from pipeline.enriquecimento import enriquecer_edicao, enriquecer
 from pipeline.identidade import checar_e_marcar
 from pipeline.ingestao import ingerir
 from pipeline.montagem import montar
@@ -96,7 +96,7 @@ async def _pipeline(event, is_edit: bool = False) -> None:
     # Um só produtor de derivados (P2/P5): derivar() é puro e roda em
     # ambos os caminhos; enriquecer() adiciona o efeito de memória de
     # cupom, exclusivo da publicação nova (P9).
-    enr = derivar(norm) if is_edit else enriquecer(norm)
+    enr = enriquecer_edicao(norm) if is_edit else enriquecer(norm)
     if not is_edit:
         try:
             if not await deve_enviar_async(enr):
