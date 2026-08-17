@@ -16,14 +16,16 @@ NÃO faz:
 Contrato público:
   post_da_familia(ofertas, dest_fix)   -> int | None
   unir(msg_id_dest, ofertas)           -> list[str]
+  absorver(msg_id_dest, ofertas)       -> int
   compartilhadas(msg_id_dest, ofertas) -> list[str]
 """
 from __future__ import annotations
 
-from database import db_get_post, db_overlap_posts, db_ofertas_de_post
+from database import (db_absorver_ofertas, db_get_post,
+                      db_ofertas_de_post, db_overlap_posts)
 from logger import log_out
 
-__all__ = ["post_da_familia", "unir", "compartilhadas"]
+__all__ = ["post_da_familia", "unir", "absorver", "compartilhadas"]
 
 
 def _escolher_post(candidatos: list) -> int:
@@ -54,6 +56,27 @@ def unir(msg_id_dest: int, ofertas: list) -> list:
     exclusivas do post — quebrando a conectividade e duplicando a
     família."""
     return sorted(set(db_ofertas_de_post(msg_id_dest)) | set(ofertas))
+
+def absorver(msg_id_dest: int, ofertas: list) -> int:
+    """APRENDIZADO DE ÂNCORA — a família passa a reconhecer estas formas
+    de encontrar a mesma oferta, sem que nada do post mude.
+
+    Complementa `unir`, que compõe a família para quem VAI REGRAVAR o
+    post. Aqui não há regravação: a decisão textual foi IGNORAR e o
+    texto vencedor, o score, o líder, o edit_count, a janela e a mídia
+    permanecem exatamente como estavam. Descobrir uma nova forma de
+    reconhecer a oferta não dá a essa mensagem o direito de substituir
+    o texto vencedor.
+
+    Devolve quantas âncoras foram aprendidas (0 = nada novo).
+    """
+    novas = db_absorver_ofertas(msg_id_dest, ofertas)
+    if novas:
+        log_out.info(
+            f"🧬 [ANCORA_ABSORVIDA] post:{msg_id_dest} aprendeu {novas} "
+            f"âncora(s) | candidato={sorted(ofertas)} "
+            f"| familia={sorted(db_ofertas_de_post(msg_id_dest))}")
+    return novas
 
 
 def post_da_familia(ofertas: list, dest_fix=None):
