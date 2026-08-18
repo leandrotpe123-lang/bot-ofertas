@@ -42,11 +42,6 @@ def _log_decisao(d, montada, norm, estado: dict, score: int,
             f"{'(janela)' if d.na_janela else '(lider)'} "
             f"chat={norm.chat} "
             f"img_nova={'sim' if montada.imagem else 'não'}")
-    elif d.motivo == "TROCA_IMG_BOA":
-        log_out.info(
-            f"🖼 [TROCA_IMG_BOA] {identity} "
-            f"de {estado.get('lider','')} (ruim) → {norm.chat} (bom) "
-            f"delta={d.delta}s")
     elif d.motivo == "DUP_SILENCIOSO":
         log_out.debug(
             f"🔁 [DUP_SILENCIOSO] {identity} sim={d.sim:.2f}")
