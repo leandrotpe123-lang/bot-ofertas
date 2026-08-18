@@ -20,7 +20,7 @@ NÃO faz:
 from __future__ import annotations
 
 import asyncio
-from typing import Optional, Set
+from typing import Set
 
 from logger import log_ing
 
