@@ -48,9 +48,8 @@ INVARIANTE: post_estado.score descreve SEMPRE o texto publicado.
 O antigo `TROCA_IMG_BOA` foi REMOVIDO. Ele era um EVOLUIR, e evolução
 grava o texto novo — trocar a imagem sobrescrevia o texto vencedor.
 Agora é TROCA/upgrade na política de mídia, sem consumir edit_count e
-sem depender de config._JANELA_REENVIO_MIDIA_S (uma imagem boa que
+sem depender de janela temporal de reenvio (uma imagem boa que
 chega 45s depois precisa poder substituir uma ruim).
-
 INVARIANTE: nenhum caminho de publicação pode alterar a mídia publicada
 contra politica_midia(). Por isso `permite_substituir` e
 `exigir_imagem` são REBAIXADOS por _com_midia() quando a política diz
@@ -215,7 +214,8 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # sobrescrevia o texto vencedor por um texto que não venceu.
     # A troca virou TROCA/upgrade na política de mídia: acontece via
     # IGNORAR + trocar_midia=True, sem tocar texto/score/líder/orçamento
-    # e sem a janela de config._JANELA_REENVIO_MIDIA_S.
+    # IGNORAR + trocar_midia=True, sem tocar texto/score/líder/orçamento.
+    # e sem janela temporal de reenvio.
     if score_cmp == score_atual:
         delta = int(agora - ts_anterior)
 
