@@ -9,8 +9,7 @@ substituir é o Módulo 3 (publicação).
 Camada PURA: não toca Telegram, não toca banco, não loga. Recebe fatos e
 devolve uma Decisao. O chamador registra os logs e executa a ação.
 
-Política preservada (idêntica à atual; afinar é passo posterior):
-  - cupom com código(s) novo(s) → evolui (edita), mesmo de outro grupo;
+Política (APRENDER ≠ EVOLUIR, ratificada):
   - score MAIOR → evolui;
   - fora da janela, outro grupo com score <= líder → ignora (LIDER_TRAVADO);
   - teto de edições → ignora SOMENTE o ramo de evolução (Frente 0 §5):
@@ -28,6 +27,23 @@ paralelo e viajam juntas na mesma Decisao, mas nenhuma manda na outra:
   - `trocar_midia`       → o que acontece com a IMAGEM
   - IGNORAR + trocar_midia=True é um resultado VÁLIDO e frequente
     (o texto não evolui, mas a imagem sobe de classe).
+
+[F5] APRENDER ≠ EVOLUIR
+------------------------
+O ramo CUPOM_ENRIQUECIDO foi REMOVIDO. Ele ficava ACIMA da comparação
+de score e deixava um código inédito comprar a vitória textual: um
+texto de score 11 derrubava um de 17 só por trazer um código novo. Pior,
+gravava `max(score, score_atual)` — o post passava a afirmar um score
+herdado de um texto que não estava mais no ar, e candidatos MAIS RICOS
+que o texto publicado eram rejeitados até o fim do ciclo.
+
+Descobrir uma nova forma de reconhecer a oferta não dá a essa mensagem
+o direito de substituir o texto vencedor. O código inédito continua
+alimentando memória (memoria_cupom), família (familia.absorver) e
+identidade — mas a evolução TEXTUAL é decidida só por score, e a
+sincronização continua pertencendo ao líder textual.
+
+INVARIANTE: post_estado.score descreve SEMPRE o texto publicado.
 
 O antigo `TROCA_IMG_BOA` foi REMOVIDO. Ele era um EVOLUIR, e evolução
 grava o texto novo — trocar a imagem sobrescrevia o texto vencedor.
@@ -81,8 +97,7 @@ class Decisao:
 
 
 def decidir(norm, montada, score: int, estado: dict | None,
-            agora: float, is_edit: bool = False,
-            cupons_novos: int = 0) -> Decisao:
+            agora: float, is_edit: bool = False) -> Decisao:
     """Decide a ação para um candidato: PUBLICAR (sem estado vivo),
     EVOLUIR ou IGNORAR (com estado). Não executa nada."""
     if not estado:
@@ -182,29 +197,6 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # EVOLUCAO_LIMITE_ATINGIDO passam por _com_midia() e podem sair com
     # trocar_midia=True.
     tem_orcamento = edit_count < _MAX_EDITS
-
-    # ── CUPOM ENRIQUECIDO: código(s) novo(s) → edita o mesmo post ──
-    if cupons_novos > 0:
-        if not tem_orcamento:
-            return _com_midia(Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
-                                      na_janela=na_janela,
-                                      score_atual=score_atual))
-        # [FASE 4] O max() só é válido DENTRO de uma escala. Contra um
-        # post v1, score_atual carrega peso histórico de mídia e `score`
-        # é conteúdo puro: o max() escolheria o maior NÚMERO, não o
-        # maior conteúdo, e _aplicar_evolucao gravaria esse valor com
-        # score_versao=V_CONTEUDO — um score v1 rotulado v2, que
-        # envenenaria toda comparação seguinte.
-        # Contra v1 usamos o score do candidato direto: é o único valor
-        # que sabemos ser conteúdo puro. O score do post v1 não é
-        # decomponível, então não há piso legítimo a preservar.
-        novo = (max(score, score_atual) if versao_post == V_CONTEUDO
-                else score)
-        return _com_midia(Decisao(
-            EVOLUIR, "CUPOM_ENRIQUECIDO",
-            novo_score=novo,
-            exigir_imagem=False, permite_substituir=False,
-            na_janela=na_janela, score_atual=score_atual))
 
     # ── DECISÃO 1: score MAIOR → evolui (edita; fallback substitui) ──
     if score_cmp > score_atual:
