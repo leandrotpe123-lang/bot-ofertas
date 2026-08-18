@@ -47,12 +47,6 @@ __all__ = [
     "ancoras",
 ]
 
-
-# ── KILL-SWITCH do domínio cupom ─────────────────────────────────
-# True  → identidade de cupom por CÓDIGO COMPARTILHADO (índice).
-# False → comportamento antigo (um código / fingerprint do conjunto).
-# Vire False para reverter NA HORA se algum cupom legítimo sumir.
-
 # ─────────────────────────────────────────────────────────────────
 # Classificação do ASSUNTO do post → pipeline.assunto (C1)
 # Os detectores e suas regex foram extraídos para o módulo próprio.
