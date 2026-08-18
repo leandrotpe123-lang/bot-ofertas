@@ -47,8 +47,7 @@ from pipeline.vida_oferta import estampar
 from pipeline.publicacao_estado import _marcar
 
 async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
-                            edit_count, ofertas_familia, identity,
-                            cupons_novos: int = 0) -> bool:
+                            edit_count, ofertas_familia, identity) -> bool:
     """Executa a EVOLUÇÃO de um post existente: edita no lugar ou, em
     fallback autorizado, substitui com mídia. Persiste o novo estado com
     a união da família. Sem decisão — o caminho já foi decidido a montante.
@@ -78,15 +77,9 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             estado.get("janela_fim", 0), edit_count + 1,
             midia_chat=(norm.chat if d.trocar_midia else None),
             score_versao=V_CONTEUDO)
-        if d.motivo == "CUPOM_ENRIQUECIDO":
-            log_out.info(
-                f"💎 [CUPOM_ENRIQUECIDO] {identity} "
-                f"novos={cupons_novos} "
-                f"score={d.novo_score} chat={norm.chat}")
-        else:
-            log_out.info(
-                f"✏️ [EDITADO_OK] {identity} novo_score={d.novo_score}"
-                f"{' +img' if d.trocar_midia else ''}")
+        log_out.info(
+            f"✏️ [EDITADO_OK] {identity} novo_score={d.novo_score}"
+            f"{' +img' if d.trocar_midia else ''}")
         log_out.info(
             f"🧭 TL | id={montada.msg_id} chat={norm.chat} | "
             f"PROMOVIDO | dest={msg_id_dest} "
@@ -95,12 +88,9 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
         return True
 
     if not d.permite_substituir:
-        if d.motivo == "CUPOM_ENRIQUECIDO":
-            log_out.warning(f"⚠️ [CUPOM_ENRIQUECIDO_FALHOU] {identity}")
-        else:
-            log_out.warning(
-                f"⚠️ [EDIT_FALHOU] {identity} motivo={d.motivo} "
-                f"midia={d.motivo_midia}")
+        log_out.warning(
+            f"⚠️ [EDIT_FALHOU] {identity} motivo={d.motivo} "
+            f"midia={d.motivo_midia}")
         return True
 
     log_out.info(
