@@ -27,9 +27,6 @@ _final_cache: OrderedDict[str, Afiliacao] = OrderedDict()
 _cache_lock  = Lock()
 _CACHE_LIMIT = 5000
 
-# ── Persistência JSON ─────────────────────────────────────────────
-_MAP_LOCK = Lock()
-
 # ── Locks async (inicializados em _init_globals) ──────────────────
 _buf_lck:        Optional[asyncio.Lock]  = None
 _buf_evt:        Optional[asyncio.Event] = None
