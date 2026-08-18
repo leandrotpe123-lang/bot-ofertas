@@ -156,14 +156,6 @@ _COND_TETO = (          # teto: desconto máximo concedido
     "até",              # Magalu/Pelando: "20% OFF até R$ 500: PELANDO20"
     "ate",              #   idem, sem acento
 )
-# Mesmo papel semântico, porém SEM evidência no corpus de produção.
-# NÃO implementadas por decisão explícita: o vocabulário evolui por
-# observação, nunca por antecipação. Ao aparecer em mensagem real,
-# mover a forma para _COND_PISO/_COND_TETO — e mais nada muda.
-_COND_EXPANSAO_FUTURA = (
-    "a partir de", "nas compras de", "em pedidos de", "mínimo",
-    "limitado a", "máximo", "para compras de",
-)
 _RE_COND_BENEFICIO = re.compile(
     r"\b(?:" + "|".join(f.replace(" ", r"\s+")
                         for f in _COND_PISO + _COND_TETO)
