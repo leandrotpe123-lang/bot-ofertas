@@ -37,8 +37,6 @@ _SEM_HTTP:  Optional[asyncio.Semaphore] = None
 
 # ── DB ────────────────────────────────────────────────────────────
 _DB_PATH         = "foguetao.db"
-CACHE_TTL        = 86400
-TTL_SCHEDULER    = 30 * 86400
 TTL_LINK_INATIVO = 7 * 86400
 
 # ── Pillow ────────────────────────────────────────────────────────
@@ -62,9 +60,6 @@ _SCORE_MIDIA_NORMAL = 3   # mídia de grupo normal
 _SCORE_MIDIA_RUIM   = 1   # mídia de _GRUPOS_IMG_RUIM
 
 # Janela para "deletar+reenviar" quando chega imagem melhor
-# Se passou MAIS desse tempo desde o post original, edita só o texto
-# (não reenvia pra evitar notificar o grupo 2x desnecessariamente)
-_JANELA_REENVIO_MIDIA_S = 30.0
 # Muro de frescor para mensagens NOVAS (NewMessage). Oferta nova com
 # idade acima disso é oferta velha ressurgida (ex.: post de 117h) e é
 # descartada na entrada. NÃO atrasa nada: rajada acontece em segundos,
