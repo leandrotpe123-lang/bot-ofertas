@@ -47,7 +47,7 @@ def db_cupom_idx_registrar(plat: str, codigos: list, identity: str,
     (plat + código → identity), com ts atual (janela deslizante).
     Preserva todos os códigos — não só um. Retorna QUANTOS códigos
     eram NOVOS dentro da janela (Frente 0 §2: a novidade é medida
-    contra o ciclo) — insumo do ramo CUPOM_ENRIQUECIDO da evolução."""
+    contra o ciclo)."""
     cods = [c.upper() for c in (codigos or []) if c]
     if not cods or not identity:
         return 0
