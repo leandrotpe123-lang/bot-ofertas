@@ -58,7 +58,6 @@ async def enviar(montada: MensagemMontada,
     """
     ofertas: list = enr.ofertas
     score:   int  = enr.score
-    cupons_novos: int = enr.cupons_novos
 
 # ── Camada 0: ORIGEM (Fase 1 do MB) — lock mais externo (I6) ──
     if norm is not None:
@@ -75,29 +74,21 @@ async def enviar(montada: MensagemMontada,
                         await stack.enter_async_context(
                             await exclusao.lock_identidade(of))
                     return await _enviar_inner(
-                        montada, norm, ofertas, score, is_edit, dest_fix,
-                        cupons_novos)
+                        montada, norm, ofertas, score, is_edit, dest_fix)
             return await _enviar_inner(
-                montada, norm, ofertas, score, is_edit, dest_fix,
-                cupons_novos)
-
+                montada, norm, ofertas, score, is_edit, dest_fix)
     if ofertas:
         async with contextlib.AsyncExitStack() as stack:
             for of in sorted(ofertas):
                 await stack.enter_async_context(await exclusao.lock_identidade(of))
-            return await _enviar_inner(montada, norm, ofertas, score, is_edit,
-                                       cupons_novos=cupons_novos)
-
-    return await _enviar_inner(montada, norm, ofertas, score, is_edit,
-                               cupons_novos=cupons_novos)
-
+            return await _enviar_inner(montada, norm, ofertas, score, is_edit)
+    return await _enviar_inner(montada, norm, ofertas, score, is_edit)
 async def _enviar_inner(montada: MensagemMontada,
                         norm: Optional[MensagemNormalizada],
                         ofertas: list,
                         score: int,
                         is_edit: bool = False,
-                        dest_fix=None,
-                        cupons_novos: int = 0) -> bool:
+                        dest_fix=None) -> bool:
     """Corpo real de enviar() — dentro dos locks de oferta. Acha o post
     parente por sobreposição, trava o post candidato, re-verifica sob o
     lock e decide pelo score (decisão intocada)."""
@@ -113,8 +104,7 @@ async def _enviar_inner(montada: MensagemMontada,
                 async with post_lock:
                     estado = db_get_post(msg_id_rel)   # re-verifica sob o lock
                     agora = time.time()
-                    d = decidir(norm, montada, score, estado, agora, is_edit,
-                                cupons_novos)
+                    d = decidir(norm, montada, score, estado, agora, is_edit)
                     if d.acao != "PUBLICAR":
                         if norm is not None:
                             # Encontro registra (I1): edits futuros desta
@@ -191,8 +181,7 @@ async def _enviar_inner(montada: MensagemMontada,
 
                         return await _aplicar_evolucao(
                             montada, norm, d, estado, msg_id_dest,
-                            edit_count, ofertas_familia, identity,
-                            cupons_novos)
+                            edit_count, ofertas_familia, identity)
                     # d.acao == PUBLICAR: estado sumiu sob o lock (substituído/
                     # limpo por outra task) → cai para NOVO ENVIO
 
