@@ -15,7 +15,6 @@ def _mk_log(nome: str, cor: str) -> logging.Logger:
     return lg
 
 log_ing = _mk_log('INGESTAO',  '1;37')
-log_cls = _mk_log('CLASSIF',   '1;36')
 log_nrm = _mk_log('NORMAL',    '1;33')
 log_ded = _mk_log('DEDUP',     '1;35')
 log_enr = _mk_log('ENRICH',    '1;34')
