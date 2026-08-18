@@ -1,6 +1,5 @@
 """Utilitários de URL: normalização, cache key, sanitização, host canônico."""
 from __future__ import annotations
-from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 
