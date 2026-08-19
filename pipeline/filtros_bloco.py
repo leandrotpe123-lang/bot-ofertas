@@ -175,10 +175,21 @@ def filtrar_blocos(texto: str, mapa: dict, preservar=()) -> str:
     remover, renumera, elimina rótulos órfãos e colapsa linhas
     vazias, para que o texto pareça ter nascido assim.
     """
-    blocos = [b for b in _segmentar(texto)
+    originais = _segmentar(texto)
+    blocos = [b for b in originais
               if not b or _bloco_permanece(b, mapa, preservar)]
     blocos = [b for b in blocos if not (b and _rotulo_orfao(b))]
-    blocos = _renumerar(blocos)
+
+    # Renumerar só faz sentido depois de REMOVER. É a própria razão de
+    # ser de _renumerar: "numeração quebrada denuncia remoção". Sem
+    # remoção não há numeração quebrada, e reescrever a enumeração de
+    # um texto íntegro só pode piorá-la — _renumerar conta enumeração
+    # por BLOCO (b[0]), enquanto a fonte enumera por LINHA. Nas formas
+    # "rótulo: / 1 url / 2 url" e "1️⃣/2️⃣/3️⃣" o primeiro item fica
+    # invisível para a contagem, len(idx)==1 dispara e o número de um
+    # item legítimo é apagado.
+    if len(blocos) != len(originais):
+        blocos = _renumerar(blocos)
 
     saida, vazio = [], True
     for b in blocos:
