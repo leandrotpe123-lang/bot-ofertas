@@ -67,7 +67,6 @@ _RE_REDES = re.compile(
 
 _RE_ROTULO = re.compile(r'^\s*[-–•]\s*\w[\w\s]{0,30}:\s*$')
 
-
 # ── Crédito de indicação ──────────────────────────────────────────
 # Alguns canais assinam quem indicou a oferta. Duas formas, ambas
 # observadas em mensagem real, e cada uma com sua própria defesa:
@@ -221,10 +220,9 @@ def filtrar(texto: str) -> str:
             if not l:
                 _podar_rotulo_orfao(saida)
                 continue
-            l = _tirar_credito(l)
-            if not l:
-                _podar_rotulo_orfao(saida)
-                continue
+        l = _tirar_credito(l)
+        if not l:
+            _podar_rotulo_orfao(saida)
+            continue
         saida.append(l)
     return "\n".join(saida).strip()
-
