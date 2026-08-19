@@ -68,6 +68,76 @@ _RE_REDES = re.compile(
 _RE_ROTULO = re.compile(r'^\s*[-–•]\s*\w[\w\s]{0,30}:\s*$')
 
 
+# ── Crédito de indicação ──────────────────────────────────────────
+# Alguns canais assinam quem indicou a oferta. Duas formas, ambas
+# observadas em mensagem real, e cada uma com sua própria defesa:
+#
+#   FORMA 1 — a linha INTEIRA é o crédito
+#       "-Dica Renan" | "-Dica Larissa" | "Dica: Maria Clara"
+#     Pode estar em QUALQUER posição da mensagem (o Promotom põe
+#     logo abaixo do título). A linha some.
+#
+#   FORMA 2 — SUFIXO da declaração de publicidade
+#       "-Anúncio - Dica DGT" | "-Anúncio -Dica Anru"
+#     Corta só o sufixo; o "-Anúncio" permanece (R6).
+#
+# A DEFESA NÃO É LEXICAL NEM POSICIONAL — é ESTRUTURAL, e é o que
+# impede comer título:
+#   FORMA 1 exige que o crédito ocupe a linha do início ao fim
+#     (^...$). Um título de produto nunca é APENAS "Dica X" — ele
+#     tem o nome do produto antes. "Fone JBL - Dica Ninja" não casa,
+#     porque "Fone JBL" está na frente.
+#   FORMA 2 exige que o prefixo seja a DECLARAÇÃO DE PUBLICIDADE, um
+#     conceito fechado que o sistema já reconhece (R6, e o ramo
+#     próprio de montagem). Não é "qualquer coisa antes do traço".
+#
+# Âncoras complementares em ambas:
+#   \bdicas?\b  — com fronteira: "Dicas de Marketing", "Medicamento",
+#                 "Indicador", "Médica", "Sindical" não casam;
+#   PALAVRA FUNCIONAL proibida logo após — lista GRAMATICAL FECHADA
+#                 (preposições e artigos), não vocabulário de
+#                 negócio: nunca cresce com campanha nova. Impede
+#                 "Dica de uso: lavar a seco";
+#   SEM CONTEÚDO DE OFERTA — sem URL, R$, % ou número longo: linha
+#                 que carrega oferta nunca é assinatura;
+#   CURTO       — até 30 caracteres de nome.
+#
+# Não exige maiúscula: "dica renan" sai igual a "Dica Renan".
+_PALAVRAS_FUNCIONAIS = (
+    r'de|do|da|dos|das|para|pra|pro|com|em|no|na|nos|nas|ao|aos|'
+    r'sobre|por|e|ou|se|que|um|uma|o|a|os|as'
+)
+_NOME_CREDITO = (
+    r'\bdicas?\b\s*:?\s*'
+    r'(?!(?:' + _PALAVRAS_FUNCIONAIS + r')\b)'
+    r'[^\s][^\n]{0,29}$'
+)
+_RE_CREDITO_LINHA = re.compile(
+    r'^\s*[-–—•|]?\s*' + _NOME_CREDITO,
+    re.I,
+)
+_RE_CREDITO_APOS_ANUNCIO = re.compile(
+    r'^(?P<pre>\s*[-#–—•]?\s*(?:an[uú]ncio|publicidade|patrocinado))'
+    r'\s*[-–—•|]\s*' + _NOME_CREDITO,
+    re.I,
+)
+_RE_CONTEUDO_OFERTA = re.compile(r'https?://|R\$|%|\d{3,}', re.I)
+
+
+def _tirar_credito(linha: str) -> str:
+    """Remove o crédito de indicação. Devolve a linha intacta quando
+    não houver crédito, ou cadeia vazia quando a linha inteira era o
+    crédito — o chamador então descarta a linha."""
+    if _RE_CONTEUDO_OFERTA.search(linha):
+        return linha
+    if _RE_CREDITO_LINHA.match(linha):
+        return ""
+    m = _RE_CREDITO_APOS_ANUNCIO.match(linha)
+    if m:
+        return m.group("pre").strip()
+    return linha
+
+
 def _reconhecida_por_autoridade(url: str) -> bool:
     """A autoridade reconhece esta URL como parte da oferta?
 
@@ -148,6 +218,10 @@ def filtrar(texto: str) -> str:
             continue
         if _RE_GRUPO_EXT.search(l):
             l = _RE_GRUPO_EXT.sub("", l).strip()
+            if not l:
+                _podar_rotulo_orfao(saida)
+                continue
+            l = _tirar_credito(l)
             if not l:
                 _podar_rotulo_orfao(saida)
                 continue
