@@ -58,6 +58,10 @@ from pipeline.assunto import (          # noqa: E402
     tema_da_campanha,
     eh_post_cashback,
 )
+from pipeline.resolucao_identidade import (   # noqa: E402
+    Evidencias,
+    resolver,
+)
 
 # ─────────────────────────────────────────────────────────────────
 # IDENTIDADE CANÔNICA — coração do sistema anti-duplicação
@@ -103,93 +107,44 @@ class Ancora:
     chave: str
 
 
+def _evidencias(norm: "MensagemNormalizada") -> Evidencias:
+    """Traduz o snapshot normalizado no contrato do resolvedor.
+
+    Aqui — e só aqui — é que as evidências são LIDAS do snapshot. O
+    resolvedor não conhece MensagemNormalizada; recebe proposições.
+    Toda derivação continua acontecendo nos donos de sempre
+    (natureza, assunto, adaptadores); esta função apenas reúne.
+    """
+    texto = norm.texto_limpo
+    return Evidencias(
+        plataforma      = norm.plat,
+        entidade_cupom  = eh_entidade_cupom(norm),
+        codigos         = tuple(norm.cupons),
+        tema_campanha   = tema_da_campanha(texto),
+        produtos        = tuple(norm.idents),
+        tem_produto     = bool(norm.ids_globais),
+        chaves_campanha = tuple(norm.chaves_campanha),
+        natureza_cash   = eh_post_cashback(texto, norm.tem_sinal_cashback),
+        link_canonico   = norm.ancora_url,
+        fingerprint     = _fp4(_alma(texto)),
+    )
+
+
 def ancoras(norm: "MensagemNormalizada") -> list[Ancora]:
     """
-    Derivação AUTORITATIVA das âncoras de família (MB v1.1, P3/P6):
-    com PRODUTO presente, cupom e cashback são ATRIBUTOS e não ancoram —
-    só ancoram quando o post não tem produto. camp| segue emitida até a
-    fase per-link (§11.11; risco declarado em §11.5). Sem oferta
-    estruturada, percorre a hierarquia de resolvers (mesma da canônica,
-    sem chamá-la — quebra a circularidade do Estágio 3).
+    Derivação AUTORITATIVA das âncoras de família (MB v1.1, P3/P6).
+
+    A POLÍTICA de precedência foi extraída para
+    pipeline.resolucao_identidade (Fase 1 — extração byte-equivalente,
+    sem evolução). Esta função permanece dona de DUAS coisas, que são
+    vocabulário do consumidor e não do resolvedor:
+      - reunir as evidências do snapshot (_evidencias);
+      - rotular cada entidade resolvida na ESPÉCIE de Ancora.
+
+    Separar as duas responsabilidades é o que permite que uma mecânica
+    nova mude só a política, num arquivo só, sem tocar em quem emite.
     """
-    plat = norm.plat
-    texto = norm.texto_limpo
-    saida: list[Ancora] = []
-    vistos: set[str] = set()
-
-    def _add(especie: str, chave: str) -> None:
-        if chave not in vistos:
-            vistos.add(chave)
-            saida.append(Ancora(especie, chave))
-
-    # ══ C3 — AUTORIDADE DO ASSUNTO ══
-    # Quando o CUPOM é o assunto do post (classificador endurecido no C2),
-    # a oferta É o cupom — o produto no link é apenas VEÍCULO/ilustração e
-    # NÃO ancora. Sem isso, o mesmo cupom relâmpago ilustrado com produtos
-    # diferentes por grupos diferentes viraria N ofertas distintas.
-    #
-    # A âncora é EXCLUSIVA (só o cupom), nunca aditiva: se o produto
-    # ilustrativo também ancorasse, um post-vitrine capturaria a oferta
-    # legítima daquele produto quando ela chegasse.
-    #
-    # Segurança: o C2 garante que "Echo Dot R$249 (cupom ECHO10)" NÃO é
-    # post de cupom (cupom como complemento) — logo produtos distintos que
-    # compartilham um código genérico seguem em famílias separadas.
-    # Gate R1×R2 (MB ratificado): com produto identificado, o cupom só
-    # ancora exclusivo se o post caracterizar CLARAMENTE benefício de
-    # loja; na dúvida, prevalece o produto (cupom vira atributo).
-    # R2+ (emenda ratificada): 2+ códigos e nenhum preço de item →
-    # a lista de códigos É a oferta; o produto presente é vitrine.
-    if eh_entidade_cupom(norm):
-        if norm.cupons:
-            # COM código: o código É a identidade (elemento mais estável
-            # disponível — INV-E3; troca de código na vida da campanha é
-            # responsabilidade do Motor de Estado, Fase 3).
-            for cod in norm.cupons:
-                _add("cupom", f"{plat}|cup|{cod.upper()}")
-        else:
-            # [F-C4] SEM código: a identidade é o TEMA da campanha
-            # (INV-E2/E3: benefício/percentual/limite são ESTADO e nunca
-            # entram na chave). Sem tema → "geral" (bucket do ciclo, R5).
-            # cupb| NÃO é código: não entra no cupom_idx (que só indexa
-            # códigos reais) — garantido por construção, pois o efeito de
-            # cupom só roda sobre norm.cupons, aqui vazio.
-            _add("cupom-beneficio",
-                 f"{plat}|cupb|{tema_da_campanha(texto)}")
-        return saida
-
-    for plat_link, pid, _tipo in norm.idents:
-        _add("produto", f"{plat_link}|{pid}")
-
-    for k in norm.chaves_campanha:
-        _add("campanha", f"{plat}|camp|{k}")
-
-    if not norm.ids_globais:
-        for cod in norm.cupons:
-            _add("cupom", f"{plat}|cup|{cod.upper()}")
-
-        if eh_post_cashback(texto, norm.tem_sinal_cashback):
-    # [F-C4 / INV-E2] O MB nomeia cashback como ESTADO: o
-            # percentual varia (e pode faltar) entre mensagens legítimas
-            # da mesma campanha. A identidade é a NATUREZA na plataforma
-            # dentro do ciclo (tolerância declarada: campanhas de
-            # cashback simultâneas na mesma plataforma colapsam).
-            _add("cashback", f"{plat}|cash")
-
-    if saida:
-        return saida
-
-    # ── Cauda: sem oferta estruturada ────────────────────────────
-    # MB §11.9 (ratificado): evento é FALLBACK, não espécie própria —
-    # âncora por palavra-chave colidia entre eventos distintos da mesma
-    # mecânica. Ordem: link primeiro, texto como terminal. Nunca vazio.
-    # Fonte: pipeline.normalizacao (autoridade única de derivação). A
-    # chave já chega derivada da URL afiliada LONGA canônica; esta
-    # camada apenas a rotula. NÃO ler norm.mapa aqui: o mapa é forma
-    # de publicação e a URL curta jamais participa de identidade.
-    if norm.ancora_url:
-        return [Ancora("fallback", f"{plat}|url|{norm.ancora_url}")]
-    return [Ancora("fallback", f"{plat}|txt|{_fp4(_alma(texto))}")]
+    return [Ancora(e.papel, e.chave) for e in resolver(_evidencias(norm))]
 
 
 def identidades(norm: "MensagemNormalizada") -> list[str]:
