@@ -162,7 +162,7 @@ def resolver(ev: Evidencias) -> List[Entidade]:
         for cod in ev.codigos:
             _add("cupom", f"{plat}|cup|{cod.upper()}")
 
-        elif ev.natureza_cash and ev.percentual and not ev.tem_produto:
+          if ev.natureza_cash and ev.percentual and not ev.tem_produto:
             # [INV-E2 REFINADO] Cashback SEM código e SEM produto: não
             # existe identificador mais forte, e o TEMA é instável.
             #
