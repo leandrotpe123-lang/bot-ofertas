@@ -74,6 +74,10 @@ class Evidencias:
     # natureza cashback já decidida (assunto_especie + sinal do
     # adaptador). O resolvedor não sabe o que a palavra significa.
     natureza_cash:   bool = False
+    # percentual do benefício, já extraído por assunto_oferta
+    # (beneficio_do_cupom). Chega como string OPACA — o resolvedor não
+    # sabe de onde veio nem o que "100" significa; só compara.
+    percentual:      str = ""
     # link canônico da oferta, já normalizado pelo adaptador
     link_canonico:   str = ""
     # fingerprint terminal do texto, já calculado
@@ -158,14 +162,34 @@ def resolver(ev: Evidencias) -> List[Entidade]:
         for cod in ev.codigos:
             _add("cupom", f"{plat}|cup|{cod.upper()}")
 
-        if ev.natureza_cash:
-            # [F-C4 / INV-E2] O MB nomeia cashback como ESTADO: o
-            # percentual varia (e pode faltar) entre mensagens
-            # legítimas da mesma campanha. A identidade é a NATUREZA
-            # na plataforma dentro do ciclo (tolerância declarada:
-            # campanhas de cashback simultâneas na mesma plataforma
-            # colapsam).
-            _add("cashback", f"{plat}|cash")
+        elif ev.natureza_cash and ev.percentual and not ev.tem_produto:
+            # [INV-E2 REFINADO] Cashback SEM código e SEM produto: não
+            # existe identificador mais forte, e o TEMA é instável.
+            #
+            # Medido em 18 mensagens reais: a mesma campanha recebe
+            # temas diferentes conforme o grupo escreva ou não a
+            # palavra-enfeite ("Moedas" aparece em 61% das mensagens;
+            # a natureza cashback, em 100%). O tema errava nos DOIS
+            # sentidos ao mesmo tempo — separava 100% de 100% e
+            # juntava 60% com 100%.
+            #
+            # A chave NÃO é o percentual: é plataforma + natureza +
+            # percentual. O percentual sozinho nunca identifica, e sem
+            # natureza provada esta via nem é alcançada. A natureza
+            # também não vira chave literal — "cash" puro colapsaria
+            # campanhas distintas (medido: 5 falsos merges).
+            #
+            # Isto REFINA o INV-E2, não o revoga: percentual continua
+            # sendo ESTADO onde existe identificador estável (código,
+            # produto) ou onde o benefício é acessório da oferta. Aqui
+            # ele é o único discriminante da mecânica.
+            #
+            # Deliberadamente NÃO participa: URL/contexto do link. A
+            # expansão depende de rede; um timeout devolve o link
+            # encurtado, único por mensagem, e a identidade viraria
+            # refém do relógio. Contexto fica registrado para frente
+            # própria, com dado de produção dos dois lados.
+            _add("cashback", f"{plat}|cash|{ev.percentual}")
 
     if saida:
         return saida
