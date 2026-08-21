@@ -159,37 +159,37 @@ def resolver(ev: Evidencias) -> List[Entidade]:
         _add("campanha", f"{plat}|camp|{k}")
 
     if not ev.tem_produto:
-        for cod in ev.codigos:
-            _add("cupom", f"{plat}|cup|{cod.upper()}")
+    for cod in ev.codigos:
+        _add("cupom", f"{plat}|cup|{cod.upper()}")
 
-          if ev.natureza_cash and ev.percentual and not ev.tem_produto:
-            # [INV-E2 REFINADO] Cashback SEM código e SEM produto: não
-            # existe identificador mais forte, e o TEMA é instável.
-            #
-            # Medido em 18 mensagens reais: a mesma campanha recebe
-            # temas diferentes conforme o grupo escreva ou não a
-            # palavra-enfeite ("Moedas" aparece em 61% das mensagens;
-            # a natureza cashback, em 100%). O tema errava nos DOIS
-            # sentidos ao mesmo tempo — separava 100% de 100% e
-            # juntava 60% com 100%.
-            #
-            # A chave NÃO é o percentual: é plataforma + natureza +
-            # percentual. O percentual sozinho nunca identifica, e sem
-            # natureza provada esta via nem é alcançada. A natureza
-            # também não vira chave literal — "cash" puro colapsaria
-            # campanhas distintas (medido: 5 falsos merges).
-            #
-            # Isto REFINA o INV-E2, não o revoga: percentual continua
-            # sendo ESTADO onde existe identificador estável (código,
-            # produto) ou onde o benefício é acessório da oferta. Aqui
-            # ele é o único discriminante da mecânica.
-            #
-            # Deliberadamente NÃO participa: URL/contexto do link. A
-            # expansão depende de rede; um timeout devolve o link
-            # encurtado, único por mensagem, e a identidade viraria
-            # refém do relógio. Contexto fica registrado para frente
-            # própria, com dado de produção dos dois lados.
-            _add("cashback", f"{plat}|cash|{ev.percentual}")
+    if ev.natureza_cash and ev.percentual and not ev.tem_produto:
+        # [INV-E2 REFINADO] Cashback SEM código e SEM produto: não
+        # existe identificador mais forte, e o TEMA é instável.
+        #
+        # Medido em 18 mensagens reais: a mesma campanha recebe
+        # temas diferentes conforme o grupo escreva ou não a
+        # palavra-enfeite ("Moedas" aparece em 61% das mensagens;
+        # a natureza cashback, em 100%). O tema errava nos DOIS
+        # sentidos ao mesmo tempo — separava 100% de 100% e
+        # juntava 60% com 100%.
+        #
+        # A chave NÃO é o percentual: é plataforma + natureza +
+        # percentual. O percentual sozinho nunca identifica, e sem
+        # natureza provada esta via nem é alcançada. A natureza
+        # também não vira chave literal — "cash" puro colapsaria
+        # campanhas distintas (medido: 5 falsos merges).
+        #
+        # Isto REFINA o INV-E2, não o revoga: percentual continua
+        # sendo ESTADO onde existe identificador estável (código,
+        # produto) ou onde o benefício é acessório da oferta. Aqui
+        # ele é o único discriminante da mecânica.
+        #
+        # Deliberadamente NÃO participa: URL/contexto do link. A
+        # expansão depende de rede; um timeout devolve o link
+        # encurtado, único por mensagem, e a identidade viraria
+        # refém do relógio. Contexto fica registrado para frente
+        # própria, com dado de produção dos dois lados.
+        _add("cashback", f"{plat}|cash|{ev.percentual}")
 
     if saida:
         return saida
