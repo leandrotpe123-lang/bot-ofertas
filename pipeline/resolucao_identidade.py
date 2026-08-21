@@ -152,10 +152,10 @@ def resolver(ev: Evidencias) -> List[Entidade]:
             _add("cupom-beneficio", f"{plat}|cupb|{ev.tema_campanha}")
         return saida
 
-    for plat_link, pid, _tipo in ev.produtos:
+        for plat_link, pid, _tipo in ev.produtos:
         _add("produto", f"{plat_link}|{pid}")
 
-            for k in ev.chaves_campanha:
+    for k in ev.chaves_campanha:
         _add("campanha", f"{plat}|camp|{k}")
 
     if not ev.tem_produto:
@@ -190,9 +190,6 @@ def resolver(ev: Evidencias) -> List[Entidade]:
             # refém do relógio. Contexto fica registrado para frente
             # própria, com dado de produção dos dois lados.
             _add("cashback", f"{plat}|cash|{ev.percentual}")
-
-    if saida:
-        return saida
 
     if saida:
         return saida
