@@ -155,10 +155,10 @@ def resolver(ev: Evidencias) -> List[Entidade]:
     for plat_link, pid, _tipo in ev.produtos:
         _add("produto", f"{plat_link}|{pid}")
 
-    for k in ev.chaves_campanha:
+        for k in ev.chaves_campanha:
         _add("campanha", f"{plat}|camp|{k}")
 
-            if not ev.tem_produto:
+    if not ev.tem_produto:
         for cod in ev.codigos:
             _add("cupom", f"{plat}|cup|{cod.upper()}")
 
