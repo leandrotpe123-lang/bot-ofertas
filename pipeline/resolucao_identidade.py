@@ -74,12 +74,12 @@ class Evidencias:
     # natureza cashback já decidida (assunto_especie + sinal do
     # adaptador). O resolvedor não sabe o que a palavra significa.
     natureza_cash:   bool = False
+    # link canônico da oferta, já normalizado pelo adaptador
+    link_canonico:   str = ""
     # percentual do benefício, já extraído por assunto_oferta
     # (beneficio_do_cupom). Chega como string OPACA — o resolvedor não
     # sabe de onde veio nem o que "100" significa; só compara.
     percentual:      str = ""
-    # link canônico da oferta, já normalizado pelo adaptador
-    link_canonico:   str = ""
     # fingerprint terminal do texto, já calculado
     fingerprint:     str = ""
 
@@ -141,28 +141,7 @@ def resolver(ev: Evidencias) -> List[Entidade]:
             # campanha é responsabilidade do Motor de Estado, Fase 3).
             for cod in ev.codigos:
                 _add("cupom", f"{plat}|cup|{cod.upper()}")
-        else:
-            # [F-C4] SEM código: a identidade é o TEMA da campanha
-            # (INV-E2/E3: benefício/percentual/limite são ESTADO e
-            # nunca entram na chave). Sem tema → "geral" (bucket do
-            # ciclo, R5). cupb| NÃO é código: não entra no cupom_idx
-            # (que só indexa códigos reais) — garantido por
-            # construção, pois o efeito de cupom só roda sobre os
-            # códigos, aqui vazios.
-            _add("cupom-beneficio", f"{plat}|cupb|{ev.tema_campanha}")
-        return saida
-
-        for plat_link, pid, _tipo in ev.produtos:
-        _add("produto", f"{plat_link}|{pid}")
-
-    for k in ev.chaves_campanha:
-        _add("campanha", f"{plat}|camp|{k}")
-
-    if not ev.tem_produto:
-        for cod in ev.codigos:
-            _add("cupom", f"{plat}|cup|{cod.upper()}")
-
-        if ev.natureza_cash and ev.percentual and not ev.tem_produto:
+        elif ev.natureza_cash and ev.percentual and not ev.tem_produto:
             # [INV-E2 REFINADO] Cashback SEM código e SEM produto: não
             # existe identificador mais forte, e o TEMA é instável.
             #
@@ -190,6 +169,35 @@ def resolver(ev: Evidencias) -> List[Entidade]:
             # refém do relógio. Contexto fica registrado para frente
             # própria, com dado de produção dos dois lados.
             _add("cashback", f"{plat}|cash|{ev.percentual}")
+        else:
+            # [F-C4] SEM código: a identidade é o TEMA da campanha
+            # (INV-E2/E3: benefício/percentual/limite são ESTADO e
+            # nunca entram na chave). Sem tema → "geral" (bucket do
+            # ciclo, R5). cupb| NÃO é código: não entra no cupom_idx
+            # (que só indexa códigos reais) — garantido por
+            # construção, pois o efeito de cupom só roda sobre os
+            # códigos, aqui vazios.
+            _add("cupom-beneficio", f"{plat}|cupb|{ev.tema_campanha}")
+        return saida
+
+    for plat_link, pid, _tipo in ev.produtos:
+        _add("produto", f"{plat_link}|{pid}")
+
+    for k in ev.chaves_campanha:
+        _add("campanha", f"{plat}|camp|{k}")
+
+    if not ev.tem_produto:
+        for cod in ev.codigos:
+            _add("cupom", f"{plat}|cup|{cod.upper()}")
+
+        if ev.natureza_cash:
+            # [F-C4 / INV-E2] O MB nomeia cashback como ESTADO: o
+            # percentual varia (e pode faltar) entre mensagens
+            # legítimas da mesma campanha. A identidade é a NATUREZA
+            # na plataforma dentro do ciclo (tolerância declarada:
+            # campanhas de cashback simultâneas na mesma plataforma
+            # colapsam).
+            _add("cashback", f"{plat}|cash")
 
     if saida:
         return saida
