@@ -57,11 +57,24 @@ __all__ = [
 from pipeline.assunto import (          # noqa: E402
     tema_da_campanha,
     eh_post_cashback,
+    beneficio_do_cupom,
 )
 from pipeline.resolucao_identidade import (   # noqa: E402
     Evidencias,
     resolver,
 )
+
+def _percentual(texto: str) -> str:
+    """Percentual do benefício, lido de beneficio_do_cupom.
+
+    Fonte ÚNICA: o descritor de assunto_oferta, que já é o dono desta
+    extração. Aqui não há regex nem parsing — só leitura do campo
+    "pct:" do descritor já pronto. Sem percentual, cadeia vazia.
+    """
+    for parte in beneficio_do_cupom(texto).split("+"):
+        if parte.startswith("pct:"):
+            return parte.split(":", 1)[1]
+    return ""
 
 # ─────────────────────────────────────────────────────────────────
 # IDENTIDADE CANÔNICA — coração do sistema anti-duplicação
@@ -125,6 +138,7 @@ def _evidencias(norm: "MensagemNormalizada") -> Evidencias:
         tem_produto     = bool(norm.ids_globais),
         chaves_campanha = tuple(norm.chaves_campanha),
         natureza_cash   = eh_post_cashback(texto, norm.tem_sinal_cashback),
+        percentual      = _percentual(texto),
         link_canonico   = norm.ancora_url,
         fingerprint     = _fp4(_alma(texto)),
     )
