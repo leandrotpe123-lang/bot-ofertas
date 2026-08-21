@@ -158,7 +158,7 @@ def resolver(ev: Evidencias) -> List[Entidade]:
     for k in ev.chaves_campanha:
         _add("campanha", f"{plat}|camp|{k}")
 
-        if not ev.tem_produto:
+            if not ev.tem_produto:
         for cod in ev.codigos:
             _add("cupom", f"{plat}|cup|{cod.upper()}")
 
