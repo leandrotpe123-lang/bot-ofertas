@@ -44,6 +44,71 @@ _SCORE_POR_CUPOM_EXTRA = 2
 _MAX_EXTRAS_CONTADOS   = 3
 
 
+# ── RÉGUA DE RIQUEZA POR MECÂNICA ─────────────────────────────────
+# Riqueza não é a mesma coisa para todas as mecânicas.
+#
+# PRODUTO — links extras são riqueza REAL: variações do mesmo item,
+#   outra loja, outro preço, opção esgotada. O post com mais links dá
+#   mais caminhos ao usuário. A régua de produto é a HISTÓRICA e
+#   permanece CONGELADA (_SCORE_POR_LINK_EXTRA, _SCORE_POR_CUPOM_EXTRA,
+#   _MAX_EXTRAS_CONTADOS). Medido: score idêntico em 94 posts.
+#
+# CUPOM — links extras NÃO são riqueza. Um post que cola 4 links de
+#   resgate não descreve mais oferta que um que diz "R$30 OFF em R$299
+#   e R$90 OFF em R$899". A riqueza é QUANTAS OFERTAS o post descreve.
+#
+# UMA oferta, UMA contagem. Código e campanha são duas FORMAS de
+# enxergar a mesma oferta, não duas ofertas:
+#     "10% OFF acima de R$79, limite R$100: QUERODESCONTO"
+#      └────────── campanha ──────────┘  └── código ──┘
+# Somar as duas premiava a mesma oferta duas vezes — medido em 70 dos
+# 92 posts de cupom do corpus, onde nº códigos == nº campanhas. Por
+# isso `max`, nunca soma: cobre o post que só traz código
+# ("🎟 MERCADOSALDAO303"), o que só traz campanha ("R$30 OFF em R$299")
+# e o que traz as duas, sem contar nada em dobro.
+#
+# Calibrado em 92 posts reais, 1.664 pares (rico, pobre) ordenados por
+# evidência estrutural. Inversões — post pobre vencendo o rico:
+#     régua única de hoje ......................... 19
+#     peso 2 teto 5 ................................ 3
+#     peso 3 teto 4 ................................ 1
+#     peso 3 teto 5 ................................ 0   ← escolhido
+#     peso 4 teto 5 ................................ 0   (mesmo resultado,
+#                                                        peso menor é
+#                                                        mais conservador)
+_SCORE_POR_OFERTA    = 3
+_MAX_OFERTAS_CONTADAS = 5
+
+# Campanha COMPLETA: benefício + condição explícitos na MESMA linha.
+#   "R$30 OFF em R$299"  ·  "20% OFF acima de R$79"
+#   "40% limitado a R$15"  ·  "30% Cashback (limite R$30)"
+# Linha a linha, de propósito: o benefício de uma linha nunca casa com
+# a condição de outra.
+_RE_CAMPANHA = re.compile(
+    r'(?:R\$\s?\d[\d.]*|\d{1,3}\s?%)'
+    r'(?:\s*(?:de\s+)?(?:OFF|desconto|cashback)?[\s,(]*'
+    r'(?:em|acima\s+de|a\s+partir\s+de|nas?\s+compras?\s+de|'
+    r'em\s+compras\s+de|para\s+compras\s+de|'
+    r'limitad[oa]\s+a|limite(?:\s+de)?|min(?:imo)?\.?\s*(?:de)?)\s*)'
+    r'R\$\s?\d[\d.]*',
+    re.I,
+)
+# Escopo do cabeçalho da oferta — mesmo limite usado pelo assunto.
+_ESCOPO_CAMPANHA = 600
+
+
+def _n_ofertas(norm: MensagemNormalizada) -> int:
+    """Quantas ofertas distintas o post descreve.
+
+    `max` e não soma: código e campanha são duas formas de enxergar a
+    MESMA oferta. Ver a doutrina acima.
+    """
+    n_campanhas = sum(
+        len(_RE_CAMPANHA.findall(l))
+        for l in norm.texto_limpo[:_ESCOPO_CAMPANHA].split("\n"))
+    return max(len(norm.cupons), n_campanhas)
+
+
 def midia_ruim(chat: str) -> bool:
     """True se o grupo de origem tem mídia de baixa qualidade
     (config._GRUPOS_IMG_RUIM). Ponto único da regra — consumido por
@@ -87,13 +152,23 @@ def calcular_score(norm: MensagemNormalizada) -> int:
 
     # ── Quantidade (riqueza): ofertas ALÉM da primeira somam, com teto.
     #    A presença acima fica intacta → posts de 1 link/1 cupom NÃO mudam.
-    n_links_extra = max(0, len(norm.mapa) - 1)
-    if n_links_extra:
-        score += min(n_links_extra, _MAX_EXTRAS_CONTADOS) * _SCORE_POR_LINK_EXTRA
-    n_cupons = len(norm.cupons)
-    n_cupons_extra = max(0, n_cupons - 1)
-    if n_cupons_extra:
-        score += min(n_cupons_extra, _MAX_EXTRAS_CONTADOS) * _SCORE_POR_CUPOM_EXTRA
+    #
+    # A régua da QUANTIDADE é POR MECÂNICA. `ids_globais` é a evidência
+    # de produto JÁ DERIVADA por normalizacao_identidade.derivar_produto
+    # — a mesma que identidade_oferta consome como `tem_produto`. O
+    # score apenas pergunta; não classifica produto por conta própria.
+    if norm.ids_globais:
+        n_links_extra = max(0, len(norm.mapa) - 1)
+        if n_links_extra:
+            score += min(n_links_extra, _MAX_EXTRAS_CONTADOS) * _SCORE_POR_LINK_EXTRA
+        n_cupons_extra = max(0, len(norm.cupons) - 1)
+        if n_cupons_extra:
+            score += min(n_cupons_extra, _MAX_EXTRAS_CONTADOS) * _SCORE_POR_CUPOM_EXTRA
+    else:
+        n_ofertas_extra = max(0, _n_ofertas(norm) - 1)
+        if n_ofertas_extra:
+            score += (min(n_ofertas_extra, _MAX_OFERTAS_CONTADAS)
+                      * _SCORE_POR_OFERTA)
 
     # [FASE 4] O peso de mídia FOI REMOVIDO daqui. Ele fazia a
     # qualidade/origem da imagem decidir o vencedor do TEXTO: um grupo
