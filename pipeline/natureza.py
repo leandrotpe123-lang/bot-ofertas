@@ -30,7 +30,7 @@ def eh_entidade_cupom(norm: MensagemNormalizada) -> bool:
     """[F-C4 / INV-E5] Decisão ÚNICA de natureza cupom-como-entidade
     (gate R1×R2 + R2+). Alimenta âncoras E canônica — nenhuma camada
     pode enxergar uma natureza diferente das demais."""
-    texto = norm.texto_limpo
+    texto = norm.texto_analise
     return eh_post_cupom(texto) and (
         not norm.ids_globais
         or beneficio_e_de_loja(texto)
@@ -44,7 +44,7 @@ def natureza(norm: MensagemNormalizada) -> str:
     ordem é a do MB: o assunto decide primeiro (R2), o fato de
     produto decide depois (R1), e "evento" é o resto.
     """
-    log_ded.info(f"🔬 P2b id={norm.msg_id} assunto_cupom={eh_post_cupom(norm.texto_limpo)} ben_loja={beneficio_e_de_loja(norm.texto_limpo)} preco_item={tem_preco_de_item(norm.texto_limpo)} n_cupons={len(norm.cupons)} ids_globais={norm.ids_globais} camp={len(norm.chaves_campanha)}")
+    log_ded.info(f"🔬 P2b id={norm.msg_id} assunto_cupom={eh_post_cupom(norm.texto_analise)} ben_loja={beneficio_e_de_loja(norm.texto_analise)} preco_item={tem_preco_de_item(norm.texto_analise)} n_cupons={len(norm.cupons)} ids_globais={norm.ids_globais} camp={len(norm.chaves_campanha)}")
     if eh_entidade_cupom(norm):
         return "cupom"
     if norm.ids_globais:
