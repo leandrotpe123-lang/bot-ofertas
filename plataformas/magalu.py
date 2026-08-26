@@ -22,8 +22,7 @@ Baseline arquitetural: Documento 1 — Especificação do Contrato.
 from __future__ import annotations
 
 import re
-from urllib.parse import (parse_qs, unquote, urlencode, urlparse,
-                          urlunparse)
+from urllib.parse import unquote, urlparse
 
 import aiohttp
 
@@ -95,14 +94,6 @@ _P_PRODUTO = [
     re.compile(r'/(?:[^/]+/)?p/([a-z0-9]{5,})(?:/|$|[?#])', re.I),
     re.compile(r'/divulgador/oferta/([a-z0-9]{5,})(?:/|$|[?#])', re.I),
 ]
-
-# ── Parâmetros de rastreamento a remover na limpeza ───────────────
-_PARAMS_REMOVER = frozenset({
-    "partnerid", "promoterid", "afforcedeeplink", "deeplinkvalue",
-    "partner_id", "promoter_id", "utm_source", "utm_medium",
-    "utm_campaign", "pid", "c", "af_force_deeplink",
-    "deep_link_value", "isretargeting",
-})
 
 # ── Identidade de afiliação ───────────────────────────────────────
 # Campos que CARREGAM identidade de divulgador e, portanto, os
@@ -237,32 +228,6 @@ def extrai_identidade(url: str) -> IdentidadeProduto:
         tipo = TipoLink.CAMPANHA
 
     return IdentidadeProduto(tipo_link=tipo, id_produto=AUSENTE)
-
-
-# ── Capacidade opcional: limpeza de URL ───────────────────────────
-def limpa_url(url: str) -> str:
-    """
-    Remove os parâmetros de rastreamento e de atribuição da URL.
-    Pura e determinística. Preserva a identidade canônica do
-    produto.
-    """
-    try:
-        parsed = urlparse(url)
-        params = parse_qs(parsed.query, keep_blank_values=True)
-        params_limpos = {
-            k: v for k, v in params.items()
-            if k.lower() not in _PARAMS_REMOVER
-        }
-        pares = [
-            (k, valor)
-            for k, valores in params_limpos.items()
-            for valor in valores
-        ]
-        return urlunparse(parsed._replace(
-            query=urlencode(pares), fragment="",
-        ))
-    except Exception:
-        return url
 
 
 # ── Capacidade obrigatória: afiliação ─────────────────────────────
