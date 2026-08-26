@@ -22,6 +22,7 @@ from plataformas import registry
 
 # Contrato INTERNO da camada — ver cabeçalho de filtros_estrutura.
 from pipeline.filtros_estrutura import _RE_ENUM, _RE_URL_BLOCO, _eh_rotulo
+from pipeline.normalizacao_texto import sem_marcacao
 
 # ══════════════════════════════════════════════════════════════════
 # POLÍTICA SEMÂNTICA DE BLOCO — PÓS-CONVERSÃO
@@ -162,9 +163,17 @@ def _renumerar(blocos: list) -> list:
 
 
 def _rotulo_orfao(bloco: list) -> bool:
-    """Bloco reduzido a um rótulo solto, sem o conteúdo que anunciava."""
+    """Bloco reduzido a um rótulo solto, sem o conteúdo que anunciava.
+
+    Testa a projeção sem marcação pela mesma razão de `_eh_rotulo`.
+    NÃO delega a `_eh_rotulo` de propósito: aquele predicado também
+    aceita enumeração, e um bloco de uma linha enumerada é CONTEÚDO
+    ("1️⃣ Envie o seu produto"), não rótulo. Delegar apagaria o corpo
+    da oferta. A duplicação do teste `endswith(":")` fica registrada
+    como dívida, não resolvida aqui.
+    """
     return (len(bloco) == 1
-            and bloco[0].rstrip().endswith(":")
+            and sem_marcacao(bloco[0]).rstrip().endswith(":")
             and not _RE_URL_BLOCO.search(bloco[0]))
 
 
