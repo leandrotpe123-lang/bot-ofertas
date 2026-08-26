@@ -86,13 +86,13 @@ class MensagemNormalizada:
     plat:              str
     sku:               str
     tem_midia:         bool
+    media_obj:         object
     # Projeção de ANÁLISE de texto_limpo, sem marcação de
     # apresentação. Os detectores semânticos (natureza, assunto)
     # consomem ESTE campo; a publicação consome texto_limpo.
     # ATENÇÃO: as posições de caractere NÃO são intercambiáveis entre
     # os dois campos — nada deve localizar em um o que achou no outro.
-    texto_analise:     str          = ""
-    media_obj:         object
+    texto_analise:     str          = "" 
     ids_globais:       List[str]    = field(default_factory=list)
     # Vínculo POR LINK que a plataforma entrega via contrato e que a
     # travessia PRESERVA: (plataforma_do_link, id_produto, tipo_link).
