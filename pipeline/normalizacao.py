@@ -63,7 +63,8 @@ from pipeline.normalizacao_links import (
     particionar_links,
     resolver_e_afiliar,
 )
-from pipeline.normalizacao_texto import _tem_emoji, limpar_texto
+from pipeline.normalizacao_texto import (_tem_emoji, limpar_texto,
+                                         sem_marcacao)
 from utils.cupom import extrair_todos_cupons
 
 # ── API pública do módulo ─────────────────────────────────────────
@@ -85,6 +86,12 @@ class MensagemNormalizada:
     plat:              str
     sku:               str
     tem_midia:         bool
+    # Projeção de ANÁLISE de texto_limpo, sem marcação de
+    # apresentação. Os detectores semânticos (natureza, assunto)
+    # consomem ESTE campo; a publicação consome texto_limpo.
+    # ATENÇÃO: as posições de caractere NÃO são intercambiáveis entre
+    # os dois campos — nada deve localizar em um o que achou no outro.
+    texto_analise:     str          = ""
     media_obj:         object
     ids_globais:       List[str]    = field(default_factory=list)
     # Vínculo POR LINK que a plataforma entrega via contrato e que a
@@ -190,6 +197,17 @@ async def normalizar(
 
     # Política de bloco: só permanece o bloco que gerou oferta
     # publicável. Depende do mapa de publicação, por isso roda
+    # Projeção de ANÁLISE do texto final. Derivada DEPOIS de
+    # filtrar_blocos de propósito: os dois campos descrevem sempre o
+    # mesmo conteúdo, e nunca podem divergir em blocos.
+    #
+    # texto_limpo  → o que vai ao ar (marcação preservada)
+    # texto_analise → o que os detectores semânticos leem
+    #
+    # A marcação do Telegram é artefato de APRESENTAÇÃO e alterava a
+    # natureza da oferta: "**R$30 OFF** em **R$60**" fazia a compra
+    # mínima virar preço de item, e o post de cupom virar produto.
+    texto_analise = sem_marcacao(texto_limpo)
     # aqui e não junto da filtragem de linha.
     from pipeline.filtros import filtrar_blocos
     texto_limpo = filtrar_blocos(
@@ -209,6 +227,7 @@ async def normalizar(
 
     return MensagemNormalizada(
         msg_id=bruta.msg_id, chat=bruta.chat, texto_limpo=texto_limpo,
+        texto_analise=texto_analise,
         mapa=mapa_publicacao, preservar=preservar_lst, plat=plat_dom,
         cupons=cupons, sku=sku, tem_midia=bruta.tem_midia,
         media_obj=bruta.media_obj,
