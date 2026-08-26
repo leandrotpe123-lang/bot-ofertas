@@ -195,6 +195,7 @@ async def normalizar(
     # de identidade e este ponto sem revisão arquitetural.
     mapa_publicacao, n_encurtadas = _encurtar_mapa(mapa)
 
+    # aqui e não junto da filtragem de linha.
     # Política de bloco: só permanece o bloco que gerou oferta
     # publicável. Depende do mapa de publicação, por isso roda
     # Projeção de ANÁLISE do texto final. Derivada DEPOIS de
@@ -207,11 +208,10 @@ async def normalizar(
     # A marcação do Telegram é artefato de APRESENTAÇÃO e alterava a
     # natureza da oferta: "**R$30 OFF** em **R$60**" fazia a compra
     # mínima virar preço de item, e o post de cupom virar produto.
-    texto_analise = sem_marcacao(texto_limpo)
-    # aqui e não junto da filtragem de linha.
     from pipeline.filtros import filtrar_blocos
     texto_limpo = filtrar_blocos(
         texto_limpo, mapa_publicacao, preservar_lst)
+    texto_analise = sem_marcacao(texto_limpo)
 
     log_nrm.info(
     f"✅ id={bruta.msg_id} {len(mapa_publicacao)}/{len(converter)} | "
