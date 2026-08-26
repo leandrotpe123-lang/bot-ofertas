@@ -36,7 +36,51 @@ _SEM_ENVIO: Optional[asyncio.Semaphore] = None
 _SEM_HTTP:  Optional[asyncio.Semaphore] = None
 
 # ── DB ────────────────────────────────────────────────────────────
-_DB_PATH         = "foguetao.db"
+# CAMINHO DO BANCO — declaração, não abertura.
+#
+# Este módulo apenas DECLARA onde o banco deve viver; quem abre,
+# valida o diretório e falha é database_conexao. A separação é
+# deliberada: config é folha do grafo de imports e não pode tocar
+# filesystem no import, sob pena de derrubar o boot inteiro por um
+# problema de disco antes de qualquer log existir.
+#
+# O caminho é configurável por ambiente porque o armazenamento do
+# processo NÃO é o mesmo em toda parte:
+#
+#   Railway  → DB_PATH=/data/foguetao.db   (volume persistente)
+#   local    → sem DB_PATH → "foguetao.db" no diretório corrente
+#
+# O default preserva byte a byte o comportamento anterior a esta
+# frente: sem a variável, nada muda para quem roda local.
+#
+# ATENÇÃO — o banco NÃO é um arquivo só. Com journal_mode=WAL
+# (ligado em database_conexao._init_db) o SQLite mantém `<db>-wal` e
+# `<db>-shm` NO MESMO DIRETÓRIO, e uma transação confirmada pode
+# viver apenas no `-wal` até o próximo checkpoint. Por isso o que
+# precisa ser persistente é o DIRETÓRIO, não o arquivo: apontar
+# DB_PATH para dentro do volume é o que garante que os três
+# sobrevivam juntos a restart e deploy.
+_DB_PATH         = os.environ.get("DB_PATH", "foguetao.db")
+
+# Quando o caminho aponta para um armazenamento que deve ser
+# persistente, um diretório ausente ou somente-leitura é ERRO DE
+# INFRAESTRUTURA, não um caso a contornar criando o banco noutro
+# lugar. Cair para o disco efêmero em silêncio seria pior que
+# falhar: o bot subiria, publicaria links curtos e os perderia no
+# deploy seguinte — exatamente a falha que esta frente corrige.
+# database_conexao consome esta lista para decidir entre criar o
+# diretório (caminho local) e exigir que ele seja um volume REALMENTE
+# montado — diretório existir não prova montagem.
+#
+# RAILWAY_VOLUME_MOUNT_PATH é injetada automaticamente pela Railway
+# quando um volume está anexado ao serviço; não precisa ser definida
+# à mão. Ela entra primeiro para que a checagem acompanhe sozinha uma
+# eventual mudança de mount path. "/data" fica como declaração
+# explícita do caminho combinado nesta frente, válida mesmo se a
+# variável não vier.
+_DB_MONTAGENS_PERSISTENTES = tuple(dict.fromkeys(
+    p for p in (os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", ""), "/data") if p
+))
 TTL_LINK_INATIVO = 7 * 86400
 
 # ── Pillow ────────────────────────────────────────────────────────
