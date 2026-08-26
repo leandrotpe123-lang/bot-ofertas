@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import re
+from pipeline.normalizacao_texto import sem_marcacao
 
 _RE_URL_BLOCO = re.compile(r'https?://\S+')
 
@@ -44,7 +45,13 @@ _RE_ENUM = re.compile(
 
 
 def _eh_rotulo(linha: str) -> bool:
-    """Linha que anuncia a URL seguinte (rótulo), não conteúdo."""
-    l = linha.strip()
-    return l.endswith(":") or bool(_RE_ENUM.match(l))
+    """Linha que anuncia a URL seguinte (rótulo), não conteúdo.
 
+    A FORMA é reconhecida sobre a projeção sem marcação: "Resgate
+    aqui:" e "**Resgate aqui:**" são o mesmo rótulo, e a segunda
+    forma terminava em `**`, escapando de `endswith(":")`. A linha
+    devolvida ao chamador continua sendo a ORIGINAL — este módulo
+    não transforma texto, apenas nomeia formas.
+    """
+    l = sem_marcacao(linha).strip()
+    return l.endswith(":") or bool(_RE_ENUM.match(l))
