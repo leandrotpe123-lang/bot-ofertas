@@ -128,7 +128,7 @@ def _evidencias(norm: "MensagemNormalizada") -> Evidencias:
     Toda derivação continua acontecendo nos donos de sempre
     (natureza, assunto, adaptadores); esta função apenas reúne.
     """
-    texto = norm.texto_limpo
+    texto = norm.texto_analise
     return Evidencias(
         plataforma      = norm.plat,
         entidade_cupom  = eh_entidade_cupom(norm),
