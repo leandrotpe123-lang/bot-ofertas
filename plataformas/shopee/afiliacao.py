@@ -91,12 +91,16 @@ def _perf_marca(via: str, t0: float = 0.0) -> None:
     if t0:
         _perf_t[via] = _perf_t.get(via, 0.0) + (time.monotonic() - t0)
     n = _perf_c.get("n", 0)
-    if n and n % _PERF_RESUMO == 0:
+    if n and n % _PERF_RESUMO == 0 and n != _perf_c.get("_ult"):
+        _perf_c["_ult"] = n
         medias = " ".join(
             f"{k}={_perf_t[k] / max(_perf_c.get(k, 1), 1) * 1000:.0f}ms"
             for k in sorted(_perf_t)
         )
-        contas = " ".join(f"{k}={v}" for k, v in sorted(_perf_c.items()))
+        contas = " ".join(
+            f"{k}={v}" for k, v in sorted(_perf_c.items())
+            if not k.startswith("_")
+        )
         log_nrm.debug(f"📊 SHP perf | {contas} | media {medias}")
 
 # ── Política de repasse direto (sem afiliação) ────────────────────
