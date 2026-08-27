@@ -41,7 +41,7 @@ e regressão — nunca dentro de uma extração.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Tuple
 
 
