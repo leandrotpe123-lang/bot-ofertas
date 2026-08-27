@@ -61,10 +61,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import config
 from config import _MAX_EDITS
 from pipeline.midia_politica import politica_midia
-from pipeline.score import V_CONTEUDO, V_LEGADO, score_na_escala
+from pipeline.score import V_LEGADO, score_na_escala
 from pipeline.vida_oferta import viva
 from pipeline.reativacao import eh_reativacao
 
