@@ -18,8 +18,10 @@ NÃO faz:
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 import re
+import time
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -36,6 +38,51 @@ _TIMEOUT_HEAD     = 10
 _TIMEOUT_GET      = 20
 _MAX_REDIRECTS    = 20
 _LIMITE_HTML      = 500_000
+# ── Instrumentação TEMPORÁRIA da expansão (SHP_PERF=1) ────────────
+# Decompõe o custo de `desencurtar` em subetapas. Vive aqui, e não
+# na Shopee, porque a expansão é do core — não há como decompô-la de
+# fora. Desligada, cada gancho é um `if` sobre constante de módulo.
+# Remover junto com a instrumentação da Shopee.
+_RES_PERF = os.environ.get("SHP_PERF", "") == "1"
+_RES_RESUMO = 25
+_res_c: dict = {}
+_res_t: dict = {}
+
+
+def _res_agora() -> float:
+    return time.monotonic() if _RES_PERF else 0.0
+
+
+def _res_marca(via: str, t0: float = 0.0) -> None:
+    if not _RES_PERF:
+        return
+    _res_c[via] = _res_c.get(via, 0) + 1
+    if t0:
+        _res_t[via] = _res_t.get(via, 0.0) + (time.monotonic() - t0)
+
+
+def _res_entrada(depth: int) -> None:
+    """Conta chamadas e emite o resumo UMA vez por bloco."""
+    if not _RES_PERF:
+        return
+    _res_c["chamadas"] = _res_c.get("chamadas", 0) + 1
+    if depth == 0:
+        _res_c["raiz"] = _res_c.get("raiz", 0) + 1
+    else:
+        _res_c["recursao"] = _res_c.get("recursao", 0) + 1
+    n = _res_c.get("raiz", 0)
+    if not n or n % _RES_RESUMO or n == _res_c.get("_ult"):
+        return
+    _res_c["_ult"] = n
+    contas = " ".join(
+        f"{k}={v}" for k, v in sorted(_res_c.items())
+        if not k.startswith("_")
+    )
+    medias = " ".join(
+        f"{k}={_res_t[k] / max(_res_c.get(k, 1), 1) * 1000:.0f}ms"
+        for k in sorted(_res_t)
+    )
+    log_nrm.debug(f"📊 RES perf | {contas} | media {medias}")
 
 
 # ── Composição de hosts que exigem GET ────────────────────────────
@@ -101,8 +148,11 @@ async def desencurtar(
     if depth > 0 and nl == "cutt.ly":
         return url
 
+    _res_entrada(depth)
+
     cached = _get_raw(url)
     if cached:
+        _res_marca("cache_hit")
         return cached
 
     hdrs = {
@@ -119,11 +169,13 @@ async def desencurtar(
         )
         if usar_head:
             try:
+                _t = _res_agora()
                 async with sessao.head(
                     url, headers=hdrs, allow_redirects=True,
                     timeout=aiohttp.ClientTimeout(total=_TIMEOUT_HEAD),
                     max_redirects=_MAX_REDIRECTS,
                 ) as r:
+                    _res_marca("head", _t)
                     final = str(r.url)
                     if final != url:
                         _set_raw(url, final)
@@ -131,22 +183,28 @@ async def desencurtar(
             except Exception:
                 pass
 
+        _t = _res_agora()
         async with sessao.get(
             url, headers=hdrs, allow_redirects=True,
             timeout=aiohttp.ClientTimeout(total=_TIMEOUT_GET),
             max_redirects=_MAX_REDIRECTS,
         ) as r:
+            _res_marca("get", _t)
             pos = str(r.url)
             if pos != url:
                 _set_raw(url, pos)
                 return await desencurtar(pos, sessao, depth + 1)
 
+            _t = _res_agora()
             html = await r.text(errors="ignore")
+            _res_marca("download", _t)
             if len(html) > _LIMITE_HTML:
                 _set_raw(url, pos)
                 return pos
 
+            _t = _res_agora()
             soup = BeautifulSoup(html, "html.parser")
+            _res_marca("parse", _t)
 
             ref = soup.find(
                 "meta", attrs={"http-equiv": re.compile("refresh", re.I)}
