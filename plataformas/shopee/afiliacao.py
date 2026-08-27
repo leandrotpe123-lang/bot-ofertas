@@ -20,6 +20,7 @@ import json
 import os
 import time
 from typing import Optional
+from collections import OrderedDict
 from urllib.parse import urlparse
 
 import aiohttp
@@ -50,6 +51,53 @@ _SHP_SECRET = os.environ.get("SHOPEE_SECRET", "")
 _ENDPOINT_AFILIADOS = "https://open-api.affiliate.shopee.com.br/graphql"
 _TENTATIVAS_AFILIACAO = 3
 _TIMEOUT_AFILIACAO = 12
+# ── Instrumentação TEMPORÁRIA de desempenho ───────────────────────
+# Ligada só com SHP_PERF=1; desligada, cada gancho é um `if` sobre
+# uma constante de módulo — custo nulo. Não grava em disco, não faz
+# I/O e não altera nenhum retorno. Remover quando a medição terminar.
+#
+# Acumula em memória e emite um resumo em DEBUG a cada _PERF_RESUMO
+# afiliações, para não inflar o volume de log já existente.
+_PERF = os.environ.get("SHP_PERF", "") == "1"
+_PERF_RESUMO = 25
+_PERF_VISTAS_MAX = 2000
+_perf_c: dict = {}
+_perf_t: dict = {}
+_perf_vistas: OrderedDict = OrderedDict()
+
+
+def _perf_agora() -> float:
+    return time.monotonic() if _PERF else 0.0
+
+
+def _perf_entrada(url: str) -> None:
+    """Conta a chamada e detecta reprocessamento da MESMA URL."""
+    if not _PERF:
+        return
+    _perf_c["n"] = _perf_c.get("n", 0) + 1
+    if url in _perf_vistas:
+        _perf_c["repetida"] = _perf_c.get("repetida", 0) + 1
+    _perf_vistas[url] = 1
+    _perf_vistas.move_to_end(url)
+    if len(_perf_vistas) > _PERF_VISTAS_MAX:
+        _perf_vistas.popitem(last=False)
+
+
+def _perf_marca(via: str, t0: float = 0.0) -> None:
+    """Registra o caminho tomado e, quando t0 vem, o tempo gasto."""
+    if not _PERF:
+        return
+    _perf_c[via] = _perf_c.get(via, 0) + 1
+    if t0:
+        _perf_t[via] = _perf_t.get(via, 0.0) + (time.monotonic() - t0)
+    n = _perf_c.get("n", 0)
+    if n and n % _PERF_RESUMO == 0:
+        medias = " ".join(
+            f"{k}={_perf_t[k] / max(_perf_c.get(k, 1), 1) * 1000:.0f}ms"
+            for k in sorted(_perf_t)
+        )
+        contas = " ".join(f"{k}={v}" for k, v in sorted(_perf_c.items()))
+        log_nrm.debug(f"📊 SHP perf | {contas} | media {medias}")
 
 # ── Política de repasse direto (sem afiliação) ────────────────────
 # Domínio cujas URLs são publicadas como recebidas, sem passar pelo
@@ -179,23 +227,28 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     """
     url = _sanitizar_url(url)
     netloc = _netloc(url)
+    _perf_entrada(url)
 
     # Domínio de repasse direto: devolvido sem afiliação.
     if _bate_dominio(netloc, _REPASSE_DIRETO):
         log_nrm.info(f"↩️ SHP repasse direto: {url[:60]}")
+        _perf_marca("repasse")
         return url
 
     # Consulta ao cache mediado.
     cache = consultar_link(url)
     if cache:
+        _perf_marca("cache")
         return cache
 
     # Expansão de encurtador próprio, quando aplicável.
     url_expandida = url
     if netloc in _ENCURTADORES:
         try:
+            _t = _perf_agora()
             async with config._SEM_HTTP:
                 url_expandida = await desencurtar(url, sessao)
+            _perf_marca("expansao", _t)
         except Exception as e:
             log_nrm.warning(f"⚠️ SHP expansão falhou: {e}")
             return AUSENTE
@@ -204,11 +257,14 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     # chamar o serviço de afiliados. Decidido sobre a URL FINAL.
     fixo = _link_fixo(url_expandida)
     if fixo:
-        return fixo 
+        _perf_marca("fixo")
+        return fixo
 
     # Chamada ao serviço de afiliados, sobre a URL limpa.
     url_limpa = limpa_url(url_expandida)
+    _t = _perf_agora()
     link = await _chamar_servico_afiliados(url_limpa, sessao)
+    _perf_marca("api", _t)
 
     # Mecanismo de recuperação: tenta a URL canônica de produto.
     if not link:
