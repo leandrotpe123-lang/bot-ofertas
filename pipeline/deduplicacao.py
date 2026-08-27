@@ -79,9 +79,6 @@ async def deve_enviar_async(enr: MensagemEnriquecida) -> bool:
     """
     try:
         norm        = enr.norm
-        texto       = norm.texto_limpo
-        plat        = norm.plat
-        ids_globais = norm.ids_globais
         chat        = (norm.chat or "").lower()
 
         # ── TIPO + IDENTIDADE (prontos do enriquecimento) ─────────
