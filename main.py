@@ -29,13 +29,11 @@ import asyncio
 from telethon import events
 from telethon.errors import AuthKeyUnregisteredError, SessionPasswordNeededError
 
-import config
 import globals as g
 
 from client import client
 
 from config import (
-    API_ID, API_HASH, SESSION_STRING,
     GRUPOS_ORIGEM, GRUPO_DESTINO,
     _PIL_OK,
 )
