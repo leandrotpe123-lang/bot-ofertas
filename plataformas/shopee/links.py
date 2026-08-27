@@ -152,19 +152,6 @@ def extrai_identidade(url: str) -> IdentidadeProduto:
     return IdentidadeProduto(tipo_link=TipoLink.BUSCA, id_produto=AUSENTE)
 
 
-# ── Campanha é derivada do classificador único (extrai_identidade) ─
-def _eh_url_campanha(url: str) -> bool:
-    """
-    Consumido pelo core (normalização) p/ popular chaves_campanha.
-    Deriva do classificador ÚNICO: é campanha sse extrai_identidade
-    devolve TipoLink.CAMPANHA. Produto, encurtado, live e busca NÃO
-    são campanha — não fundem famílias. (A precedência POR POST —
-    produto presente suprime campanha — fica em normalizacao; aqui é
-    só a classificação POR URL.)
-    """
-    return extrai_identidade(url).tipo_link == TipoLink.CAMPANHA
-
-
 # ── Capacidade opcional: limpeza de URL ───────────────────────────
 def limpa_url(url: str) -> str:
     """
