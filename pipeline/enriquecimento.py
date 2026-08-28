@@ -29,7 +29,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from logger import log_enr
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.identidade_oferta import identidade_canonica, ancoras, Ancora
 from pipeline.natureza import natureza
@@ -74,7 +73,6 @@ def derivar(norm: MensagemNormalizada) -> MensagemEnriquecida:
         score=calcular_score(norm),
         ancoras=tuple(ancs),
         cupons_novos=0)
-    log_enr.info(f"🔬 P3 id={norm.msg_id} tipo={enr.tipo} canonica={enr.canonica} ofertas={enr.ofertas} cupons={norm.cupons} codes={len(norm.code_entities)} score={enr.score}")
     return enr
 
 
