@@ -217,13 +217,9 @@ async def normalizar(
     f"✅ id={bruta.msg_id} {len(mapa_publicacao)}/{len(converter)} | "
     f"plat={plat_dom or 'none'} cupons={cupons} sku={sku} "
     f"ids_globais={ids_globais} "
-    f"chave_campanha='{chave_campanha}' "
-    f"chaves_campanha={chaves_campanha} "
-    f"ancora_url=…{ancora_url[-60:]} len={len(ancora_url)} "
-    f"encurtadas={n_encurtadas} " 
+    f"encurtadas={n_encurtadas} "
     f"override={is_override}"
-  )
-    _log_cache_stats()
+    )
 
     return MensagemNormalizada(
         msg_id=bruta.msg_id, chat=bruta.chat, texto_limpo=texto_limpo,
