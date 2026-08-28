@@ -122,6 +122,65 @@ def _compor_forca_get() -> frozenset[str]:
 
     return frozenset(composto)
 
+def _compor_encurtadores() -> "frozenset[str] | None":
+    """Hosts declarados como ENCURTADOR pelas plataformas.
+
+    Devolve None quando a composição FALHA — estado distinto de
+    frozenset() vazio, que significa "compôs com sucesso e ninguém
+    declarou". A distinção existe porque aqui a degradação NÃO é
+    segura: um conjunto vazio faria _eh_intermediario parar cedo e
+    devolver um encurtador NÃO RESOLVIDO como se fosse o destino.
+    Em _compor_forca_get a degradação é inofensiva — o fallback GET
+    resolve mesmo assim; aqui não há fallback.
+
+    Fonte e proveniência vivem no registry, como em
+    _compor_forca_get. A falha nunca é silenciosa.
+    """
+    try:
+        from plataformas import registry  # lazy: evita ciclo de import
+        return frozenset(
+            registry.compor_capacidade("encurtadores").keys()
+        )
+    except Exception as e:
+        log_nrm.warning(
+            f"⚠ _compor_encurtadores: falha compondo via registry: {e}"
+        )
+        return None
+
+
+def _eh_intermediario(url: str) -> bool:
+    """O destino ainda é etapa intermediária, ou já é o alvo final?
+
+    Fontes, deliberadamente separadas de encurtadores_forca_get:
+
+      _FORCA_GET_GENERICOS     encurtadores universais do core
+      capacidade encurtadores  o que cada plataforma declara
+
+    NÃO usa a composição de encurtadores_forca_get. Aquele conjunto
+    é quirk de TRANSPORTE ("este host não responde a HEAD") e o
+    contrato permite que contenha host que não seja encurtador — um
+    host de loja que recuse HEAD entraria lá legitimamente, e
+    tratá-lo como intermediário faria a resolução recursar até o
+    teto de profundidade. Verificado host a host nas cinco
+    plataformas: hoje os conjuntos coincidem, mas a relação é
+    factual, não definicional.
+
+    Composição indisponível (None) devolve True: continua resolvendo,
+    que é exatamente o comportamento anterior a esta frente. Falha de
+    infraestrutura degrada para o código de ontem, nunca para uma
+    resposta pior.
+
+    Sem host hardcoded, sem heurística.
+    """
+    nl = _netloc(url)
+    if not nl:
+        return False
+    declarados = _compor_encurtadores()
+    if declarados is None:
+        return True
+    conhecidos = set(_FORCA_GET_GENERICOS) | set(declarados)
+    return any(nl == d or nl.endswith("." + d) for d in conhecidos)
+
 async def desencurtar(
     url: str,
     sessao: aiohttp.ClientSession,
@@ -179,7 +238,31 @@ async def desencurtar(
                     final = str(r.url)
                     if final != url:
                         _set_raw(url, final)
-                        return await desencurtar(final, sessao, depth + 1)
+                        # allow_redirects=True JÁ seguiu a cadeia HTTP
+                        # inteira: `final` é o destino por definição do
+                        # protocolo. Recursar aqui custava um segundo
+                        # HEAD mais um GET com download e parse —
+                        # medido em produção: 285ms por link, 60% do
+                        # custo total da expansão — só para reconfirmar
+                        # o que o HTTP já havia entregue.
+                        #
+                        # A resolução continua quando o destino ainda é
+                        # etapa intermediária declarada por alguma
+                        # plataforma (encurtador que resolve por
+                        # meta-refresh ou JS, e portanto não aparece na
+                        # cadeia de redirecionamento HTTP).
+                        #
+                        # RESSALVA CONHECIDA E ACEITA (caso C10 do
+                        # corpus): se o destino HTTP declarar um
+                        # og:url/canonical DIFERENTE, ele deixa de ser
+                        # seguido. Não ocorreu em nenhum dos 25 links
+                        # reais medidos, e não altera a identidade
+                        # Shopee, que deriva do par (loja, item) no
+                        # caminho e ignora query string.
+                        if _eh_intermediario(final):
+                            return await desencurtar(
+                                final, sessao, depth + 1)
+                        return final
             except Exception:
                 pass
 
@@ -193,7 +276,9 @@ async def desencurtar(
             pos = str(r.url)
             if pos != url:
                 _set_raw(url, pos)
-                return await desencurtar(pos, sessao, depth + 1)
+                if _eh_intermediario(pos):
+                    return await desencurtar(pos, sessao, depth + 1)
+                return pos
 
             _t = _res_agora()
             html = await r.text(errors="ignore")
