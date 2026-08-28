@@ -6,7 +6,7 @@ from typing import List
 
 from telethon.tl.types import MessageMediaWebPage, MessageEntityCode, MessageEntityPre
 
-from logger import log_ing, _ts_str, _idade_str
+from logger import log_ing
 from pipeline.identidade import chat_canonico, username_para_log
 
 _RE_URL = re.compile(r'https?://[^\s\)\]>,"\'<\u200b\u200c\u200d\u2060]+')
@@ -87,14 +87,6 @@ async def ingerir(event) -> MensagemBruta:
             reply_to = event.message.reply_to.reply_to_msg_id or 0
         except Exception:
             pass
-
-    log_ing.info(
-        f"🧭 TL | id={event.message.id} chat={chat} | INGERIDO | "
-        f"ts_orig={_ts_str(event.message.date)} "
-        f"editado_em={_ts_str(getattr(event.message, 'edit_date', None))}")
-    log_ing.debug(
-        f"🧭 TL | id={event.message.id} chat={chat} | "
-        f"idade_ingestao={_idade_str(event.message.date)}")
 
     log_ing.debug(
         f"📩 id={event.message.id} "
