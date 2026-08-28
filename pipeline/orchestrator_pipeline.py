@@ -21,7 +21,7 @@ comportamento.
 from __future__ import annotations
 
 import globals as g
-from logger import log_sys, _idade_str
+from logger import log_sys
 from pipeline.deduplicacao import deve_enviar_async
 from pipeline.enriquecimento import enriquecer_edicao, enriquecer
 from pipeline.identidade import checar_e_marcar
@@ -45,14 +45,6 @@ async def _pipeline(event, is_edit: bool = False) -> None:
     except Exception as e:
         log_sys.error(f"❌ ingestao: {e}")
         return
-
-    log_sys.info(
-        f"🧭 TL | id={msg_id} chat={bruta.chat} | PROC | "
-        f"origem={'edit' if is_edit else 'new'}")
-    log_sys.debug(
-        f"🧭 TL | id={msg_id} chat={bruta.chat} | "
-        f"idade_proc={_idade_str(event.message.date)} "
-        f"q={len(g._buf)} w={g._w_ativos}")
 
     # ── Idempotência (somente novas) — chave (chat canônico, msg_id) ──
     if not is_edit and await checar_e_marcar(f"{bruta.chat}:{msg_id}"):
