@@ -587,6 +587,7 @@ PLATAFORMA = Plataforma(
     extrai_identidade=extrai_identidade,
     afilia=afilia,
     encurtadores_forca_get=_ENCURTADORES_FORCA_GET,
+    encurtadores=_ENCURTADORES,
     hosts_campanha=_HOSTS_CAMPANHA,
     requer_encurtamento=True,
 )
