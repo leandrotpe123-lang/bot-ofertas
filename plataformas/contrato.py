@@ -138,6 +138,22 @@ class Plataforma:
                                  de plataforma. None equivale a
                                  não declarar; o core ignora.
 
+      - encurtadores : frozenset[str] | None. Conjunto de hosts que
+                       são ETAPA INTERMEDIÁRIA de resolução desta
+                       plataforma — encurtadores próprios, cujo
+                       destino ainda precisa ser resolvido. O core
+                       compõe a UNIÃO das contribuições e a utiliza
+                       para decidir se a resolução continua depois de
+                       um redirecionamento. Distinto de
+                       encurtadores_forca_get, que é quirk de
+                       TRANSPORTE (o host não responde a HEAD); este
+                       é conhecimento de RESOLUÇÃO (o host não é o
+                       alvo). Os dois conjuntos coincidem com
+                       frequência, mas a relação é factual, não
+                       definicional — e por isso NÃO devem ser
+                       unidos pelo core. None equivale a não
+                       declarar; o core ignora.
+
       - hosts_campanha : frozenset[str] | None. Conjunto de hosts
                          cujas URLs afiliadas LONGAS caracterizam uma
                          página de campanha desta plataforma (ex.: a
@@ -172,5 +188,6 @@ class Plataforma:
     # Capacidades opcionais
     requer_encurtamento:  bool = False
     encurtadores_forca_get: Optional[frozenset[str]] = None
+    encurtadores: Optional[frozenset[str]] = None
     hosts_campanha:       Optional[frozenset[str]] = None
     sinais_cashback:      Optional[frozenset[str]] = None
