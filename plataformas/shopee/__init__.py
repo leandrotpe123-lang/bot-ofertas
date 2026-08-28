@@ -24,7 +24,6 @@ from .afiliacao import afilia
 from .links import (
     _IDENTIFICADOR,
     _ENCURTADORES,
-    _ENCURTADORES_FORCA_GET,
     extrai_identidade,
     reconhece,
 )
