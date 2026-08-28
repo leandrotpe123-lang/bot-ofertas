@@ -236,6 +236,7 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     # Domínio de repasse direto: devolvido sem afiliação.
     if _bate_dominio(netloc, _REPASSE_DIRETO):
         log_nrm.info(f"↩️ SHP repasse direto: {url[:60]}")
+        registrar_link(url, url, _IDENTIFICADOR)
         _perf_marca("repasse")
         return url
 
@@ -261,6 +262,13 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     # chamar o serviço de afiliados. Decidido sobre a URL FINAL.
     fixo = _link_fixo(url_expandida)
     if fixo:
+        # Alimenta o cache mediado ANTES de sair. Sem isto, o caminho
+        # fixo — 84% do tráfego Shopee medido — pagava a expansão
+        # inteira em toda ocorrência, porque o `registrar_link` do fim
+        # da função nunca era alcançado. Medido: 21 de 25 links neste
+        # caminho, ZERO acertos de cache, 6 URLs repetidas. Usa o
+        # links_cache que já existe e já é persistente em /data.
+        registrar_link(url, fixo, _IDENTIFICADOR)
         _perf_marca("fixo")
         return fixo
 
