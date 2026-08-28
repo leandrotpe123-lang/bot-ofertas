@@ -34,7 +34,7 @@ from telethon.errors import FloodWaitError
 
 from config import GRUPO_DESTINO
 from database import db_registrar_post, db_remover_post, db_ofertas_de_post
-from logger import log_out, log_sys, _idade_str
+from logger import log_out, log_sys
 from pipeline.saida import (
     _enviar_msg,
     _editar_inner_no_sem,
@@ -261,9 +261,5 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
         f"{montada.msg_id}→{sent.id} | "
         f"{montada.plat.upper()} score={score} sku={montada.sku} "
         f"identity={identity}")
-    log_out.debug(
-        f"🧭 TL | id={montada.msg_id} chat={norm.chat if norm else ''} | "
-        f"ENVIADO | dest={sent.id} "
-        f"idade_envio={_idade_str(norm.media_obj.date) if norm else '?'}")
     return True
             
