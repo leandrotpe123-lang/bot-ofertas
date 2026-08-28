@@ -60,10 +60,6 @@ async def _enfileirar(event, is_edit: bool) -> None:
         prio = _PRIO_EDIT if is_edit else _PRIO_NOVA
         heapq.heappush(
             g._buf, (prio, time.monotonic(), next(_seq), event, is_edit))
-        log_sys.info(
-            f"🧭 TL | id={event.message.id} chat={event.chat_id} | FILA_IN | "
-            f"tipo={'edit' if is_edit else 'new'} prio={prio} "
-            f"profundidade={len(g._buf)}")
     g._buf_evt.set()
 
 # ── Workers ───────────────────────────────────────────────────────
@@ -98,12 +94,6 @@ async def _worker_loop() -> None:
                         f"⏱ Expirado | id={event.message.id}"
                     )
                     continue
-                log_sys.info(
-                    f"🧭 TL | id={event.message.id} chat={event.chat_id} | "
-                    f"FILA_OUT | tipo={'edit' if is_edit else 'new'}")
-                log_sys.debug(
-                    f"🧭 TL | id={event.message.id} chat={event.chat_id} | "
-                    f"espera_fila={time.monotonic() - ts:.1f}s")
                 await _pipeline(event, is_edit)
                 
             except Exception as e:
