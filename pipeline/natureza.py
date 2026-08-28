@@ -20,7 +20,6 @@ from pipeline.assunto import (
     eh_post_cupom,
     tem_preco_de_item,
 )
-from logger import log_ded
 from pipeline.normalizacao import MensagemNormalizada
 
 __all__ = ["eh_entidade_cupom", "natureza"]
@@ -44,7 +43,6 @@ def natureza(norm: MensagemNormalizada) -> str:
     ordem é a do MB: o assunto decide primeiro (R2), o fato de
     produto decide depois (R1), e "evento" é o resto.
     """
-    log_ded.info(f"🔬 P2b id={norm.msg_id} assunto_cupom={eh_post_cupom(norm.texto_analise)} ben_loja={beneficio_e_de_loja(norm.texto_analise)} preco_item={tem_preco_de_item(norm.texto_analise)} n_cupons={len(norm.cupons)} ids_globais={norm.ids_globais} camp={len(norm.chaves_campanha)}")
     if eh_entidade_cupom(norm):
         return "cupom"
     if norm.ids_globais:
