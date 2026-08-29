@@ -49,7 +49,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from globals import _log_cache_stats
 from logger import log_nrm
 from pipeline.ingestao import MensagemBruta
 from pipeline.normalizacao_identidade import (
