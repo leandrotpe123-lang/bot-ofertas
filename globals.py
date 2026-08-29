@@ -154,12 +154,3 @@ def _get_final(url: str) -> Optional[Afiliacao]:
     from utils.urls import _cache_key
     with _cache_lock:
         return _final_cache.get(_cache_key(url))
-
-
-def _log_cache_stats():
-    from database import _db_count_links
-    log_db.debug(
-        f"📦 Cache | raw={len(_raw_cache)} final={len(_final_cache)} "
-        f"db_links={_db_count_links()}"
-)
-    
