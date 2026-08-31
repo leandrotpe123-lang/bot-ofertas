@@ -37,7 +37,8 @@ from plataformas.contrato import AUSENTE, Afiliacao
 from utils.cache_links import consultar_link
 from utils.encurtador import encurtar
 from utils.url_resolver import desencurtar
-from utils.urls import _netloc
+from utils.uma_por_vez import uma_por_vez
+from utils.urls import _cache_key, _netloc
 
 __all__ = [
     "LinksParticionados",
@@ -214,7 +215,8 @@ async def resolver_e_afiliar(
     """
     sessao = await _get_session()
     resultados = await asyncio.gather(
-        *[_normalizar_um(url, sessao, msg_id) for url in converter[:50]],
+        *[uma_por_vez(_cache_key(url), _normalizar_um, url, sessao, msg_id)
+          for url in converter[:50]],
         return_exceptions=True,
     )
 
