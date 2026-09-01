@@ -21,7 +21,8 @@ ORDEM: LANE → ORÇAMENTO → pipeline. A lane vem primeiro para que
 eventos da mesma origem enfileirem SEM consumir vaga do orçamento; o
 inverso deixaria as demais origens em inanição.
 
-A lane usa utils.uma_por_vez com namespace próprio `lane|chat|msg_id`.
+A lane usa utils.uma_por_vez com namespace próprio `lane|chat`: a
+unidade de exclusão é a ORIGEM, não a mensagem.
 NÃO usa origem.lock_origem: publicacao.enviar já o adquire e
 asyncio.Lock não é reentrante — reutilizá-lo seria auto-deadlock. A
 chave da lane é derivada de event.chat_id, que é exatamente o que
