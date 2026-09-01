@@ -2,8 +2,8 @@
 Camada 2 — Orquestração.
 
 Responsabilidade única: coordenar o fluxo entre as camadas da pipeline.
-Recebe eventos do Telegram, enfileira com prioridade, gerencia worker
-e chama cada camada na ordem correta.
+Recebe eventos do Telegram, aplica as travas de idade de ADMISSÃO e
+entrega ao dispatch, que chama cada camada na ordem correta.
 
 Camadas chamadas em sequência:
     1. Ingestão       → pipeline.ingestao.ingerir
@@ -23,10 +23,11 @@ NÃO faz:
   - lógica de plataforma
 """
 #
-# Implementação: pipeline.orchestrator_fila (heap, prioridade, TTL,
-# workers) e pipeline.orchestrator_pipeline (sequência das camadas).
+# Implementação: pipeline.orchestrator_fila (teto de admissão, lane por
+# origem, orçamento de execução) e pipeline.orchestrator_pipeline
+# (sequência das camadas).
 # Este arquivo retém a ADMISSÃO — as travas de idade de entrada — e
-# entrega à fila. _enfileirar e _pipeline NÃO são reexportados: são
+# entrega ao dispatch. _enfileirar e _pipeline NÃO são reexportados: são
 # contrato interno da camada.
 from __future__ import annotations
 
@@ -36,7 +37,7 @@ from pipeline.orchestrator_fila import _enfileirar, _iniciar_orchestrator
 from pipeline.vida_oferta import VIDA_OFERTA_S
 
 
-# ── Entrypoint público ────────────────────────────────────────────
+# ── Entrypoint público ───────────────────────────────────────
 async def processar(event, is_edit: bool = False) -> None:
     """Chamado pelos handlers do Telethon em `main.py`."""
     # ── Trava: edição de mensagem antiga (fora da vida da oferta) ─────

@@ -59,7 +59,7 @@ import plataformas
 from web.redirect import _iniciar_servidor_web
 
 
-# ── Health check ──────────────────────────────────────────────────
+# ── Health check ────────────────────────────────────────────────
 async def _health_check() -> None:
     while True:
         await asyncio.sleep(300)
@@ -74,7 +74,7 @@ async def _health_check() -> None:
             log_hc.info(
                 f"💚 links={n_links} | claims={len(g._atomic_mem)} | "
                 f"anti-loop={len(g._IDS_PROC)} | fila={len(g._buf)} "
-                f"w={g._w_ativos} workers={_n_workers()} | "
+                f"w={g._w_ativos} | "
                 f"PIL={'OK' if _PIL_OK else 'OFF'}"
             )
         except Exception as e:
@@ -90,18 +90,6 @@ async def _health_check() -> None:
 # este bloco e as duas chamadas a _log_lifecycle.
 _CICLO = 0
 _TASKS_FUNDO: dict = {}
-
-
-def _n_workers() -> int:
-    """Quantos _worker_loop existem vivos. Prova direta da invariante
-    'reconexão não cria novo worker', sem alterar orchestrator_fila."""
-    try:
-        return sum(
-            1 for t in asyncio.all_tasks()
-            if getattr(t.get_coro(), "__name__", "") == "_worker_loop"
-        )
-    except Exception:
-        return -1
 
 
 def _log_lifecycle(fase: str) -> None:
@@ -124,15 +112,15 @@ def _log_lifecycle(fase: str) -> None:
     )
     log_sys.info(
         f"🔁 LIFECYCLE | fase={fase} ciclo={_CICLO} "
-        f"tasks={n_tasks} handlers={n_handlers} workers={_n_workers()} "
-        f"fundo={vivas} buf_evt={id(g._buf_evt)} "
+        f"tasks={n_tasks} handlers={n_handlers} "
+        f"fundo={vivas} "
         f"sem_http={id(config._SEM_HTTP)} "
         f"sem_envio={id(config._SEM_ENVIO)} db={id_db} "
         f"w={g._w_ativos} fila={len(g._buf)}"
     )
 
 
-# ── Handlers de evento ────────────────────────────────────────────
+# ── Handlers de evento ──────────────────────────────────────────
 def _registrar_handlers(fontes) -> None:
     """
     Registra os handlers SOBRE AS FONTES RESOLVIDAS. Registrar com a
@@ -205,7 +193,7 @@ async def _preparar_processo() -> bool:
 
     # 6. Tarefas de fundo — UMA instância de cada por processo.
     # _iniciar_orchestrator é aguardado, não posto em task: ele apenas
-    # loga e cria o _worker_loop, retornando de imediato. Envolvê-lo
+    # loga os parâmetros operacionais e retorna de imediato. Envolvê-lo
     # numa task criava uma task supérflua que morria em seguida.
     _TASKS_FUNDO["health"] = asyncio.create_task(_health_check())
     await _iniciar_orchestrator()
@@ -244,7 +232,7 @@ async def _run() -> bool:
     return True
 
 
-# ── Loop principal com restart automático ────────────────────────
+# ── Loop principal com restart automático ──────────────────────────
 async def main() -> None:
     plataformas.inicializar()  # boot do catálogo (único por processo)
 
@@ -278,4 +266,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-  
