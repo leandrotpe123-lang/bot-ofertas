@@ -28,9 +28,6 @@ _cache_lock  = Lock()
 _CACHE_LIMIT = 5000
 
 # ── Locks async (inicializados em _init_globals) ──────────────────
-_buf_lck:        Optional[asyncio.Lock]  = None
-_buf_evt:        Optional[asyncio.Event] = None
-_w_lck:          Optional[asyncio.Lock]  = None
 _IDS_LOCK:       Optional[asyncio.Lock]  = None
 _atomic_lck_obj: Optional[asyncio.Lock]  = None
 
@@ -44,7 +41,11 @@ _EXCLUSAO_POOLS_LOCK: Optional[asyncio.Lock] = None
 _session_lock: Optional[asyncio.Lock] = None
 
 # ── Estado do orchestrator ────────────────────────────────────────
-_buf:      list       = []
+# _buf é o conjunto de tasks ADMITIDAS e ainda não concluídas. É a
+# estrutura do teto de admissão (_FILA_MAX) e a referência forte que
+# impede o coletor de descartar uma task em execução. len(_buf) é lido
+# por telemetria; a mutação é exclusiva de pipeline.orchestrator_fila.
+_buf:      set        = set()
 _coal:     dict       = {}
 _w_ativos: int        = 0
 _IDS_PROC: set        = set()
@@ -89,11 +90,11 @@ def _init_globals():
 
       - Locks asyncio (que começam None): tem que reassignar com
         asyncio.Lock(). Por isso TODOS os consumidores DEVEM usar
-        `import globals as g` + `g._buf_lck` (acessam dinamicamente).
+        `import globals as g` + `g._IDS_LOCK` (acessam dinamicamente).
 
       - _w_ativos (int): mantém reassign — int é imutável.
     """
-    global _buf_lck, _buf_evt, _w_lck, _w_ativos
+    global _w_ativos
     global _IDS_LOCK, _atomic_lck_obj
     global _EXCLUSAO_POOLS_LOCK, _session_lock
     import config as _cfg
@@ -108,9 +109,6 @@ def _init_globals():
     _w_ativos = 0
 
     # Locks asyncio
-    _buf_lck            = asyncio.Lock()
-    _buf_evt            = asyncio.Event()
-    _w_lck              = asyncio.Lock()
     _IDS_LOCK           = asyncio.Lock()
     _atomic_lck_obj     = asyncio.Lock()
     _EXCLUSAO_POOLS_LOCK = asyncio.Lock()  

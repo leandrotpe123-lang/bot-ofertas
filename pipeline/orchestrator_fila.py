@@ -1,113 +1,128 @@
-"""Camada 2 — Orquestração / Fila e workers.
+"""Camada 2 — Orquestração / Admissão e dispatch.
 
-Responsabilidade ÚNICA: a máquina de concorrência — heap com
-prioridade, TTL de fila, pool de workers e o start do loop. Detém os
-parâmetros operacionais e é a única a MUTAR g._buf e g._w_ativos.
+Responsabilidade ÚNICA: a máquina de concorrência — teto de admissão,
+lane sequencial por origem, orçamento global de execução e o start do
+dispatch. Detém os parâmetros operacionais e é a única a MUTAR g._buf
+e g._w_ativos.
+
+DOIS LIMITES, RESPONSABILIDADES DIFERENTES — NÃO CONFUNDIR:
+  ADMISSÃO ≤ _FILA_MAX (200)   quantos eventos podem existir pendentes
+                               em memória. Protege contra crescimento
+                               ilimitado de tasks.
+  EXECUÇÃO ≤ _ORCAMENTO (16)   quantos pipelines rodam ao mesmo tempo.
+                               Para-choque de execução.
+
+O orçamento NÃO substitui a admissão. Medido: numa rajada de mil
+eventos da MESMA origem, a lane serializa em UM pipeline e ocupa UMA
+única vaga do orçamento, enquanto as mil tasks existem juntas. Quem
+contém isso é o teto de admissão, herdado da fila anterior.
+
+ORDEM: LANE → ORÇAMENTO → pipeline. A lane vem primeiro para que
+eventos da mesma origem enfileirem SEM consumir vaga do orçamento; o
+inverso deixaria as demais origens em inanição.
+
+A lane usa utils.uma_por_vez com namespace próprio `lane|chat|msg_id`.
+NÃO usa origem.lock_origem: publicacao.enviar já o adquire e
+asyncio.Lock não é reentrante — reutilizá-lo seria auto-deadlock. A
+chave da lane é derivada de event.chat_id, que é exatamente o que
+identidade.chat_canonico devolve, então lane e lock de origem falam da
+mesma origem por caminhos independentes.
+
+A lane é o PRIMEIRO await da corrotina despachada. Nenhum await a
+precede, logo a task corre síncrona até o lock e a ordem de aquisição
+é a ordem de criação da task: eventos da mesma origem preservam ordem.
 
 NÃO conhece a sequência das camadas: delega a _pipeline, em
 pipeline.orchestrator_pipeline. Não importa pipeline.orchestrator.
 
 CONTRATO INTERNO DA CAMADA — LEIA ANTES DE ALTERAR:
   _enfileirar tem prefixo `_`, mas é chamado por `processar` em
-  pipeline.orchestrator. Underscore PRESERVADO na extração — dívida
-  registrada. _iniciar_orchestrator é reexportado pela fachada e
-  consumido por main.py.
-
-Extraído de pipeline.orchestrator sem qualquer alteração de
-comportamento.
+  pipeline.orchestrator. Nome e assinatura PRESERVADOS — renomear
+  estaria fora do escopo desta frente. _iniciar_orchestrator é
+  reexportado pela fachada e consumido por main.py.
 """
 from __future__ import annotations
 
 import asyncio
-import heapq
-import itertools
-import time
 
 import globals as g
 from logger import log_sys
 from pipeline.orchestrator_pipeline import _pipeline
 from pipeline.vida_oferta import VIDA_OFERTA_S
+from utils.uma_por_vez import uma_por_vez
 
 
 # ── Parâmetros operacionais ───────────────────────────────────────
-_WORKERS_MAX = 4
-_FILA_MAX    = 200
-_TTL_FILA_S  = 60
+_FILA_MAX   = 200   # teto de ADMISSÃO — eventos pendentes em memória
+_ORCAMENTO  = 16    # teto de EXECUÇÃO — pipelines simultâneos
 
-# Prioridades da heap (menor = mais prioritário).
-# Edições são correção do divulgador e processam antes de novas.
-_PRIO_EDIT = 0
-_PRIO_NOVA = 1
-
-
-# Desempate estável da heap. `event` (telethon events.NewMessage.Event)
-# não implementa __lt__: com prio E ts idênticos, o heapq avançaria para
-# ele e levantaria TypeError, perdendo a mensagem silenciosamente. O
-# contador é sempre distinto e crescente, então a comparação nunca passa
-# dele. Ordem preservada: itens com prio+ts distintos seguem decididos
-# por prio e ts, exatamente como antes; o contador só arbitra empates,
-# e nesse caso aplica FIFO (o que chegou primeiro sai primeiro).
-# next() é chamado sob g._buf_lck, e é atômico em CPython.
-_seq = itertools.count()
+# Semáforo de nível de módulo, criado no import. Precedente na casa:
+# origem._LOCKS_LCK faz o mesmo e roda em produção. Fora de globals de
+# propósito: _init_globals pertence ao lifecycle e não é escopo desta
+# frente. O processo tem um único event loop; a reconexão acontece
+# dentro dele.
+_orcamento = asyncio.Semaphore(_ORCAMENTO)
 
 
-# ── Fila de entrada ───────────────────────────────────────────────
+# ── Execução de um evento ─────────────────────────────────────────
+async def _executar(event, is_edit: bool) -> None:
+    """
+    Já dentro da lane da origem. Toma vaga do orçamento e roda o
+    pipeline. g._w_ativos conta pipelines EM EXECUÇÃO — o incremento e
+    o decremento são síncronos, atômicos no event loop de thread única.
+    """
+    async with _orcamento:
+        g._w_ativos += 1
+        try:
+            await _pipeline(event, is_edit)
+        finally:
+            g._w_ativos -= 1
+
+
+async def _blindado(event, is_edit: bool) -> None:
+    """
+    Isolamento por evento: uma falha não contamina as demais tasks.
+    Substitui o try/except que vivia no laço do worker. CancelledError
+    é BaseException e é repassada — cancelamento não é falha.
+    """
+    try:
+        await _executar(event, is_edit)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        log_sys.error(f"❌ Worker: {e}", exc_info=True)
+
+
+# ── Admissão e dispatch ───────────────────────────────────────────
 async def _enfileirar(event, is_edit: bool) -> None:
-    async with g._buf_lck:
-        if len(g._buf) >= _FILA_MAX:
-            log_sys.warning(f"⚠️ Fila cheia | id={event.message.id}")
-            return
-        prio = _PRIO_EDIT if is_edit else _PRIO_NOVA
-        heapq.heappush(
-            g._buf, (prio, time.monotonic(), next(_seq), event, is_edit))
-    g._buf_evt.set()
+    """
+    Admite o evento e despacha imediatamente. Não há fila, heap,
+    prioridade nem espera artificial: a coordenação é feita pela lane
+    e pelo orçamento.
 
-# ── Workers ───────────────────────────────────────────────────────
-async def _worker_loop() -> None:
-    while True:
-        await g._buf_evt.wait()
-        while True:
-            item = None
-            async with g._buf_lck:
-                if g._buf:
-                    item = heapq.heappop(g._buf)
-                else:
-                    g._buf_evt.clear()
-                    break
-            if item is None:
-                break
+    O teto de admissão preserva a proteção que existia na fila: sem
+    ele, uma rajada criaria uma task por evento sem limite algum.
+    len(g._buf) e a inserção são síncronos — não há await entre a
+    verificação e o add, logo a checagem é atômica.
+    """
+    if len(g._buf) >= _FILA_MAX:
+        log_sys.warning(f"⚠️ Fila cheia | id={event.message.id}")
+        return
 
-            prio, ts, _seq_i, event, is_edit = item
+    chave = f"lane|{event.chat_id}|{event.message.id}"
+    tarefa = asyncio.create_task(uma_por_vez(chave, _blindado, event, is_edit))
 
-            async with g._w_lck:
-                if g._w_ativos >= _WORKERS_MAX:
-                    async with g._buf_lck:
-                        heapq.heappush(g._buf, item)
-                        g._buf_evt.set()
-                    await asyncio.sleep(0.5)
-                    break
-                g._w_ativos += 1
-
-            try:
-                if time.monotonic() - ts > _TTL_FILA_S:
-                    log_sys.warning(
-                        f"⏱ Expirado | id={event.message.id}"
-                    )
-                    continue
-                await _pipeline(event, is_edit)
-                
-            except Exception as e:
-                log_sys.error(f"❌ Worker: {e}", exc_info=True)
-            finally:
-                async with g._w_lck:
-                    g._w_ativos -= 1
+    # Referência forte obrigatória: create_task sem referência permite
+    # que o coletor descarte a task no meio da execução. O callback
+    # remove a entrada quando a task termina.
+    g._buf.add(tarefa)
+    tarefa.add_done_callback(g._buf.discard)
 
 
 async def _iniciar_orchestrator() -> None:
     from config import _MAX_EDITS  # noqa: log only
     log_sys.info(
-        f"🎛 Orchestrator | workers={_WORKERS_MAX} fila={_FILA_MAX} "
+        f"🎛 Orchestrator | orcamento={_ORCAMENTO} admissao={_FILA_MAX} "
         f"vida_oferta={VIDA_OFERTA_S}s "
         f"max_edits={_MAX_EDITS}"
     )
-    asyncio.create_task(_worker_loop())
