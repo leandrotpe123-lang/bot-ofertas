@@ -97,8 +97,9 @@ async def _blindado(event, is_edit: bool) -> None:
 async def _enfileirar(event, is_edit: bool) -> None:
     """
     Admite o evento e despacha imediatamente. Não há fila, heap,
-    prioridade nem espera artificial: a coordenação é feita pela lane
-    e pelo orçamento.
+    prioridade nem espera artificial: eventos da mesma origem são
+    serializados pela lane; origens diferentes podem executar em paralelo,
+    respeitando o orçamento global.
 
     O teto de admissão preserva a proteção que existia na fila: sem
     ele, uma rajada criaria uma task por evento sem limite algum.
@@ -109,7 +110,7 @@ async def _enfileirar(event, is_edit: bool) -> None:
         log_sys.warning(f"⚠️ Fila cheia | id={event.message.id}")
         return
 
-    chave = f"lane|{event.chat_id}|{event.message.id}"
+    chave = f"lane|{event.chat_id}"
     tarefa = asyncio.create_task(uma_por_vez(chave, _blindado, event, is_edit))
 
     # Referência forte obrigatória: create_task sem referência permite
