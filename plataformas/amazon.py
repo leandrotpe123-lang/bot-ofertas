@@ -280,16 +280,16 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
             return AUSENTE
 
     # Caminho que não comporta afiliação: devolve forma limpa.
-    identidade = extrai_identidade(url)
+    identidade = extrai_identidade(url_expandida)
     if identidade.tipo_link == TipoLink.INVALIDO:
-        afiliada = _construir_url_afiliada(url)
+        afiliada = _construir_url_afiliada(url_expandida)
         if afiliada:
             registrar_link(url, afiliada, _IDENTIFICADOR)
             return afiliada
         return AUSENTE
 
     # Construção da URL afiliada.
-    afiliada = _construir_url_afiliada(url)
+    afiliada = _construir_url_afiliada(url_expandida)
     if not afiliada or "amazon" not in _netloc(afiliada):
         log_nrm.warning(f"⚠️ AMZ afiliação inválida: {afiliada}")
         return AUSENTE
