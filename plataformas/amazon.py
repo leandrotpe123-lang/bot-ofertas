@@ -270,10 +270,11 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         return cache
 
     # Expansão de encurtador próprio, quando aplicável.
+    url_expandida = url
     if _netloc(url) in _ENCURTADORES:
         try:
             async with config._SEM_HTTP:
-                url = await desencurtar(url, sessao)
+                url_expandida = await desencurtar(url, sessao)
         except Exception as e:
             log_nrm.warning(f"⚠️ AMZ expansão falhou: {e}")
             return AUSENTE
