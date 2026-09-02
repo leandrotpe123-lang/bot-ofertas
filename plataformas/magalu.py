@@ -489,6 +489,7 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     resultar numa URL da Magalu, devolve AUSENTE.
     """
     url = _sanitizar_url(url)
+    url_original = url
 
     cache = consultar_link(url)
     if cache:
@@ -574,7 +575,7 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
             log_nrm.warning("⚠️ MGL slug não confirmado — descarta")
             return AUSENTE
 
-    registrar_link(url, afiliada, _IDENTIFICADOR)
+    registrar_link(url_original, afiliada, _IDENTIFICADOR)
     log_nrm.info("✅ MGL afiliada (longa)")
     return afiliada
 
