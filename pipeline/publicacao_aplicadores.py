@@ -37,7 +37,7 @@ from database import db_registrar_post, db_remover_post, db_ofertas_de_post
 from logger import log_out, log_sys
 from pipeline.saida import (
     _enviar_msg,
-    _editar_inner_no_sem,
+    editar_msg,
     _substituir_post_com_midia,
 )
 from pipeline.score import V_CONTEUDO
@@ -57,7 +57,7 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
     intacta — e o fallback de substituição está desarmado (decidir() já
     rebaixou d.permite_substituir), porque repostar apagaria a imagem
     boa de forma irrecuperável."""
-    ok = await _editar_inner_no_sem(
+    ok = await editar_msg(
         msg_id_dest, montada.texto, montada.imagem,
         exigir_imagem=d.exigir_imagem, trocar_midia=d.trocar_midia)
     if ok:
@@ -129,7 +129,7 @@ async def _aplicar_sincronizacao(montada, norm, score, estado, msg_id_dest,
     aqui o vazamento principal: um líder de mídia ruim editando a
     própria mensagem sobrescrevia a imagem boa publicada, porque
     montada.imagem ia direto para a primitiva sem consulta nenhuma."""
-    ok = await _editar_inner_no_sem(
+    ok = await editar_msg(
         msg_id_dest, montada.texto, montada.imagem, exigir_imagem=False,
         trocar_midia=d.trocar_midia)
     if not ok:
@@ -167,7 +167,7 @@ async def _aplicar_upgrade_midia(montada, norm, d, estado, msg_id_dest,
     familia.unir(msg_id, []): é operação de domínio, e unir com lista
     vazia seria um leitor disfarçado com semântica de escrita."""
     texto_atual = estado.get("texto", "") or montada.texto
-    ok = await _editar_inner_no_sem(
+    ok = await editar_msg(
         msg_id_dest, texto_atual, montada.imagem,
         exigir_imagem=False, trocar_midia=True)
     if not ok:

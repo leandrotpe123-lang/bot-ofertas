@@ -5,7 +5,7 @@
 # decidido) e pipeline.publicacao_log (observabilidade da decisão).
 #
 # Este arquivo retém a ORQUESTRAÇÃO: a cadeia de locks
-# (origem → identidade → post → semáforo de envio), a chamada a
+# (origem → identidade → post), a chamada a
 # decidir() sob o lock do post, e o roteamento para o aplicador.
 # A DECISÃO mora aqui; a EXECUÇÃO mora nos aplicadores.
 #
@@ -16,7 +16,6 @@ import contextlib
 import time
 from typing import Optional
 
-import config
 from database import db_get_post
 from logger import log_out
 from pipeline.decisao import decidir
@@ -92,102 +91,101 @@ async def _enviar_inner(montada: MensagemMontada,
     """Corpo real de enviar() — dentro dos locks de oferta. Acha o post
     parente por sobreposição, trava o post candidato, re-verifica sob o
     lock e decide pelo score (decisão intocada)."""
-    async with config._SEM_ENVIO:
-        identity = ofertas[0] if ofertas else None   # rótulo de log
+    identity = ofertas[0] if ofertas else None   # rótulo de log
 
-        if norm is not None and (ofertas or dest_fix):
-            # Alvo FIXADO pelo vínculo de Origem (I2): edit de origem
-            # vinculada nunca re-casa por conteúdo em outro post.
-            msg_id_rel = familia.post_da_familia(ofertas, dest_fix)
-            if msg_id_rel is not None:
-                post_lock = await exclusao.lock_post(msg_id_rel)
-                async with post_lock:
-                    estado = db_get_post(msg_id_rel)   # re-verifica sob o lock
-                    agora = time.time()
-                    d = decidir(norm, montada, score, estado, agora, is_edit)
-                    if d.acao != "PUBLICAR":
-                        if norm is not None:
-                            # Encontro registra (I1): edits futuros desta
-                            # origem roteiam direto ao mesmo post lógico.
-                            origem.registrar(norm.chat, norm.msg_id, msg_id_rel)
-                        identity = f"post:{msg_id_rel}"
-                        _log_decisao(d, montada, norm, estado, score, agora, identity)
+    if norm is not None and (ofertas or dest_fix):
+        # Alvo FIXADO pelo vínculo de Origem (I2): edit de origem
+        # vinculada nunca re-casa por conteúdo em outro post.
+        msg_id_rel = familia.post_da_familia(ofertas, dest_fix)
+        if msg_id_rel is not None:
+            post_lock = await exclusao.lock_post(msg_id_rel)
+            async with post_lock:
+                estado = db_get_post(msg_id_rel)   # re-verifica sob o lock
+                agora = time.time()
+                d = decidir(norm, montada, score, estado, agora, is_edit)
+                if d.acao != "PUBLICAR":
+                    if norm is not None:
+                        # Encontro registra (I1): edits futuros desta
+                        # origem roteiam direto ao mesmo post lógico.
+                        origem.registrar(norm.chat, norm.msg_id, msg_id_rel)
+                    identity = f"post:{msg_id_rel}"
+                    _log_decisao(d, montada, norm, estado, score, agora, identity)
 
-                        if d.acao == "IGNORAR" and d.na_janela:
-                            # [F6] APRENDER ≠ EVOLUIR. A mensagem já
-                            # casou validamente com este post (linha
-                            # 110) e o ciclo está vivo; se ela trouxe
-                            # âncora nova, a FAMÍLIA aprende — o texto
-                            # vencedor não muda. Sem isto a âncora se
-                            # perde e o próximo grupo que a use abre um
-                            # post duplicado.
-                            # A guarda `na_janela` é obrigatória: post
-                            # com ciclo encerrado não absorve nada.
-                            familia.absorver(msg_id_rel, ofertas)
+                    if d.acao == "IGNORAR" and d.na_janela:
+                        # [F6] APRENDER ≠ EVOLUIR. A mensagem já
+                        # casou validamente com este post (linha
+                        # 110) e o ciclo está vivo; se ela trouxe
+                        # âncora nova, a FAMÍLIA aprende — o texto
+                        # vencedor não muda. Sem isto a âncora se
+                        # perde e o próximo grupo que a use abre um
+                        # post duplicado.
+                        # A guarda `na_janela` é obrigatória: post
+                        # com ciclo encerrado não absorve nada.
+                        familia.absorver(msg_id_rel, ofertas)
 
-                        
-                        if d.acao == "IGNORAR" and d.trocar_midia:
-                            # [FASE 2] O texto não evolui, mas a mídia
-                            # pode. Uma decisão não mata a outra.
-                            return await _aplicar_upgrade_midia(
-                                montada, norm, d, estado, msg_id_rel,
-                                identity)
+                    
+                    if d.acao == "IGNORAR" and d.trocar_midia:
+                        # [FASE 2] O texto não evolui, mas a mídia
+                        # pode. Uma decisão não mata a outra.
+                        return await _aplicar_upgrade_midia(
+                            montada, norm, d, estado, msg_id_rel,
+                            identity)
 
-                        if d.acao == "RENASCER":
-                            # Reativação em ciclo vivo → post NOVO. Absorve a
-                            # UNIÃO (família antiga + candidato) para que o
-                            # INSERT OR REPLACE em oferta_index reaponte TODAS
-                            # as âncoras ao post novo — o antigo é orfanado do
-                            # índice e vira histórico (a mensagem antiga
-                            # permanece no canal, por decisão de negócio).
-                            ofertas_renasce = familia.unir(msg_id_rel, ofertas)
-                            log_out.info(
-                                f"🐣 TL | id={montada.msg_id} chat={norm.chat} | "
-                                f"RENASCIMENTO | supersede={msg_id_rel}")
-                            return await _aplicar_novo_envio(
-                                montada, norm, ofertas_renasce, score,
-                                identity)
+                    if d.acao == "RENASCER":
+                        # Reativação em ciclo vivo → post NOVO. Absorve a
+                        # UNIÃO (família antiga + candidato) para que o
+                        # INSERT OR REPLACE em oferta_index reaponte TODAS
+                        # as âncoras ao post novo — o antigo é orfanado do
+                        # índice e vira histórico (a mensagem antiga
+                        # permanece no canal, por decisão de negócio).
+                        ofertas_renasce = familia.unir(msg_id_rel, ofertas)
+                        log_out.info(
+                            f"🐣 TL | id={montada.msg_id} chat={norm.chat} | "
+                            f"RENASCIMENTO | supersede={msg_id_rel}")
+                        return await _aplicar_novo_envio(
+                            montada, norm, ofertas_renasce, score,
+                            identity)
 
-                        if d.acao == "SINCRONIZAR":
-                            # Edição do líder → espelha o conteúdo no post,
-                            # SEM incrementar edit_count (não é evolução).
-                            # Preserva família (união), líder, janela e o
-                            # próprio contador.
-                            ofertas_familia = familia.unir(msg_id_rel, ofertas)
-                            return await _aplicar_sincronizacao(
-                                montada, norm, score, estado, msg_id_rel,
-                                ofertas_familia, identity, d)
+                    if d.acao == "SINCRONIZAR":
+                        # Edição do líder → espelha o conteúdo no post,
+                        # SEM incrementar edit_count (não é evolução).
+                        # Preserva família (união), líder, janela e o
+                        # próprio contador.
+                        ofertas_familia = familia.unir(msg_id_rel, ofertas)
+                        return await _aplicar_sincronizacao(
+                            montada, norm, score, estado, msg_id_rel,
+                            ofertas_familia, identity, d)
 
-                        if d.acao != "EVOLUIR":
-                            log_out.info(
-                                f"🧭 TL | id={montada.msg_id} chat={norm.chat} | "
-                                f"DESCARTE | motivo={d.motivo}")
-                            return True
+                    if d.acao != "EVOLUIR":
+                        log_out.info(
+                            f"🧭 TL | id={montada.msg_id} chat={norm.chat} | "
+                            f"DESCARTE | motivo={d.motivo}")
+                        return True
 
-                        msg_id_dest = estado["msg_id_dest"]
-                        edit_count  = estado.get("edit_count", 0) or 0
+                    msg_id_dest = estado["msg_id_dest"]
+                    edit_count  = estado.get("edit_count", 0) or 0
 
-                        # UNIÃO DA FAMÍLIA — regra de negócio: ao evoluir, as
-                        # ofertas registradas passam a ser a UNIÃO das do post
-                        # existente com as da mensagem (X + Y). Lê o post ANTES
-                        # de remover/regravar; a família só cresce, então a união
-                        # é sempre superconjunto do post e nada legítimo se perde.
-                        # Vale para os dois caminhos abaixo (edição e
-                        # substituição), que partem do mesmo msg_id_dest. Sem
-                        # isto, o registro gravaria só as ofertas da mensagem e
-                        # descartaria as exclusivas do post — quebrando a
-                        # conectividade e duplicando a família.
-                        ofertas_familia = familia.unir(msg_id_dest, ofertas)
+                    # UNIÃO DA FAMÍLIA — regra de negócio: ao evoluir, as
+                    # ofertas registradas passam a ser a UNIÃO das do post
+                    # existente com as da mensagem (X + Y). Lê o post ANTES
+                    # de remover/regravar; a família só cresce, então a união
+                    # é sempre superconjunto do post e nada legítimo se perde.
+                    # Vale para os dois caminhos abaixo (edição e
+                    # substituição), que partem do mesmo msg_id_dest. Sem
+                    # isto, o registro gravaria só as ofertas da mensagem e
+                    # descartaria as exclusivas do post — quebrando a
+                    # conectividade e duplicando a família.
+                    ofertas_familia = familia.unir(msg_id_dest, ofertas)
 
-                        return await _aplicar_evolucao(
-                            montada, norm, d, estado, msg_id_dest,
-                            edit_count, ofertas_familia, identity)
-                    # d.acao == PUBLICAR: estado sumiu sob o lock (substituído/
-                    # limpo por outra task) → cai para NOVO ENVIO
+                    return await _aplicar_evolucao(
+                        montada, norm, d, estado, msg_id_dest,
+                        edit_count, ofertas_familia, identity)
+                # d.acao == PUBLICAR: estado sumiu sob o lock (substituído/
+                # limpo por outra task) → cai para NOVO ENVIO
 
-        # ═════════════════════════════════════════════════════════════
-        # NOVO ENVIO (sem post parente vivo)
-        # ═════════════════════════════════════════════════════════════
-        return await _aplicar_novo_envio(
-            montada, norm, ofertas, score, identity)
+    # ═════════════════════════════════════════════════════════════
+    # NOVO ENVIO (sem post parente vivo)
+    # ═════════════════════════════════════════════════════════════
+    return await _aplicar_novo_envio(
+        montada, norm, ofertas, score, identity)
  

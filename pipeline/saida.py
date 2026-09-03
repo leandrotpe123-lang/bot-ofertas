@@ -14,6 +14,38 @@ NÃO faz (é do orquestrador, publicacao.py):
 _SEM_ENVIO é consumido aqui (declarado em config, instanciado em
 globals._init_globals): não é estado de negócio, é controle de
 throughput / proteção de FloodWait do Telegram.
+
+[E3.3] ESTE MÓDULO É O ÚNICO DONO DO _SEM_ENVIO
+------------------------------------------------
+O semáforo limita RECURSO TELEGRAM. CONSISTÊNCIA DE DOMÍNIO é dos
+locks (origem → identidade → post) e não passa por aqui. As duas
+responsabilidades não se misturam.
+
+Por isso a aquisição vive na FRONTEIRA DE I/O, e não a montante:
+decisão, banco, trabalho síncrono e espera por lock_post não podem
+consumir vaga de envio. Antes da E3.3 a aquisição ficava em
+publicacao._enviar_inner, acima de decidir() e do lock do post —
+caminhos que terminam em DESCARTE gastavam vaga sem fazer uma única
+chamada ao Telegram.
+
+CONTRATO DE AQUISIÇÃO — uma operação de saída, UMA aquisição:
+
+  PÚBLICAS (ADQUIREM o semáforo; por isso NUNCA podem ser chamadas
+  de dentro de outra pública):
+      _enviar_msg
+      editar_msg
+      editar_por_id               (herdada; mesma família de editar_msg)
+      _substituir_post_com_midia
+
+  INTERNAS (NÃO adquirem; uso EXCLUSIVO de dentro de uma pública):
+      _enviar_msg_no_sem
+      _editar_inner_no_sem
+      _substituir_inner_no_sem
+
+asyncio.Semaphore NÃO é reentrante — e com 3 vagas a reentrada não
+falha na hora: ela só trava quando 3 tarefas estiverem aninhadas ao
+mesmo tempo. É um deadlock que aparece somente sob carga. Daí a regra
+ser ESTRUTURAL (duas famílias de nomes) e não uma recomendação.
 """
 from __future__ import annotations
 
@@ -29,7 +61,12 @@ from pipeline.montagem import MensagemMontada
 
 
 # ── Envio ─────────────────────────────────────────────────────────
-async def _enviar_msg(texto: str, img) -> object:
+async def _enviar_msg_no_sem(texto: str, img) -> object:
+    """Envia SEM adquirir _SEM_ENVIO. Use APENAS de dentro de uma
+    função pública que já segura o semáforo.
+
+    Os fallbacks internos (send_file+caption → send_file sem caption →
+    send_message) fazem parte DESTA operação e ficam sob a mesma vaga."""
     from client import client
     if img:
         if len(texto) <= 1024:
@@ -55,13 +92,25 @@ async def _enviar_msg(texto: str, img) -> object:
                                      parse_mode="md", link_preview=True)
 
 
+async def _enviar_msg(texto: str, img) -> object:
+    """Envio PÚBLICO — UMA aquisição do _SEM_ENVIO cobrindo a operação
+    inteira, inclusive os fallbacks internos.
+
+    O laço de re-tentativa de _aplicar_novo_envio fica FORA: cada
+    tentativa envia um payload DIFERENTE (a 2ª degrada para img=None),
+    logo é outra operação de saída, com a própria aquisição. Nunca
+    duas ao mesmo tempo, nunca aninhadas."""
+    async with config._SEM_ENVIO:
+        return await _enviar_msg_no_sem(texto, img)
+
+
 # ─────────────────────────────────────────────────────────────────
 # Edição sem deadlock de semáforo.
 # asyncio.Semaphore não é reentrante: se uma função que já segura
-# _SEM_ENVIO chamar editar_por_id (que tenta o mesmo semáforo), trava.
+# _SEM_ENVIO chamar uma pública (que tenta o mesmo semáforo), trava.
 # Por isso há duas versões:
 #   - _editar_inner_no_sem: SEM semáforo, uso interno apenas
-#   - editar_por_id:        COM semáforo, callers externos
+#   - editar_msg:           COM semáforo, callers externos
 # ─────────────────────────────────────────────────────────────────
 async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
                                 imagem_nova=None,
@@ -139,6 +188,24 @@ async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
     return False
 
 
+async def editar_msg(msg_id_dest: int, texto_novo: str,
+                     imagem_nova=None,
+                     exigir_imagem: bool = False,
+                     trocar_midia: bool = True) -> bool:
+    """Edição PÚBLICA — UMA aquisição do _SEM_ENVIO cobrindo a operação
+    inteira: as até 3 tentativas, o backoff exponencial e o sleep de
+    FloodWait desta edição ficam TODOS sob a mesma vaga (regra: o
+    semáforo limita o I/O e o retry/FloodWait daquela operação).
+
+    Assinatura idêntica à de _editar_inner_no_sem: esta função só
+    acrescenta a aquisição, não interpreta nem altera parâmetro algum."""
+    async with config._SEM_ENVIO:
+        return await _editar_inner_no_sem(
+            msg_id_dest, texto_novo, imagem_nova,
+            exigir_imagem=exigir_imagem, trocar_midia=trocar_midia
+        )
+
+
 async def editar_por_id(msg_id_dest: int, texto_novo: str,
                         imagem_nova=None) -> bool:
     """Versão pública (com semáforo) pra callers externos que não
@@ -154,10 +221,14 @@ async def editar_por_id(msg_id_dest: int, texto_novo: str,
 # Se delete falha, ABORTA (retorna None). O caller cai pra edição comum
 # (que não duplica). Sem essa proteção, o canal duplicaria.
 # ─────────────────────────────────────────────────────────────────
-async def _substituir_post_com_midia(
+async def _substituir_inner_no_sem(
     msg_id_dest_antigo: int, montada: MensagemMontada,
 ) -> Optional[object]:
-    """Apaga a mensagem antiga e reenvia com a imagem nova."""
+    """Apaga a mensagem antiga e reenvia com a imagem nova.
+
+    SEM adquirir _SEM_ENVIO: usa _enviar_msg_no_sem no reenvio, porque
+    a vaga já é segurada pela pública _substituir_post_com_midia e
+    readquiri-la aqui seria aninhamento."""
     from client import client
     try:
         # 1. Apaga a mensagem antiga
@@ -191,7 +262,7 @@ async def _substituir_post_com_midia(
         sent = None
         for t in range(1, 4):
             try:
-                sent = await _enviar_msg(montada.texto, montada.imagem)
+                sent = await _enviar_msg_no_sem(montada.texto, montada.imagem)
                 break
             except FloodWaitError as e:
                 if e.seconds > 60:
@@ -214,3 +285,21 @@ async def _substituir_post_com_midia(
     except Exception as e:
         log_out.error(f"❌ _substituir_post_com_midia: {e}", exc_info=True)
         return None
+
+
+async def _substituir_post_com_midia(
+    msg_id_dest_antigo: int, montada: MensagemMontada,
+) -> Optional[object]:
+    """Substituição PÚBLICA — UMA aquisição do _SEM_ENVIO cobrindo
+    DELETE + REPOST como UMA ÚNICA operação de Telegram.
+
+    A vaga NÃO é solta entre o delete e o reenvio. Soltá-la alargaria a
+    janela em que o post já foi apagado e ainda não foi reenviado, pelo
+    tempo de espera por uma vaga — regressão inaceitável.
+
+    A SEMÂNTICA do fallback é preservada byte a byte: quem decide se
+    ele acontece continua sendo d.permite_substituir, rebaixado por
+    decidir() quando a política de mídia diz PRESERVA. Esta frente só
+    move a fronteira do limitador de I/O."""
+    async with config._SEM_ENVIO:
+        return await _substituir_inner_no_sem(msg_id_dest_antigo, montada)
