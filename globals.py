@@ -51,6 +51,13 @@ _w_ativos: int        = 0
 _IDS_PROC: set        = set()
 _atomic_mem: Dict[str, float] = {}
 
+# Encerramento em curso (E3.4). Escrito UMA vez pelo handler de sinal
+# em main; lido por pipeline.orchestrator_fila._enfileirar para fechar
+# a admissao. Estado de PROCESSO, como _buf e _w_ativos — mesmo dono,
+# mesma natureza. NAO e' resetado em _init_globals de proposito: um
+# reset reabriria a admissao durante um encerramento em curso.
+_encerrando: bool = False
+
 # ── HTTP Session singleton ────────────────────────────────────────
 _http_session: Optional[aiohttp.ClientSession] = None
 

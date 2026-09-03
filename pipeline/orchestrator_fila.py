@@ -106,7 +106,14 @@ async def _enfileirar(event, is_edit: bool) -> None:
     ele, uma rajada criaria uma task por evento sem limite algum.
     len(g._buf) e a inserção são síncronos — não há await entre a
     verificação e o add, logo a checagem é atômica.
+
+    [E3.4] O guard de encerramento e' a PRIMEIRA instrucao e nao tem
+    await antes do create_task: ou a task ja' nasceu (e sera' drenada),
+    ou e' recusada. Nao existe estado intermediario.
     """
+    if g._encerrando:
+        return
+
     if len(g._buf) >= _FILA_MAX:
         log_sys.warning(f"⚠️ Fila cheia | id={event.message.id}")
         return

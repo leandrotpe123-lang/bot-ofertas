@@ -33,6 +33,7 @@ Mudanças v80.2 (em relação a v80.0):
 from __future__ import annotations
 
 import asyncio
+import signal
 
 from telethon import events
 from telethon.errors import AuthKeyUnregisteredError, SessionPasswordNeededError
@@ -47,7 +48,7 @@ from config import (
     _PIL_OK,
 )
 
-from database import _init_db, _db, db_limpar
+from database import _init_db, _db, db_limpar, _fechar_db
 from globals import _init_globals
 from logger import log_sys, log_hc
 
@@ -56,7 +57,7 @@ from pipeline.identidade import precarregar_usernames
 
 import plataformas
 
-from web.redirect import _iniciar_servidor_web
+from web.redirect import _iniciar_servidor_web, _encerrar_servidor_web
 
 
 # ── Health check ────────────────────────────────────────────────
@@ -90,6 +91,15 @@ async def _health_check() -> None:
 # este bloco e as duas chamadas a _log_lifecycle.
 _CICLO = 0
 _TASKS_FUNDO: dict = {}
+
+# ── Shutdown gracioso (E3.4) ──────────────────────────────────────
+# Parametro do LIFECYCLE DE PROCESSO, mora aqui pelo mesmo precedente
+# de _FILA_MAX/_ORCAMENTO, que vivem no modulo dono e nao em config.
+# NAO e' um worst-case: e' janela de CORTESIA para as tasks em voo
+# terminarem naturalmente. Vencida, nada e' cancelado nem fechado — a
+# janela externa do Railway e' a autoridade final de terminacao.
+_DRAIN_TIMEOUT = 30
+_TAREFA_SHUTDOWN = None
 
 
 def _log_lifecycle(fase: str) -> None:
@@ -150,6 +160,82 @@ def _registrar_handlers(fontes) -> None:
             log_sys.error(f"❌ on_edit: {e}", exc_info=True)
 
 
+# ── Shutdown: handler de sinal e teardown (E3.4) ──────────────────
+def _on_sinal(sig) -> None:
+    """Handler de SIGTERM/SIGINT. Roda NO LOOP e e' SINCRONO.
+
+    Fecha a admissao sem janela: como _enfileirar corre do guard ate' o
+    create_task sem nenhum await, ou a task ja' nasceu (e sera' drenada)
+    ou e' recusada. Idempotente — um segundo sinal nao abre um segundo
+    drain.
+    """
+    global _TAREFA_SHUTDOWN
+    if g._encerrando:
+        return
+    g._encerrando = True
+    log_sys.info(f"🛑 sinal {sig!s} recebido — admissao fechada")
+    _TAREFA_SHUTDOWN = asyncio.create_task(_encerrar())
+
+
+async def _encerrar() -> None:
+    """Fase 3 — TEARDOWN. Task INDEPENDENTE, jamais dentro de handler.
+
+    Ordem: drain -> health -> HTTP -> Telegram -> web -> DB.
+    Os passos 3-7 so' acontecem se o drain convergir: fechar recurso
+    com task de pipeline viva converteria publicacao bem-sucedida em
+    post orfao. Vencido o deadline, NENHUMA acao destrutiva.
+    """
+    # 2. drenar g._buf — CORTESIA. Nao cancela nada.
+    pendentes = set(g._buf)
+    if pendentes:
+        log_sys.info(f"⏳ drenando | tasks={len(pendentes)} timeout={_DRAIN_TIMEOUT}s")
+        try:
+            await asyncio.wait(pendentes, timeout=_DRAIN_TIMEOUT)
+        except Exception as e:
+            log_sys.error(f"❌ drain: {e}", exc_info=True)
+
+    if g._buf:
+        log_sys.warning(
+            f"⏳ deadline vencido | vivas={len(g._buf)} — teardown abortado; "
+            f"terminacao externa decide")
+        return
+
+    log_sys.info("🧹 drain concluido")
+
+    # 3. health
+    t = _TASKS_FUNDO.get("health")
+    if t is not None and not t.done():
+        t.cancel()
+
+    # 4. HTTP
+    try:
+        if g._http_session is not None and not g._http_session.closed:
+            await g._http_session.close()
+            log_sys.info("🌐 HTTP session fechada")
+    except Exception as e:
+        log_sys.error(f"❌ close http: {e}")
+
+    # 5. Telegram — e' isto que faz run_until_disconnected retornar
+    try:
+        await client.disconnect()
+    except Exception as e:
+        log_sys.error(f"❌ disconnect: {e}")
+
+    # 6. web
+    try:
+        await _encerrar_servidor_web()
+    except Exception as e:
+        log_sys.error(f"❌ web cleanup: {e}")
+
+    # 7. DB
+    try:
+        _fechar_db()
+    except Exception as e:
+        log_sys.error(f"❌ close db: {e}")
+
+    log_sys.info("👋 encerrado")
+
+
 # ── Lifecycle de PROCESSO — roda UMA vez ──────────────────────────
 async def _preparar_processo() -> bool:
     """
@@ -198,6 +284,17 @@ async def _preparar_processo() -> bool:
     _TASKS_FUNDO["health"] = asyncio.create_task(_health_check())
     await _iniciar_orchestrator()
     _TASKS_FUNDO["web"] = asyncio.create_task(_iniciar_servidor_web())
+
+    # 7. Sinais — instalados no PROCESSO, onde nascem os recursos que o
+    # teardown finaliza (simetria criar/finalizar). add_signal_handler e
+    # nao signal.signal: o callback roda NO LOOP, nunca entre bytecodes,
+    # que e' o que torna o fechamento da admissao atomico.
+    _loop = asyncio.get_running_loop()
+    for _s in (signal.SIGTERM, signal.SIGINT):
+        try:
+            _loop.add_signal_handler(_s, _on_sinal, _s)
+        except (NotImplementedError, RuntimeError) as e:
+            log_sys.warning(f"⚠️ sem handler para {_s!s}: {e}")
 
     _log_lifecycle("boot")
     return True
@@ -248,6 +345,12 @@ async def main() -> None:
             log_sys.error(f"❌ Auth fatal: {e}")
             break
         except Exception as e:
+            # [E3.4] Durante o shutdown, sair ANTES do disconnect do
+            # caminho de restart: o Telegram deve ser desconectado
+            # exclusivamente por _encerrar(), depois do drain.
+            if g._encerrando:
+                log_sys.error(f"🛑 erro durante shutdown: {e}", exc_info=True)
+                break
             log_sys.error(f"💥 Caiu: {e} — restart em 15s", exc_info=True)
             try:
                 await client.disconnect()
@@ -262,6 +365,18 @@ async def main() -> None:
         if not conectado:
             log_sys.error("❌ Sessão inválida — encerrando sem restart.")
             break
+
+        # [E3.4] Desconexao provocada pelo shutdown: terminal, nao
+        # reconecta. Sem este guard o laco trataria como queda de rede.
+        if g._encerrando:
+            break
+
+    # [E3.4] OBRIGATORIO: client.disconnect() (passo 5) faz _run()
+    # retornar e o laco sair, mas _encerrar() ainda precisa executar os
+    # passos 6 (web) e 7 (DB). Sem este await, asyncio.run() cancela a
+    # task de shutdown no meio do teardown.
+    if _TAREFA_SHUTDOWN is not None:
+        await _TAREFA_SHUTDOWN
 
 
 if __name__ == "__main__":

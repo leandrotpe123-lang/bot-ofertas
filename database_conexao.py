@@ -282,4 +282,31 @@ def _db():
         except sqlite3.Error as e:
             log_db.error(f"❌ DB: {e}"); raise
 
+
+def _fechar_db() -> None:
+    """Fecha a conexao do processo. Idempotente. [E3.4]
+
+    Mora aqui pela mesma restricao ja' documentada de _init_db: declara
+    `global _db_conn`, e esse global e' DESTE modulo.
+
+    O checkpoint TRUNCATE consolida o WAL no .db antes de fechar, para
+    que o proximo boot nao herde um WAL grande. Falha no checkpoint NAO
+    impede o close.
+    """
+    global _db_conn
+    if _db_conn is None:
+        return
+    with _db_lock:
+        if _db_conn is None:
+            return
+        try:
+            _db_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception as e:
+            log_db.warning(f"⚠️ checkpoint WAL: {e}")
+        try:
+            _db_conn.close()
+        finally:
+            _db_conn = None
+    log_db.info("🗄 DB fechado")
+
                              
