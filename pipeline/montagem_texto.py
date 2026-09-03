@@ -65,11 +65,11 @@ from pipeline import papel
 # ─────────────────────────────────────────────────────────────────
 _EMOJI_POR_PAPEL: Dict[str, str] = {
     papel.TITULO:   "🔥",
-    papel.PRECO:    "💵",
+    papel.PRECO:    "✅",
     papel.CUPOM:    "🎟",
-    papel.RESGATE:  "⭐",
+    papel.RESGATE:  "📌",
     papel.PARCELA:  "⭐",
-    papel.LINK:     "✅",
+    papel.LINK:     "🎯",
     papel.VARIANTE: "🔹",
     papel.CARRINHO: "🛒",
     papel.FRETE:    "🚚",
