@@ -1,60 +1,108 @@
-# Execução 8 — expandidor real de produção vs. Mercado Livre
+# Execução 8 — RESULTADO: expandidor resolve, mas todo destino é vitrine
 
-Rodada dedicada a uma pergunta só: o `desencurtar` que já roda em
-produção resolve links do Mercado Livre, ou cai no muro de captcha
-como o expandidor caseiro da execução 7?
+## Veredito em uma linha
 
-## O que muda em relação à execução 7
+O expandidor de produção **resolve o Mercado Livre sem captcha**.
+Mas os cinco links expandiram para `/social/<afiliado>` — e nenhum
+é afiliável pelo `createLink`.
 
-A execução 7 usava um expandidor escrito para o teste. Este importa
-`utils.url_resolver.desencurtar`, o mesmo código que atende Shopee,
-Amazon e Magalu hoje.
+```
+Expandidos : 5/5
+Captcha    : 0/5
+Afiliáveis : 0/5
+```
 
-Diferenças que podem explicar um resultado melhor:
+## Destinos encontrados
 
-| Recurso | teste caseiro (exec 7) | produção (exec 8) |
+| Link recebido | Destino | Classe |
 |---|---|---|
-| User-Agent | fixo | sorteado de `config.USER_AGENTS` |
-| `Accept-Language` | ausente | `pt-BR,pt;q=0.9,en;q=0.8` |
-| redirecionamento | manual, salto a salto | `allow_redirects` do aiohttp |
-| fallback GET | sim | sim |
-| meta-refresh | não | sim |
-| redirect por JS | não | sim |
-| `og:url` / canonical | não | sim |
-| cache | não | em memória |
+| `meli.la/1ipL9sf` | `/social/samuelf3lipe?matt_word=samuelf3lipe…` | SOCIAL |
+| `meli.la/26eaLSW` | `/social/promotom?matt_word=promotom…` | SOCIAL |
+| `meli.la/1bZpCya` | `/social/fadadoscupons?matt_word=fadadoscupons…` | SOCIAL |
+| `meli.la/2nhS3s3` | `/social/samuelf3lipe?matt_word=samuelf3lipe…` | SOCIAL |
+| `mercadolivre.com/sec/2U6U32Q` | `/social/promotom/lists/8f90988a-…?matt_tool=54541970` | SOCIAL |
 
-## Links sob teste
+Tempo: 737ms a ~1s por link. Sem erro, sem timeout, sem captcha.
+
+## Achado 1 — o captcha era do expandidor caseiro
+
+A execução 7 caiu em `/captcha/wall` porque o expandidor do teste
+não mandava `Accept-Language`, usava UA fixo e seguia redirect
+manualmente. O de produção passa. **O IP da Railway não está
+bloqueado.**
+
+## Achado 2 — os `meli.la` dos grupos são links de afiliado
+
+Todos apontam para a vitrine de quem publicou, com `matt_word` do
+terceiro. Não são links de produto nem de listagem do Mercado Livre.
+
+Isso é coerente com tudo que já sabíamos: os grupos publicam os
+**próprios links afiliados**. O `meli.la` deles é o equivalente do
+`meli.la/2TzpFAP` que geramos — produto final da afiliação alheia.
+
+Portanto: **`meli.la` de grupo ≡ `/sec/` de grupo**. Mesma natureza,
+mesmo tratamento. Não há URL de origem a recuperar.
+
+## Achado 3 — o `/sec/` revelou uma lista real
+
+O `/sec/2U6U32Q` expandiu para:
 
 ```
-https://meli.la/1ipL9sf
-https://meli.la/26eaLSW
-https://meli.la/1bZpCya
-https://meli.la/2nhS3s3
-https://mercadolivre.com/sec/2U6U32Q
+/social/promotom/lists/8f90988a-1c69-4f23-8b26-76286c3cdc87
+  ?matt_tool=54541970&forceInApp=true
 ```
 
-## O que o log deve mostrar por link
+Note: tem `/lists/<uuid>` e **não tem `matt_word`**. É uma lista
+específica dentro da vitrine do promotom, não a vitrine genérica.
 
-URL recebida, host de entrada, tempo, se expandiu, URL final, host
-final, classificação (PRODUTO / LISTA / SEC / SOCIAL / CAPTCHA /
-NÃO RESOLVIDO / OUTRO), identificador quando houver, afiliável
-SIM/NÃO com motivo, e o erro exato em caso de falha.
+Não testado ainda: essa URL, sem `matt_word`, é aceita pelo
+`createLink`? Se for, muda o quadro — teria caminho de conversão
+para o que vem do Promotom.
 
-## Verificação estrutural incluída
+Vale um teste. Se der `111`, encerra a questão e o fallback por
+`/sec/` próprio é a única saída.
 
-O teste também imprime a configuração efetiva do expandidor e,
-principalmente, **se `meli.la` está declarado como encurtador** pelo
-registry.
+## Achado 4 — nenhuma plataforma declara encurtador
 
-Isso importa: `_eh_intermediario` decide se a resolução continua
-depois do primeiro destino. Se `meli.la` não estiver declarado, a
-expansão para cedo — e seria um problema independente do captcha.
+```
+encurtadores declarados: 0 → (nenhum)
+→ meli.la NÃO está declarado como encurtador
+```
 
-## Hipótese do operador sobre `meli.la` cru no createLink
+`_compor_encurtadores()` devolveu conjunto vazio. Como o
+`_eh_intermediario` só continua a resolução para hosts declarados,
+a expansão para no primeiro destino.
 
-O operador testou no gerador oficial: colar `meli.la` cru **dá
-erro**. Isso torna improvável que o `createLink` aceite um `meli.la`
-sem expansão — a hipótese levantada na execução 7 provavelmente
-está errada, e a expansão continua sendo passo obrigatório.
+Aqui não fez diferença — um salto bastou. Mas se algum encurtador
+passar a resolver por meta-refresh ou JS, a cadeia pararia cedo.
 
-Motivo a mais para saber se o expandidor de produção funciona.
+O pacote `plataformas/mercadolivre/` (ainda fora do repositório)
+declara `ENCURTADORES_FORCA_GET` como conjunto vazio explícito, mas
+não declara a capacidade `encurtadores`. Ponto a revisar antes de
+publicar o pacote.
+
+## Consequência para a arquitetura
+
+A rota de conversão do Mercado Livre depende do que chega:
+
+| Origem | Formato | Rota |
+|---|---|---|
+| link direto de produto | `/p/MLB…`, `/up/MLBU…`, `MLB-…` | `createLink` ✔ |
+| link direto de listagem | `lista.mercadolivre.com.br/…` | `createLink` ✔ |
+| `meli.la` de grupo | expande para `/social/<terceiro>` | fallback próprio |
+| `/sec/` de grupo | expande para `/social/<terceiro>/lists/…` | fallback próprio (a confirmar) |
+
+A expansão continua valendo a pena: é ela que **distingue** um
+`meli.la` que aponta para produto de um que aponta para vitrine.
+Custa ~1s e não bate em captcha.
+
+## Próximo teste
+
+`createLink` com a URL de lista revelada pelo `/sec/`:
+
+```
+https://www.mercadolivre.com.br/social/promotom/lists/8f90988a-1c69-4f23-8b26-76286c3cdc87?forceInApp=true
+```
+
+Com e sem `matt_tool`. Se passar, há rota para o Promotom. Se der
+`111`, o fallback é definitivo.
