@@ -40,32 +40,26 @@ PASSO 1 — Capturar a sessão (num navegador logado)
     c) F12 → aba Network.
     d) Clique em "Compartilhar" e gere um link normalmente.
     e) Na lista de requisições, ache  createLink
+       (tem que ser ESSA requisição, não outra da página)
     f) Botão direito → Copy → **Copy as cURL (bash)**
        (no Windows, escolha a opção "bash", não "cmd")
 
 PASSO 2 — Criar as variáveis na Railway
-    Variables → New Variable:
-
     ML_TEST_CURL   = (cole o cURL inteiro, várias linhas, tudo bem)
     ML_TAG         = sua_etiqueta_de_afiliado
     ML_TEST_URL    = https://www.mercadolivre.com.br/... (URL LONGA)
 
-    ML_TEST_URL é opcional — há um padrão embutido. Mas prefira
-    passar uma URL longa real de produto.
-
 PASSO 3 — Rodar UMA vez, sem subir o bot
-    Troque temporariamente o comando de start do serviço para:
+    Troque o start command do serviço para:
 
         python -u testes_ml/teste_ml_createlink.py
 
-    O bot NÃO sobe: este arquivo não importa main.py.
-    Veja o resultado nos logs, depois devolva o comando original.
-
-    (O -u garante que o log apareça na hora, sem buffer.)
+    ATENÇÃO: 'redeploy' reaproveita o snapshot de configuração do
+    build anterior. Para a troca valer, é preciso um deploy NOVO
+    (push). Depois do teste, devolva o comando original.
 
 PASSO 4 — Depois do teste
-    Apague ML_TEST_CURL das variáveis. É uma credencial de sessão
-    e não deve ficar guardada mais do que o necessário.
+    Apague ML_TEST_CURL. É credencial de sessão.
 
 ───────────────────────────────────────────────────────────────────
 """
@@ -95,8 +89,6 @@ ENDPOINT = (
 REFERER = "https://www.mercadolivre.com.br/affiliate-program"
 ORIGIN = "https://www.mercadolivre.com.br"
 
-# Fallback de User-Agent. O ideal é vir do próprio cURL — cliente
-# HTTP com UA de biblioteca costuma ser recusado.
 USER_AGENT_PADRAO = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -104,13 +96,22 @@ USER_AGENT_PADRAO = (
 )
 
 # Lista indicada pelo Guilherme. Usada APENAS para diagnóstico.
-# Ver a nota impressa no log: a requisição envia o Cookie inteiro,
-# então esta contagem não prova suficiência de nada.
 COOKIES_LISTA_GUILHERME = [
     "ssid", "orguserid", "orguseridp", "orgnickp", "_csrf",
     "x-meli-session-id", "x-bf-session-v6", "_d2id",
     "_mldataSessionId", "nsa_rotok",
 ]
+
+# Cookies que indicam captura da requisição ERRADA: são de banner e
+# telemetria da interface, presentes mesmo sem sessão de afiliado.
+_COOKIES_SO_DE_INTERFACE = {
+    "ml_affiliates_hub_visit_count",
+    "ml_affiliates_orders_fraud_banner_first_shown",
+    "ml_affiliates_orders_fraud_banner_action",
+    "ml_affiliates_onboarding_banner_visits",
+    "nav_dab_closed",
+    "g_state",
+}
 
 URL_PADRAO = (
     "https://www.mercadolivre.com.br/apple-iphone-15-128-gb-preto"
@@ -139,20 +140,36 @@ def bloco(titulo: str) -> None:
 # ═══════════════════════════════════════════════════════════════════
 
 def _limpar_continuacoes(texto: str) -> str:
-    """
-    Junta as linhas de um cURL multilinha, removendo as barras de
-    continuação. Necessário porque o valor colado no painel de
-    variáveis preserva as quebras de linha.
-    """
+    """Junta linhas de um cURL multilinha, tirando as barras."""
     return re.sub(r"\\\s*\n", " ", texto)
+
+
+def _sanear_header(valor: str) -> str:
+    """
+    Remove quebras de linha e caracteres de controle de um valor de
+    header.
+
+    Necessário porque o painel de variáveis pode inserir quebras
+    dentro do valor colado. Um header com \\n é recusado pela
+    biblioteca HTTP com ValueError ANTES da requisição sair — falha
+    de transporte que não diz nada sobre a sessão e mascara o
+    resultado real do teste.
+
+    Só remove controle e espaço em volta; não altera o conteúdo.
+    """
+    if not valor:
+        return ""
+    limpo = re.sub(r"[\r\n\t]+", "", valor)
+    limpo = "".join(c for c in limpo if ord(c) >= 32 or c == " ")
+    return limpo.strip()
 
 
 def extrair_do_curl(texto: str) -> Tuple[str, Dict[str, str]]:
     """
     Extrai (header_cookie, headers_extra) de um comando cURL.
 
-    Aceita as formas -H 'Nome: valor', -H "Nome: valor",
-    -b 'cookies' e --cookie 'cookies'.
+    Aceita -H 'Nome: valor', -H "Nome: valor", -b e --cookie.
+    Todo valor passa por _sanear_header.
     """
     texto = _limpar_continuacoes(texto)
     headers: Dict[str, str] = {}
@@ -163,7 +180,8 @@ def extrair_do_curl(texto: str) -> Tuple[str, Dict[str, str]]:
         if ":" not in linha:
             continue
         nome, _, valor = linha.partition(":")
-        nome, valor = nome.strip(), valor.strip()
+        nome = nome.strip()
+        valor = _sanear_header(valor)
         if nome.lower() == "cookie":
             cookie = valor
         elif nome:
@@ -172,27 +190,19 @@ def extrair_do_curl(texto: str) -> Tuple[str, Dict[str, str]]:
     if not cookie:
         m = re.search(r"""(?:-b|--cookie)\s+(['"])(.*?)\1""", texto, re.S)
         if m:
-            cookie = m.group(2).strip()
+            cookie = _sanear_header(m.group(2))
 
     return cookie, headers
 
 
 def carregar_sessao() -> Tuple[str, Dict[str, str]]:
-    """
-    Lê a sessão do secret ML_TEST_CURL.
-
-    Aceita como alternativa um header Cookie bruto na mesma
-    variável, caso a captura do cURL não seja possível.
-    """
+    """Lê a sessão do secret ML_TEST_CURL."""
     bruto = os.environ.get("ML_TEST_CURL", "").strip()
 
     if not bruto:
         log("ERRO: variável ML_TEST_CURL não definida.")
-        log("      Siga o PASSO 1 e o PASSO 2 no topo deste arquivo.")
         sys.exit(2)
 
-    # Formato do Windows (cmd) usa ^ e aspas duplas escapadas —
-    # o parser não cobre e o diagnóstico seria confuso.
     if "^\"" in bruto or bruto.lstrip().lower().startswith("curl.exe"):
         log("ERRO: o cURL parece estar no formato cmd do Windows.")
         log("      Recapture usando 'Copy as cURL (bash)'.")
@@ -204,10 +214,9 @@ def carregar_sessao() -> Tuple[str, Dict[str, str]]:
 
     if "=" in bruto and ";" in bruto:
         log("Formato detectado: header Cookie bruto")
-        return bruto, {}
+        return _sanear_header(bruto), {}
 
     log("ERRO: conteúdo de ML_TEST_CURL não reconhecido.")
-    log("      Esperado: comando cURL ou header Cookie bruto.")
     sys.exit(2)
 
 
@@ -222,10 +231,7 @@ def nomes_de_cookies(header_cookie: str) -> List[str]:
 
 
 def valor_de_cookie(header_cookie: str, alvo: str) -> str:
-    """
-    Valor de um cookie específico — usado só para derivar o CSRF.
-    Jamais impresso.
-    """
+    """Valor de um cookie — usado só para o CSRF. Jamais impresso."""
     try:
         jar = SimpleCookie()
         jar.load(header_cookie)
@@ -268,25 +274,21 @@ def chamar_create_link(
     """
     Executa o POST. Devolve (status, corpo, headers_da_resposta).
 
-    Body mínimo, conforme decidido:
-        {"urls": ["URL_LONGA"], "tag": "MINHA_TAG"}
-
-    itemId e itemAddToList ficam de fora — só entram se o caminho
-    mínimo se provar insuficiente.
+    Body mínimo: {"urls": ["URL_LONGA"], "tag": "MINHA_TAG"}
     """
     corpo = json.dumps({"urls": [url_produto], "tag": tag}).encode("utf-8")
 
     headers = {
-        "User-Agent": user_agent,
+        "User-Agent": _sanear_header(user_agent),
         "Content-Type": "application/json",
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "pt-BR,pt;q=0.9",
         "Origin": ORIGIN,
         "Referer": REFERER,
-        "Cookie": header_cookie,
+        "Cookie": _sanear_header(header_cookie),
     }
     if csrf:
-        headers["x-csrf-token"] = csrf
+        headers["x-csrf-token"] = _sanear_header(csrf)
 
     req = urllib.request.Request(
         ENDPOINT, data=corpo, headers=headers, method="POST"
@@ -299,6 +301,11 @@ def chamar_create_link(
         return e.code, _corpo_decodificado(e), dict(e.headers or {})
     except urllib.error.URLError as e:
         log(f"ERRO de rede: {e.reason}")
+        sys.exit(3)
+    except ValueError as e:
+        # Header recusado pela stdlib. Não vaza o valor: só o motivo.
+        log(f"ERRO: header recusado pela biblioteca HTTP ({e.args[0][:40]})")
+        log("      Provável quebra de linha dentro do valor colado.")
         sys.exit(3)
 
 
@@ -316,8 +323,7 @@ def _primeiro(dic, *chaves):
     Primeiro valor não-vazio entre as chaves informadas.
 
     Existe para que diferença de nomenclatura (short_url vs
-    shortUrl) nunca produza falso negativo. Não adivinha: consulta
-    apenas as variantes explicitamente listadas.
+    shortUrl) nunca produza falso negativo.
     """
     if not isinstance(dic, dict):
         return None
@@ -331,12 +337,6 @@ def _localizar_item(dados: dict) -> Tuple[dict, str]:
     """
     Localiza o objeto que carrega o resultado, tolerando variações
     de envelope. Devolve (item, descrição_da_estrutura).
-
-    Formas aceitas:
-      {"urls": [ {...} ]}          objeto dentro da lista
-      {"urls": [ "https://..." ]}  string dentro da lista
-      {"data": {"urls": [...]}}    envelope 'data'
-      {"short_url": ...}           campos no topo
     """
     envelopes = [dados]
     if isinstance(dados.get("data"), dict):
@@ -398,7 +398,6 @@ def analisar(status: int, corpo: str, tag_esperada: str) -> bool:
             log("Indício: menção a CSRF na resposta")
         return False
 
-    # ── Sucesso HTTP: validar o conteúdo ──────────────────────────
     total_sucesso = _primeiro(dados, "total_success", "totalSuccess")
     total_erro = _primeiro(dados, "total_error", "totalError")
     if total_sucesso is not None:
@@ -411,7 +410,6 @@ def analisar(status: int, corpo: str, tag_esperada: str) -> bool:
     criado = _primeiro(item, "created", "is_created", "isCreated")
     log(f"created: {criado}")
 
-    # Link curto — snake_case e camelCase, no item e no topo.
     curto = (
         _primeiro(item, "short_url", "shortUrl", "shortURL", "url")
         or _primeiro(dados, "short_url", "shortUrl", "shortURL")
@@ -473,7 +471,6 @@ def main() -> int:
     tag = os.environ.get("ML_TAG", "").strip()
     if not tag:
         log("ERRO: variável ML_TAG não definida.")
-        log("      Defina ML_TAG com a sua etiqueta de afiliado.")
         return 2
 
     url_produto = (
@@ -485,17 +482,14 @@ def main() -> int:
     log(f"Tag configurada: {tag}")
     log(f"URL de teste: {url_produto[:90]}")
     if url_produto == URL_PADRAO:
-        log("AVISO: usando a URL padrão embutida. Prefira definir")
-        log("       ML_TEST_URL com uma URL longa real de produto.")
+        log("AVISO: usando a URL padrão embutida.")
     if "meli.la" in url_produto or "/sec/" in url_produto:
-        log("AVISO: URL encurtada. O body espera a URL LONGA do")
-        log("       produto — expanda antes de testar.")
+        log("AVISO: URL encurtada. O body espera a URL LONGA.")
 
     # ── Sessão ────────────────────────────────────────────────────
     header_cookie, headers_extra = carregar_sessao()
     if not header_cookie:
         log("ERRO: nenhum cookie encontrado em ML_TEST_CURL.")
-        log("      Confira se o cURL copiado contém o header Cookie.")
         return 2
     log("Sessão carregada")
 
@@ -523,20 +517,29 @@ def main() -> int:
         "posterior, por eliminação."
     )
 
+    # Detecção de captura errada: só cookies de banner/telemetria.
+    so_interface = set(presentes) <= _COOKIES_SO_DE_INTERFACE | {"_d2id"}
+    if so_interface:
+        log("")
+        log("ALERTA: a sessão só contém cookies de interface (banners,")
+        log("        contadores). Nenhum cookie de sessão autenticada.")
+        log("        O cURL provavelmente veio de OUTRA requisição.")
+        log("        Recapture a requisição chamada 'createLink'.")
+
     # ── CSRF ──────────────────────────────────────────────────────
     minusculos = {k.lower(): v for k, v in headers_extra.items()}
     csrf = (
-        os.environ.get("ML_CSRF", "").strip()
+        _sanear_header(os.environ.get("ML_CSRF", ""))
         or minusculos.get("x-csrf-token", "")
         or valor_de_cookie(header_cookie, "_csrf")
     )
     log(f"CSRF encontrado: {'SIM' if csrf else 'NAO'}")
     if not csrf:
         log("AVISO: sem x-csrf-token. A chamada provavelmente será")
-        log("       recusada. Confira o cURL ou defina ML_CSRF.")
+        log("       recusada. Confira se o cURL é o da createLink.")
 
     user_agent = (
-        os.environ.get("ML_USER_AGENT", "").strip()
+        _sanear_header(os.environ.get("ML_USER_AGENT", ""))
         or minusculos.get("user-agent", "")
         or USER_AGENT_PADRAO
     )
