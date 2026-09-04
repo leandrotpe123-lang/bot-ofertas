@@ -35,6 +35,10 @@ valores de cookie, token ou credencial.
    qualquer outra.
 6. Botão direito → Copy → **Copy as cURL (bash)**.
 
+O valor colado precisa **começar com a palavra `curl`**. Se começar
+com `POST`, com uma URL, ou for um JSON, veio da opção errada do
+menu (por exemplo "Copy request headers" ou "Copy as fetch").
+
 O cURL correto contém, no mínimo:
 
 - header `cookie:` com os cookies de sessão (`ssid`, `orguserid`,
@@ -42,8 +46,15 @@ O cURL correto contém, no mínimo:
 - header `x-csrf-token:`;
 - header `user-agent:`.
 
-Se o teste reportar `CSRF encontrado: NAO` e poucos cookies da
-lista, o cURL provavelmente veio de outra requisição.
+### Diagnósticos e o que significam
+
+| Mensagem | Causa |
+|---|---|
+| `conteúdo de ML_TEST_CURL não reconhecido` | não começa com `curl` — opção errada do menu Copy |
+| `formato cmd do Windows` | usar "Copy as cURL (**bash**)" |
+| `CSRF encontrado: NAO` | cURL de outra requisição |
+| `ALERTA: só cookies de interface` | cURL de outra requisição |
+| `header recusado pela biblioteca HTTP` | quebra de linha no valor colado |
 
 ### Como executar (Railway)
 
