@@ -7,10 +7,7 @@ Executável na nuvem (Railway), sessão fornecida por secret
 
 PERGUNTA ÚNICA QUE ESTE TESTE RESPONDE
     Com uma sessão real, o POST HTTP para createLink devolve o link
-    curto de afiliado com a MINHA tag?
-
-        sessão real → Cookie + CSRF → POST createLink
-                    → HTTP 200 → short_url → tag = minha tag
+    curto de afiliado com a MINHA tag — e creditando A MIM?
 
 FORA DE ESCOPO (deliberadamente)
     Playwright, renovação de sessão, integração com o pacote
@@ -21,47 +18,47 @@ ISOLAMENTO — GARANTIAS DESTE ARQUIVO
     - Não é importado por nenhum módulo de produção.
     - Não inicia Telethon, banco, orchestrator nem monitoramento.
     - Não escreve em disco. Não altera nenhum arquivo.
-    - A pasta testes_ml/ NÃO tem __init__.py de propósito: assim
-      não é pacote e não pode ser importada por engano.
+    - A pasta testes_ml/ NÃO tem __init__.py de propósito.
 
 SEGURANÇA DE LOG
-    Nenhum valor de cookie, token, credencial ou header sensível é
-    impresso — em nenhum caminho, nem em caso de erro. O log mostra
-    apenas nomes de cookies, contagens, status HTTP, e o link
-    resultante.
+    Nenhum valor de cookie, token ou credencial é impresso — em
+    nenhum caminho. O log mostra apenas nomes de cookies, contagens,
+    status HTTP e o link resultante.
+
+───────────────────────────────────────────────────────────────────
+DUAS VALIDAÇÕES DE PROPRIEDADE — E POR QUE SÃO DUAS
+───────────────────────────────────────────────────────────────────
+1) CAMPO 'tag' DA RESPOSTA
+   Fraca por si só: a API ecoa a tag que PEDIMOS. Ver a nossa tag
+   de volta não prova que o link credita a nós.
+
+2) matt_word DENTRO DA long_url DEVOLVIDA  ← a que vale
+   O parâmetro matt_word na URL longa é quem efetivamente recebe a
+   comissão.
+
+   O cenário perigoso é real: enviamos uma URL de lista que já
+   carrega matt_word=<terceiro>. Se a API apenas encurtar sem
+   substituir a identidade, a resposta traz tag=<a nossa>, o teste
+   diria APROVADO — e o meli.la publicado creditaria o CONCORRENTE.
+   Comissão do canal indo para outra pessoa, com o teste dizendo
+   que está tudo certo.
+
+   Por isso o teste REPROVA quando o matt_word devolvido não é o
+   nosso, mesmo com HTTP 200 e tag conferindo.
 
 ───────────────────────────────────────────────────────────────────
 COMO EXECUTAR NA RAILWAY
 ───────────────────────────────────────────────────────────────────
+    ML_TEST_CURL = cURL da requisição createLink (Copy as cURL bash)
+    ML_TAG       = etiqueta de afiliado
+    ML_TEST_URL  = URL LONGA (produto, lista ou campanha)
 
-PASSO 1 — Capturar a sessão (num navegador logado)
-    a) Faça login no Mercado Livre.
-    b) Abra uma página de produto com a barra de Afiliados visível.
-    c) F12 → aba Network.
-    d) Clique em "Compartilhar" e gere um link normalmente.
-    e) Na lista de requisições, ache  createLink
-       (tem que ser ESSA requisição, não outra da página)
-    f) Botão direito → Copy → **Copy as cURL (bash)**
-       (no Windows, escolha a opção "bash", não "cmd")
-
-PASSO 2 — Criar as variáveis na Railway
-    ML_TEST_CURL   = (cole o cURL inteiro, várias linhas, tudo bem)
-    ML_TAG         = sua_etiqueta_de_afiliado
-    ML_TEST_URL    = https://www.mercadolivre.com.br/... (URL LONGA)
-
-PASSO 3 — Rodar UMA vez, sem subir o bot
-    Troque o start command do serviço para:
-
+    start command temporário:
         python -u testes_ml/teste_ml_createlink.py
 
     ATENÇÃO: 'redeploy' reaproveita o snapshot de configuração do
     build anterior. Para a troca valer, é preciso um deploy NOVO
-    (push). Depois do teste, devolva o comando original.
-
-PASSO 4 — Depois do teste
-    Apague ML_TEST_CURL. É credencial de sessão.
-
-───────────────────────────────────────────────────────────────────
+    (push). Depois, devolver 'python main.py' e apagar ML_TEST_CURL.
 """
 from __future__ import annotations
 
@@ -71,6 +68,7 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 import zlib
 from http.cookies import SimpleCookie
@@ -95,15 +93,12 @@ USER_AGENT_PADRAO = (
     "Chrome/148.0.0.0 Safari/537.36"
 )
 
-# Lista indicada pelo Guilherme. Usada APENAS para diagnóstico.
 COOKIES_LISTA_GUILHERME = [
     "ssid", "orguserid", "orguseridp", "orgnickp", "_csrf",
     "x-meli-session-id", "x-bf-session-v6", "_d2id",
     "_mldataSessionId", "nsa_rotok",
 ]
 
-# Cookies que indicam captura da requisição ERRADA: são de banner e
-# telemetria da interface, presentes mesmo sem sessão de afiliado.
 _COOKIES_SO_DE_INTERFACE = {
     "ml_affiliates_hub_visit_count",
     "ml_affiliates_orders_fraud_banner_first_shown",
@@ -149,13 +144,9 @@ def _sanear_header(valor: str) -> str:
     Remove quebras de linha e caracteres de controle de um valor de
     header.
 
-    Necessário porque o painel de variáveis pode inserir quebras
-    dentro do valor colado. Um header com \\n é recusado pela
-    biblioteca HTTP com ValueError ANTES da requisição sair — falha
-    de transporte que não diz nada sobre a sessão e mascara o
-    resultado real do teste.
-
-    Só remove controle e espaço em volta; não altera o conteúdo.
+    O painel de variáveis insere quebras dentro do valor colado, e a
+    biblioteca HTTP recusa o header com ValueError ANTES da
+    requisição sair — falha de transporte que mascara o resultado.
     """
     if not valor:
         return ""
@@ -165,12 +156,7 @@ def _sanear_header(valor: str) -> str:
 
 
 def extrair_do_curl(texto: str) -> Tuple[str, Dict[str, str]]:
-    """
-    Extrai (header_cookie, headers_extra) de um comando cURL.
-
-    Aceita -H 'Nome: valor', -H "Nome: valor", -b e --cookie.
-    Todo valor passa por _sanear_header.
-    """
+    """Extrai (header_cookie, headers_extra) de um comando cURL."""
     texto = _limpar_continuacoes(texto)
     headers: Dict[str, str] = {}
     cookie = ""
@@ -217,6 +203,7 @@ def carregar_sessao() -> Tuple[str, Dict[str, str]]:
         return _sanear_header(bruto), {}
 
     log("ERRO: conteúdo de ML_TEST_CURL não reconhecido.")
+    log("      O valor precisa começar com a palavra 'curl'.")
     sys.exit(2)
 
 
@@ -244,6 +231,36 @@ def valor_de_cookie(header_cookie: str, alvo: str) -> str:
         if nome.strip() == alvo:
             return valor.strip()
     return ""
+
+
+# ═══════════════════════════════════════════════════════════════════
+# INSPEÇÃO DE IDENTIDADE NA URL
+# ═══════════════════════════════════════════════════════════════════
+
+def matt_word_de(url: str) -> str:
+    """
+    Extrai o matt_word de uma URL. String vazia se não houver.
+
+    É este parâmetro que determina QUEM RECEBE A COMISSÃO — não o
+    campo 'tag' da resposta, que apenas ecoa o que pedimos.
+    """
+    try:
+        q = urllib.parse.urlparse(url).query
+        valores = urllib.parse.parse_qs(q).get("matt_word") or []
+        return valores[0].strip() if valores else ""
+    except Exception:
+        return ""
+
+
+def slug_social_de(url: str) -> str:
+    """Slug em /social/<slug>, ou string vazia. Só para diagnóstico."""
+    try:
+        m = re.search(
+            r"/social/([^/?#]+)", urllib.parse.urlparse(url).path or "", re.I
+        )
+        return m.group(1) if m else ""
+    except Exception:
+        return ""
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -303,8 +320,7 @@ def chamar_create_link(
         log(f"ERRO de rede: {e.reason}")
         sys.exit(3)
     except ValueError as e:
-        # Header recusado pela stdlib. Não vaza o valor: só o motivo.
-        log(f"ERRO: header recusado pela biblioteca HTTP ({e.args[0][:40]})")
+        log(f"ERRO: header recusado pela biblioteca HTTP ({str(e)[:40]})")
         log("      Provável quebra de linha dentro do valor colado.")
         sys.exit(3)
 
@@ -320,10 +336,8 @@ _RE_CURTO = re.compile(
 
 def _primeiro(dic, *chaves):
     """
-    Primeiro valor não-vazio entre as chaves informadas.
-
-    Existe para que diferença de nomenclatura (short_url vs
-    shortUrl) nunca produza falso negativo.
+    Primeiro valor não-vazio entre as chaves informadas. Existe para
+    que diferença de nomenclatura nunca produza falso negativo.
     """
     if not isinstance(dic, dict):
         return None
@@ -334,10 +348,7 @@ def _primeiro(dic, *chaves):
 
 
 def _localizar_item(dados: dict) -> Tuple[dict, str]:
-    """
-    Localiza o objeto que carrega o resultado, tolerando variações
-    de envelope. Devolve (item, descrição_da_estrutura).
-    """
+    """Localiza o objeto de resultado, tolerando variações."""
     envelopes = [dados]
     if isinstance(dados.get("data"), dict):
         envelopes.append(dados["data"])
@@ -358,7 +369,8 @@ def _localizar_item(dados: dict) -> Tuple[dict, str]:
     return {}, ""
 
 
-def analisar(status: int, corpo: str, tag_esperada: str) -> bool:
+def analisar(status: int, corpo: str, tag_esperada: str,
+             url_enviada: str = "") -> bool:
     """
     Interpreta a resposta e imprime o diagnóstico.
     Devolve True somente se o teste passou por completo.
@@ -424,9 +436,7 @@ def analisar(status: int, corpo: str, tag_esperada: str) -> bool:
         elif not isinstance(curto, str):
             curto = ""
 
-    # Tag — busca tolerante para não reportar "ausente" por
-    # nomenclatura. A COMPARAÇÃO é estrita: é a barreira que impede
-    # aceitar link de outro afiliado.
+    # ── Validação 1: campo 'tag' (fraca — a API ecoa o que pedimos)
     tag_resposta = (
         _primeiro(item, "tag", "affiliate_tag", "affiliateTag")
         or _primeiro(dados, "tag", "affiliate_tag", "affiliateTag")
@@ -452,11 +462,50 @@ def analisar(status: int, corpo: str, tag_esperada: str) -> bool:
     elif "meli.la" in curto:
         log("FORMATO: meli.la")
 
+    # ── Validação 2: quem recebe a comissão (a que vale) ───────────
     longa = _primeiro(item, "long_url", "longUrl")
-    if longa:
-        log(f"long_url presente: SIM ({len(str(longa))} chars)")
+    dono_ok = True
 
-    return bool(criado is not False) and tag_ok
+    if longa:
+        longa = str(longa)
+        log(f"long_url presente: SIM ({len(longa)} chars)")
+
+        slug_out = slug_social_de(longa)
+        if slug_out:
+            log(f"slug na long_url: /social/{slug_out}")
+
+        dono = matt_word_de(longa)
+        if dono:
+            dono_ok = dono == tag_esperada
+            marca = "(NOSSA)" if dono_ok else "(DE TERCEIRO)"
+            log(f"matt_word na long_url: {dono} {marca}")
+            if not dono_ok:
+                log("")
+                log("FALHA GRAVE: o link gerado credita OUTRO afiliado.")
+                log("             A API encurtou sem substituir a")
+                log("             identidade embutida na URL enviada.")
+                log("             Publicar este link daria a comissão")
+                log("             ao concorrente.")
+                log("             A URL precisa ser sanitizada ANTES.")
+        else:
+            log("matt_word na long_url: (ausente)")
+            log("AVISO: sem matt_word explícito — a atribuição pode")
+            log("       estar embutida no encurtador. Verifique o")
+            log("       link manualmente antes de confiar.")
+
+        # Comparação com a entrada — mostra se houve substituição.
+        if url_enviada:
+            dono_in = matt_word_de(url_enviada)
+            if dono_in:
+                log(f"matt_word na URL enviada: {dono_in}")
+                if dono and dono != dono_in:
+                    log("=> A API SUBSTITUIU a identidade. Bom sinal.")
+                elif dono and dono == dono_in and not dono_ok:
+                    log("=> A API PRESERVOU a identidade de terceiro.")
+    else:
+        log("long_url ausente — impossível verificar quem é creditado")
+
+    return bool(criado is not False) and tag_ok and dono_ok
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -486,6 +535,18 @@ def main() -> int:
     if "meli.la" in url_produto or "/sec/" in url_produto:
         log("AVISO: URL encurtada. O body espera a URL LONGA.")
 
+    # Identidade embutida na ENTRADA — o risco a observar.
+    dono_entrada = matt_word_de(url_produto)
+    if dono_entrada:
+        proprio = dono_entrada == tag
+        log(
+            f"matt_word na URL de entrada: {dono_entrada} "
+            f"{'(nossa)' if proprio else '(DE TERCEIRO)'}"
+        )
+        if not proprio:
+            log("      Cenário sob teste: a API substitui essa")
+            log("      identidade pela nossa, ou apenas encurta?")
+
     # ── Sessão ────────────────────────────────────────────────────
     header_cookie, headers_extra = carregar_sessao()
     if not header_cookie:
@@ -512,19 +573,11 @@ def main() -> int:
         "      A requisição envia o header Cookie INTEIRO da sessão, "
         "não apenas os da lista."
     )
-    log(
-        "      Descobrir o conjunto realmente exigido é etapa "
-        "posterior, por eliminação."
-    )
 
-    # Detecção de captura errada: só cookies de banner/telemetria.
-    so_interface = set(presentes) <= _COOKIES_SO_DE_INTERFACE | {"_d2id"}
-    if so_interface:
+    if set(presentes) <= _COOKIES_SO_DE_INTERFACE | {"_d2id"}:
         log("")
-        log("ALERTA: a sessão só contém cookies de interface (banners,")
-        log("        contadores). Nenhum cookie de sessão autenticada.")
+        log("ALERTA: a sessão só contém cookies de interface.")
         log("        O cURL provavelmente veio de OUTRA requisição.")
-        log("        Recapture a requisição chamada 'createLink'.")
 
     # ── CSRF ──────────────────────────────────────────────────────
     minusculos = {k.lower(): v for k, v in headers_extra.items()}
@@ -555,7 +608,7 @@ def main() -> int:
     if resp_headers.get("Set-Cookie"):
         log("Servidor devolveu Set-Cookie (sessão pode ter sido renovada)")
 
-    aprovado = analisar(status, corpo, tag)
+    aprovado = analisar(status, corpo, tag, url_produto)
 
     bloco("TESTE APROVADO" if aprovado else "TESTE REPROVADO")
 
