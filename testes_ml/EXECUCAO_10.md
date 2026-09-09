@@ -1,74 +1,117 @@
-# Execução 10 — forense da LISTA
+# Execução 10 — RESULTADO: a lista entrega URLs de produto prontas
 
-## Escopo
+## Comparação
 
-Apenas `/social/<afiliado>/lists/<UUID>`. Produto não é
-reinvestigado — já foi comprovado manualmente pelo operador:
+| Campo | SOCIAL (`/lists`) | SOCIAL_LIST (`/lists/<UUID>`) |
+|---|---|---|
+| poly-card | SIM (90) | SIM (70) |
+| poly-card--list | NAO | NAO |
+| poly-card--large | NAO | NAO |
+| poly-card--grid | SIM (18) | SIM (14) |
+| href de produto | **SIM (18)** | **SIM (14)** |
+| "Ir para produto" | NAO | NAO |
+| listId | NAO | **SIM (1)** |
+| uuid no path | NAO | `8f90988a-1c69-4f23-8b26-76286c3cdc87` |
+| uuid no corpo | SIM (21) | SIM (7) |
+| href `/lists/` | SIM (6 listas) | SIM (1) |
+| href `lista.mercadolivre.com.br` | SIM (79) | SIM (79) |
+| IDs MLB | — | 41 distintos |
+
+## Respostas diretas
+
+**A página `/lists` contém links individuais de produtos?** SIM.
+
+**Aparecem em `href`?** SIM — 14 na lista específica, 18 na página
+de listas. URLs completas e navegáveis:
 
 ```
-meli.la → /social/promotom → poly-card → <a href> → "Ir para produto"
+/combo-cuide-se-bem-locao-corporal-deleite-400ml-refil-ros/p/MLB53980844
+/samsung-galaxy-buds3-fone-de-ouvido-sem-fio-galaxy-ai-cinza/p/MLB38059088
+/mouse-gamer-sem-fio-logitech-g-pro-x2-superstrike-lightspeed/p/MLB65536248
+/air-fryer-britania-42l-dura-mais-1500w-bfr38-127v/p/MLB29694703
 ```
 
-## URL sob teste
+Formato `/p/MLB…` — exatamente o que o `createLink` aprovou na
+execução 3.
 
-Lista real descoberta na execução 8, expandindo `/sec/2U6U32Q`:
+**Existe `<a>` para a própria lista?** SIM. A página `/lists` do
+promotom expõe **6 listas distintas**, cada uma com seu UUID:
 
 ```
 /social/promotom/lists/8f90988a-1c69-4f23-8b26-76286c3cdc87
-  ?matt_tool=54541970&forceInApp=true
+/social/promotom/lists/0ba6b879-2daa-4adf-9173-a8b4a55f7648
+/social/promotom/lists/580f83ff-0007-42ca-8a68-ca76e320d7ff
+/social/promotom/lists/aacee5d0-68f1-440a-a005-967bf647912d
+/social/promotom/lists/3277e65c-d91b-4d5f-8b3d-aff1130ceffd
 ```
 
-Comparada com a vitrine do mesmo afiliado: `/social/promotom`.
+**Existe listId/UUID?** SIM. UUID no path e `listId` no corpo — mas
+`listId` aparece **apenas** na lista específica, nunca na página de
+listas. É o marcador que distingue as duas.
 
-Usar o mesmo afiliado nas duas leituras isola a variável: qualquer
-diferença encontrada é de **tipo de página**, não de conta.
+**Existe URL `lista.mercadolivre.com.br`?** SIM, 79 — mas todas são
+**menu de categorias**, não a lista curada:
 
-## Separação exigida
+```
+/celulares-telefones/acessorios-celulares/#menu=categories
+/informatica/componentes-pc/#menu=categories
+```
 
-| Bloco | O que responde |
-|---|---|
-| A | produtos dentro da lista |
-| B | identidade da lista |
-| C | URL da lista |
-| D | URL de cada produto |
+Navegação do site, presente igualmente nas duas páginas. **Não
+serve como URL afiliável da lista.**
 
-## O que é procurado
+**HTML traz produtos completos ou só IDs?** Completos — `href` mais
+título.
 
-**Elementos** — `poly-card`, `poly-card--list`, `poly-card--large`,
-`poly-card--grid`, `poly-component__title`
+**Quantos produtos?** 41 IDs MLB distintos, mas apenas **14 cards
+com href**. A diferença (27 IDs sem card) é moldura: recomendação,
+telemetria, blocos laterais.
 
-**Links** — todo `<a href>`, separados em: href de produto (contém
-`MLB`), href com `/lists/`, href de `lista.mercadolivre.com.br`,
-href `/social/`. Mais a contagem de `"Ir para produto"` e de
-`"Ir para a lista"` / `"Ver lista"`.
+Os 14 com `href` e `poly-card--grid` são a curadoria real.
 
-**Identificadores** — `MLB…`, `MLBU…`, UUID no path, UUIDs no corpo,
-e a contagem das chaves `product_id`, `productId`, `item_id`,
-`itemId`, `listId`, `list_id`, `list_uuid`, `permalink`.
+## Diferença estrutural
 
-**Estrutura** — títulos dos cards e a **ordem** dos pares
-(href → texto) na sequência do documento.
+Só duas: **contagem de poly-card** e **presença de `listId`**.
 
-A ordem importa mais do que parece: se a curadoria da lista vier
-antes da moldura de recomendação, existe regra explorável. Se vier
-embaralhada, extrair produto não resolve.
+Estruturalmente as páginas são a mesma coisa — mesma grade, mesmo
+componente, mesmos `href` de produto. A lista específica é um
+recorte da vitrine.
 
-## A pergunta que decide
+Note também que `"Ir para produto"` **não aparece no HTML** de
+nenhuma das duas (contagem 0). O texto que o operador vê no
+navegador é renderizado depois; o que existe no HTML servido é o
+`href` direto — que é melhor, porque dispensa interação.
 
-Existe uma URL própria da lista — algo como
-`lista.mercadolivre.com.br/…` — dentro da própria resposta?
+## A resposta que decide
 
-Se existir, há rota direta: a lista de terceiro apontaria para uma
-listagem do Mercado Livre, que já provamos ser afiliável
-(execução 6).
+**NÃO existe URL de lista afiliável.**
 
-Se não existir, a lista de terceiro só oferece os produtos
-individuais, e a decisão passa a ser entre afiliar produto a produto
-ou usar o fallback próprio.
+A lista de terceiro não aponta para nenhuma
+`lista.mercadolivre.com.br/_Container_…` — só para menus de
+categoria. Não há como converter a lista dele numa lista nossa.
 
-## Restrições
+**O que existe são 14 URLs de produto prontas**, no formato que o
+`createLink` já aprovou.
 
-Somente leitura. Sem Playwright, sem navegador automatizado, sem
-seguir endpoint inventado, sem tocar produção, sem imprimir
-credencial. Destino que vier como muro de captcha é registrado e o
-teste aborta, sem contorno.
+## Consequência
+
+Para lista de terceiro sobram dois caminhos, e a escolha é de
+negócio, não técnica:
+
+1. **Fallback `/sec/` próprio** — um link, destino genérico, não
+   corresponde à oferta anunciada
+2. **Afiliar os produtos** — 14 chamadas ao `createLink`, cada uma
+   com link correto e creditando a nós
+
+O caminho 2 é tecnicamente viável e não era antes. Custo: ~1,3s de
+leitura da página, mais N chamadas de afiliação.
+
+## Pergunta que ainda não foi respondida
+
+Qual dos 14 corresponde à oferta anunciada na mensagem? A curadoria
+tem 14 produtos; a mensagem do grupo fala de um cupom. Se o cupom
+vale para a lista inteira, publicar vários faz sentido. Se vale para
+um item, é preciso casar com o texto da mensagem.
+
+Isso não se resolve lendo HTML — precisa de uma mensagem real com o
+texto ao lado.
