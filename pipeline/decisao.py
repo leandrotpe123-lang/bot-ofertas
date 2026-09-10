@@ -92,12 +92,24 @@ class Decisao:
     score_atual: int = 0
     delta: int = 0
     sim: float = 0.0
+    # [E4.0] FATO, não ação: o texto do candidato é IDÊNTICO ao texto
+    # publicado. Só é preenchido no ramo SINCRONIZAR. A ação continua
+    # sendo SINCRONIZAR — trocá-la por IGNORAR mudaria a operação de
+    # família de unir() para absorver() e perderia o reapontamento de
+    # âncoras. Quem consome decide não fazer I/O; ninguém pula domínio.
+    texto_igual: bool = False
 
 
 def decidir(norm, montada, score: int, estado: dict | None,
-            agora: float, is_edit: bool = False) -> Decisao:
+            agora: float, is_edit: bool = False,
+            *, midia_key_aceita: str = "") -> Decisao:
     """Decide a ação para um candidato: PUBLICAR (sem estado vivo),
-    EVOLUIR ou IGNORAR (com estado). Não executa nada."""
+    EVOLUIR ou IGNORAR (com estado). Não executa nada.
+
+    [E4.0] `midia_key_aceita` é um FATO fornecido pelo orquestrador (a
+    mídia efetivamente publicada naquele post). Keyword-only e com
+    default: quem não se pronuncia recebe o comportamento anterior.
+    Esta camada continua PURA — não lê globals, não lê banco."""
     if not estado:
         return Decisao(PUBLICAR, "SEM_ESTADO")
 
@@ -119,8 +131,13 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # Calculada UMA vez, no topo, e anexada a toda Decisao que sair
     # daqui. É independente de score, texto, líder, edit_count e
     # janela — só olha a classe da imagem publicada contra a nova.
+    # [E4.0] As duas chaves entram como fatos. A chave do candidato vem
+    # da ingestão (norm.midia_key); a aceita vem do orquestrador. Vazio
+    # em qualquer lado ⇒ a política decide sozinha, como antes.
     trocar_midia, motivo_midia = politica_midia(
-        montada.imagem, norm.chat, estado, is_edit)
+        montada.imagem, norm.chat, estado, is_edit,
+        chave_nova=getattr(norm, "midia_key", "") or "",
+        chave_aceita=midia_key_aceita or "")
 
     def _com_midia(d: Decisao) -> Decisao:
         """Anexa a decisão de mídia e faz a política GOVERNAR os
@@ -177,10 +194,16 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # [FASE 2] A sincronização espelha o TEXTO do líder — a imagem
     # continua governada pela política. Um líder de mídia ruim editando
     # a própria mensagem NÃO rebaixa mais a imagem boa publicada.
+    #
+    # [E4.0] `texto_igual` é comparação EXATA contra o texto publicado.
+    # NÃO usa _alma/_sim: aquilo é similaridade semântica de dedup e
+    # normaliza preço (R$ → VALOR), então suprimiria uma queda de preço
+    # legítima. Guarda de I/O exige igualdade byte a byte.
     if is_edit and lider_atual and norm.chat == lider_atual:
         return _com_midia(Decisao(SINCRONIZAR, "SINCRONIZACAO",
                                   na_janela=na_janela,
-                                  score_atual=score_atual))
+                                  score_atual=score_atual,
+                                  texto_igual=(montada.texto == texto_atual)))
 
     # ══ TETO DE EVOLUÇÃO — Doutrina Frente 0 §5 ══
     # O teto trava SOMENTE o ramo de evolução; NÃO encerra a família.
