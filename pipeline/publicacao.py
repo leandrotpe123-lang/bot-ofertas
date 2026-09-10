@@ -16,6 +16,8 @@ import contextlib
 import time
 from typing import Optional
 
+import globals as g
+
 from database import db_get_post
 from logger import log_out
 from pipeline.decisao import decidir
@@ -102,7 +104,12 @@ async def _enviar_inner(montada: MensagemMontada,
             async with post_lock:
                 estado = db_get_post(msg_id_rel)   # re-verifica sob o lock
                 agora = time.time()
-                d = decidir(norm, montada, score, estado, agora, is_edit)
+                # [E4.0] O fato da mídia aceita é lido AQUI, pelo
+                # orquestrador, e entregue à decisão. decisao.py
+                # permanece pura. A leitura acontece sob o lock do
+                # post, o mesmo que serializa a escrita do mapa.
+                d = decidir(norm, montada, score, estado, agora, is_edit,
+                            midia_key_aceita=g.midia_aceita_get(msg_id_rel))
                 if d.acao != "PUBLICAR":
                     if norm is not None:
                         # Encontro registra (I1): edits futuros desta
@@ -159,7 +166,8 @@ async def _enviar_inner(montada: MensagemMontada,
                     if d.acao != "EVOLUIR":
                         log_out.info(
                             f"🧭 TL | id={montada.msg_id} chat={norm.chat} | "
-                            f"DESCARTE | motivo={d.motivo}")
+                            f"DESCARTE | motivo={d.motivo} "
+                            f"midia={d.motivo_midia}")
                         return True
 
                     msg_id_dest = estado["msg_id_dest"]
