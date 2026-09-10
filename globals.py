@@ -58,6 +58,55 @@ _atomic_mem: Dict[str, float] = {}
 # reset reabriria a admissao durante um encerramento em curso.
 _encerrando: bool = False
 
+# ── [E4.0] Mídia ACEITA por post ─────────────────────────────────
+# post_id (msg_id_dest) → chave da mídia de ORIGEM efetivamente
+# publicada naquele post. Estado de PROCESSO, como _buf/_w_ativos: não
+# há coluna de banco e não deve haver.
+#
+# REGRA DE VERDADE: a entrada só é escrita DEPOIS da I/O e SOMENTE com
+# evidência de mídia publicada (Message com mídia, ou midia_aplicada do
+# contrato de edição). Nunca a partir de intenção.
+#
+# AUSÊNCIA ≠ "MÍDIA IGUAL". Ausência (evicção, restart, chave vazia,
+# post legado) significa NÃO SEI e devolve o comportamento anterior à
+# E4.0 — no máximo uma escrita redundante, jamais uma supressão
+# indevida.
+#
+# SEM LOCK, de propósito: o precedente correto é _buf/_w_ativos/_coal,
+# mutados sem lock porque vivem no único event loop do processo. Todas
+# as mutações aqui são síncronas e acontecem sob lock_post (ou
+# lock_origem+lock_identidade, no nascimento), então a serialização já
+# existe. _cache_lock protege estruturas com acesso síncrono fora do
+# loop; não é o caso desta.
+_MIDIA_ACEITA: "OrderedDict[int, str]" = OrderedDict()
+_MIDIA_LIMIT = 2000
+
+
+def midia_aceita_get(post_id: int) -> str:
+    """Chave da mídia aceita naquele post, ou "" quando não se sabe."""
+    if not post_id:
+        return ""
+    return _MIDIA_ACEITA.get(post_id, "")
+
+
+def midia_aceita_set(post_id: int, chave: str) -> None:
+    """Registra a mídia aceita. Ponto ÚNICO que impõe "chave vazia não
+    é fato": um valor ausente jamais entra no mapa, para que nenhuma
+    comparação futura possa casar "" com ""."""
+    if not post_id or not chave:
+        return
+    _MIDIA_ACEITA[post_id] = chave
+    _MIDIA_ACEITA.move_to_end(post_id)
+    if len(_MIDIA_ACEITA) > _MIDIA_LIMIT:
+        _MIDIA_ACEITA.popitem(last=False)
+
+
+def midia_aceita_drop(post_id: int) -> None:
+    """Esquece o post. Usado quando o corpo físico deixa de existir
+    (delete+repost)."""
+    _MIDIA_ACEITA.pop(post_id, None)
+
+
 # ── HTTP Session singleton ────────────────────────────────────────
 _http_session: Optional[aiohttp.ClientSession] = None
 
@@ -111,6 +160,7 @@ def _init_globals():
     _coal.clear()
     _IDS_PROC.clear()
     _atomic_mem.clear()
+    _MIDIA_ACEITA.clear()   # [E4.0] mesmo tratamento: clear, não reassign
 
     # Contador int: reassign
     _w_ativos = 0
