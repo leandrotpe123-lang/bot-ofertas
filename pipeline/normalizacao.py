@@ -115,6 +115,10 @@ class MensagemNormalizada:
     ancora_url:        str          = ""
     # Entidades de código (monospace) capturadas na ingestão — insumo que
     code_entities:     List[str]    = field(default_factory=list)
+    # [E4.0] Chave da mídia de ORIGEM, transportada da ingestão sem
+    # transformação — mesmo trilho de code_entities. Consumida pela
+    # guarda de delta de mídia; "" significa NÃO SEI (legado).
+    midia_key:         str          = ""
     # ──────────────────────────────────────────────────────────────
     is_reply:          bool         = False
     reply_to:          int          = 0
@@ -233,6 +237,7 @@ async def normalizar(
         tem_sinal_cashback=tem_sinal_cashback,
         ancora_url=ancora_url,
         code_entities=bruta.code_entities,
+        midia_key=getattr(bruta, "midia_key", ""),
         is_reply=bruta.is_reply,
         reply_to=bruta.reply_to, is_override=is_override,
   )
