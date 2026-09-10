@@ -50,7 +50,7 @@ ser ESTRUTURAL (duas famílias de nomes) e não uma recomendação.
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from telethon.errors import FloodWaitError, MessageNotModifiedError
 
@@ -58,6 +58,29 @@ import config
 from config import GRUPO_DESTINO
 from logger import log_out
 from pipeline.montagem import MensagemMontada
+
+
+# ── [E4.0] Resultado de uma edição ────────────────────────────────
+class ResultadoEdicao(NamedTuple):
+    """Contrato de retorno das primitivas de edição.
+
+    `ok`             a operação de edição concluiu.
+    `midia_aplicada` o edit_message(file=) retornou sem exceção NESTA
+                     tentativa. É o ÚNICO fato que prova que a mídia
+                     nova entrou.
+
+    Existe porque `ok` sozinho é ambíguo: quando o edit com mídia falha
+    e exigir_imagem=False, a primitiva degrada para uma edição
+    texto-only e conclui com sucesso. Tratar esse `ok` como "mídia
+    aceita" criaria estado falso — pior que uma escrita redundante.
+
+    NamedTuple pelo idioma da casa (LinksParticionados,
+    LinksResolvidos): contrato tipado e desempacotável. ATENÇÃO: uma
+    NamedTuple é sempre truthy — chamadores testam `.ok`, nunca o
+    objeto.
+    """
+    ok: bool
+    midia_aplicada: bool
 
 
 # ── Envio ─────────────────────────────────────────────────────────
@@ -115,7 +138,7 @@ async def _enviar_msg(texto: str, img) -> object:
 async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
                                 imagem_nova=None,
                                 exigir_imagem: bool = False,
-                                trocar_midia: bool = True) -> bool:
+                                trocar_midia: bool = True) -> ResultadoEdicao:
     """Edita mensagem sem adquirir _SEM_ENVIO. Use APENAS dentro de
     funções que já seguram o semáforo.
 
@@ -147,6 +170,12 @@ async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
     # A mídia só entra na chamada se houver AUTORIZAÇÃO e imagem.
     midia = imagem_nova if trocar_midia else None
     for t in range(1, 4):
+        # [E4.0] Prova de mídia, POR TENTATIVA: cada retry recomeça em
+        # False. Só vira True na linha imediatamente após o
+        # edit_message(file=) retornar sem exceção — nunca inferida de
+        # ok, de trocar_midia, de exigir_imagem nem da existência da
+        # imagem candidata.
+        midia_aplicada = False
         try:
             if midia:
                 try:
@@ -154,13 +183,14 @@ async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
                         GRUPO_DESTINO, msg_id_dest, texto_novo,
                         parse_mode="md", file=midia,
                     )
+                    midia_aplicada = True
                 except Exception as e_img:
                     if exigir_imagem:
                         log_out.info(
                             f"🖼 imagem não entrou (post sem mídia) "
                             f"dest_id={msg_id_dest}: {e_img}"
                         )
-                        return False
+                        return ResultadoEdicao(False, False)
                     await client.edit_message(
                         GRUPO_DESTINO, msg_id_dest, texto_novo,
                         parse_mode="md",
@@ -171,27 +201,29 @@ async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
                     parse_mode="md",
                 )
             log_out.info(f"✏️ Editado | dest_id={msg_id_dest}")
-            return True
+            return ResultadoEdicao(True, midia_aplicada)
         except MessageNotModifiedError:
-            return True
+            # Nada mudou no destino — conservadoramente, a mídia NÃO
+            # foi aplicada.
+            return ResultadoEdicao(True, False)
         except FloodWaitError as e:
             if e.seconds > 120:
                 log_out.warning(
                     f"⚠️ FloodWait longo {e.seconds}s — abortando edição"
                 )
-                return False
+                return ResultadoEdicao(False, False)
             await asyncio.sleep(e.seconds)
         except Exception as e:
             log_out.error(f"❌ edit t={t}: {e}")
             if t < 3:
                 await asyncio.sleep(2 ** t)
-    return False
+    return ResultadoEdicao(False, False)
 
 
 async def editar_msg(msg_id_dest: int, texto_novo: str,
                      imagem_nova=None,
                      exigir_imagem: bool = False,
-                     trocar_midia: bool = True) -> bool:
+                     trocar_midia: bool = True) -> ResultadoEdicao:
     """Edição PÚBLICA — UMA aquisição do _SEM_ENVIO cobrindo a operação
     inteira: as até 3 tentativas, o backoff exponencial e o sleep de
     FloodWait desta edição ficam TODOS sob a mesma vaga (regra: o
@@ -207,7 +239,7 @@ async def editar_msg(msg_id_dest: int, texto_novo: str,
 
 
 async def editar_por_id(msg_id_dest: int, texto_novo: str,
-                        imagem_nova=None) -> bool:
+                        imagem_nova=None) -> ResultadoEdicao:
     """Versão pública (com semáforo) pra callers externos que não
     seguram _SEM_ENVIO. Delega pra _editar_inner_no_sem."""
     async with config._SEM_ENVIO:
