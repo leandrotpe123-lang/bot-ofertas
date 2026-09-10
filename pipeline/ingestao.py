@@ -4,7 +4,9 @@ import re
 from dataclasses import dataclass, field
 from typing import List
 
-from telethon.tl.types import MessageMediaWebPage, MessageEntityCode, MessageEntityPre
+from telethon.tl.types import (MessageMediaWebPage, MessageMediaPhoto,
+                               MessageMediaDocument, MessageEntityCode,
+                               MessageEntityPre)
 
 from logger import log_ing
 from pipeline.identidade import chat_canonico, username_para_log
@@ -27,6 +29,44 @@ class MensagemBruta:
     # para cupom-code, porque divulgadores profissionais sempre formatam
     # códigos de cupom assim no Telegram pra ficarem clicáveis/copiáveis.
     code_entities: List[str] = field(default_factory=list)
+    # [E4.0] Identidade ESTÁVEL da mídia desta mensagem, no ESPAÇO DE
+    # CHAVES DA ORIGEM. Derivada do objeto que o Telegram já entregou
+    # no update — pura, sem rede, sem download, sem hash de bytes.
+    # Cadeia vazia significa NÃO SEI, nunca "igual".
+    midia_key: str = ""
+
+
+def chave_midia(message) -> str:
+    """[E4.0] Identidade estável da mídia de uma mensagem do Telegram.
+
+    Pura: só lê atributos de um objeto JÁ desserializado pelo Telethon.
+    Nenhuma chamada de rede, nenhum download, nenhum hash de bytes.
+
+    Usa `photo.id` / `document.id` — identificadores de armazenamento
+    do Telegram. `access_hash` e `file_reference` são deliberadamente
+    ignorados: o primeiro é por sessão e o segundo é volátil, então
+    nenhum dos dois identifica a mídia.
+
+    Devolve "" quando não há identidade derivável: sem mídia, preview
+    de link (MessageMediaWebPage) ou tipo desconhecido. Cadeia vazia é
+    "NÃO SEI" — jamais é lida como "mídia igual" por quem consome.
+
+    Serve a dois usos, ambos no mesmo espaço de chaves:
+      - na INGESTÃO, para carimbar a mídia da mensagem de origem;
+      - na PUBLICAÇÃO, como EVIDÊNCIA booleana de que um Message
+        devolvido pelo Telegram realmente saiu com mídia.
+    """
+    try:
+        media = getattr(message, "media", None)
+        if isinstance(media, MessageMediaPhoto):
+            ident = getattr(getattr(media, "photo", None), "id", None)
+            return f"photo:{ident}" if ident is not None else ""
+        if isinstance(media, MessageMediaDocument):
+            ident = getattr(getattr(media, "document", None), "id", None)
+            return f"doc:{ident}" if ident is not None else ""
+        return ""
+    except Exception:
+        return ""
 
 
 def _extrair_code_entities(message) -> List[str]:
@@ -75,6 +115,9 @@ async def ingerir(event) -> MensagemBruta:
         and not isinstance(event.message.media, MessageMediaWebPage)
     )
     code_entities = _extrair_code_entities(event.message)
+    # [E4.0] Só derivamos chave quando há mídia real; preview de link
+    # já foi excluído por tem_midia acima.
+    midia_key = chave_midia(event.message) if tem_midia else ""
 
     # Identidade vem do Módulo 1 (id numérico canônico). Username só p/ log.
     chat = chat_canonico(event)
@@ -98,6 +141,6 @@ async def ingerir(event) -> MensagemBruta:
         msg_id=event.message.id, chat=chat, texto=texto,
         links=links, tem_midia=tem_midia, media_obj=event.message,
         is_reply=is_reply, reply_to=reply_to,
-        code_entities=code_entities,
+        code_entities=code_entities, midia_key=midia_key,
                     )
             
