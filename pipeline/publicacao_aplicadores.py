@@ -32,9 +32,15 @@ import time
 
 from telethon.errors import FloodWaitError
 
+import globals as g
+
 from config import GRUPO_DESTINO
 from database import db_registrar_post, db_remover_post, db_ofertas_de_post
 from logger import log_out, log_sys
+# [E4.0] chave_midia é PURA (só lê atributos de um Message já
+# desserializado). Aqui ela tem um único uso: EVIDÊNCIA de que o
+# Message devolvido pelo Telegram realmente saiu com mídia.
+from pipeline.ingestao import chave_midia
 from pipeline.saida import (
     _enviar_msg,
     editar_msg,
@@ -57,10 +63,10 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
     intacta — e o fallback de substituição está desarmado (decidir() já
     rebaixou d.permite_substituir), porque repostar apagaria a imagem
     boa de forma irrecuperável."""
-    ok = await editar_msg(
+    res = await editar_msg(
         msg_id_dest, montada.texto, montada.imagem,
         exigir_imagem=d.exigir_imagem, trocar_midia=d.trocar_midia)
-    if ok:
+    if res.ok:
         # Edição preserva o msg_id: NÃO removemos o post.
         # db_registrar_post faz upsert atômico e, como
         # ofertas_familia ⊇ ofertas do post, reescreve todas
@@ -77,6 +83,11 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             estado.get("janela_fim", 0), edit_count + 1,
             midia_chat=(norm.chat if d.trocar_midia else None),
             score_versao=V_CONTEUDO)
+        # [E4.0] Só APÓS a I/O e só com prova: midia_aplicada. Um
+        # `res.ok` que caiu em texto-only NÃO registra nada, então a
+        # mesma mídia continua elegível na próxima chegada.
+        if res.midia_aplicada:
+            g.midia_aceita_set(msg_id_dest, getattr(norm, "midia_key", ""))
         log_out.info(
             f"✏️ [EDITADO_OK] {identity} novo_score={d.novo_score}"
             f"{' +img' if d.trocar_midia else ''}")
@@ -99,6 +110,12 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
     sent = await _substituir_post_com_midia(msg_id_dest, montada)
     if sent:
         db_remover_post(msg_id_dest)
+        # [E4.0] O corpo físico mudou: o post antigo deixa de existir e
+        # a chave só migra se o Message NOVO realmente tiver mídia — o
+        # reenvio pode ter degradado para texto.
+        g.midia_aceita_drop(msg_id_dest)
+        if chave_midia(sent):
+            g.midia_aceita_set(sent.id, getattr(norm, "midia_key", ""))
         # O repost nasce COM a mídia da mensagem — e só chegou aqui
         # porque a política autorizou (d.permite_substituir já foi
         # rebaixado por decidir() quando ela diz PRESERVA).
@@ -129,12 +146,25 @@ async def _aplicar_sincronizacao(montada, norm, score, estado, msg_id_dest,
     aqui o vazamento principal: um líder de mídia ruim editando a
     própria mensagem sobrescrevia a imagem boa publicada, porque
     montada.imagem ia direto para a primitiva sem consulta nenhuma."""
-    ok = await editar_msg(
-        msg_id_dest, montada.texto, montada.imagem, exigir_imagem=False,
-        trocar_midia=d.trocar_midia)
+    # [E4.0] SEM DELTA REAL ⇒ SEM I/O. Texto idêntico ao publicado e
+    # política sem troca de mídia: a edição no Telegram não mudaria
+    # nada. A ação continua SINCRONIZAR e TUDO o que vem abaixo —
+    # familia.unir já calculada pelo chamador, db_registrar_post,
+    # líder, janela, edit_count — segue idêntico. A economia é
+    # exclusivamente a chamada ao Telegram.
+    no_op = d.texto_igual and not d.trocar_midia
+    if no_op:
+        ok, midia_aplicada = True, False
+    else:
+        res = await editar_msg(
+            msg_id_dest, montada.texto, montada.imagem, exigir_imagem=False,
+            trocar_midia=d.trocar_midia)
+        ok, midia_aplicada = res.ok, res.midia_aplicada
     if not ok:
         log_out.warning(f"⚠️ [SYNC_FALHOU] {identity} chat={norm.chat}")
         return True
+    if midia_aplicada:
+        g.midia_aceita_set(msg_id_dest, getattr(norm, "midia_key", ""))
     db_registrar_post(
         msg_id_dest, ofertas_familia, score, montada.texto,
         montada.plat, estado.get("lider", "") or norm.chat,
@@ -144,7 +174,8 @@ async def _aplicar_sincronizacao(montada, norm, score, estado, msg_id_dest,
     log_out.info(
         f"🔁 [SINCRONIZADO] {identity} chat={norm.chat} score={score} "
         f"edit_count={estado.get('edit_count', 0)} (preservado)"
-        f"{' +img' if d.trocar_midia else ''}")
+        f"{' +img' if d.trocar_midia else ''}"
+        f"{' no-op' if no_op else ''} midia={d.motivo_midia}")
     return True
 
 
@@ -167,13 +198,16 @@ async def _aplicar_upgrade_midia(montada, norm, d, estado, msg_id_dest,
     familia.unir(msg_id, []): é operação de domínio, e unir com lista
     vazia seria um leitor disfarçado com semântica de escrita."""
     texto_atual = estado.get("texto", "") or montada.texto
-    ok = await editar_msg(
+    res = await editar_msg(
         msg_id_dest, texto_atual, montada.imagem,
         exigir_imagem=False, trocar_midia=True)
-    if not ok:
+    if not res.ok:
         log_out.warning(
             f"⚠️ [UPGRADE_MIDIA_FALHOU] {identity} chat={norm.chat}")
         return True
+    # [E4.0] Prova antes do registro — ver _aplicar_evolucao.
+    if res.midia_aplicada:
+        g.midia_aceita_set(msg_id_dest, getattr(norm, "midia_key", ""))
     # Regrava o MESMO estado, mudando só midia_chat. As ofertas vêm do
     # índice para que o upsert não perca a família existente.
     db_registrar_post(
@@ -241,6 +275,13 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
                 msg_id_origem=montada.msg_id,
                 midia_chat=((norm.chat if norm else "") if img else ""),
                 score_versao=V_CONTEUDO)
+            # [E4.0] `img` diz o que TENTAMOS enviar; chave_midia(sent)
+            # diz o que o Telegram REALMENTE publicou. _enviar_msg_no_sem
+            # tem fallback que devolve um send_message puro — nesse caso
+            # img é truthy e o post no ar não tem mídia. Só o Message
+            # devolvido é prova.
+            if img and chave_midia(sent):
+                g.midia_aceita_set(sent.id, getattr(norm, "midia_key", ""))
             log_out.info(
                 f"🧭 TL | id={montada.msg_id} "
                 f"chat={norm.chat if norm else ''} | JANELA_CRIADA | "
