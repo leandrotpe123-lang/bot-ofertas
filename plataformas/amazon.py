@@ -1,48 +1,62 @@
 """
 Plataforma — Amazon.
 
-Módulo autocontido que descreve integralmente a plataforma Amazon
-e cumpre o contrato de plataforma. Consolida o conhecimento que
-antes se encontrava disperso entre os módulos de classificação,
-de estado de evento e de limpeza de parâmetros.
+Adapter puro do contrato de plataforma. Conhece URL da Amazon,
+identidade de produto e a sua própria política de afiliação. Não
+conhece pipeline, publicação, dedupe nem banco de dados.
 
-Expõe a instância `PLATAFORMA`, que é registrada no registry
-durante a inicialização do sistema.
+REGRA DE CONVERSÃO (o formato da entrada define o formato da saída):
 
-Este módulo depende do contrato, dos utilitários do core e dos
-recursos externos. Não depende da pipeline, do registry nem da
-orquestração. Não acessa o banco de dados diretamente: o cache
-de links é mediado por `utils.cache_links`.
+  LONGA  → troca somente o valor da tag → SiteStripe → short oficial
+  CURTA  → expande → troca a tag       → SiteStripe → short oficial
 
-Baseline arquitetural: Documento 1 — Especificação do Contrato.
+  Em qualquer falha do SiteStripe a oferta NUNCA se perde: publica-se
+  a URL longa já afiliada.
+
+CACHE-FIRST: o short oficial é guardado no cache mediado sob a
+IDENTIDADE da oferta (o ASIN), e não apenas sob a URL recebida. Duas
+URLs diferentes do mesmo produto — Promotom e Fumotom mandam formas
+distintas do mesmo ASIN — reaproveitam o mesmo short sem uma segunda
+chamada externa.
+
+SESSÃO: o SiteStripe exige sessão autenticada de Associados. A
+sessão é própria deste módulo, com cookie jar que aceita e devolve
+os Set-Cookie da Amazon. Valor de cookie NUNCA é registrado em log.
 """
 from __future__ import annotations
 
+import asyncio
+import base64
+import os
 import re
+import time
 from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import aiohttp
+from yarl import URL
 
 import config
-import os
-
-_AMZ_TAG = os.environ.get("AMAZON_TAG", "leo21073-20")
 from logger import log_nrm
 from plataformas.contrato import (
     AUSENTE,
     CONTRACT_VERSION,
+    Afiliacao,
     IdentidadeProduto,
     Plataforma,
     TipoLink,
 )
 from utils.cache_links import consultar_link, registrar_link
+from utils.uma_por_vez import uma_por_vez
 from utils.url_resolver import desencurtar
 from utils.urls import _netloc, _sanitizar_url
 
 
 # ── Identidade da plataforma ──────────────────────────────────────
 _IDENTIFICADOR = "amazon"
+
+_AMZ_TAG = os.environ.get("AMAZON_TAG", "")
+_AMZ_STORE_ID = os.environ.get("AMAZON_STORE_ID", "")
 
 
 # ── Domínios e encurtadores ───────────────────────────────────────
@@ -53,14 +67,15 @@ _ENCURTADORES = frozenset({
     "amzn.to", "link.amazon", "a.co", "amzn.com", "amzlink.to",
 })
 
-
-# ── Quirk HTTP: hosts que exigem GET na resolução ─────────────────
-# Hosts cujos servidores não respondem corretamente a requisições
-# HEAD, exigindo GET direto no resolver de redirecionamento. Hoje
-# coincide com _ENCURTADORES, mas a relação NÃO é definicional: é
-# fato empírico, sujeito a revisão por host individualmente.
 _ENCURTADORES_FORCA_GET = frozenset({
     "amzn.to", "a.co", "amzn.com", "amzlink.to",
+})
+
+# Domínios que a própria Amazon devolve como link curto oficial.
+# Verificado em produção: getShortUrl devolve link.amazon, não
+# apenas amzn.to. Exigir só amzn.to reprovaria sucesso legítimo.
+_SHORTS_OFICIAIS = frozenset({
+    "amzn.to", "link.amazon", "a.co",
 })
 
 # ── Hosts de campanha ─────────────────────────────────────────────
@@ -83,11 +98,45 @@ _PATHS_SEM_AFILIACAO = re.compile(
     re.I,
 )
 
-
 # ── Parâmetros de limpeza de URL ──────────────────────────────────
 _PARAMS_MANTER = frozenset({
     "keywords", "node", "k", "i", "rh", "n", "field-keywords",
 })
+
+
+# ── SiteStripe ────────────────────────────────────────────────────
+_ENDPOINT_SHORT = (
+    "https://www.amazon.com.br/associates/sitestripe/getShortUrl"
+)
+_MARKETPLACE_ID = "526970"
+_TIMEOUT_SHORT = 15
+
+# Disjuntor: sessão vencida ou desafio de WAF falha em série. Sem
+# isto, cookie morto vira centenas de tentativas por hora contra a
+# Amazon com sessão inválida — que é como uma conta de associado
+# entra na mira. Aberto o circuito, publica-se a longa direto.
+_LIMITE_FALHAS = 3
+_PAUSA_DISJUNTOR = 300.0
+
+_falhas_seguidas = 0
+_disjuntor_ate = 0.0
+
+_sessao_amz: Optional[aiohttp.ClientSession] = None
+_lock_sessao = asyncio.Lock()
+
+_CABECALHOS_SHORT = {
+    "accept": "application/json, text/javascript, */*; q=0.01",
+    "accept-language": "pt-BR",
+    "user-agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+    ),
+    "referer": "https://www.amazon.com.br/",
+    "x-requested-with": "XMLHttpRequest",
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+}
 
 
 # ── Funções de apoio ──────────────────────────────────────────────
@@ -111,11 +160,6 @@ def _extrair_asin(parsed) -> str:
 
 # ── Capacidade obrigatória: reconhecimento ────────────────────────
 def reconhece(url: str) -> bool:
-    """
-    Verdadeiro se a URL pertence à Amazon (domínio próprio ou
-    encurtador próprio). Pura e determinística. Não falha: uma
-    URL malformada simplesmente não é reconhecida.
-    """
     if not url:
         return False
     netloc = _netloc(url)
@@ -126,25 +170,8 @@ def reconhece(url: str) -> bool:
 
 # ── Capacidade obrigatória: extração de identidade ────────────────
 def extrai_identidade(url: str) -> IdentidadeProduto:
-    """
-    Extrai a identidade estruturada de uma URL da Amazon.
-
-    Pura e determinística. Para qualquer URL reconhecida, produz
-    sempre uma IdentidadeProduto válida, ainda que com identificador
-    de produto ausente.
-
-    Classificação do tipo de link:
-      - encurtador próprio          → ENCURTADO
-      - caminho sem afiliação        → INVALIDO
-      - ASIN presente                → PRODUTO
-      - identificador de promoção    → CAMPANHA
-      - caminho de busca             → BUSCA
-      - caminho de evento ou loja    → EVENTO
-      - demais casos                 → CAMPANHA
-    """
     netloc = _netloc(url)
 
-    # Encurtador: natureza final desconhecida até a expansão.
     if netloc in _ENCURTADORES:
         return IdentidadeProduto(
             tipo_link=TipoLink.ENCURTADO, id_produto=AUSENTE,
@@ -152,13 +179,11 @@ def extrai_identidade(url: str) -> IdentidadeProduto:
 
     parsed = urlparse(url)
 
-    # Caminho que pertence à Amazon mas não comporta afiliação.
     if _PATHS_SEM_AFILIACAO.match(parsed.path):
         return IdentidadeProduto(
             tipo_link=TipoLink.INVALIDO, id_produto=AUSENTE,
         )
 
-    # Produto identificado por ASIN.
     asin = _extrair_asin(parsed)
     if asin:
         return IdentidadeProduto(
@@ -167,7 +192,6 @@ def extrai_identidade(url: str) -> IdentidadeProduto:
             id_global=f"{_IDENTIFICADOR}:{asin}",
         )
 
-    # Campanha de promoção identificada.
     promo = _P_PROMO.search(parsed.path)
     if promo:
         promo_id = promo.group(1).upper()
@@ -177,7 +201,6 @@ def extrai_identidade(url: str) -> IdentidadeProduto:
             id_global=f"{_IDENTIFICADOR}:promo_{promo_id}",
         )
 
-    # Demais naturezas, sem identificador de produto.
     if re.search(r'/s[/?]|/deals|/b[/?]', parsed.path):
         tipo = TipoLink.BUSCA
     elif re.search(r'/events/|/stores/', parsed.path):
@@ -190,11 +213,6 @@ def extrai_identidade(url: str) -> IdentidadeProduto:
 
 # ── Capacidade opcional: limpeza de URL ───────────────────────────
 def limpa_url(url: str) -> str:
-    """
-    Remove parâmetros de rastreamento da URL, preservando os
-    parâmetros funcionais. Pura e determinística. Preserva a
-    identidade canônica do produto.
-    """
     try:
         parsed = urlparse(url)
         params = {
@@ -208,36 +226,242 @@ def limpa_url(url: str) -> str:
         return url
 
 
+# ── Troca cirúrgica da identidade de afiliado ─────────────────────
+# A URL longa que chega dos grupos JÁ é a URL final da Amazon. O
+# único campo que carrega identidade de afiliado é `tag`. Trocar o
+# valor de `tag` e preservar todo o resto byte a byte é a operação
+# correta: não reconstrói rota, não inventa campo, não descarta
+# parâmetro desconhecido — `th` e `psc`, que selecionam a variação
+# do produto, sobrevivem. Mesma doutrina já aplicada na Magalu.
+def _partir_url(url: str) -> tuple:
+    """Separa (base, query) por corte de cadeia, sem reserializar.
+
+    O FRAGMENTO é descartado, como todo ramo deste módulo já faz:
+    não é enviado ao servidor, não participa de atribuição, e
+    preservá-lo deixaria a tag de outro afiliado visível no texto
+    publicado quando a URL vem na forma anômala `#algo?tag=...`.
+    """
+    base, _, query = url.split("#", 1)[0].partition("?")
+    return base, query
+
+
+def _aplicar_tag(query: str) -> str:
+    """Query com EXATAMENTE uma `tag`, a nossa, na posição original
+    quando já existia, ao final quando não existia. Todo parâmetro
+    que não é `tag` atravessa intacto: sem decodificar, sem
+    recodificar, sem reordenar."""
+    if not query:
+        return f"tag={_AMZ_TAG}"
+    saida, achou = [], False
+    for parte in query.split("&"):
+        if parte.split("=", 1)[0].lower() == "tag":
+            if not achou:
+                saida.append(f"tag={_AMZ_TAG}")
+                achou = True
+            continue
+        saida.append(parte)
+    if not achou:
+        saida.append(f"tag={_AMZ_TAG}")
+    return "&".join(p for p in saida if p)
+
+
+def _trocar_tag(url: str) -> str:
+    """Fast path: URL Amazon longa entra, sai idêntica exceto a tag."""
+    base, query = _partir_url(url)
+    return f"{base}?{_aplicar_tag(query)}"
+
+
+def _tag_unica_nossa(url: str) -> bool:
+    """Guard: uma única `tag` na saída, e o valor é o nosso. Nenhuma
+    identidade de afiliado estrangeira pode sobreviver."""
+    _, query = _partir_url(url)
+    valores = [
+        (p.split("=", 1) + [""])[1]
+        for p in query.split("&")
+        if p.split("=", 1)[0].lower() == "tag"
+    ]
+    return valores == [_AMZ_TAG]
+
+
+def _chave_identidade(asin: str) -> str:
+    """Chave de cache derivada da IDENTIDADE, não da URL recebida.
+
+    Forma canônica mínima do produto. Qualquer URL do mesmo ASIN —
+    decorada, com caminho descritivo, vinda de qualquer grupo —
+    produz esta mesma chave, e por isso reaproveita o short já
+    obtido em vez de chamar o SiteStripe de novo.
+    """
+    return f"https://www.amazon.com.br/dp/{asin}?tag={_AMZ_TAG}"
+
+
+# ── Sessão autenticada do SiteStripe ──────────────────────────────
+def _cookies_iniciais() -> dict:
+    """Semente do cookie jar, a partir de AMAZON_COOKIE.
+
+    Aceita a cadeia de cookies crua ou em Base64 — a extensão de
+    captura entrega Base64. Nenhum valor é registrado em log, aqui
+    ou em qualquer outro ponto do módulo.
+    """
+    bruto = (os.environ.get("AMAZON_COOKIE") or "").strip()
+    if not bruto:
+        return {}
+    if not (";" in bruto and "=" in bruto):
+        try:
+            bruto = base64.b64decode(bruto, validate=True).decode("utf-8")
+        except Exception:
+            pass
+    pares = {}
+    for parte in bruto.split(";"):
+        nome, sep, valor = parte.strip().partition("=")
+        if sep and nome:
+            pares[nome] = valor
+    return pares
+
+
+async def _obter_sessao() -> aiohttp.ClientSession:
+    """Sessão persistente e privada deste módulo.
+
+    Privada de propósito: os cookies de Associados não podem entrar
+    na sessão compartilhada do sistema. O cookie jar aceita os
+    Set-Cookie da Amazon e os devolve nas chamadas seguintes —
+    verificado em produção: a Amazon devolve session-id, sst-acbbr e
+    companhia a cada chamada, e a segunda chamada na mesma sessão
+    responde em fração do tempo da primeira.
+    """
+    global _sessao_amz
+    if _sessao_amz is not None and not _sessao_amz.closed:
+        return _sessao_amz
+    async with _lock_sessao:
+        if _sessao_amz is None or _sessao_amz.closed:
+            jar = aiohttp.CookieJar()
+            cookies = _cookies_iniciais()
+            if cookies:
+                jar.update_cookies(
+                    cookies, response_url=URL("https://www.amazon.com.br"),
+                )
+            _sessao_amz = aiohttp.ClientSession(
+                cookie_jar=jar, headers=_CABECALHOS_SHORT,
+            )
+            log_nrm.info(
+                f"🔐 AMZ sessão SiteStripe iniciada "
+                f"({len(cookies)} cookies)"
+            )
+    return _sessao_amz
+
+
+async def _http_getshorturl(params: dict) -> tuple:
+    """Costura de I/O: devolve (status, content_type, dados|None).
+
+    Isolada de propósito — é o único ponto deste módulo que fala com
+    a rede, o que mantém a política de validação, o disjuntor e o
+    cache testáveis sem acesso externo.
+    """
+    sessao = await _obter_sessao()
+    async with config._SEM_HTTP:
+        async with sessao.get(
+            _ENDPOINT_SHORT, params=params,
+            timeout=aiohttp.ClientTimeout(total=_TIMEOUT_SHORT),
+            allow_redirects=False,
+        ) as resposta:
+            tipo = (resposta.headers.get("content-type") or "").lower()
+            if resposta.status != 200 or "json" not in tipo:
+                return resposta.status, tipo, None
+            return resposta.status, tipo, await resposta.json(
+                content_type=None,
+            )
+
+
+def _registrar_falha(motivo: str) -> None:
+    """Contabiliza a falha e abre o disjuntor no limite."""
+    global _falhas_seguidas, _disjuntor_ate
+    _falhas_seguidas += 1
+    log_nrm.warning(
+        f"⚠️ AMZ SiteStripe falhou ({_falhas_seguidas}/"
+        f"{_LIMITE_FALHAS}): {motivo}"
+    )
+    if _falhas_seguidas >= _LIMITE_FALHAS:
+        _disjuntor_ate = time.monotonic() + _PAUSA_DISJUNTOR
+        log_nrm.error(
+            f"🔌 AMZ SiteStripe suspenso por "
+            f"{int(_PAUSA_DISJUNTOR)}s — publicando URL longa"
+        )
+
+
+async def _sitestripe(canonica: str) -> str:
+    """Devolve o short oficial da Amazon, ou cadeia vazia.
+
+    Só o sucesso é sucesso: HTTP 200, JSON válido, `ok` e `isOk`
+    verdadeiros, `shortUrl` num domínio oficial e a `longUrl` de
+    resposta carregando a nossa tag. Qualquer outra coisa — desafio
+    de WAF, página de login, captcha, 4xx, 5xx, timeout — é falha, e
+    falha nunca inventa short.
+    """
+    global _falhas_seguidas
+    if time.monotonic() < _disjuntor_ate:
+        return ""
+    if not _AMZ_TAG:
+        return ""
+
+    params = {
+        "longUrl": canonica,
+        "marketplaceId": _MARKETPLACE_ID,
+        "storeId": _AMZ_STORE_ID,
+    }
+    try:
+        status, tipo, dados = await _http_getshorturl(params)
+    except Exception as e:
+        _registrar_falha(type(e).__name__)
+        return ""
+
+    if dados is None:
+        _registrar_falha(f"HTTP {status} tipo={tipo!r}")
+        return ""
+    if dados.get("ok") is not True or dados.get("isOk") is not True:
+        _registrar_falha(
+            f"ok={dados.get('ok')} isOk={dados.get('isOk')}"
+        )
+        return ""
+
+    curta = dados.get("shortUrl") or ""
+    if not curta or _netloc(curta) not in _SHORTS_OFICIAIS:
+        _registrar_falha("shortUrl fora dos domínios oficiais")
+        return ""
+    if f"tag={_AMZ_TAG}" not in (dados.get("longUrl") or ""):
+        _registrar_falha("longUrl de resposta sem a nossa tag")
+        return ""
+
+    _falhas_seguidas = 0
+    return curta
+
+
 # ── Capacidade obrigatória: afiliação ─────────────────────────────
 def _construir_url_afiliada(url: str) -> Optional[str]:
-    """
-    Constrói a URL afiliada da Amazon a partir de uma URL já
-    expandida. Anexa a tag de afiliado. Devolve None quando a
-    construção não é possível.
-    """
     try:
         parsed = urlparse(url)
 
-        # Caminho sem afiliação: devolve a URL limpa, sem tag.
         if _PATHS_SEM_AFILIACAO.match(parsed.path):
             return urlunparse(parsed._replace(query="", fragment=""))
 
-        # Produto: forma canônica /dp/ASIN com a tag.
         asin = _extrair_asin(parsed)
         if asin:
+            # FAST PATH — a URL longa já é a URL final da Amazon:
+            # preserva tudo, troca só o valor da tag.
+            rapida = _trocar_tag(url)
+            if _tag_unica_nossa(rapida):
+                return rapida
+            # Guard reprovou (forma anômala de query): cai para a
+            # construção canônica, nunca para a entrada crua.
             return urlunparse(parsed._replace(
                 path=f"/dp/{asin}",
                 query=f"tag={_AMZ_TAG}",
                 fragment="",
             ))
 
-        # Promoção: preserva o caminho, anexa a tag.
         if "/promotion/" in parsed.path:
             return urlunparse(parsed._replace(
                 query=f"tag={_AMZ_TAG}", fragment="",
             ))
 
-        # Demais casos: limpa e anexa a tag.
         limpa = limpa_url(url)
         p_limpa = urlparse(limpa)
         query = parse_qs(p_limpa.query)
@@ -250,36 +474,76 @@ def _construir_url_afiliada(url: str) -> Optional[str]:
         return None
 
 
+async def _encurtar_produto(
+    url_original: str, afiliada: str, chave: str,
+) -> object:
+    """Obtém o short oficial para um produto, sob exclusão por ASIN.
+
+    Reconsulta o cache ao entrar: quem esperou pela exclusão encontra
+    o short que o primeiro acabou de gravar, em vez de repetir a
+    chamada externa.
+    """
+    guardado = consultar_link(chave)
+    if guardado:
+        registrar_link(url_original, guardado, _IDENTIFICADOR)
+        return guardado
+
+    curta = await _sitestripe(afiliada)
+
+    if curta:
+        resultado = Afiliacao(publicada=curta, canonica=afiliada)
+        # Sob a IDENTIDADE: qualquer outra URL do mesmo ASIN
+        # reaproveita este short sem nova chamada externa.
+        registrar_link(chave, resultado, _IDENTIFICADOR)
+        registrar_link(url_original, resultado, _IDENTIFICADOR)
+        log_nrm.info(f"✅ AMZ short oficial: {curta}")
+        return resultado
+
+    # Falha: publica a longa afiliada, sem inventar short. Gravada
+    # SÓ sob a URL recebida — nunca sob a identidade, para que a
+    # próxima oferta do mesmo produto tente o SiteStripe de novo em
+    # vez de herdar a falha por dias.
+    registrar_link(url_original, afiliada, _IDENTIFICADOR)
+    log_nrm.info(f"↩️ AMZ sem short, publica longa: {afiliada[:70]}")
+    return afiliada
+
+
 async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     """
     Converte uma URL da Amazon na sua forma afiliada.
 
     Capacidade com efeito colateral controlado: acessa a rede para
-    expandir encurtadores e consulta o cache de links mediado. Não
-    propaga exceções ao core: qualquer falha legítima resulta no
-    sentinela AUSENTE.
-
-    Garante que a URL devolvida pertence à Amazon e preserva a
-    identidade canônica do produto original.
+    expandir encurtadores e para obter o short oficial, e consulta o
+    cache de links mediado. Não propaga exceções ao core: qualquer
+    falha legítima resulta no sentinela AUSENTE — ou, no caso do
+    SiteStripe, na URL longa já afiliada.
     """
     url = _sanitizar_url(url)
 
-    # Consulta ao cache mediado, antes de qualquer processamento.
     cache = consultar_link(url)
     if cache:
         return cache
 
-    # Expansão de encurtador próprio, quando aplicável.
+    entrou_curta = _netloc(url) in _ENCURTADORES
+
     url_expandida = url
-    if _netloc(url) in _ENCURTADORES:
+    if entrou_curta:
         try:
             async with config._SEM_HTTP:
                 url_expandida = await desencurtar(url, sessao)
         except Exception as e:
             log_nrm.warning(f"⚠️ AMZ expansão falhou: {e}")
             return AUSENTE
+        # A expansão precisa ter chegado a um domínio Amazon real.
+        # Sem isto, um short não resolvido — desencurtar devolve a
+        # própria entrada em falha de rede — seguiria adiante e
+        # produziria publicação fabricada.
+        if not _bate_dominio(_netloc(url_expandida), _DOMINIOS):
+            log_nrm.warning(
+                "⚠️ AMZ expansão não resultou em URL Amazon — descarta"
+            )
+            return AUSENTE
 
-    # Caminho que não comporta afiliação: devolve forma limpa.
     identidade = extrai_identidade(url_expandida)
     if identidade.tipo_link == TipoLink.INVALIDO:
         afiliada = _construir_url_afiliada(url_expandida)
@@ -288,18 +552,33 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
             return afiliada
         return AUSENTE
 
-    # Construção da URL afiliada.
     afiliada = _construir_url_afiliada(url_expandida)
-    if not afiliada or "amazon" not in _netloc(afiliada):
+    if not afiliada or not _bate_dominio(_netloc(afiliada), _DOMINIOS):
         log_nrm.warning(f"⚠️ AMZ afiliação inválida: {afiliada}")
         return AUSENTE
 
+    # Produto: cache-first pela identidade, depois SiteStripe.
+    if identidade.tipo_link == TipoLink.PRODUTO:
+        chave = _chave_identidade(identidade.id_produto)
+        guardado = consultar_link(chave)
+        if guardado:
+            registrar_link(url, guardado, _IDENTIFICADOR)
+            return guardado
+        # Exclusão por ASIN: duas ofertas simultâneas do mesmo
+        # produto não disparam duas chamadas externas. Chave
+        # diferente da usada pelo core, portanto sem reentrância.
+        return await uma_por_vez(
+            f"{_IDENTIFICADOR}:short:{identidade.id_produto}",
+            _encurtar_produto, url, afiliada, chave,
+        )
+
+    # Campanha, busca e evento não têm identidade de produto para
+    # ancorar o short: seguem publicando a longa afiliada.
     registrar_link(url, afiliada, _IDENTIFICADOR)
     log_nrm.info(f"✅ AMZ afiliada: {afiliada[:70]}")
     return afiliada
 
 
-# ── Definição da plataforma ───────────────────────────────────────
 PLATAFORMA = Plataforma(
     identificador=_IDENTIFICADOR,
     versao_contrato=CONTRACT_VERSION,
