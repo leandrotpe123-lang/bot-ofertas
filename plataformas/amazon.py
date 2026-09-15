@@ -49,7 +49,7 @@ from plataformas.contrato import (
 from utils.cache_links import consultar_link, registrar_link
 from utils.uma_por_vez import uma_por_vez
 from utils.url_resolver import desencurtar
-from utils.urls import _netloc, _sanitizar_url
+from utils.urls import _cache_key, _netloc, _sanitizar_url
 
 
 # ── Identidade da plataforma ──────────────────────────────────────
@@ -283,15 +283,69 @@ def _tag_unica_nossa(url: str) -> bool:
     return valores == [_AMZ_TAG]
 
 
-def _chave_identidade(asin: str) -> str:
+_PREFIXO_PROMO = f"{_IDENTIFICADOR}:promo_"
+
+
+def _chave_identidade(identidade: IdentidadeProduto) -> str:
     """Chave de cache derivada da IDENTIDADE, não da URL recebida.
 
-    Forma canônica mínima do produto. Qualquer URL do mesmo ASIN —
+    Forma canônica mínima do alvo. Qualquer URL da mesma identidade —
     decorada, com caminho descritivo, vinda de qualquer grupo —
     produz esta mesma chave, e por isso reaproveita o short já
     obtido em vez de chamar o SiteStripe de novo.
+
+    Devolve cadeia vazia quando não existe identidade estável para
+    ancorar o short. Busca e evento caem aí de propósito: a mesma
+    página de busca hoje e amanhã não é a mesma oferta, e encurtar
+    o que não tem identidade só gastaria chamada externa.
     """
-    return f"https://www.amazon.com.br/dp/{asin}?tag={_AMZ_TAG}"
+    if (identidade.tipo_link == TipoLink.PRODUTO
+            and isinstance(identidade.id_produto, str)):
+        return (
+            f"https://www.amazon.com.br/dp/{identidade.id_produto}"
+            f"?tag={_AMZ_TAG}"
+        )
+    global_ = identidade.id_global or ""
+    if global_.startswith(_PREFIXO_PROMO):
+        promo = global_[len(_PREFIXO_PROMO):]
+        return (
+            f"https://www.amazon.com.br/promotion/psp/{promo}"
+            f"?tag={_AMZ_TAG}"
+        )
+    return ""
+
+
+def _cache_aproveitavel(guardado, url: str) -> bool:
+    """Decide se um registro do cache ainda serve ao fluxo atual.
+
+    Registro legado — gravado antes do SiteStripe, com a URL longa
+    como forma publicada — não pode bloquear um alvo que hoje tem
+    identidade estável. Se bloqueasse, produto e promoção nunca
+    chegariam ao encurtamento oficial; e como a leitura renova o ts,
+    o registro nunca expiraria sozinho. Ignorá-lo faz o fluxo seguir
+    e, no sucesso, a gravação sobrescreve a entrada velha pelo short.
+
+    Continua valendo como acerto de cache:
+      - short em domínio oficial CUJA canônica carrega a nossa tag;
+      - alvo sem identidade estável (busca, evento, campanha sem id,
+        caminho sem afiliação), onde o comportamento é o de sempre.
+
+    O short oficial sozinho não basta: ele é opaco e não revela a
+    quem credita. Quem credita é a canônica. Um short gravado sob
+    outra tag — o caso natural depois de uma troca de AMAZON_TAG —
+    seria reaproveitado para sempre, publicando atribuição que não
+    é nossa. Exigir a nossa tag na canônica invalida esses registros
+    sozinho, sem migração de banco: na troca de tag, o cache inteiro
+    se regenera no primeiro acerto de cada alvo.
+    """
+    publicada = getattr(guardado, "publicada", "") or ""
+    if _netloc(publicada) in _SHORTS_OFICIAIS:
+        return _tag_unica_nossa(getattr(guardado, "canonica", "") or "")
+    if _netloc(url) in _ENCURTADORES:
+        # Sem expandir não há como saber a identidade, e expandir
+        # aqui seria ir à rede antes do cache. Trata como legado.
+        return False
+    return not _chave_identidade(extrai_identidade(url))
 
 
 # ── Sessão autenticada do SiteStripe ──────────────────────────────
@@ -474,17 +528,18 @@ def _construir_url_afiliada(url: str) -> Optional[str]:
         return None
 
 
-async def _encurtar_produto(
+async def _encurtar_identidade(
     url_original: str, afiliada: str, chave: str,
 ) -> object:
-    """Obtém o short oficial para um produto, sob exclusão por ASIN.
+    """Obtém o short oficial para uma identidade estável — produto ou
+    promoção — sob exclusão por essa identidade.
 
     Reconsulta o cache ao entrar: quem esperou pela exclusão encontra
     o short que o primeiro acabou de gravar, em vez de repetir a
     chamada externa.
     """
     guardado = consultar_link(chave)
-    if guardado:
+    if guardado and _cache_aproveitavel(guardado, chave):
         registrar_link(url_original, guardado, _IDENTIFICADOR)
         return guardado
 
@@ -501,9 +556,16 @@ async def _encurtar_produto(
 
     # Falha: publica a longa afiliada, sem inventar short. Gravada
     # SÓ sob a URL recebida — nunca sob a identidade, para que a
-    # próxima oferta do mesmo produto tente o SiteStripe de novo em
-    # vez de herdar a falha por dias.
-    registrar_link(url_original, afiliada, _IDENTIFICADOR)
+    # próxima oferta do mesmo alvo tente o SiteStripe de novo em vez
+    # de herdar a falha por dias.
+    #
+    # Quando a URL recebida JÁ É a forma canônica, as duas chaves
+    # coincidem — caso comum quando a nossa própria publicação longa
+    # volta a entrar no bot. Gravar aí envenenaria a identidade: o
+    # alvo ficaria presa na forma longa e, como a leitura renova o
+    # ts, o TTL nunca a expiraria. Nesse caso não se grava nada.
+    if _cache_key(url_original) != _cache_key(chave):
+        registrar_link(url_original, afiliada, _IDENTIFICADOR)
     log_nrm.info(f"↩️ AMZ sem short, publica longa: {afiliada[:70]}")
     return afiliada
 
@@ -521,7 +583,7 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     url = _sanitizar_url(url)
 
     cache = consultar_link(url)
-    if cache:
+    if cache and _cache_aproveitavel(cache, url):
         return cache
 
     entrou_curta = _netloc(url) in _ENCURTADORES
@@ -557,23 +619,26 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         log_nrm.warning(f"⚠️ AMZ afiliação inválida: {afiliada}")
         return AUSENTE
 
-    # Produto: cache-first pela identidade, depois SiteStripe.
-    if identidade.tipo_link == TipoLink.PRODUTO:
-        chave = _chave_identidade(identidade.id_produto)
+    # Identidade estável (produto ou promoção): cache-first, depois
+    # SiteStripe. O critério não é o tipo do link e sim a existência
+    # de uma âncora estável — a Amazon encurta promoção igual encurta
+    # produto, verificado contra o endpoint real.
+    chave = _chave_identidade(identidade)
+    if chave:
         guardado = consultar_link(chave)
-        if guardado:
+        if guardado and _cache_aproveitavel(guardado, chave):
             registrar_link(url, guardado, _IDENTIFICADOR)
             return guardado
-        # Exclusão por ASIN: duas ofertas simultâneas do mesmo
-        # produto não disparam duas chamadas externas. Chave
-        # diferente da usada pelo core, portanto sem reentrância.
+        # Exclusão pela identidade: duas ofertas simultâneas do mesmo
+        # alvo não disparam duas chamadas externas. Chave diferente
+        # da usada pelo core, portanto sem reentrância.
         return await uma_por_vez(
-            f"{_IDENTIFICADOR}:short:{identidade.id_produto}",
-            _encurtar_produto, url, afiliada, chave,
+            f"{_IDENTIFICADOR}:short:{identidade.id_global}",
+            _encurtar_identidade, url, afiliada, chave,
         )
 
-    # Campanha, busca e evento não têm identidade de produto para
-    # ancorar o short: seguem publicando a longa afiliada.
+    # Busca, evento e campanha sem identidade não têm âncora estável
+    # para o short: seguem publicando a longa afiliada.
     registrar_link(url, afiliada, _IDENTIFICADOR)
     log_nrm.info(f"✅ AMZ afiliada: {afiliada[:70]}")
     return afiliada
