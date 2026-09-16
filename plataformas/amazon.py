@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import os
 import re
 import time
@@ -208,7 +209,16 @@ def extrai_identidade(url: str) -> IdentidadeProduto:
     else:
         tipo = TipoLink.CAMPANHA
 
-    return IdentidadeProduto(tipo_link=tipo, id_produto=AUSENTE)
+    # IDENTIDADE DE PÁGINA — fallback estrutural, nunca substituto.
+    # Produto e promoção já retornaram acima; aqui resta toda página
+    # Amazon válida que nenhuma identidade especializada reivindicou.
+    # `id_produto` permanece AUSENTE: uma página não é um produto, e
+    # preenchê-lo faria a normalização tratá-la como tal na dedupe.
+    return IdentidadeProduto(
+        tipo_link=tipo,
+        id_produto=AUSENTE,
+        id_global=_id_pagina(url),
+    )
 
 
 # ── Capacidade opcional: limpeza de URL ───────────────────────────
@@ -284,9 +294,36 @@ def _tag_unica_nossa(url: str) -> bool:
 
 
 _PREFIXO_PROMO = f"{_IDENTIFICADOR}:promo_"
+_PREFIXO_PAGINA = f"{_IDENTIFICADOR}:pag_"
 
 
-def _chave_identidade(identidade: IdentidadeProduto) -> str:
+def _id_pagina(url: str) -> Optional[str]:
+    """Identificador estável de uma PÁGINA Amazon sem identidade
+    especializada.
+
+    Deriva da forma AFILIADA CANÔNICA da página — exatamente a URL
+    que será publicada. É essa igualdade que torna a identidade
+    segura: mesma URL publicada implica mesma identidade, e por isso
+    um acerto de cache jamais pode devolver um destino diferente do
+    que aquela chave representa.
+
+    Páginas cujo conteúdo vem da query continuam distintas, porque a
+    canônica preserva os parâmetros que o definem (`node`, `k`,
+    `keywords`, `rh`) e descarta apenas rastreamento.
+
+    Hash, e não a URL inteira: o identificador é chave de
+    serialização e rótulo de sistema — não pode herdar o tamanho
+    arbitrário da query de uma busca.
+    """
+    canonica = _construir_url_afiliada(url)
+    if not canonica:
+        return None
+    return _PREFIXO_PAGINA + hashlib.sha1(
+        canonica.encode("utf-8"),
+    ).hexdigest()[:16]
+
+
+def _chave_identidade(identidade: IdentidadeProduto, url: str) -> str:
     """Chave de cache derivada da IDENTIDADE, não da URL recebida.
 
     Forma canônica mínima do alvo. Qualquer URL da mesma identidade —
@@ -294,10 +331,10 @@ def _chave_identidade(identidade: IdentidadeProduto) -> str:
     produz esta mesma chave, e por isso reaproveita o short já
     obtido em vez de chamar o SiteStripe de novo.
 
-    Devolve cadeia vazia quando não existe identidade estável para
-    ancorar o short. Busca e evento caem aí de propósito: a mesma
-    página de busca hoje e amanhã não é a mesma oferta, e encurtar
-    o que não tem identidade só gastaria chamada externa.
+    Devolve cadeia vazia apenas quando não há identidade alguma:
+    encurtador não expandido e caminho sem afiliação. Toda página
+    Amazon válida tem identidade — especializada quando produto ou
+    promoção, de página no restante.
     """
     if (identidade.tipo_link == TipoLink.PRODUTO
             and isinstance(identidade.id_produto, str)):
@@ -312,6 +349,12 @@ def _chave_identidade(identidade: IdentidadeProduto) -> str:
             f"https://www.amazon.com.br/promotion/psp/{promo}"
             f"?tag={_AMZ_TAG}"
         )
+    if global_.startswith(_PREFIXO_PAGINA):
+        # A canônica da página É a chave. O hash em id_global não é
+        # reversível — e nem precisa ser: ele serve à serialização,
+        # a chave de cache serve à identidade, e ambos derivam da
+        # mesma canônica, logo não podem divergir.
+        return _construir_url_afiliada(url) or ""
     return ""
 
 
@@ -345,7 +388,7 @@ def _cache_aproveitavel(guardado, url: str) -> bool:
         # Sem expandir não há como saber a identidade, e expandir
         # aqui seria ir à rede antes do cache. Trata como legado.
         return False
-    return not _chave_identidade(extrai_identidade(url))
+    return not _chave_identidade(extrai_identidade(url), url)
 
 
 # ── Sessão autenticada do SiteStripe ──────────────────────────────
@@ -618,11 +661,12 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         log_nrm.warning(f"⚠️ AMZ afiliação inválida: {afiliada}")
         return AUSENTE
 
-    # Identidade estável (produto ou promoção): cache-first, depois
-    # SiteStripe. O critério não é o tipo do link e sim a existência
-    # de uma âncora estável — a Amazon encurta promoção igual encurta
-    # produto, verificado contra o endpoint real.
-    chave = _chave_identidade(identidade)
+    # Identidade estável (produto, promoção ou página): cache-first,
+    # depois SiteStripe. O critério não é o tipo do link e sim a
+    # existência de uma âncora estável — o SiteStripe encurta
+    # qualquer página do domínio, verificado contra o endpoint real
+    # em produto, promoção, categoria, busca, Music, Prime e home.
+    chave = _chave_identidade(identidade, url_expandida)
     if chave:
         guardado = consultar_link(chave)
         if guardado and _cache_aproveitavel(guardado, chave):
@@ -636,8 +680,8 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
             _encurtar_identidade, url, afiliada, chave,
         )
 
-    # Busca, evento e campanha sem identidade não têm âncora estável
-    # para o short: seguem publicando a longa afiliada.
+    # Sem âncora estável (caminho sem afiliação, encurtador não
+    # expandido): segue publicando a longa afiliada.
     registrar_link(url, afiliada, _IDENTIFICADOR)
     log_nrm.info(f"✅ AMZ afiliada: {afiliada[:70]}")
     return afiliada
