@@ -236,7 +236,8 @@ def montar_texto(norm: MensagemNormalizada) -> str:
             continue
 
         if _RE_ANUNCIO.match(l):
-            saida.append(l)
+            if saida and saida[-1] == "":
+                saida.pop()
             continue
 
         l = _RE_LIXO_PREF.sub("", l).strip()
