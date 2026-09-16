@@ -551,7 +551,6 @@ async def _encurtar_identidade(
         # reaproveita este short sem nova chamada externa.
         registrar_link(chave, resultado, _IDENTIFICADOR)
         registrar_link(url_original, resultado, _IDENTIFICADOR)
-        log_nrm.info(f"✅ AMZ short oficial: {curta}")
         return resultado
 
     # Falha: publica a longa afiliada, sem inventar short. Gravada
