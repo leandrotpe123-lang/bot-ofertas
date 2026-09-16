@@ -37,6 +37,8 @@ from telethon.tl.types import MessageMediaPhoto                 # noqa: E402
 from database import _init_db                                   # noqa: E402
 from database_posts import db_registrar_post, db_get_post, db_origem_set  # noqa: E402
 from pipeline import identidade                                 # noqa: E402
+from pipeline import exclusao                                    # noqa: E402
+from pipeline import origem                                      # noqa: E402
 from pipeline.montagem import montar                            # noqa: E402
 from pipeline.publicacao import enviar                          # noqa: E402
 from pipeline.enriquecimento import derivar                     # noqa: E402
@@ -76,6 +78,7 @@ class ClienteFake:
         self.downloads = 0
         self.envios_file = 0
         self.envios_texto = 0
+        self.bytes_recebidos = []   # o que de fato chegou ao Telegram
         self.edits = []            # (msg_id, tem_file)
         self.deletes = []
         self.bytes_midia = bytes_midia
@@ -99,6 +102,8 @@ class ClienteFake:
             self.envios_file += 1
             raise RuntimeError("falha simulada no primeiro envio")
         self.envios_file += 1
+        self.bytes_recebidos.append(
+            img.getbuffer().nbytes if hasattr(img, "getbuffer") else -1)
         self._proximo_id += 1
         return MsgFake(self._proximo_id, com_midia=True)
 
@@ -157,7 +162,20 @@ async def rodar_caminho(n, is_edit=False):
 
 
 def preparar_loop():
+    """Isolamento entre cenarios: cada um roda no seu proprio loop.
+
+    Alem de _init_globals(), e preciso drenar os pools de lock que sao
+    estado de MODULO e sobrevivem ao loop (exclusao e origem). Um
+    asyncio.Lock criado no loop do cenario anterior explodiria com
+    "bound to a different event loop" ao ser aguardado aqui. Isto e
+    higiene de teste — em producao existe um unico loop por processo e
+    os pools sao justamente o que serializa origem/identidade/post."""
     g._init_globals()
+    for pool in (exclusao._IDENTITY_LOCKS, exclusao._IDENTITY_LOCKS_TS,
+                 exclusao._POST_LOCKS, exclusao._POST_LOCKS_TS,
+                 origem._LOCKS, origem._LOCKS_TS):
+        pool.clear()
+    origem._LOCKS_LCK = asyncio.Lock()
 
 
 def post_vivo(msg_id_dest, ofertas, score, texto, lider, midia_chat,
@@ -192,7 +210,12 @@ def test_GUARDA_publicacao_nova_com_midia(r: Resultado):
     r.check(ok is True, "G1.ok")
     r.check(c.downloads == 1, "G1.um_download", f"downloads={c.downloads}")
     r.check(c.envios_file == 1, "G1.send_file", f"{c.envios_file}")
-    r.check(montada.imagem is not None, "G1.bytes_no_aplicador")
+    # [E5.0] `montada` devolvido por montar() nasce com imagem=None: os
+    # bytes passam a existir dentro de _enviar_inner, via replace(). A
+    # prova correta e o EFEITO OBSERVAVEL — o que chegou ao Telegram —
+    # e nao o objeto montado a montante.
+    r.check(c.bytes_recebidos == [4096], "G1.bytes_chegaram_ao_telegram",
+            f"bytes_recebidos={c.bytes_recebidos}")
 
 
 def test_GUARDA_publicacao_nova_sem_midia(r: Resultado):
@@ -558,13 +581,23 @@ def test_GUARDA_T18_corrida_estado_final_consistente(r: Resultado):
 
 
 def test_ALVO_T18_materializacao_dentro_da_cadeia_de_locks(r: Resultado):
-    """T18 (alvo) — com a E5.0, a materializacao acontece DEPOIS da
-    decisao, sob lock_post. Logo a segunda task so baixa depois que a
-    primeira libera a cadeia: os downloads NAO se sobrepoem.
+    """T18 (alvo) — com a E5.0 a materializacao acontece DEPOIS da
+    decisao, sob lock_post. Duas consequencias observaveis:
 
-    Hoje os dois downloads acontecem em montar(), fora dos locks, e se
-    sobrepoem — e exatamente o trabalho que a frente move para dentro."""
-    _c, _dest, eventos, _res, _n1, _n2 = _cenario_corrida()
+    1. os downloads NAO se sobrepoem — a segunda task so poderia
+       materializar depois que a primeira liberasse a cadeia;
+    2. a segunda task sequer materializa: quando chega, o post ja tem
+       dono de midia da mesma classe e a politica responde PRESERVA.
+
+    Antes da frente os dois downloads aconteciam em montar(), fora dos
+    locks, e se sobrepunham. E exatamente o trabalho que a E5.0 move
+    para dentro — e, neste cenario, elimina pela metade.
+
+    NOTA (item 12 da autorizacao): "download nao se sobrepoe" e
+    contrato de implementacao DESTA frente, nao regra de negocio
+    permanente. A regra permanente e a do guarda acima: nenhuma corrida
+    pode produzir estado inconsistente ou lost update."""
+    c, _dest, eventos, _res, _n1, _n2 = _cenario_corrida()
 
     janelas = []
     for i, ev in enumerate(eventos):
@@ -575,13 +608,17 @@ def test_ALVO_T18_materializacao_dentro_da_cadeia_de_locks(r: Resultado):
             if fim is not None:
                 janelas.append((i, fim, tag))
 
-    r.check(len(janelas) == 2, "T18.alvo.dois_downloads", str(eventos))
+    r.check(len(janelas) >= 1, "T18.alvo.materializou",
+            f"a evolucao com TROCA precisa dos bytes: {eventos}")
     for ini, fim, tag in janelas:
-        intrusos = [e for e in eventos[ini + 1:fim] if not e.startswith(
-            f"download.{tag}")]
+        intrusos = [e for e in eventos[ini + 1:fim]
+                    if not e.startswith(f"download.{tag}")]
         r.check(intrusos == [], "T18.alvo.downloads_nao_se_sobrepoem",
-                f"durante o download de {tag}: {intrusos} "
-                f"(E5.0 materializa sob lock_post)")
+                f"durante o download de {tag}: {intrusos}")
+
+    r.check(c.downloads == 1, "T18.alvo.segundo_download_poupado",
+            f"downloads={c.downloads}: a 2a task cai em PRESERVA e a "
+            f"E5.0 poupa o download que montar() fazia incondicionalmente")
 
 
 if __name__ == "__main__":

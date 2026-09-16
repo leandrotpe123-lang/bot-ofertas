@@ -102,14 +102,25 @@ class Decisao:
 
 def decidir(norm, montada, score: int, estado: dict | None,
             agora: float, is_edit: bool = False,
-            *, midia_key_aceita: str = "") -> Decisao:
+            *, midia_key_aceita: str = "",
+            midia_candidata: bool | None = None) -> Decisao:
     """Decide a ação para um candidato: PUBLICAR (sem estado vivo),
     EVOLUIR ou IGNORAR (com estado). Não executa nada.
 
     [E4.0] `midia_key_aceita` é um FATO fornecido pelo orquestrador (a
     mídia efetivamente publicada naquele post). Keyword-only e com
     default: quem não se pronuncia recebe o comportamento anterior.
-    Esta camada continua PURA — não lê globals, não lê banco."""
+    Esta camada continua PURA — não lê globals, não lê banco.
+
+    [E5.0] `midia_candidata` é o FATO de PRESENÇA de mídia candidata,
+    entregue pelo orquestrador quando os bytes ainda não foram
+    materializados. Mesmo idioma da E4.0: aditivo, keyword-only, e
+    `None` preserva byte a byte o comportamento anterior — o fato volta
+    a ser derivado de `montada.imagem`.
+
+    A E5.0 muda QUANDO os bytes existem, nunca a REGRA: a autoridade de
+    mídia continua sendo `politica_midia`, que recebe o mesmo fato de
+    veracidade que sempre recebeu."""
     if not estado:
         return Decisao(PUBLICAR, "SEM_ESTADO")
 
@@ -127,6 +138,14 @@ def decidir(norm, montada, score: int, estado: dict | None,
     score_cmp = score_na_escala(score, norm.chat, norm.tem_midia,
                                 versao_post)
 
+    # [E5.0] FATO de presença de mídia candidata. `None` ⇒ derivado dos
+    # bytes, exatamente como antes desta frente. Fornecido ⇒ o
+    # orquestrador sabe que há mídia no Telegram mas ainda NÃO
+    # materializou os bytes. É o ÚNICO ponto onde a origem do fato
+    # muda; as duas leituras abaixo consomem daqui.
+    fato_midia = (bool(montada.imagem) if midia_candidata is None
+                  else bool(midia_candidata))
+
     # ══ [FASE 2] POLÍTICA DE MÍDIA ══
     # Calculada UMA vez, no topo, e anexada a toda Decisao que sair
     # daqui. É independente de score, texto, líder, edit_count e
@@ -135,7 +154,7 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # da ingestão (norm.midia_key); a aceita vem do orquestrador. Vazio
     # em qualquer lado ⇒ a política decide sozinha, como antes.
     trocar_midia, motivo_midia = politica_midia(
-        montada.imagem, norm.chat, estado, is_edit,
+        fato_midia, norm.chat, estado, is_edit,
         chave_nova=getattr(norm, "midia_key", "") or "",
         chave_aceita=midia_key_aceita or "")
 
@@ -227,7 +246,7 @@ def decidir(norm, montada, score: int, estado: dict | None,
                                       score_atual=score_atual))
         return _com_midia(Decisao(
             EVOLUIR, "EVOLUI", novo_score=score,
-            exigir_imagem=bool(montada.imagem), permite_substituir=True,
+            exigir_imagem=fato_midia, permite_substituir=True,
             na_janela=na_janela, score_atual=score_atual))
 
     # ── DECISÃO 2: score IGUAL ──

@@ -14,6 +14,7 @@
 from __future__ import annotations
 import contextlib
 import time
+from dataclasses import replace
 from typing import Optional
 
 import globals as g
@@ -24,7 +25,7 @@ from pipeline.decisao import decidir
 from pipeline import exclusao
 from pipeline import familia
 from pipeline import origem
-from pipeline.montagem import MensagemMontada
+from pipeline.montagem import MensagemMontada, materializar_imagem
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.enriquecimento import MensagemEnriquecida
 from pipeline.publicacao_aplicadores import (
@@ -108,8 +109,38 @@ async def _enviar_inner(montada: MensagemMontada,
                 # orquestrador, e entregue à decisão. decisao.py
                 # permanece pura. A leitura acontece sob o lock do
                 # post, o mesmo que serializa a escrita do mapa.
+                # [E5.0] CONGELADO numa variável: a eventual segunda
+                # decisão do Portão A reusa exatamente este valor —
+                # reler _MIDIA_ACEITA entre as duas seria decidir com
+                # dois fatos diferentes.
+                chave_aceita = g.midia_aceita_get(msg_id_rel)
                 d = decidir(norm, montada, score, estado, agora, is_edit,
-                            midia_key_aceita=g.midia_aceita_get(msg_id_rel))
+                            midia_key_aceita=chave_aceita,
+                            midia_candidata=norm.tem_midia)
+
+                # ══ [E5.0] PORTÃO A — MATERIALIZAÇÃO SOB DEMANDA ══
+                # Só quando a política AUTORIZOU tocar a imagem
+                # publicada. Fica aqui, antes de _log_decisao, do
+                # roteamento e dos efeitos de família: o log jamais
+                # pode registrar a decisão otimista se a aplicada for
+                # a provada.
+                if d.trocar_midia:
+                    montada = replace(
+                        montada, imagem=await materializar_imagem(norm))
+                    if montada.imagem is None:
+                        # Materialização falhou. REDECIDE com o fato
+                        # provado, reusando estado, `agora` e chave
+                        # aceita — só o fato muda. Nenhum campo de `d`
+                        # é editado à mão: a política continua soberana
+                        # e é ela que rebaixa trocar_midia,
+                        # exigir_imagem e permite_substituir. É o que
+                        # impede "Telegram tem mídia" + "download
+                        # falhou" de alcançar o delete+repost.
+                        d = decidir(norm, montada, score, estado, agora,
+                                    is_edit,
+                                    midia_key_aceita=chave_aceita,
+                                    midia_candidata=False)
+
                 if d.acao != "PUBLICAR":
                     if norm is not None:
                         # Encontro registra (I1): edits futuros desta
@@ -149,6 +180,17 @@ async def _enviar_inner(montada: MensagemMontada,
                         log_out.info(
                             f"🐣 TL | id={montada.msg_id} chat={norm.chat} | "
                             f"RENASCIMENTO | supersede={msg_id_rel}")
+                        # ══ [E5.0] PORTÃO B — RENASCER ══
+                        # RENASCER é PUBLICAÇÃO NOVA e NÃO passa por
+                        # _com_midia: chega aqui com trocar_midia=False.
+                        # Ainda assim precisa dos bytes, porque
+                        # _aplicar_novo_envio usa montada.imagem
+                        # independentemente da decisão de troca. Se a
+                        # materialização falhar, não há redecisão: o
+                        # próprio aplicador degrada para envio sem
+                        # imagem, como já fazia.
+                        montada = replace(
+                            montada, imagem=await materializar_imagem(norm))
                         return await _aplicar_novo_envio(
                             montada, norm, ofertas_renasce, score,
                             identity)
@@ -194,6 +236,14 @@ async def _enviar_inner(montada: MensagemMontada,
     # ═════════════════════════════════════════════════════════════
     # NOVO ENVIO (sem post parente vivo)
     # ═════════════════════════════════════════════════════════════
+    # ══ [E5.0] PORTÃO B — PUBLICAÇÃO NOVA ══
+    # Sítio ÚNICO onde convergem todas as rotas de publicação nova:
+    # msg_id_rel is None, norm ausente / sem ofertas / sem dest_fix, e
+    # PUBLICAR com o estado desaparecido sob o lock. Nenhuma delas
+    # passou pelo Portão A (todas chegam com trocar_midia=False ou sem
+    # decisão nenhuma), então não há dupla materialização. A fachada
+    # tolera norm=None e devolve None sem tocar a rede.
+    montada = replace(montada, imagem=await materializar_imagem(norm))
     return await _aplicar_novo_envio(
         montada, norm, ofertas, score, identity)
  
