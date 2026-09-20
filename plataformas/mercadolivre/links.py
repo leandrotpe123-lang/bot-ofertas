@@ -49,11 +49,16 @@ A listagem DIRETA está ligada: `lista.mercadolivre.com.br` com
 `_Container_<slug>?coupon_campaign_id=<id>` foi comprovada contra o
 endpoint real e gerou `meli.la/2TzpFAP` com a nossa tag.
 
-O que continua em aberto é outra coisa, e não é escopo deste
-módulo: descobrir a listagem A PARTIR de uma vitrine de terceiro.
-Enquanto essa rota não estiver comprovada no HTML servido, vitrine
-segue inelegível — que é o comportamento correto, porque o servidor
-a recusa.
+Descobrir o destino A PARTIR de uma vitrine de terceiro deixou de
+estar em aberto: a estrutura do documento servido declara, em campo
+nomeado, se a vitrine representa um produto ou uma lista. Isso NÃO
+torna a vitrine elegível — o servidor continua recusando-a, e ela
+continua fora de `_CENARIOS_ELEGIVEIS`. O que se afilia é o DESTINO
+descoberto, nunca a vitrine.
+
+A leitura da página é de `descoberta.py`. Este módulo só declara,
+em `precisa_descobrir`, que vale a pena ir olhar — conhecimento de
+FORMA DE URL, que é o que lhe cabe.
 """
 from __future__ import annotations
 
@@ -267,6 +272,26 @@ def precisa_expandir(url: str) -> bool:
     confirmar uma recusa já conhecida.
     """
     return cenario_de(url) == CENARIO_ENCURTADO
+
+
+def precisa_descobrir(url: str) -> bool:
+    """
+    Verdadeiro se a URL é uma VITRINE, que é porta de entrada e não
+    destino.
+
+    A vitrine `/social/<afiliado>` continua INELEGÍVEL — o servidor
+    a recusa com error_code 111, e isso não mudou. O que mudou é
+    que ela deixou de ser beco sem saída: o documento servido
+    carrega, em estrutura nomeada, QUAL conteúdo ela representa.
+
+    CONHECIMENTO, não ATO: quem busca e lê a página é
+    `descoberta.py`. Aqui só se declara que vale a pena ir olhar.
+
+    A lista de afiliado (`/social/<slug>/lists/<uuid>`) fica de
+    fora: é a vitrine genérica do perfil, sem item compartilhado a
+    descobrir.
+    """
+    return cenario_de(url) == CENARIO_VITRINE
 
 
 # ── Capacidade obrigatória: extração de identidade ────────────────
