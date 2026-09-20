@@ -13,6 +13,7 @@ FLUXO
     reconhece
       → cache            (antes de qualquer I/O)
       → expande          (só encurtador próprio, com o core)
+      → descobre         (vitrine → produto ou lista, query intacta)
       → classifica
       → elegibilidade    (portão anterior à rede)
       → sanitiza
@@ -53,7 +54,7 @@ from utils.cache_links import consultar_link, registrar_link
 from utils.url_resolver import desencurtar
 from utils.urls import _sanitizar_url
 
-from . import afiliado, cliente, links, sessao
+from . import afiliado, cliente, descoberta, links, sessao
 
 
 # Uma tentativa extra apenas para falha transitória de rede ou
@@ -112,6 +113,35 @@ async def afilia(url: str, sessao_http: aiohttp.ClientSession) -> object:
         if expandida is None:
             return AUSENTE
         alvo = expandida
+
+    # ── Descoberta da vitrine ─────────────────────────────────────
+    # A vitrine é porta de entrada, não destino. O documento servido
+    # diz, em estrutura nomeada, se ela representa um produto ou uma
+    # lista — e qual.
+    #
+    # A posição no fluxo não é arbitrária:
+    #
+    #   antes da ELEGIBILIDADE — a vitrine não é elegível por si só,
+    #   e com razão: ela carrega a identidade de um afiliado de
+    #   terceiro. O portão a barraria antes de qualquer descoberta.
+    #   É a descoberta que produz o alvo elegível.
+    #
+    #   antes da SANITIZAÇÃO — `sanitizar` prepara a URL que vai ao
+    #   createLink, não uma URL que vamos BUSCAR. A busca usa a URL
+    #   como chegou: o `ref` é condição comprovada para o servidor
+    #   entregar a vitrine do item compartilhado (sem ele, 302 para
+    #   `/social/<afiliado>/lists`), e sobre os `matt_*` não há
+    #   prova de que sejam ignorados na escolha. Quem é sanitizado é
+    #   o DESTINO descoberto, logo abaixo — e é só ele que viaja.
+    if links.precisa_descobrir(alvo):
+        destino = await descoberta.descobrir(alvo, sessao_http)
+        if destino is None:
+            log_nrm.info("🛒 ML vitrine sem destino reconhecível → ausente")
+            return AUSENTE
+        log_nrm.info(
+            f"🛒 ML descoberta | tipo={destino.tipo} | origem=social"
+        )
+        alvo = destino.url
 
     # ── Elegibilidade: portão anterior à rede ─────────────────────
     cenario = links.cenario_de(alvo)
