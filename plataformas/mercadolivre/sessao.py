@@ -136,14 +136,33 @@ def _decodificar(bruto: str) -> str:
     O teste é estrutural, não por tentativa: um header Cookie tem
     `=` e `;`. Só o que NÃO tem essa forma é candidato a Base64, e
     a decodificação só é aceita se produzir algo que tenha.
+
+    ATENÇÃO ao preparo antes de decodificar. `validate=True` recusa
+    qualquer byte fora do alfabeto e exige padding exato, e as duas
+    coisas quebram em campo com credencial legítima:
+
+      - painel de variáveis quebra valor longo em linhas, e o `\\n`
+        é caractere fora do alfabeto;
+      - captura que entrega Base64 sem `=` no fim dispara
+        "Incorrect padding".
+
+    Nos dois casos o `except` devolvia o Base64 CRU, que então saía
+    no header `Cookie:` e o servidor respondia 401 — falha que
+    parece sessão expirada e não é. Por isso o espaço sai e o
+    padding é recomposto ANTES da tentativa. `validate=True`
+    continua: o que se quer tolerar é forma de transporte, não
+    conteúdo inválido.
     """
     bruto = (bruto or "").strip()
     if not bruto:
         return ""
     if ";" in bruto and "=" in bruto:
         return bruto
+    candidato = re.sub(r"\s+", "", bruto)
+    candidato += "=" * (-len(candidato) % 4)
     try:
-        decodificado = base64.b64decode(bruto, validate=True).decode("utf-8")
+        decodificado = base64.b64decode(
+            candidato, validate=True).decode("utf-8")
     except Exception:
         return bruto
     # Só troca se o resultado for reconhecível como cookie. Caso
@@ -192,8 +211,26 @@ def carregar() -> Credencial:
 
 
 def _contar_cookies(cookie: str) -> int:
-    """Quantidade de cookies no header. Nunca devolve valores."""
-    return len([p for p in cookie.split(";") if p.strip()])
+    """
+    Quantidade de cookies UTILIZÁVEIS no header. Nunca devolve valores.
+
+    Conta pares `nome=valor`, que é a mesma regra com que o cliente
+    semeia o jar. Contar pedaços separados por `;` media outra coisa:
+    um valor quebrado, sem um único `=`, aparecia aqui como
+    "cookies=1" e dava a impressão de credencial carregada. O defeito
+    só reaparecia três passos adiante, como HTTP 401 — que parece
+    sessão expirada e não é.
+
+    Com a contagem certa, `cookies=0` na carga já separa credencial
+    MALFORMADA de credencial RECUSADA pelo servidor, antes de gastar
+    requisição.
+    """
+    total = 0
+    for parte in (cookie or "").split(";"):
+        nome, sep, _valor = parte.strip().partition("=")
+        if sep and nome:
+            total += 1
+    return total
 
 
 # ── Validade ──────────────────────────────────────────────────────
