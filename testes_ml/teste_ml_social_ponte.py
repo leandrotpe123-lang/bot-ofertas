@@ -1,72 +1,67 @@
 """
-Sonda da PONTE — rodada 2: REGRA DE SELEÇÃO.
-
-A rodada 1 já fechou a pergunta estrutural:
-
-    (A) a ponte está no HTML SERVIDO, como <a href> puro.
-        JSON_EMBUTIDO = 0 blocos. JS_INLINE = 0 ocorrências de /p/MLB.
-        Sem credencial.
-
-Sobrou UMA pergunta, e é a que impede implementar:
-
-    a vitrine traz 7 a 12 produtos. QUAL deles é o da oferta?
+Sonda da PONTE — rodada 3: DE ONDE SAI O `_Container_`.
 
 ═══════════════════════════════════════════════════════════════════
-POR QUE ESTA RODADA DECIDE
+O ERRO QUE ESTA RODADA CORRIGE
 ═══════════════════════════════════════════════════════════════════
-Desta vez o operador mandou os links JUNTO COM o que eles são:
+A rodada 2 IMPRIMIU a pista e eu não puxei:
 
-    meli.la/1FE6ohY  → Monitor AOC 23,8" 100Hz 1ms Gaming HDMI  R$391
-    meli.la/2tA9txv  → Teclado Mecânico F75 Sem Fio 75% RGB     R$166
+    alvos de LISTA    → (_Container_ em JS_INLINE: 1)
+    alvos de PRODUTO  → (_Container_ em JS_INLINE: 0)
 
-Ou seja: a resposta certa é conhecida ANTES do teste. Não se trata
-mais de observar estrutura e supor — dá para conferir se a regra
-candidata acerta o produto anunciado. É teste, não observação.
+Diferença sistemática, 2 a 2. O `_Container_` ESTÁ na página de
+lista — dentro de <script> inline. Eu contei e não extraí, e daí
+concluí "os quatro alvos eram produto". Errado.
 
-A regra candidata, vinda de três indícios convergentes da rodada 1:
-
-    "a PRIMEIRA âncora /p/MLB do HTML_DOC é o produto da oferta"
-
-Indícios: o alvo era a 1ª ocorrência; vinha com selo MAIS VENDIDO; e
-o fragmento da URL capturada trazia reco_item_pos=0 e
-c_id=/home/card-featured/element.
-
-Três indícios convergentes de UMA amostra ainda são uma amostra. Por
-isso esta rodada extrai as âncoras EM ORDEM, com o slug — o slug
-carrega o nome do produto, então o acerto ou o erro fica visível.
+`<script>` inline faz parte do DOCUMENTO SERVIDO. Então continua
+sendo rota HTTP pura: GET + extração. Só muda a zona.
 
 ═══════════════════════════════════════════════════════════════════
-LISTA
+A RESPOSTA CERTA É CONHECIDA
 ═══════════════════════════════════════════════════════════════════
-Dois alvos são lista. A rodada 1 não respondeu esse caso: na vitrine
-do promotom, `_Container_` e `coupon_campaign_id` deram zero. Aqui
-eles têm chance real de aparecer.
+O operador mandou o destino real do meli.la/1hGSoc3:
+
+    lista.mercadolivre.com.br/_Container_promotions-77-full
+      ?coupon_campaign_id=13657213
+      #tracking_id=…&source=affiliate-profile
+
+E a mensagem do grupo confirma a natureza:
+
+    "Válido na lista ↓ clique em 'Mostrar mais'"
+
+Logo, esta sonda não procura às cegas. Ela procura POR ESSAS
+AGULHAS EXATAS e reporta em qual bloco cada uma caiu. Ou acha, ou
+prova que não está no servido.
 
 ═══════════════════════════════════════════════════════════════════
-SEGREDO
+MÉTODO
 ═══════════════════════════════════════════════════════════════════
-ANÔNIMA. Nenhum cookie, CSRF ou credencial é lido, enviado ou
-impresso. De Set-Cookie registra apenas os NOMES.
+Cada <script> inline é tratado como um bloco NUMERADO e medido
+separadamente — sem isso, "está no JS_INLINE" não diz de onde sai.
+
+Para cada bloco: tamanho, quais agulhas contém, o contexto ao
+redor, e tentativa de parse quando tem cara de estado.
+
+ANÔNIMA. Nenhum cookie, CSRF ou credencial.
 """
 from __future__ import annotations
 
 import asyncio
 import html as _html
+import json
 import os
 import re
 import sys
 import urllib.parse
-from typing import Optional
 
 import aiohttp
 
 
-# ── Alvos: "url :: o que o grupo anunciou" ────────────────────────
 _PADRAO = (
-    "https://meli.la/1hGSoc3 :: LISTA (informado pelo operador)|"
-    "https://meli.la/13iNqPB :: LISTA (informado pelo operador)|"
-    "https://meli.la/1FE6ohY :: PRODUTO Monitor AOC 23,8 pol 100Hz Gaming R$391|"
-    "https://meli.la/2tA9txv :: PRODUTO Teclado Mecanico F75 Sem Fio 75% RGB R$166"
+    "https://meli.la/1hGSoc3 :: LISTA _Container_promotions-77-full "
+    "coupon_campaign_id=13657213|"
+    "https://meli.la/13iNqPB :: LISTA (mesma lista, outro cupom)|"
+    "https://meli.la/1FE6ohY :: PRODUTO Monitor AOC (controle)"
 )
 
 ALVOS = []
@@ -76,6 +71,19 @@ for item in (os.environ.get("ML_SOCIAL_URLS") or _PADRAO).split("|"):
         continue
     url, _, esperado = item.partition("::")
     ALVOS.append((url.strip(), esperado.strip() or "(não informado)"))
+
+# Agulhas da LISTA. As quatro primeiras são a resposta conhecida.
+AGULHAS = (
+    "_Container_",
+    "coupon_campaign_id",
+    "13657213",
+    "promotions-77-full",
+    "lista.mercadolivre",
+    "Mostrar mais",
+    "ui-recommendations-subtitle",
+    "subtitle-link",
+    "affiliate-profile",
+)
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
       "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -91,20 +99,13 @@ CAB = {
 
 _RE_SCRIPT = re.compile(r"<script([^>]*)>(.*?)</script>", re.I | re.S)
 _RE_SRC = re.compile(r'src\s*=\s*["\']([^"\']+)["\']', re.I)
+_RE_TIPO = re.compile(r'type\s*=\s*["\']([^"\']+)["\']', re.I)
 
-# Âncora de produto: captura href inteiro para preservar a ordem.
-_RE_ANCORA = re.compile(
-    r'<a\b[^>]*?href\s*=\s*["\']([^"\']*?/(?:p/MLB|up/MLBU)[^"\']*)["\']',
-    re.I)
-_RE_ANCORA_LISTA = re.compile(
-    r'<a\b[^>]*?href\s*=\s*["\']([^"\']*?(?:_Container_|coupon_campaign_id)[^"\']*)["\']',
-    re.I)
-
-_RE_ID = re.compile(r"/(?:p/(MLB\d{5,})|up/(MLBU\d{5,}))", re.I)
-_RE_SLUG = re.compile(r"mercadolivre\.com\.br/([^/?#]+)/(?:p|up)/", re.I)
+_RE_URL_LISTA = re.compile(
+    r"https?:(?:\\u002[Ff]|\\/|/){2}lista\.mercadolivre\.com\.br"
+    r"(?:[^\s\"'<>\\]|\\u002[Ff]|\\/)+", re.I)
 _RE_CONTAINER = re.compile(r"_Container_[A-Za-z0-9_\-]+", re.I)
-_RE_CAMPANHA = re.compile(r"coupon_campaign_id[\"'=:%\s]+(\d+)", re.I)
-_RE_TEXTO = re.compile(r">([^<>]{3,60})<")
+_RE_CAMPANHA = re.compile(r"coupon_campaign_id[\"'=:%\s\\u0]*?(\d{4,})", re.I)
 
 
 def bloco(t: str) -> None:
@@ -117,172 +118,204 @@ def sub(t: str) -> None:
     print(f"\n── {t} " + "─" * max(0, 68 - len(t)))
 
 
-def fatiar(documento: str) -> dict:
-    """HTML servido separado do que é <script>."""
-    js_inline, externos = [], []
-
-    def _coletar(m):
-        src = _RE_SRC.search(m.group(1))
-        if src:
-            externos.append(src.group(1))
-        else:
-            js_inline.append(m.group(2))
-        return " "
-
-    return {
-        "HTML_DOC": _RE_SCRIPT.sub(_coletar, documento),
-        "JS_INLINE": "\n".join(js_inline),
-        "externos": externos,
-    }
-
-
-def rotulo_antes(html_doc: str, pos: int) -> str:
-    """
-    Texto visível logo antes da âncora — é onde ficam selos como
-    MAIS VENDIDO, OFERTA DO DIA, PATROCINADO.
-    """
-    janela = html_doc[max(0, pos - 320):pos]
-    achados = _RE_TEXTO.findall(janela)
-    limpos = [_html.unescape(a).strip() for a in achados]
-    limpos = [a for a in limpos if a and not a.startswith(("http", "{", "."))]
-    return " | ".join(limpos[-3:]) if limpos else ""
-
-
-def ancoras_em_ordem(html_doc: str) -> list:
-    """
-    Âncoras de produto NA ORDEM DO DOCUMENTO.
-
-    A ordem é o dado central desta rodada: a regra candidata diz que
-    a primeira é a certa. Sem ordem não há como testar isso.
-    """
-    saida, vistos = [], set()
-    for m in _RE_ANCORA.finditer(html_doc):
-        href = _html.unescape(m.group(1))
-        achado = _RE_ID.search(href)
-        if not achado:
-            continue
-        ident = achado.group(1) or achado.group(2)
-        if ident in vistos:
-            continue
-        vistos.add(ident)
-        slug = _RE_SLUG.search(href)
-        saida.append({
-            "pos": len(saida) + 1,
-            "id": ident,
-            "slug": (slug.group(1) if slug else "")[:78],
-            "rotulo": rotulo_antes(html_doc, m.start())[:70],
-            "href": href[:160],
-        })
+def desescapar(texto: str) -> str:
+    """As quatro formas em que o ML escreve URL dentro de script."""
+    saida = (texto.replace("\\u002F", "/").replace("\\u002f", "/")
+                  .replace("\\/", "/").replace("\\u0026", "&"))
+    try:
+        saida += " ||UNQUOTE|| " + urllib.parse.unquote(texto)
+    except Exception:
+        pass
+    try:
+        saida += " ||UNESCAPE|| " + _html.unescape(texto)
+    except Exception:
+        pass
     return saida
 
 
-async def saltos(s: aiohttp.ClientSession, url: str) -> str:
-    """Cadeia de redirecionamento. Devolve a URL final."""
-    sub("expansão salto a salto")
-    atual = url
-    for n in range(1, 10):
-        try:
-            async with s.get(atual, headers=CAB, allow_redirects=False,
-                             timeout=aiohttp.ClientTimeout(total=30)) as r:
-                destino = r.headers.get("Location")
-                print(f"    {n}. HTTP {r.status}  {atual[:120]}")
-                if not destino:
-                    print("       → FINAL")
-                    return atual
-                print(f"       → {destino[:160]}")
-                atual = urllib.parse.urljoin(atual, destino)
-        except Exception as exc:
-            print(f"    {n}. FALHOU {type(exc).__name__}")
-            return atual
-    return atual
+def contexto(texto: str, agulha: str, quantos: int = 2, raio: int = 260) -> list:
+    saida, inicio = [], 0
+    baixo, alvo = texto.lower(), agulha.lower()
+    for _ in range(quantos):
+        i = baixo.find(alvo, inicio)
+        if i < 0:
+            break
+        a, b = max(0, i - raio), min(len(texto), i + len(agulha) + raio)
+        t = texto[a:b].replace("\n", " ").replace("\r", " ")
+        saida.append(re.sub(r"\s{2,}", " ", t))
+        inicio = i + len(agulha)
+    return saida
+
+
+def blocos_de_script(documento: str) -> tuple:
+    """
+    Cada <script> inline vira um bloco NUMERADO.
+
+    Sem numerar, "está no JS_INLINE" não diz de onde sai — e era
+    exatamente essa a lacuna da rodada 2.
+    """
+    inline, externos = [], []
+
+    def _coletar(m):
+        atributos, corpo = m.group(1), m.group(2)
+        src = _RE_SRC.search(atributos)
+        if src:
+            externos.append(src.group(1))
+        else:
+            tipo = (_RE_TIPO.search(atributos).group(1)
+                    if _RE_TIPO.search(atributos) else "")
+            inline.append({"i": len(inline), "tipo": tipo, "corpo": corpo})
+        return " "
+
+    html_doc = _RE_SCRIPT.sub(_coletar, documento)
+    return html_doc, inline, externos
+
+
+def varrer(nome: str, texto: str, mostrar_contexto: bool = True) -> dict:
+    """Conta as agulhas e mostra o entorno das que importam."""
+    achou = {}
+    expandido = desescapar(texto)
+    for agulha in AGULHAS:
+        n = expandido.lower().count(agulha.lower())
+        if n:
+            achou[agulha] = n
+    if not achou:
+        return {}
+
+    print(f"\n    ┌─ {nome}  ({len(texto)} chars)")
+    for agulha, n in achou.items():
+        print(f"    │  🎯 {agulha:28s} {n}")
+    print("    └─")
+
+    if mostrar_contexto:
+        for agulha in ("_Container_", "coupon_campaign_id",
+                       "promotions-77-full", "13657213"):
+            if agulha not in achou:
+                continue
+            for t in contexto(expandido, agulha):
+                print(f"       [{agulha}] …{t}…")
+    return achou
+
+
+def extrair_urls_lista(texto: str) -> list:
+    """URLs de lista.mercadolivre, já desescapadas."""
+    expandido = desescapar(texto)
+    brutas = _RE_URL_LISTA.findall(expandido)
+    limpas = []
+    for u in brutas:
+        u = (u.replace("\\u002F", "/").replace("\\u002f", "/")
+              .replace("\\/", "/").replace("\\u0026", "&"))
+        u = _html.unescape(u)
+        if u not in limpas:
+            limpas.append(u)
+    return limpas
 
 
 async def sondar(s: aiohttp.ClientSession, url: str, esperado: str) -> None:
     bloco(f"ALVO  {url}\nESPERADO: {esperado}")
 
-    final = await saltos(s, url)
+    # ── expansão ──────────────────────────────────────────────────
+    sub("expansão")
+    atual = url
+    for n in range(1, 8):
+        try:
+            async with s.get(atual, headers=CAB, allow_redirects=False,
+                             timeout=aiohttp.ClientTimeout(total=30)) as r:
+                dest = r.headers.get("Location")
+                print(f"    {n}. HTTP {r.status}  {atual[:110]}")
+                if not dest:
+                    break
+                print(f"       → {dest[:150]}")
+                atual = urllib.parse.urljoin(atual, dest)
+        except Exception as exc:
+            print(f"    {n}. FALHOU {type(exc).__name__}")
+            return
 
-    sub("GET do documento final")
+    # ── documento ─────────────────────────────────────────────────
     try:
-        async with s.get(final, headers=CAB, allow_redirects=True,
-                         timeout=aiohttp.ClientTimeout(total=40)) as r:
+        async with s.get(atual, headers=CAB, allow_redirects=True,
+                         timeout=aiohttp.ClientTimeout(total=45)) as r:
             corpo = await r.text(errors="ignore")
-            nomes = [c.split("=", 1)[0].strip()
-                     for c in r.headers.getall("Set-Cookie", [])]
-            status, url_final = r.status, str(r.url)
+            status = r.status
     except Exception as exc:
-        print(f"    FALHOU {type(exc).__name__}: {exc}")
+        print(f"    GET FALHOU {type(exc).__name__}: {exc}")
         return
 
-    print(f"    HTTP {status} | {len(corpo)} bytes")
-    print(f"    url final : {url_final[:160]}")
-    print(f"    Set-Cookie: {nomes or 'nenhum'}")
+    html_doc, inline, externos = blocos_de_script(corpo)
+    print(f"\n    HTTP {status} | documento {len(corpo)}B | "
+          f"HTML_DOC {len(html_doc)}B | {len(inline)} blocos inline")
 
-    zonas = fatiar(corpo)
-    doc = zonas["HTML_DOC"]
-    print(f"    HTML_DOC={len(doc)}B  JS_INLINE={len(zonas['JS_INLINE'])}B")
+    # ── 1. marcação servida ───────────────────────────────────────
+    sub("ZONA 1 — HTML_DOC (marcação servida)")
+    if not varrer("HTML_DOC", html_doc):
+        print("    nenhuma agulha de lista.")
 
-    # ── A pergunta desta rodada ───────────────────────────────────
-    sub("ÂNCORAS DE PRODUTO, NA ORDEM DO DOCUMENTO")
-    ancoras = ancoras_em_ordem(doc)
-    if not ancoras:
-        print("    NENHUMA âncora de produto no HTML servido.")
-    for a in ancoras[:15]:
-        marca = ">>>" if a["pos"] == 1 else "   "
-        print(f"  {marca} #{a['pos']:<2} {a['id']:<16} {a['slug']}")
-        if a["rotulo"]:
-            print(f"        rótulo antes: {a['rotulo']}")
-    if len(ancoras) > 15:
-        print(f"    … mais {len(ancoras) - 15}")
+    # ── 2. cada bloco inline, NUMERADO ────────────────────────────
+    sub("ZONA 2 — CADA <script> INLINE, bloco a bloco")
+    blocos_com_agulha = []
+    for b in inline:
+        achou = varrer(f"bloco #{b['i']}  type={b['tipo'] or '(sem type)'}",
+                       b["corpo"])
+        if achou:
+            blocos_com_agulha.append((b, achou))
+    if not blocos_com_agulha:
+        print("    nenhum bloco inline contém agulha de lista.")
 
-    if ancoras:
-        p = ancoras[0]
-        print(f"\n    REGRA CANDIDATA (primeira âncora) escolheria:")
-        print(f"      id   : {p['id']}")
-        print(f"      slug : {p['slug']}")
-        print(f"      ESPERADO: {esperado}")
-        print(f"      ^^ conferir se o slug bate com o esperado ^^")
+    # ── 3. o que interessa: a URL inteira ─────────────────────────
+    sub("ZONA 3 — URLs de lista.mercadolivre recuperadas")
+    todas = []
+    for rotulo, texto in ([("HTML_DOC", html_doc)] +
+                          [(f"bloco #{b['i']}", b["corpo"]) for b in inline]):
+        for u in extrair_urls_lista(texto):
+            todas.append((rotulo, u))
+    if todas:
+        for rotulo, u in todas[:25]:
+            print(f"    >>> [{rotulo}] {u[:200]}")
+    else:
+        print("    NENHUMA URL de lista.mercadolivre no documento servido.")
 
-    # ── Lista ─────────────────────────────────────────────────────
-    sub("sinais de LISTA no HTML servido")
-    expandido = (doc.replace("\\u002F", "/").replace("\\/", "/"))
-    try:
-        expandido += " " + urllib.parse.unquote(doc[:400000])
-    except Exception:
-        pass
-    expandido += " " + _html.unescape(doc[:400000])
+    conts, camps = [], []
+    for _, texto in ([("x", html_doc)] + [("y", b["corpo"]) for b in inline]):
+        conts += _RE_CONTAINER.findall(desescapar(texto))
+        camps += _RE_CAMPANHA.findall(desescapar(texto))
+    print(f"\n    _Container_ (todos)        : {sorted(set(conts))[:10]}")
+    print(f"    coupon_campaign_id (todos) : {sorted(set(camps))[:10]}")
 
-    conts = sorted(set(_RE_CONTAINER.findall(expandido)))
-    camps = sorted(set(_RE_CAMPANHA.findall(expandido)))
-    print(f"    _Container_        : {len(conts)} {conts[:10]}")
-    print(f"    coupon_campaign_id : {len(camps)} {camps[:10]}")
+    # ── 4. estado embutido, se houver ─────────────────────────────
+    sub("ZONA 4 — blocos com cara de estado, parseados")
+    for b, _ in blocos_com_agulha:
+        corpo_b = b["corpo"].strip()
+        candidato = None
+        if corpo_b.startswith(("{", "[")):
+            candidato = corpo_b
+        else:
+            m = re.search(r"=\s*(\{.*\})\s*;?\s*$", corpo_b, re.S)
+            if m:
+                candidato = m.group(1)
+        if not candidato:
+            print(f"    bloco #{b['i']}: não tem forma de estado "
+                  f"(início: {corpo_b[:70]!r})")
+            continue
+        try:
+            dados = json.loads(candidato)
+        except Exception as exc:
+            print(f"    bloco #{b['i']}: não parseou ({type(exc).__name__})")
+            continue
+        chaves = list(dados)[:25] if isinstance(dados, dict) else "lista"
+        print(f"    bloco #{b['i']}: JSON ok | chaves de topo: {chaves}")
 
-    ancoras_lista = []
-    for m in _RE_ANCORA_LISTA.finditer(doc):
-        h = _html.unescape(m.group(1))
-        if h not in ancoras_lista:
-            ancoras_lista.append(h)
-    print(f"    âncoras de lista   : {len(ancoras_lista)}")
-    for h in ancoras_lista[:10]:
-        print(f"      {h[:170]}")
-
-    # Também no JS inline, para separar servido de montado.
-    c_js = len(set(_RE_CONTAINER.findall(zonas["JS_INLINE"])))
-    print(f"    (_Container_ em JS_INLINE: {c_js})")
-
-    sub("bundles próprios referenciados")
-    proprios = [u for u in zonas["externos"]
-                if "affiliates" in u or "recommendations" in u
-                or "social" in u]
-    for u in proprios[:10]:
+    sub("bundles próprios")
+    for u in [u for u in externos
+              if "affiliates" in u or "recommendations" in u][:8]:
         print(f"    {u[:150]}")
 
 
 async def main() -> int:
-    bloco("SONDA DA PONTE — RODADA 2: REGRA DE SELEÇÃO")
+    bloco("SONDA — RODADA 3: DE ONDE SAI O _Container_")
     print(f"  alvos      : {len(ALVOS)}")
-    print(f"  credencial : NENHUMA (anônima, por desenho)")
-    print(f"  pergunta   : a PRIMEIRA âncora /p/MLB é o produto da oferta?")
+    print(f"  credencial : NENHUMA (anônima)")
+    print(f"  resposta conhecida do 1hGSoc3:")
+    print(f"    _Container_promotions-77-full?coupon_campaign_id=13657213")
 
     async with aiohttp.ClientSession() as s:
         for url, esperado in ALVOS:
@@ -292,12 +325,12 @@ async def main() -> int:
                 print(f"\n  ALVO FALHOU: {type(exc).__name__}: {exc}")
 
     bloco("FIM")
-    print("  Conferir, alvo a alvo, se a âncora #1 bate com o ESPERADO.")
-    print("  Se bater nos dois produtos, a regra está comprovada.")
-    print("  Se não bater, a regra está errada e NÃO deve ser")
-    print("  implementada — o log mostra qual posição acertaria.")
+    print("  Se a URL da lista apareceu em ZONA 3, a ponte da LISTA")
+    print("  também é HTTP pura — só muda a zona de extração.")
+    print("  Se não apareceu em zona nenhuma, então nasce de XHR e")
+    print("  o próximo passo é outro.")
     print()
-    print("  NADA foi implementado. NADA foi alterado em produção.")
+    print("  NADA implementado. NADA alterado em produção.")
     return 0
 
 
