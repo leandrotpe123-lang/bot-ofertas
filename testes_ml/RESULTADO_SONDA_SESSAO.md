@@ -1,8 +1,8 @@
-# Sonda de sessão — Mercado Livre — resultado das 3 rodadas
+# Sonda de sessão — Mercado Livre — resultado das 4 rodadas
 
 Diagnóstico do `HTTP 401` / `CookieError` no `createLink`.
 Nenhum valor de cookie, token ou segredo foi registrado em nenhuma
-rodada: só contagens, tamanhos e booleanos.
+rodada: só contagens, tamanhos, nomes e booleanos.
 
 ## Linha do tempo medida
 
@@ -11,36 +11,54 @@ rodada: só contagens, tamanhos e booleanos.
 | credencial antiga | 0 | HTTP 401 |
 | credencial nova (Create Link) | 28 | `CookieError` |
 | sonda, jar vazio | 28 | HTTP 401 `Unauthorized` |
+| sonda, só os 24 legais | 24 | HTTP 401 `Unauthorized` |
+| sonda, transporte urllib | 28 | HTTP 401 `Unauthorized` |
 
-## O que a sonda mediu
+## Rodada 4 — transporte x credencial
 
-**Leitura da credencial: correta.**
+O teste histórico `teste_ml_createlink.py`, que já obteve 200 e gerou
+`meli.la`, usa `urllib.request`; a produção usa `aiohttp`. Os dois
+transportes receberam o MESMO dicionário de cabeçalhos, o mesmo
+corpo, a mesma URL, a mesma tag e a mesma credencial — montados uma
+única vez e compartilhados.
 
-- `ML_SESSION_COOKIE` presente, 28 pares `nome=valor`
-- **112 sequências `%XX`** — os valores estão percent-encoded, como
-  num header de navegador de verdade
-- `Cookie`: 0 caracteres de controle
-- `ML_CSRF_TOKEN` presente, 38 chars crus → 36 após `_limpar`,
-  sem caractere de controle
+| TRANSPORTE | STATUS | RESULTADO |
+|---|---|---|
+| urllib | 401 | `Unauthorized` |
+| aiohttp | 401 | `Unauthorized` |
 
-**Semeadura do jar: 24 aceitos, 4 recusados.**
+**O transporte não explica a recusa.** Hipótese encerrada.
 
-Quatro fragmentos com nome ilegal, `len` 28 / 33 / 140 / 484,
-caracteres proibidos `' '` e `'/'`. Cada um vem logo depois de um
-cookie de rastreamento cujo valor contém `;` sem codificar:
-`g_state`, `_cq_duid`, `ttcsid_*` — e um depois de `ssid`.
+## Inventário de cookies — o que faltou
 
-Não são cookies: são a cauda do valor anterior, partida pelo
-`split(";")`. O navegador manda esses valores do mesmo jeito; quem
-não tolera é o `http.cookies` do Python.
+| cookie | estado |
+|---|---|
+| `ssid` | **PRESENTE** |
+| `_csrf` | **PRESENTE** |
+| `nsa_rotok` | **PRESENTE** |
+| `orguserid` | ausente |
+| `_d2id` | ausente |
+| `x-meli-session-id` | ausente |
+| `x-bf-session-v6` | ausente |
+| `_mldataSessionId` | ausente |
 
-**Servidor: recusa.**
+Dos 24 nomes legais, a esmagadora maioria é rastreador de terceiro —
+`__rtbh.*` (RTB House), `_hjSession*` (Hotjar), `_pin_unauth`
+(Pinterest), `ttcsid_*` (TikTok), `QSI_SI_*` (Qualtrics), `_gads-ID`,
+`g_state` (Google), `_cq_duid` (Cheq) — mais os `c_*` de experimento
+do próprio Mercado Livre e itens de UI (`ml_cart-quantity`,
+`nav_dab_closed`).
 
-`POST createLink` com jar vazio e header completo →
-`401 {"message": "Unauthorized"}`, JSON limpo da própria API.
-Repetido com apenas os 24 cookies de nome legal → **mesmo 401**.
+A credencial carrega quase tudo, menos identidade autenticada.
 
-**`x-csrf-token` ≠ cookie `_csrf`** — 36 chars contra 25.
+Isso casa com o relato do operador: a primeira captura, feita numa
+requisição de `www.mercadolivre.com.br`, tinha ~56 cookies; a atual,
+feita no createLink, tem 28. Sumiu metade — e sumiram justamente os
+de sessão.
+
+**Não está concluído que algum desses cookies seja obrigatório.**
+Presença numa captura histórica não prova exigência. O que está
+medido é a ausência.
 
 ## Hipóteses minhas que a medição DERRUBOU
 
@@ -60,26 +78,25 @@ Ficam registradas para não voltarem.
 4. **`GET /affiliate-program/hub`** para testar se a sessão está
    viva — caminho chutado, respondeu **404**. Teste inconclusivo por
    erro meu, não por resultado.
+5. **"É o transporte aiohttp"** — plausível, com um teste histórico
+   de 200 por urllib para sustentá-la. Medida: **falsa**, os dois
+   levam 401.
 
 ## Duas frentes, independentes
 
-**1 — Robustez (defeito nosso, real).**
-`cliente._obter_sessao` semeia o jar com `jar.update_cookies(dict)`
-numa chamada só. Um único nome ilegal derruba os 28 e levanta
-`CookieError`, que sobe como "erro inesperado" e vira `AUSENTE`.
+**1 — Robustez (defeito nosso). CORRIGIDO.**
+`cliente._obter_sessao` semeava o jar com `jar.update_cookies(dict)`
+numa chamada só, e um único nome ilegal derrubava os 28 com
+`CookieError`. Agora a semeadura é individual, com `except
+CookieError` específico, e a `ClientSession` é criada de qualquer
+forma. O header `Cookie` bruto nunca passou por aí: é ele que
+autentica, e segue intacto.
 
-Um header `Cookie` legítimo de navegador contém cookies de
-rastreamento com valor fora de spec. O sistema precisa tolerar isso.
-Além do mais, o jar **não é o que autentica** — o `cliente` manda o
-header `Cookie` explicitamente. O jar só serve para absorver
-`Set-Cookie` da resposta.
+**2 — Credencial. EM ABERTO.**
+Com o jar fora do caminho e com dois transportes diferentes, o
+servidor responde `Unauthorized`. Descartar os 4 fragmentos não muda.
+A requisição chega inteira e é recusada.
 
-**2 — Credencial (não é defeito de código).**
-Com o jar fora do caminho, o servidor ainda responde `Unauthorized`.
-Descartar os 4 fragmentos não muda. A requisição chega inteira e é
-recusada.
-
-O `x-csrf-token` e o cookie `_csrf` têm tamanhos diferentes (36 x
-25). Os dois precisam vir da **mesma requisição**, capturados no
-**mesmo momento** — token de um instante com cookie de outro é
-recusado mesmo com sessão viva.
+O que está medido e ainda não explicado: faltam 5 dos 8 cookies de
+sessão conhecidos, e o `x-csrf-token` (36 chars) difere do cookie
+`_csrf` (25 chars).
