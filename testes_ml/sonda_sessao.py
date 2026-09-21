@@ -99,20 +99,82 @@ def _nome_seguro(nome: str) -> str:
             f"caracteres proibidos: {amostra!r}>")
 
 
+# Palavras que só aparecem em ATRIBUTO de Set-Cookie, nunca num
+# header `Cookie` de requisição. Achar uma delas identifica a origem
+# do lixo sem revelar conteúdo nenhum.
+_ATRIBUTOS = ("expires", "path", "domain", "secure", "httponly",
+              "samesite", "max-age", "priority", "partitioned")
+_DIAS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def _classificar(fragmento: str) -> str:
+    """
+    Diz o QUE é um fragmento ilegal, sem mostrar o que ele contém.
+
+    Só booleanos derivados: nenhuma substring do valor é impressa.
+    """
+    baixo = fragmento.lower()
+    marcas = []
+    for atrib in _ATRIBUTOS:
+        if baixo.startswith(atrib) or f" {atrib}" in baixo:
+            marcas.append(f"atributo:{atrib}")
+    if any(d in baixo for d in _DIAS):
+        marcas.append("data-http")
+    if "mozilla" in baixo or "applewebkit" in baixo:
+        marcas.append("user-agent")
+    if "http://" in baixo or "https://" in baixo:
+        marcas.append("url")
+    if "{" in fragmento or "[" in fragmento:
+        marcas.append("json")
+    if ": " in fragmento:
+        marcas.append("par-de-header")
+    return ", ".join(marcas) or "(não classificado)"
+
+
+def _diagnosticar_header(rotulo: str, valor: str) -> int:
+    """
+    Caracteres que o aiohttp recusa em header. Conta, não mostra.
+
+    Existe porque a primeira versão desta sonda levou ValueError no
+    write_headers e eu não sabia QUAL header carregava o defeito —
+    Cookie ou x-csrf-token. Contar separado responde isso.
+    """
+    cr = valor.count("\r")
+    lf = valor.count("\n")
+    tab = valor.count("\t")
+    controle = sum(1 for c in valor if ord(c) < 32)
+    fora_latin1 = sum(1 for c in valor if ord(c) > 255)
+    linha(f"{rotulo}: tamanho", len(valor))
+    linha(f"{rotulo}: CR / LF / TAB", f"{cr} / {lf} / {tab}")
+    linha(f"{rotulo}: chars de controle (<32)", controle)
+    linha(f"{rotulo}: fora de latin-1 (>255)", fora_latin1)
+    return controle + fora_latin1
+
+
 # ══════════════════════════════════════════════════════════════════
 # 1 — VARIÁVEIS
 # ══════════════════════════════════════════════════════════════════
 def etapa_variaveis() -> tuple:
     secao("1) VARIÁVEIS")
     bruto = os.environ.get("ML_SESSION_COOKIE") or ""
-    csrf = os.environ.get("ML_CSRF_TOKEN") or ""
+    csrf_cru = os.environ.get("ML_CSRF_TOKEN") or ""
     tag = os.environ.get("ML_TAG") or ""
 
     linha("ML_SESSION_COOKIE presente", "sim" if bruto.strip() else "NÃO")
     linha("tamanho bruto do cookie", len(bruto))
-    linha("ML_CSRF_TOKEN presente", "sim" if csrf.strip() else "NÃO")
-    linha("tamanho do CSRF", len(csrf))
+    linha("ML_CSRF_TOKEN presente", "sim" if csrf_cru.strip() else "NÃO")
+    linha("tamanho do CSRF (cru)", len(csrf_cru))
     linha("ML_TAG presente", "sim" if tag.strip() else "NÃO")
+
+    # A primeira versão desta sonda mandou o CSRF CRU ao POST, mas a
+    # produção manda `_limpar(csrf)`. Medir coisa diferente da que
+    # roda em produção é como a sonda inventa um defeito que não
+    # existe — foi o que aconteceu, e é por isso que aqui se usa
+    # exatamente o mesmo caminho do `carregar()`.
+    csrf = sessao._limpar(csrf_cru)
+    linha("tamanho do CSRF (após _limpar)", len(csrf))
+    linha("_limpar removeu algo do CSRF",
+          "SIM" if len(csrf) != len(csrf_cru) else "não")
     return bruto, csrf
 
 
@@ -195,9 +257,14 @@ def etapa_cookiejar(pares: list) -> list:
         except Exception as exc:
             # NÃO interrompe: a sonda precisa saber quantos e quais.
             rejeitados.append((i, nome, type(exc).__name__, exc))
+            anterior = (_nome_seguro(pares[i - 1][0]) if i > 0
+                        else "(nenhum)")
             print(
                 f"  {i:<7} REJEITADO    {_nome_seguro(nome)}\n"
-                f"          └─ {type(exc).__name__}: {_sanitizar(exc)}",
+                f"          ├─ {type(exc).__name__}: {_sanitizar(exc)}\n"
+                f"          ├─ classificação: {_classificar(nome)}\n"
+                f"          └─ cookie ANTERIOR (índice {i - 1}): "
+                f"{anterior}",
                 flush=True,
             )
 
@@ -276,6 +343,14 @@ async def etapa_createlink(sessao_http, efetivo: str, csrf: str) -> None:
     linha("campos do corpo", "urls[1], tag")
     linha("tag presente no corpo", "sim" if afiliado.TAG else "NÃO")
     RESUMO["csrf_chegou"] = "SIM" if csrf else "NÃO"
+
+    print("\n  -- caracteres proibidos por header (contagem) --",
+          flush=True)
+    ruim_cookie = _diagnosticar_header("Cookie", efetivo)
+    ruim_csrf = _diagnosticar_header("x-csrf-token", csrf)
+    if ruim_cookie or ruim_csrf:
+        culpado = "Cookie" if ruim_cookie else "x-csrf-token"
+        linha("header que quebraria o write", culpado)
 
     inicio = time.monotonic()
     try:
