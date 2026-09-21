@@ -41,6 +41,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from http.cookies import CookieError
 from typing import Optional
 
 import aiohttp
@@ -300,14 +301,40 @@ async def _obter_sessao(credencial: Credencial,
             nome, sep, valor = parte.strip().partition("=")
             if sep and nome:
                 pares[nome] = valor
-        if pares:
-            jar.update_cookies(pares, response_url=URL(_ORIGIN))
+
+        # Semeadura UMA A UMA, e não em bloco.
+        #
+        # Um header `Cookie` legítimo de navegador carrega cookie de
+        # rastreamento cujo valor tem `;` sem codificar. O split
+        # parte esse valor e a cauda vira um "nome" que o
+        # `http.cookies` recusa. Em bloco, UM nome ilegal derruba
+        # todos os outros e levanta CookieError — que subia como
+        # "erro inesperado" e matava a plataforma inteira, medido em
+        # produção: 28 pares, 4 ilegais, zero cookies no jar.
+        #
+        # O jar é SUPORTE, não credencial: quem autentica é o header
+        # `Cookie` bruto, que segue intacto em `credencial.cookie` e
+        # é montado sem passar por aqui. O jar existe só para
+        # absorver os `Set-Cookie` da resposta. Perder uma entrada
+        # nele não tira nada da requisição.
+        #
+        # `CookieError` específico de propósito: um `except` genérico
+        # engoliria defeito de programação junto.
+        aceitos = ignorados = 0
+        for nome, valor in pares.items():
+            try:
+                jar.update_cookies(
+                    {nome: valor}, response_url=URL(_ORIGIN),
+                )
+                aceitos += 1
+            except CookieError:
+                ignorados += 1
 
         _sessao_ml = aiohttp.ClientSession(cookie_jar=jar)
         _geracao_sessao = geracao
         log_nrm.info(
-            f"🛒 ML sessão HTTP criada | cookies={len(pares)} "
-            f"geracao={geracao}"
+            f"🛒 ML sessão HTTP criada | cookies={aceitos} "
+            f"ignorados={ignorados} geracao={geracao}"
         )
     return _sessao_ml
 
