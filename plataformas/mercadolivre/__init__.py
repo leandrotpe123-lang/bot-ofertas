@@ -86,7 +86,11 @@ INVARIANTES
 ═══════════════════════════════════════════════════════════════════
 INV-ML-1  `links` é síncrono, puro e sem I/O.
 INV-ML-2  Nada abaixo de `afiliacao` conhece cache ou publicação.
-INV-ML-3  URL resolvida pelo cache nunca chega à rede.
+INV-ML-3  URL resolvida por entrada VIGENTE do cache nunca chega à
+          rede. Entrada de contrato anterior (canônica que não é
+          destino) é reparada: expansão + descoberta anônimas, SEM
+          createLink, `publicada` preservada. Falha no reparo mantém
+          a entrada antiga e não é repetida no mesmo processo.
 INV-ML-4  URL inelegível nunca chega ao `cliente`.
 INV-ML-5  Nenhum link é publicado sem tag confirmada pelo servidor.
 INV-ML-6  Qualquer falha resulta em AUSENTE; nunca link parcial.
@@ -100,7 +104,7 @@ from __future__ import annotations
 
 from plataformas.contrato import CONTRACT_VERSION, Plataforma
 
-from .afiliacao import afilia
+from .afiliacao import afilia, afiliacao_vigente
 from .afiliado import IDENTIFICADOR
 from .links import (
     ENCURTADORES,
@@ -118,6 +122,7 @@ PLATAFORMA = Plataforma(
     afilia=afilia,
     encurtadores=ENCURTADORES,
     encurtadores_forca_get=ENCURTADORES_FORCA_GET,
+    afiliacao_vigente=afiliacao_vigente,
 )
 
 

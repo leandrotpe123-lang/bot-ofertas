@@ -209,7 +209,23 @@ class Plataforma:
                           compõe a UNIÃO das contribuições de todas as
                           plataformas e a utiliza para derivar
                           tem_sinal_cashback. Não contém lógica. None
-                          equivale a não declarar; o core ignora.                   
+                          equivale a não declarar; o core ignora.
+
+      - afiliacao_vigente : (Afiliacao) -> bool | None. Pura, sem I/O.
+                            Diz se uma afiliação guardada no cache de
+                            links ainda obedece ao contrato VIGENTE
+                            desta plataforma. Existe porque o cache é
+                            persistente e sobrevive a deploys: quando
+                            a plataforma muda o que grava (por
+                            exemplo, qual URL é a canônica), as
+                            entradas antigas continuariam sendo
+                            servidas para sempre. False faz o core NÃO
+                            reutilizar a entrada e entregar a URL à
+                            capacidade `afilia`, que decide como
+                            atualizá-la. O core não sabe por que a
+                            entrada deixou de valer — só pergunta.
+                            None equivale a não declarar: toda entrada
+                            em cache é reutilizada, como sempre.
 
     """
     # Identidade
@@ -227,3 +243,4 @@ class Plataforma:
     encurtadores: Optional[frozenset[str]] = None
     hosts_campanha:       Optional[frozenset[str]] = None
     sinais_cashback:      Optional[frozenset[str]] = None
+    afiliacao_vigente:    Optional[Callable[["Afiliacao"], bool]] = None

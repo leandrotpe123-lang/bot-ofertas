@@ -89,6 +89,35 @@ def particionar_links(links: List[str]) -> LinksParticionados:
 
 
 # ─────────────────────────────────────────────────────────────────
+# VIGÊNCIA DE UMA ENTRADA DO CACHE DE LINKS
+#
+# O cache é persistente e sobrevive a deploys. Quando uma plataforma
+# muda o que grava, as entradas antigas seriam servidas para sempre
+# — e a leitura renova o carimbo de tempo, então a entrada que é
+# muito usada nunca expira.
+#
+# O core não sabe POR QUE uma entrada deixou de valer; pergunta à
+# plataforma, pela capacidade opcional `afiliacao_vigente`. Nenhum
+# conhecimento de plataforma entra aqui.
+#
+# Degradação: plataforma desconhecida, capacidade não declarada ou
+# falha ao consultá-la ⇒ a entrada é reutilizada, exatamente como
+# antes desta função existir.
+# ─────────────────────────────────────────────────────────────────
+def _entrada_vigente(plataforma: object, cached: Afiliacao) -> bool:
+    if plataforma is None:
+        return True
+    verificar = getattr(plataforma, "afiliacao_vigente", None)
+    if verificar is None:
+        return True
+    try:
+        return bool(verificar(cached))
+    except Exception as e:
+        log_nrm.warning(f"⚠️ afiliacao_vigente falhou: {type(e).__name__}")
+        return True
+
+
+# ─────────────────────────────────────────────────────────────────
 # RESOLUÇÃO E AFILIAÇÃO DE UM LINK
 # ─────────────────────────────────────────────────────────────────
 async def _normalizar_um(
@@ -140,11 +169,16 @@ async def _normalizar_um(
         cached = consultar_link(url)
     if cached:
         plataforma_cache = registry.resolver(url)
-        ident = (
-            plataforma_cache.identificador
-            if plataforma_cache is not None else "none"
-        )
-        return url_original, cached, ident
+        if _entrada_vigente(plataforma_cache, cached):
+            ident = (
+                plataforma_cache.identificador
+                if plataforma_cache is not None else "none"
+            )
+            return url_original, cached, ident
+        # Entrada gravada sob um contrato ANTERIOR da plataforma: não
+        # é reutilizada. Segue para a afiliação (passos 4 e 5), que é
+        # quem sabe atualizá-la. Só ocorre para plataforma que
+        # DECLAROU `afiliacao_vigente`; nenhuma outra muda.
 
     # 4. Resolução de plataforma via registry (fonte soberana).
     plataforma = registry.resolver(url)
