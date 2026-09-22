@@ -28,7 +28,7 @@ from pipeline.normalizacao import (
     MensagemNormalizada,
     _tem_emoji,
 )
-from utils.cupom import _KW_CUPOM, extrair_todos_cupons
+from utils.cupom import _KW_CUPOM
 from utils import marcacao
 from pipeline import papel
 
@@ -111,11 +111,11 @@ _RE_BULLET_PREFIXO = re.compile(r'^\s*[-–—•·]\s*')
 # de conteúdo ("🔹 Item - R$ 110", faixa de preço) não é tocado.
 _RE_EMOJI_BULLET = re.compile(
     r'^([\U0001F300-\U0001FAFF\U00002600-\U000027BF'
-    r'\U0001F900-\U0001F9FF\u2B50\u2B55]\uFE0F?)\s*[-–—•·]\s*' 
+    r'\U0001F900-\U0001F9FF⭐⭕]️?)\s*[-–—•·]\s*' 
 )
 
 _RE_URL_RENDER = re.compile(
-    r'https?://[^\s\)\]>,"\'<\u200b\u200c]+'
+    r'https?://[^\s\)\]>,"\'<​‌]+'
 )
 
 # ─────────────────────────────────────────────────────────────────
@@ -288,7 +288,14 @@ def montar_texto(norm: MensagemNormalizada) -> str:
             # A AUTORIDADE do que é cupom é utils.cupom (MB: soberania
             # do módulo). A montagem NÃO reconhece cupom — ela apenas
             # evita repetir visualmente o mesmo código no mesmo post.
-            codigos = extrair_todos_cupons(l)
+            #
+            # CONSOME o fato já derivado (`norm.cupons`) em vez de
+            # reextrair da linha. Reextrair aqui sempre devolveria
+            # vazio: a extração é T0, e a entidade de código vive na
+            # MENSAGEM, não na linha solta. É o mesmo princípio que
+            # `_crases` já segue logo abaixo — uma única derivação,
+            # feita na normalização, consumida na apresentação.
+            codigos = [c for c in norm.cupons if c in l.upper()]
 
             novos = [c for c in codigos if c not in cupons_vistos]
 
@@ -348,4 +355,3 @@ def montar_texto(norm: MensagemNormalizada) -> str:
         saida.append(l)
 
     return "\n".join(saida).strip()
-

@@ -17,32 +17,36 @@ NÃO faz:
 ─────────────────────────────────────────────────────────────────────
 DOUTRINA DE EVIDÊNCIA (ratificada)
 
-O módulo NÃO tenta adivinhar se uma palavra "parece" cupom. Ele só
-reconhece código onde a FONTE declarou que há um código. Três níveis,
-em ordem de força:
+CUPOM É SOMENTE O QUE A FONTE DECLAROU COMO CÓDIGO.
 
   T0  CRASE      MessageEntityCode / MessageEntityPre. A fonte marcou
-                 o trecho como copiável. É a evidência mais forte que
-                 existe: nada se sobrepõe a ela.
-  T1  ESTRUTURA  A linha declara um benefício (valor ou percentual) e
-                 entrega o código após um separador — ":" ou "-" — ou
-                 usa a forma chave-valor ("Cupom: X").
-  T2  LINHA      A linha inteira, tirados marcadores, É um único token.
+                 o trecho como copiável. É a ÚNICA evidência de cupom.
 
-NÃO EXISTE mais:
-  · janela de palavra-chave (colher token MAIÚSCULO perto de "cupom");
+NÃO EXISTE fallback textual. O módulo NÃO tenta descobrir cupom por:
+  · janela de palavra-chave (token MAIÚSCULO perto de "cupom");
   · blacklist de vocabulário (_FALSO_CUPOM);
-  · exigência de dígito, de tamanho mínimo arbitrário ou de palavra
-    previamente conhecida.
+  · estrutura de linha com valor/percentual antes de ":" ou "-" (T1);
+  · linha inteiramente dedicada a um token (T2);
+  · caixa alta, posição na frase, contexto semântico ou dois-pontos.
 
-A blacklist existia como REMENDO da janela de palavra-chave: aquela
-estratégia colhia qualquer token maiúsculo de qualquer posição —
-títulos, escopos de benefício, até trechos de URL — e por isso
-precisava de uma lista dizendo quais palavras não eram cupom. Foi ela
-que produziu FORTES, ESGOTANDO, ENTREGAS, ITENS e 2U6U32Q. Removida a
-janela, some a razão de existir da lista: nas posições que restam a
-própria fonte declarou o código, e posição de declaração não produz
-vocabulário.
+HISTÓRICO — por que a inferência caiu
+  A janela de palavra-chave colhia token maiúsculo de qualquer
+  posição e produziu FORTES, ESGOTANDO, ENTREGAS, ITENS e 2U6U32Q.
+  Foi removida, e com ela a blacklist que existia só para remendá-la.
+  Restaram T1 e T2, mais estreitos — e ainda assim T2 produziu
+  TUTORIAL a partir de "🚨🚨 TUTORIAL:", medido em produção
+  (id=1295), fazendo um post duplicar por âncora `cup|TUTORIAL`.
+
+  A lição é a mesma das duas vezes: toda regra que INFERE código a
+  partir da forma do texto acaba colhendo o texto. A correção não é
+  uma inferência mais fina — é não inferir.
+
+O QUE PERMANECE, e não é extração de cupom
+  `linha_e_item_de_cupom` é PREDICADO ESTRUTURAL consumido por
+  pipeline.assunto_oferta e pipeline.assunto_especie para decidir se
+  uma LINHA tem forma de item de cupom (gate de natureza). Ele NÃO
+  devolve código e NÃO alimenta `cupons`. Continua como estava:
+  mexer nele seria mudar o gate, que é outra frente.
 
 Um código que o sistema nunca viu funciona sem alteração de código.
 ─────────────────────────────────────────────────────────────────────
@@ -88,52 +92,29 @@ def _forma_codigo(c: str) -> bool:
     return bool(_RE_FORMA_CODIGO.match(cu)) and bool(_RE_TEM_LETRA.search(cu))
 
 
-# ── T1 — evidência estrutural ─────────────────────────────────────
-# A linha declara um benefício em valor ou percentual e entrega o(s)
-# código(s) após o separador.
+# ── FORMA de item de cupom — PREDICADO DE GATE, não extração ──────
+# A linha declara um benefício em valor ou percentual e entrega algo
+# após o separador:
 #
 #   "R$ 120 OFF em R$ 1000: INFLU120, TOMA120"
-#   "R$120 em R$1000: INFLU120"        ← sem OFF, mesma estrutura
-#   "15% OFF acima de R$200 - TOMA15"  ← separador travessão
 #   "10% em R$ 500: PROMO10"
 #
-# O literal "OFF" NÃO é condição para que um cupom exista: é uma das
-# formas de anunciar o benefício, não a única. A exigência de valor
-# ANTES do separador é a barreira que impede "Modelo: AGON32",
-# "Cor: PRETO2024" e "SKU: 240419000" de virarem cupom; a exclusão de
-# linha com URL impede "Resgate aqui: https://.../2U6U32Q".
+# ⚠️ ESTE RECORTE NÃO EXTRAI CUPOM. Ele responde APENAS se a LINHA
+# TEM FORMA de item de cupom, e é consumido por
+# pipeline.assunto_oferta e pipeline.assunto_especie no gate de
+# natureza (_faixas_de_item_cupom, tem_preco_de_item,
+# beneficio_e_de_loja, eh_entidade_cupom).
 #
-# DONO ÚNICO desta evidência (MB: soberania de utils.cupom).
-# pipeline.assunto_especie e pipeline.assunto_oferta CONSOMEM o
-# predicado — não redefinem o padrão. Qualquer evolução do formato
-# acontece aqui, e só aqui.
+# A exigência de valor ANTES do separador é o que impede
+# "Modelo: AGON32" e "Cor: PRETO2024" de contarem como item; a
+# exclusão de linha com URL impede "Resgate aqui: https://…".
+#
+# Preservado byte-a-byte: mexer aqui é mudar o GATE, não a extração
+# de cupom — outra frente, com regressão de natureza própria.
 _RE_VALOR_BENEFICIO = re.compile(r'(?:r\$\s*[\d.,]+|\d+\s*%)', re.I)
 
 _RE_ITEM_CUPOM = re.compile(
     r'^(?P<pre>[^:]{0,80}?):\s*(?P<pos>[A-Z0-9][A-Z0-9_,\s/-]{2,80})$'
-)
-
-_RE_ITEM_TRACO = re.compile(
-    r'^(?P<pre>[^-]{0,80}?)\s*[-\u2013]\s*'
-    r'(?P<pos>[A-Z0-9][A-Z0-9_,\s/-]{2,80})$'
-)
-
-_RE_KV_CUPOM = re.compile(
-    r'(?:OFF|cupom|cupons|c[oó]digo|c[oó]digos|coupon|voucher)\s*[:=]\s*'
-    r'([A-Z0-9][A-Z0-9_-]{3,19})\b',
-    re.I,
-)
-
-
-# ── T2 — linha dedicada ───────────────────────────────────────────
-# A linha inteira, tirados marcadores e pontuação, É um único token.
-# O benefício foi declarado no cabeçalho da mensagem:
-#
-#   "🚨 +1 Cupom iFood R$30 OFF sem mínimo em Mercados"
-#   ""
-#   "🎟 MERCADOSALDAO303"
-_RE_LINHA_DEDICADA = re.compile(
-    r'^[^A-Za-z0-9]*([A-Z0-9][A-Z0-9_-]{2,19})[^A-Za-z0-9]*$'
 )
 
 
@@ -155,18 +136,6 @@ def _codigos_por_recorte(linha: str, recortes) -> List[str]:
     return achados
 
 
-def codigos_de_item_de_cupom(linha: str) -> List[str]:
-    """Códigos que a FORMA de item de cupom reconhece nesta linha.
-
-    Contrato do EXTRATOR. Cobre os DOIS separadores observados no
-    corpus real: dois-pontos e travessão.
-
-    GARANTIA DE LITERALIDADE: todo código devolvido é a forma
-    maiúscula de um recorte literal da linha.
-    """
-    return _codigos_por_recorte(linha, (_RE_ITEM_CUPOM, _RE_ITEM_TRACO))
-
-
 def linha_e_item_de_cupom(linha: str) -> bool:
     """PREDICADO ESTRUTURAL: esta linha tem forma de item de cupom?
 
@@ -174,74 +143,50 @@ def linha_e_item_de_cupom(linha: str) -> bool:
     pipeline.assunto_especie precisam saber se a LINHA declara um item
     de cupom, nunca quais códigos ela contém.
 
-    ⚠️ RECORTE DELIBERADAMENTE MAIS ESTREITO que o do extrator: aqui
-    entra SÓ o separador dois-pontos. O travessão é evidência válida
-    para EXTRAIR CÓDIGO, mas ampliá-lo aqui mudaria quantas linhas
-    contam como item de cupom e, por consequência, mudaria
+    ⚠️ NÃO EXTRAI CUPOM e NÃO alimenta `cupons` — cupom vem só de T0.
+    Entra SÓ o separador dois-pontos. Ampliar este recorte mudaria
+    quantas linhas contam como item de cupom e, por consequência,
     _faixas_de_item_cupom, tem_preco_de_item, beneficio_e_de_loja e o
     gate eh_entidade_cupom. Medido: com este recorte o predicado é
     IDÊNTICO ao comportamento anterior nas 65 mensagens reais.
 
-    Qualquer ampliação deste recorte é mudança de GATE, não de
-    extração, e exige frente própria com regressão de natureza.
+    Preservado byte-a-byte na remoção de T1/T2: qualquer alteração
+    aqui é mudança de GATE, e exige frente própria com regressão de
+    natureza.
     """
     return bool(_codigos_por_recorte(linha, (_RE_ITEM_CUPOM,)))
-
-
-def codigos_de_linha_dedicada(linha: str) -> List[str]:
-    """Código de linha inteiramente dedicada a um código (T2)."""
-    l = linha.strip()
-    if "http" in l.lower():
-        return []
-    m = _RE_LINHA_DEDICADA.match(l)
-    if not m:
-        return []
-    c = m.group(1).upper()
-    return [c] if _forma_codigo(c) else []
 
 
 # ── Extração ──────────────────────────────────────────────────────
 def extrair_todos_cupons(texto: str, code_entities: list = None) -> List[str]:
     """
-    Extrai todos os cupons distintos presentes em um texto, na ordem
-    de força da evidência: T0 crase → T1 estrutura → T2 linha
-    dedicada.
+    Cupons declarados pela FONTE como código (T0), na ordem em que
+    aparecem. Sem code_entities não há cupom — e isso é a regra, não
+    uma degradação.
+
+    `texto` permanece na assinatura porque é o contrato público
+    consumido por normalização e montagem; ele NÃO é mais inspecionado
+    para descobrir código. Não existe fallback textual.
 
     GARANTIA DE LITERALIDADE (contratual):
-      Quando code_entities NÃO é fornecido, todo código devolvido é
-      a forma MAIÚSCULA de um recorte literal do texto de entrada:
-      as estratégias textuais extraem exclusivamente por
-      correspondência sobre o próprio texto. Consumidores que
-      LOCALIZAM o código no texto para aplicar apresentação (ver
-      montagem._crases) dependem desta propriedade. Qualquer
-      evolução que normalize ou transforme o código devolvido DEVE
-      preservá-la ou revisar esses consumidores explicitamente.
+      Todo código devolvido é a forma MAIÚSCULA de um trecho que a
+      fonte marcou como código. Consumidores que LOCALIZAM o código no
+      texto para aplicar apresentação (ver montagem._crases) dependem
+      desta propriedade.
     """
     encontrados: List[str] = []
     visto = set()
 
-    def add(c: str):
-        cu = c.strip().upper()
-        if cu and cu not in visto and _forma_codigo(cu):
-            visto.add(cu)
-            encontrados.append(cu)
-
-    # ── T0 — CRASE: evidência explícita da fonte ──────────────────
+    # ── T0 — CRASE: a única evidência de cupom ────────────────────
     # A fonte marcou o trecho para ser copiado: isto É um código.
-    # Nenhuma validação semântica se sobrepõe a esta declaração.
+    # `_forma_codigo` continua sendo a ÚNICA validação, e é lexical —
+    # garante que o recorte é um token, não uma frase. Nenhuma regra
+    # semântica, vocabulário ou blacklist participa.
     for trecho in (code_entities or []):
         for tok in re.split(r'[\s,;/]+', trecho.strip()):
-            add(tok)
-
-    # ── T1 — evidência estrutural ────────────────────────────────
-    for m in _RE_KV_CUPOM.finditer(texto):
-        add(m.group(1))
-
-    for linha in texto.splitlines():
-        for c in codigos_de_item_de_cupom(linha):
-            add(c)
-        # ── T2 — linha dedicada ──────────────────────────────────
-        for c in codigos_de_linha_dedicada(linha):
-            add(c)
+            cu = tok.strip().upper()
+            if cu and cu not in visto and _forma_codigo(cu):
+                visto.add(cu)
+                encontrados.append(cu)
 
     return encontrados
