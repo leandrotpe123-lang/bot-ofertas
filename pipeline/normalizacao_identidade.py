@@ -111,6 +111,9 @@ class IdentidadeCampanha(NamedTuple):
     chave_campanha: str
     chaves_campanha: List[str]
     tem_sinal_cashback: bool
+    # Identidades de DESTINO declaradas pelos adaptadores. Canal
+    # SEPARADO de chaves_campanha por construção — ver derivar_campanha.
+    destinos_declarados: List[str] = []
 
 
 def derivar_produto(urls_longas: List[str]) -> IdentidadeProduto:
@@ -164,15 +167,67 @@ def derivar_campanha(
     tem_sinal_cashback deriva da linha-título do texto limpo, não de
     URL: é sinal semântico, e por isso mora aqui e não em
     normalizacao_texto.
+
+    ─────────────────────────────────────────────────────────────
+    DOIS SINAIS, NUNCA MISTURADOS
+
+      chaves_campanha      marcador GENÉRICO, inferido de host+caminho
+                           pelo mecanismo pré-existente. Amplo: dispara
+                           até em URL de PRODUTO de host de campanha.
+                           Semântica INTOCADA por esta função.
+
+      destinos_declarados  identidade EXPLÍCITA que o adaptador afirma
+                           para aquela URL. Cadeia opaca. Só existe
+                           quando a plataforma sabe QUAL destino é.
+
+    Misturar os dois foi medido e reprovado: promoveria o marcador
+    fraco a identidade de destino e alteraria Amazon, Shopee e Magalu.
+    As duas listas viajam separadas daqui até o resolvedor.
     """
     urls_campanha     = [u for u in urls_longas if _eh_host_de_campanha(u)]
+
+    # ── Identidade DECLARADA (canal novo) ─────────────────────────
+    # Pergunta-se à plataforma; não se infere. Plataforma que não
+    # declara devolve None e nada entra — é o que mantém Amazon,
+    # Shopee, Magalu e Netshoes literalmente inalteradas.
+    declarados: List[str] = []
+    urls_declarantes: set = set()
+    for u in urls_longas:
+        plataforma = registry.resolver(u)
+        if plataforma is None:
+            continue
+        try:
+            chave = getattr(plataforma.extrai_identidade(u), "id_campanha", None)
+        except Exception:
+            continue
+        if not chave:
+            continue
+        urls_declarantes.add(u)
+        if chave not in declarados:
+            declarados.append(chave)
+
+    # ── C.1 — a chave declarada SUBSTITUI a inferida da MESMA URL ──
+    # Sem isto, uma URL que declarasse identidade e cujo host também
+    # fosse host de campanha emitiria DUAS âncoras: a forte (distinta
+    # por campanha) e a fraca (host+caminho, que descarta a query e é
+    # IGUAL para campanhas diferentes). A fraca recolaria o que a
+    # forte acabou de separar — colapso silencioso.
+    #
+    # Atua SOMENTE sobre a URL que declarou. Não altera
+    # `chaves_canonicas_campanha`, não altera `hosts_campanha`, não
+    # remove chave de URL que não declarou nada. Para qualquer
+    # plataforma que não declare identidade, `urls_declarantes` é
+    # vazio e esta linha é a identidade.
+    urls_inferiveis   = [u for u in urls_campanha if u not in urls_declarantes]
+
     tem_host_campanha = bool(urls_campanha)
-    chave_campanha    = host_canonico_campanha(urls_campanha)
-    chaves_campanha   = chaves_canonicas_campanha(urls_campanha)
+    chave_campanha    = host_canonico_campanha(urls_inferiveis)
+    chaves_campanha   = chaves_canonicas_campanha(urls_inferiveis)
     tem_sinal_cashback = _tem_sinal_cashback(texto_limpo)
 
     return IdentidadeCampanha(
-        tem_host_campanha, chave_campanha, chaves_campanha, tem_sinal_cashback
+        tem_host_campanha, chave_campanha, chaves_campanha,
+        tem_sinal_cashback, declarados,
     )
 
 def derivar_ancora_url(urls_longas: List[str]) -> str:

@@ -247,9 +247,24 @@ async def afilia(url: str, sessao_http: aiohttp.ClientSession) -> object:
     if resultado is None:
         return AUSENTE
 
+    # ── CANÔNICA = O ALVO ENVIADO ────────────────────────────────
+    # Medido na sonda: o createLink devolve SEMPRE a nossa própria
+    # vitrine social como `long_url`, qualquer que seja a URL
+    # enviada. Usar essa resposta como canônica destrói a identidade
+    # do destino — todo post de ML passava a ter a mesma canônica.
+    #
+    # As duas coisas são distintas e continuam distintas:
+    #   canônica / destino    = `alvo`, o que a oferta APONTA
+    #   atribuição própria    = validada pela resposta do servidor,
+    #                           que segue sendo lida em `resultado`
+    #                           e NÃO é substituída por esta linha.
+    #
+    # `resultado.publicada` — o que de fato vai ao ar — permanece
+    # exatamente o que o servidor devolveu. Nada no cliente HTTP
+    # nem na sessão é tocado.
     afiliacao = Afiliacao(
         publicada=resultado.publicada,
-        canonica=resultado.canonica,
+        canonica=alvo,
     )
     registrar_link(url, afiliacao, afiliado.IDENTIFICADOR)
     log_nrm.info(f"🛒 ML afiliado | {resultado.publicada}")

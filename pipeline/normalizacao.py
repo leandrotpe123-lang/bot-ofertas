@@ -109,6 +109,14 @@ class MensagemNormalizada:
     chaves_campanha:   List[str]    = field(default_factory=list)
     tem_host_campanha: bool         = False
     tem_sinal_cashback: bool        = False
+    # ── Identidades de DESTINO declaradas pelos adaptadores.
+    # Canal SEPARADO de chaves_campanha, e a separação é o ponto:
+    #   chaves_campanha     = marcador genérico inferido de host+caminho
+    #   destinos_declarados = identidade que a plataforma AFIRMA
+    # Cada cadeia é OPACA — a normalização transporta e nunca
+    # interpreta; a semântica pertence ao adaptador que a emitiu.
+    # Lista vazia para toda plataforma que não declara identidade.
+    destinos_declarados: List[str]  = field(default_factory=list)
     # Identidade de FALLBACK derivada — chave de URL usada quando o post
     # não tem oferta estruturada. Derivada da URL afiliada LONGA canônica
     # pela normalização; os consumidores apenas a leem, nunca a recalculam.
@@ -186,7 +194,8 @@ async def normalizar(
     cupons = remover_cupons_da_entidade(cupons, ids_globais)
 
     (tem_host_campanha, chave_campanha,
-     chaves_campanha, tem_sinal_cashback) = derivar_campanha(
+     chaves_campanha, tem_sinal_cashback,
+     destinos_declarados) = derivar_campanha(
         urls_longas, texto_limpo)
 
     ancora_url = derivar_ancora_url(urls_longas)
@@ -235,6 +244,7 @@ async def normalizar(
         chaves_campanha=chaves_campanha,
         tem_host_campanha=tem_host_campanha,
         tem_sinal_cashback=tem_sinal_cashback,
+        destinos_declarados=destinos_declarados,
         ancora_url=ancora_url,
         code_entities=bruta.code_entities,
         midia_key=getattr(bruta, "midia_key", ""),

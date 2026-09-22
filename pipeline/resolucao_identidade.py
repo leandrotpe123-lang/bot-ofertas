@@ -68,6 +68,22 @@ class Evidencias:
     produtos:        Tuple[Tuple[str, str, str], ...] = ()
     # o post tem produto identificado? (espelha ids_globais)
     tem_produto:     bool = False
+    # identidades de DESTINO NÃO-PRODUTO declaradas pelos adaptadores.
+    #
+    # DESTINO é aquilo que a oferta APONTA (uma lista, uma campanha).
+    # MECANISMO é como se resgata (um código, um link de resgate).
+    # Havendo destino DECLARADO, o destino identifica e o mecanismo
+    # é atributo; não havendo, o mecanismo identifica — exatamente
+    # como sempre foi.
+    #
+    # Cada cadeia é OPACA: o resolvedor não sabe de que plataforma
+    # veio, nem como foi construída, nem o que significa. Compara.
+    #
+    # NÃO é alimentado por ids_globais (o caminho do PRODUTO tem
+    # política própria — C3/R1×R2, ratificada, intocada aqui) nem
+    # por chaves_campanha (marcador genérico host+caminho). Misturar
+    # qualquer um dos dois foi medido e reprovado.
+    destinos_declarados: Tuple[str, ...] = ()
     # chaves de campanha derivadas dos hosts declarados pelos
     # adaptadores (registry.compor_capacidade)
     chaves_campanha: Tuple[str, ...] = ()
@@ -134,7 +150,23 @@ def resolver(ev: Evidencias) -> List[Entidade]:
     # benefício de loja; na dúvida, prevalece o produto (cupom vira
     # atributo). R2+ (emenda ratificada): 2+ códigos e nenhum preço de
     # item → a lista de códigos É a oferta; o produto é vitrine.
-    if ev.entidade_cupom:
+    #
+    # [FRENTE 7B] O ramo EXCLUSIVO do cupom vale enquanto não houver
+    # DESTINO DECLARADO. A regra é genérica e não cita plataforma:
+    #
+    #     DESTINO DECLARADO  >  MECANISMO
+    #
+    # Com destino declarado, o cupom é atributo e seguir adiante
+    # preserva a identidade do destino, em vez de deixá-la morta no
+    # `return saida`. Sem destino declarado — que é o caso de toda
+    # plataforma que não declara identidade — a condição é False e
+    # este ramo é LITERALMENTE o de sempre.
+    #
+    # ids_globais deliberadamente NÃO participa: o produto usado como
+    # veículo continua governado pelo gate C3/R1×R2, que já foi
+    # medido e ratificado. Esta frente resolve a lacuna dos destinos
+    # NÃO-PRODUTO, e só ela.
+    if ev.entidade_cupom and not ev.destinos_declarados:
         if ev.codigos:
             # COM código: o código É a identidade (elemento mais
             # estável disponível — INV-E3; troca de código na vida da
@@ -183,10 +215,25 @@ def resolver(ev: Evidencias) -> List[Entidade]:
     for plat_link, pid, _tipo in ev.produtos:
         _add("produto", f"{plat_link}|{pid}")
 
+    # [FRENTE 7B] DESTINO DECLARADO — identidade primária.
+    # Emitido ANTES do marcador genérico: é o sinal forte, o que
+    # distingue dois destinos que host+caminho não distinguiria.
+    # Lista vazia para quem não declara → nada é emitido → nenhuma
+    # plataforma existente muda.
+    for k in ev.destinos_declarados:
+        _add("campanha", f"{plat}|camp|{k}")
+
     for k in ev.chaves_campanha:
         _add("campanha", f"{plat}|camp|{k}")
 
-    if not ev.tem_produto:
+    # MECANISMO. Não ancora quando já existe DESTINO — nem produto
+    # (regra de sempre), nem destino declarado (7B).
+    #
+    # Sem a segunda condição o código voltaria a ancorar junto com a
+    # campanha e duas campanhas distintas que compartilham o MESMO
+    # código colidiriam por `cup|<codigo>` — recolando exatamente o
+    # que a identidade de destino acabou de separar.
+    if not ev.tem_produto and not ev.destinos_declarados:
         for cod in ev.codigos:
             _add("cupom", f"{plat}|cup|{cod.upper()}")
 

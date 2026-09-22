@@ -134,6 +134,11 @@ def _evidencias(norm: "MensagemNormalizada") -> Evidencias:
         tema_campanha   = tema_da_campanha(texto),
         produtos        = tuple(norm.idents),
         tem_produto     = bool(norm.ids_globais),
+        # Transporte puro: o snapshot já traz as identidades que os
+        # adaptadores declararam. Esta camada não deriva, não filtra
+        # e não interpreta — reúne, como faz com todo o resto.
+        destinos_declarados = tuple(
+            getattr(norm, "destinos_declarados", ()) or ()),
         chaves_campanha = tuple(norm.chaves_campanha),
         natureza_cash   = eh_post_cashback(texto, norm.tem_sinal_cashback),
         percentual      = _percentual(texto),

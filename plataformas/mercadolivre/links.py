@@ -295,6 +295,51 @@ def precisa_descobrir(url: str) -> bool:
 
 
 # ── Capacidade obrigatória: extração de identidade ────────────────
+# ── Identidade de DESTINO de uma listagem ─────────────────────────
+# O Mercado Livre distingue campanhas pela QUERY sobre o mesmo
+# caminho:
+#     /_Container_promotions-77-full?coupon_campaign_id=13657213
+#     /_Container_promotions-77-full?coupon_campaign_id=14194174
+#
+# São campanhas DIFERENTES no mesmo container. Nenhum mecanismo
+# genérico do núcleo expressa isso: a derivação host+caminho
+# descarta a query e devolveria a MESMA chave para as duas.
+#
+# Esta função é o único lugar do sistema que conhece o nome
+# `coupon_campaign_id`. Ela traduz o par (container, campanha) numa
+# cadeia OPACA, e é essa cadeia — não a query — que atravessa o
+# núcleo. O núcleo compara; não interpreta.
+#
+# Degradação explícita, jamais invenção:
+#     container + campanha  →  "<plat>:lista:<container>:<campanha>"
+#     container sem campanha→  "<plat>:lista:<container>"
+#     sem container         →  ""  (o chamador devolve None)
+_RE_CONTAINER = re.compile(r"/(_Container_[A-Za-z0-9_.-]+)", re.I)
+
+
+def _identidade_da_listagem(url: str) -> str:
+    try:
+        partes = urlparse(url)
+    except Exception:
+        return ""
+
+    achado = _RE_CONTAINER.search(partes.path or "")
+    container = achado.group(1) if achado else ""
+    if not container:
+        return ""
+
+    campanha = ""
+    try:
+        valores = parse_qs(partes.query).get("coupon_campaign_id") or []
+        campanha = (valores[0] or "").strip() if valores else ""
+    except Exception:
+        campanha = ""
+
+    if campanha:
+        return f"{IDENTIFICADOR}:lista:{container}:{campanha}"
+    return f"{IDENTIFICADOR}:lista:{container}"
+
+
 def extrai_identidade(url: str) -> IdentidadeProduto:
     """
     Extrai a identidade estruturada de uma URL do Mercado Livre.
@@ -330,8 +375,13 @@ def extrai_identidade(url: str) -> IdentidadeProduto:
         )
 
     if cenario == CENARIO_LISTAGEM:
+        # id_produto permanece AUSENTE e tipo_link permanece BUSCA:
+        # a lista NÃO vira produto. A identidade de destino viaja no
+        # campo próprio, opaco para o núcleo. Sem container extraível,
+        # `or None` devolve None — não se inventa identidade.
         return IdentidadeProduto(
             tipo_link=TipoLink.BUSCA, id_produto=AUSENTE,
+            id_campanha=_identidade_da_listagem(url) or None,
         )
 
     if cenario in (CENARIO_VITRINE, CENARIO_LISTA_AFILIADO):

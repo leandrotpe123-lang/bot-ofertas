@@ -111,11 +111,11 @@ _RE_BULLET_PREFIXO = re.compile(r'^\s*[-–—•·]\s*')
 # de conteúdo ("🔹 Item - R$ 110", faixa de preço) não é tocado.
 _RE_EMOJI_BULLET = re.compile(
     r'^([\U0001F300-\U0001FAFF\U00002600-\U000027BF'
-    r'\U0001F900-\U0001F9FF⭐⭕]️?)\s*[-–—•·]\s*' 
+    r'\U0001F900-\U0001F9FF\u2B50\u2B55]\uFE0F?)\s*[-–—•·]\s*' 
 )
 
 _RE_URL_RENDER = re.compile(
-    r'https?://[^\s\)\]>,"\'<​‌]+'
+    r'https?://[^\s\)\]>,"\'<\u200b\u200c]+'
 )
 
 # ─────────────────────────────────────────────────────────────────
@@ -355,3 +355,4 @@ def montar_texto(norm: MensagemNormalizada) -> str:
         saida.append(l)
 
     return "\n".join(saida).strip()
+

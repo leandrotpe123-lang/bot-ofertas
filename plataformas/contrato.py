@@ -75,11 +75,47 @@ class IdentidadeProduto:
                      vazia, ou AUSENTE quando não há produto único.
       - id_global  : opcional; chave de sistema (plataforma+produto),
                      presente apenas quando id_produto está presente.
+      - id_campanha: opcional; identidade OPACA de um DESTINO que não
+                     é produto (uma lista, uma campanha). Ver abaixo.
+
+    ─────────────────────────────────────────────────────────────
+    id_campanha — POR QUE UM CAMPO NOVO
+
+    Nada no contrato anterior conseguia carregar "identidade
+    declarada de um destino que NÃO é produto":
+
+      · `idents`/`ids_globais` não servem — a travessia
+        (normalizacao_identidade._identidade_de) descarta toda URL
+        cujo id_produto é AUSENTE. Forçar a entrada colocaria a
+        lista em ids_globais, e lista NÃO é produto.
+      · `TipoLink` não serve — é classificação de FORMA, não
+        identidade. Duas campanhas distintas têm o mesmo
+        TipoLink.CAMPANHA.
+      · `id_global` não serve — é chave de sistema do PRODUTO, e é
+        lida apenas pelo adaptador que a emite.
+      · `chave_campanha` (normalização) não serve — é o host
+        canônico, derivado de host+caminho, e é marcador genérico,
+        não identidade declarada.
+
+    CONTRATO DO CAMPO
+      · ADITIVO e RETROCOMPATÍVEL: default None. Plataforma que não
+        o define continua válida e não precisa implementar nada.
+      · OPACO: o núcleo NUNCA interpreta esta cadeia — apenas
+        compara igualdade. A semântica pertence ao adaptador.
+      · DECLARADO: preenchido somente quando a própria plataforma
+        sabe QUAL destino é. Jamais inferido de texto, host,
+        caminho, query genérica, score ou resposta de servidor.
+      · NÃO é produto: convive com id_produto=AUSENTE e nunca
+        alimenta ids_globais.
+
+    CONTRACT_VERSION permanece 1: a mudança é puramente aditiva com
+    default, logo nenhum adaptador existente se torna inválido.
     """
-    tipo_link:  TipoLink
-    id_produto: object                       # str | _Ausente
-    id_global:  Optional[str] = None
-    
+    tipo_link:   TipoLink
+    id_produto:  object                      # str | _Ausente
+    id_global:   Optional[str] = None
+    id_campanha: Optional[str] = None
+
 
 # ── Resultado da afiliação ────────────────────────────────────────
 @dataclass(frozen=True)
