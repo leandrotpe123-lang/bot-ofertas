@@ -14,6 +14,7 @@ FLUXO
       → cache            (antes de qualquer I/O)
       → expande          (só encurtador próprio, com o core)
       → descobre         (vitrine → produto ou lista, query intacta)
+      → /sec/ próprio    (substituição, sem rede)
       → classifica
       → elegibilidade    (portão anterior à rede)
       → sanitiza
@@ -142,6 +143,34 @@ async def afilia(url: str, sessao_http: aiohttp.ClientSession) -> object:
             f"🛒 ML descoberta | tipo={destino.tipo} | origem=social"
         )
         alvo = destino.url
+
+    # ── `/sec/` de terceiro: substituição pelo nosso ──────────────
+    # O `/sec/` alheio não converte — medido contra o gerador
+    # oficial e registrado em testes_ml/FORMATOS.md. E a sonda da
+    # Frente 7 mostrou que ele expande para
+    # `/social/<slug>/lists/<uuid>`, que também não é afiliável.
+    # Não há rota de conversão.
+    #
+    # Sem substituição o core descarta o BLOCO inteiro
+    # (`filtros_bloco`: "link DE PLATAFORMA que não converteu —
+    # sai"), e o cupom vai junto. Publicar o nosso `/sec/` preserva
+    # a oferta e credita a nós.
+    #
+    # IDENTIDADE: a `publicada` é CONSTANTE — é sempre o mesmo
+    # link. Se ela fosse também a canônica, todas as ofertas
+    # `/sec/` colapsariam numa identidade só e a deduplicação
+    # descartaria as seguintes como repetidas. Por isso a canônica
+    # é a URL RECEBIDA, que é distinta por oferta.
+    #
+    # Sem `ML_SEC_PROPRIO` configurado, nada muda: segue para a
+    # elegibilidade e termina em AUSENTE, como hoje.
+    if links.cenario_de(alvo) == links.CENARIO_SEC:
+        nosso = afiliado.sec_proprio()
+        if nosso:
+            afiliacao_sec = Afiliacao(publicada=nosso, canonica=url)
+            registrar_link(url, afiliacao_sec, afiliado.IDENTIFICADOR)
+            log_nrm.info("🛒 ML /sec/ de terceiro → /sec/ próprio")
+            return afiliacao_sec
 
     # ── Elegibilidade: portão anterior à rede ─────────────────────
     cenario = links.cenario_de(alvo)
