@@ -39,6 +39,41 @@ def configurado() -> bool:
     return bool(TAG)
 
 
+# ── Link curto próprio, para substituir `/sec/` de terceiro ───────
+# O `/sec/` de outro afiliado NÃO converte: medido pelo operador
+# contra o gerador oficial e registrado em testes_ml/FORMATOS.md.
+# Não adianta desencurtar nem limpar — o programa não gera.
+#
+# Sem substituição, o bloco inteiro da oferta é descartado pelo
+# core (`filtros_bloco._bloco_permanece`: "link DE PLATAFORMA que
+# não converteu — sai"), e o cupom some do post junto com ele.
+#
+# A substituição é por um `/sec/` NOSSO, constante. A identidade
+# fica a cargo de `afiliacao`, que devolve a URL recebida como
+# canônica — ver o comentário lá.
+SEC_PROPRIO = (os.environ.get("ML_SEC_PROPRIO") or "").strip()
+
+_RE_SEC_PROPRIO = re.compile(
+    r"^https?://(?:www\.)?mercadolivre\.com(?:\.br)?/sec/[A-Za-z0-9]+/?$",
+    re.I,
+)
+
+
+def sec_proprio() -> str:
+    """
+    O nosso `/sec/`, ou cadeia vazia quando não há um válido.
+
+    Valida a FORMA antes de devolver. Uma variável preenchida com
+    lixo publicaria lixo em toda oferta `/sec/` — e como a
+    substituição é constante, o estrago seria em série. Formato
+    inesperado equivale a não configurado: o fluxo degrada para
+    AUSENTE, que é o comportamento de hoje.
+    """
+    if SEC_PROPRIO and _RE_SEC_PROPRIO.match(SEC_PROPRIO):
+        return SEC_PROPRIO
+    return ""
+
+
 # ── Validação de atribuição ───────────────────────────────────────
 _RE_MATT_WORD = re.compile(r"[?&]matt_word=([^&#]+)", re.I)
 
