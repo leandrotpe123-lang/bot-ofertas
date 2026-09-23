@@ -23,6 +23,8 @@ simulado, como no resto da suíte):
   G  produto-veículo em post de cupom não ancora (C3 intacta)
   H  outras plataformas: nenhum destino, nenhum motivo novo
   I  decidir(): fatos ausentes ≡ comportamento anterior, em grade
+  J  replay de 23/09 15:00–15:11 com a lista recuperada do Samuel
+     (duas listas numa mensagem): UM post, que vira a lista
 
     python tests/test_familia_destino.py
 """
@@ -419,6 +421,62 @@ def test_I_decidir_fatos_ausentes_equivalem_ao_anterior(r):
                         if any(getattr(d, c) != getattr(base, c) for c in campos):
                             difs += 1
     r.check(difs == 0, "I.equivalencia_em_grade", f"{difs}/{total} divergem")
+
+
+def test_J_producao_23_09_lista_recuperada(r):
+    """Replay de 23/09, 15:00–15:11, com a lista do Samuel (117876) que o
+    Telegram não entregou e a completude da entrada recupera:
+
+      15:00 @promotom  DECORACAO2309 só com /sec/          → post
+      15:02 @samuel    117876 recuperada: DUAS listas —
+                       DECORACAO2309 | SUPERPETSHOP, CUIDADO20OFF
+      15:10 @promotom  SUPERPETSHOP só com /sec/
+      15:11 @promotom  edita e acrescenta CUIDADO20OFF
+
+    Esperado (regra do operador: a lista prevalece): UM post, que vira a
+    mensagem do Samuel com as duas listas; os /sec/ seguintes não
+    substituem e não abrem post novo."""
+    from pipeline.enriquecimento import enriquecer_edicao
+    decor, pet, cuid = "DECORACAO2309", "SUPERPETSHOP", "CUIDADO20OFF"
+    l_decor = lista("_Container_decoracao-2309", "13690001")
+    l_pet = lista("_Container_superpetshop", "13690002")
+    t_samuel = ("🔥 Cupom Mercado Livre\n\n"
+                f"🎟 10% OFF, Limite de R$ 20 OFF: {decor}\n"
+                "👉 Lista: https://meli.la/2isJwzH\n\n\n"
+                f"🎟 20% OFF, Limite de R$ 40 OFF: {pet}, {cuid}\n"
+                "👉 Lista: https://meli.la/25Bp1DL")
+    p_decor = msg(PROMOTOM, "🔥 Cupom Mercado Livre\n\n"
+                  f"🎟 10% OFF, Limite de R$ 20 OFF: {decor}\n\n📌 Resgate aqui: {SEC}",
+                  [SEC], [decor])
+    samuel = msg(SAMUEL, t_samuel, [l_decor, l_pet], [decor, pet, cuid])
+    p_pet = msg(PROMOTOM, "🔥 Cupom Mercado Livre\n\n"
+                f"🎟 20% OFF, Limite de R$ 40 OFF: {pet}\n\n📌 Resgate aqui: {SEC}",
+                [SEC], [pet])
+    p_pet_ed = msg(PROMOTOM, "🔥 Cupom Mercado Livre\n\n"
+                   f"🎟 20% OFF, Limite de R$ 40 OFF: {pet}, {cuid}\n\n📌 Resgate aqui: {SEC}",
+                   [SEC], [pet, cuid])
+    p_pet_ed = replace(p_pet_ed, msg_id=p_pet.msg_id)
+    saida = {}
+
+    async def corpo(c):
+        await publicar(p_decor)
+        enr_s, m_s = await publicar(samuel)
+        saida["destinos"], saida["texto_samuel"] = enr_s.destinos, m_s.texto
+        await publicar(p_pet)
+        enr_e = enriquecer_edicao(p_pet_ed)
+        await publicacao.enviar(await montar(p_pet_ed), p_pet_ed, enr=enr_e, is_edit=True)
+    cli = cenario(corpo)
+    r.check(len(saida["destinos"]) == 2, "J.lista_recuperada_declara_os_dois_destinos",
+            str(saida["destinos"]))
+    r.check(cli.novos == 1, "J.UM_post", f"novos={cli.novos}")
+    r.check("DESTINO_PREVALECE" in MOTIVOS, "J.lista_substitui_o_sec_do_promotom", str(MOTIVOS))
+    r.check("MECANISMO_NAO_SUBSTITUI_DESTINO" in MOTIVOS, "J.sec_seguinte_nao_substitui",
+            str(MOTIVOS))
+    r.check(cli.edits and cli.edits[-1][1] == saida["texto_samuel"]
+            and all(t == saida["texto_samuel"] for _, t in cli.edits),
+            "J.post_final_e_a_lista_do_samuel", f"edits={len(cli.edits)}")
+    r.check(len(n_posts([decor, pet, cuid])) == 1, "J.tres_codigos_numa_familia_so",
+            str(n_posts([decor, pet, cuid])))
 
 
 if __name__ == "__main__":

@@ -55,6 +55,7 @@ from logger import log_sys, log_hc
 
 from pipeline.orchestrator import processar, _iniciar_orchestrator
 from pipeline.identidade import precarregar_usernames
+from pipeline import completude
 
 import plataformas
 
@@ -149,6 +150,7 @@ def _registrar_handlers(fontes) -> None:
     @client.on(events.NewMessage(chats=fontes))
     async def on_new(event):
         try:
+            completude.observar(event.chat_id, event.message.id)
             await processar(event, is_edit=False)
         except Exception as e:
             log_sys.error(f"❌ on_new: {e}", exc_info=True)
@@ -156,6 +158,7 @@ def _registrar_handlers(fontes) -> None:
     @client.on(events.MessageEdited(chats=fontes))
     async def on_edit(event):
         try:
+            completude.observar(event.chat_id, event.message.id)
             await processar(event, is_edit=True)
         except Exception as e:
             log_sys.error(f"❌ on_edit: {e}", exc_info=True)
@@ -283,7 +286,10 @@ async def _preparar_processo() -> bool:
         from diagnostico.sonda_entrega import instalar as _instalar_sonda
         _instalar_sonda(client, fontes)
 
-    # 5. Handlers — UMA vez.
+    # 5. Handlers — UMA vez. A completude da entrada é ligada antes:
+    # os handlers a alimentam desde o primeiro update, e ela devolve ao
+    # MESMO ponto de entrada as mensagens que o Telegram não entregou.
+    completude.instalar(client, fontes, processar)
     _registrar_handlers(fontes)
 
     # 6. Tarefas de fundo — UMA instância de cada por processo.
