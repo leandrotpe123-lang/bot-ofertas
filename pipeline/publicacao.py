@@ -60,6 +60,10 @@ async def enviar(montada: MensagemMontada,
     """
     ofertas: list = enr.ofertas
     score:   int  = enr.score
+    # Destinos declarados do candidato — prontos do enriquecimento,
+    # consumidos pela família e pela decisão. Vazio = comportamento
+    # de antes.
+    destinos: tuple = tuple(getattr(enr, "destinos", ()) or ())
 
 # ── Camada 0: ORIGEM (Fase 1 do MB) — lock mais externo (I6) ──
     if norm is not None:
@@ -76,21 +80,26 @@ async def enviar(montada: MensagemMontada,
                         await stack.enter_async_context(
                             await exclusao.lock_identidade(of))
                     return await _enviar_inner(
-                        montada, norm, ofertas, score, is_edit, dest_fix)
+                        montada, norm, ofertas, score, is_edit, dest_fix,
+                        destinos=destinos)
             return await _enviar_inner(
-                montada, norm, ofertas, score, is_edit, dest_fix)
+                montada, norm, ofertas, score, is_edit, dest_fix,
+                destinos=destinos)
     if ofertas:
         async with contextlib.AsyncExitStack() as stack:
             for of in sorted(ofertas):
                 await stack.enter_async_context(await exclusao.lock_identidade(of))
-            return await _enviar_inner(montada, norm, ofertas, score, is_edit)
-    return await _enviar_inner(montada, norm, ofertas, score, is_edit)
+            return await _enviar_inner(montada, norm, ofertas, score, is_edit,
+                                       destinos=destinos)
+    return await _enviar_inner(montada, norm, ofertas, score, is_edit,
+                               destinos=destinos)
 async def _enviar_inner(montada: MensagemMontada,
                         norm: Optional[MensagemNormalizada],
                         ofertas: list,
                         score: int,
                         is_edit: bool = False,
-                        dest_fix=None) -> bool:
+                        dest_fix=None,
+                        *, destinos: tuple = ()) -> bool:
     """Corpo real de enviar() — dentro dos locks de oferta. Acha o post
     parente por sobreposição, trava o post candidato, re-verifica sob o
     lock e decide pelo score (decisão intocada)."""
@@ -99,7 +108,7 @@ async def _enviar_inner(montada: MensagemMontada,
     if norm is not None and (ofertas or dest_fix):
         # Alvo FIXADO pelo vínculo de Origem (I2): edit de origem
         # vinculada nunca re-casa por conteúdo em outro post.
-        msg_id_rel = familia.post_da_familia(ofertas, dest_fix)
+        msg_id_rel = familia.post_da_familia(ofertas, dest_fix, destinos)
         if msg_id_rel is not None:
             post_lock = await exclusao.lock_post(msg_id_rel)
             async with post_lock:
@@ -114,9 +123,16 @@ async def _enviar_inner(montada: MensagemMontada,
                 # reler _MIDIA_ACEITA entre as duas seria decidir com
                 # dois fatos diferentes.
                 chave_aceita = g.midia_aceita_get(msg_id_rel)
+                # FATOS DE FAMÍLIA, também lidos sob o lock e CONGELADOS
+                # pela mesma razão: as duas decisões do Portão A usam os
+                # mesmos fatos. Destino > mecanismo (decisao, DECISÃO 0).
+                destino_candidato = bool(destinos)
+                destino_post = familia.tem_destino(msg_id_rel)
                 d = decidir(norm, montada, score, estado, agora, is_edit,
                             midia_key_aceita=chave_aceita,
-                            midia_candidata=norm.tem_midia)
+                            midia_candidata=norm.tem_midia,
+                            destino_candidato=destino_candidato,
+                            destino_post=destino_post)
 
                 # ══ [E5.0] PORTÃO A — MATERIALIZAÇÃO SOB DEMANDA ══
                 # Só quando a política AUTORIZOU tocar a imagem
@@ -139,7 +155,9 @@ async def _enviar_inner(montada: MensagemMontada,
                         d = decidir(norm, montada, score, estado, agora,
                                     is_edit,
                                     midia_key_aceita=chave_aceita,
-                                    midia_candidata=False)
+                                    midia_candidata=False,
+                                    destino_candidato=destino_candidato,
+                                    destino_post=destino_post)
 
                 if d.acao != "PUBLICAR":
                     if norm is not None:

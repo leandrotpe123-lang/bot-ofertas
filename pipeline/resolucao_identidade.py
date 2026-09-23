@@ -46,6 +46,29 @@ from typing import List, Tuple
 
 
 # ─────────────────────────────────────────────────────────────────
+# GRAMÁTICA DA ESPÉCIE "DESTINO"
+#
+# Este módulo é quem EMITE as chaves; é também o único que as
+# reconhece. Quem precisa saber se uma chave gravada é de destino
+# declarado (a família) pergunta aqui — nunca interpreta a cadeia.
+# O sufixo continua OPACO: vem do adaptador e ninguém o lê.
+# ─────────────────────────────────────────────────────────────────
+PAPEL_DESTINO = "destino"
+_SEGMENTO_DESTINO = "dest"
+
+
+def chave_destino(plat: str, opaca: str) -> str:
+    """Chave de um destino declarado: `<plat>|dest|<opaca>`."""
+    return f"{plat}|{_SEGMENTO_DESTINO}|{opaca}"
+
+
+def eh_chave_destino(chave: str) -> bool:
+    """Verdadeiro se `chave` foi emitida como destino declarado."""
+    partes = (chave or "").split("|", 2)
+    return len(partes) == 3 and partes[1] == _SEGMENTO_DESTINO and bool(partes[2])
+
+
+# ─────────────────────────────────────────────────────────────────
 # CONTRATO DE ENTRADA — evidências já derivadas
 # ─────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
@@ -212,27 +235,47 @@ def resolver(ev: Evidencias) -> List[Entidade]:
             _add("cupom-beneficio", f"{plat}|cupb|{ev.tema_campanha}")
         return saida
 
-    for plat_link, pid, _tipo in ev.produtos:
-        _add("produto", f"{plat_link}|{pid}")
+    # C3 — quando o CUPOM é o assunto, o produto no link é VEÍCULO e não
+    # ancora. Até aqui só se chega com entidade_cupom se houver DESTINO
+    # DECLARADO (o ramo exclusivo acima retorna nos demais casos); o
+    # produto-veículo continua não ancorando também nesse caso. Medido
+    # em produção (id=17417): o link de resgate virou MLB8923631 e
+    # ancorava um post de cupom.
+    if not ev.entidade_cupom:
+        for plat_link, pid, _tipo in ev.produtos:
+            _add("produto", f"{plat_link}|{pid}")
 
-    # [FRENTE 7B] DESTINO DECLARADO — identidade primária.
-    # Emitido ANTES do marcador genérico: é o sinal forte, o que
-    # distingue dois destinos que host+caminho não distinguiria.
-    # Lista vazia para quem não declara → nada é emitido → nenhuma
-    # plataforma existente muda.
+    # DESTINO DECLARADO — identidade primária, espécie própria.
+    # Chave em gramática própria (`|dest|`), separada do marcador
+    # genérico `|camp|`: os dois conceitos não se misturam nem na chave.
+    # É o que permite à família reconhecer, só pela chave gravada, que
+    # um post já tem destino (ver `eh_chave_destino`).
     for k in ev.destinos_declarados:
-        _add("campanha", f"{plat}|camp|{k}")
+        _add(PAPEL_DESTINO, chave_destino(plat, k))
 
     for k in ev.chaves_campanha:
         _add("campanha", f"{plat}|camp|{k}")
 
-    # MECANISMO. Não ancora quando já existe DESTINO — nem produto
-    # (regra de sempre), nem destino declarado (7B).
+    # CHAVES DE ENCONTRO — post de cupom COM destino declarado.
     #
-    # Sem a segunda condição o código voltaria a ancorar junto com a
-    # campanha e duas campanhas distintas que compartilham o MESMO
-    # código colidiriam por `cup|<codigo>` — recolando exatamente o
-    # que a identidade de destino acabou de separar.
+    # A mesma campanha de cupom chega por dois caminhos: com o destino
+    # (a lista) ou só com o mecanismo (`/sec/`, sem lista). O post só
+    # com mecanismo ancora nos códigos; se o post com destino não
+    # expuser os mesmos códigos, os dois nunca se encontram — medido em
+    # produção (posts 23238 e 23239, MODA2309 + LOJASOFICIAIS).
+    #
+    # Então o post com destino TAMBÉM carrega os códigos. O que impede
+    # duas listas diferentes com o mesmo código de colapsar NÃO é
+    # esconder o código: é a regra da FAMÍLIA (familia.post_da_familia),
+    # que não deixa um destino entrar numa família de OUTRO destino.
+    # E a precedência DESTINO > MECANISMO dentro da família é da
+    # decisão (decisao.decidir), não do score.
+    if ev.entidade_cupom and ev.destinos_declarados:
+        for cod in ev.codigos:
+            _add("cupom", f"{plat}|cup|{cod.upper()}")
+
+    # MECANISMO. Não ancora quando já existe DESTINO — produto (regra
+    # de sempre) ou destino declarado (tratado acima).
     if not ev.tem_produto and not ev.destinos_declarados:
         for cod in ev.codigos:
             _add("cupom", f"{plat}|cup|{cod.upper()}")

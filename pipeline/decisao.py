@@ -103,7 +103,9 @@ class Decisao:
 def decidir(norm, montada, score: int, estado: dict | None,
             agora: float, is_edit: bool = False,
             *, midia_key_aceita: str = "",
-            midia_candidata: bool | None = None) -> Decisao:
+            midia_candidata: bool | None = None,
+            destino_candidato: bool | None = None,
+            destino_post: bool | None = None) -> Decisao:
     """Decide a ação para um candidato: PUBLICAR (sem estado vivo),
     EVOLUIR ou IGNORAR (com estado). Não executa nada.
 
@@ -120,7 +122,11 @@ def decidir(norm, montada, score: int, estado: dict | None,
 
     A E5.0 muda QUANDO os bytes existem, nunca a REGRA: a autoridade de
     mídia continua sendo `politica_midia`, que recebe o mesmo fato de
-    veracidade que sempre recebeu."""
+    veracidade que sempre recebeu.
+
+    `destino_candidato` / `destino_post` são FATOS de família: o
+    candidato declara destino? a família do post já tem destino? Mesmo
+    idioma: keyword-only, e `None` preserva o comportamento anterior."""
     if not estado:
         return Decisao(PUBLICAR, "SEM_ESTADO")
 
@@ -237,6 +243,33 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # EVOLUCAO_LIMITE_ATINGIDO passam por _com_midia() e podem sair com
     # trocar_midia=True.
     tem_orcamento = edit_count < _MAX_EDITS
+
+    # ── DECISÃO 0: DESTINO > MECANISMO ─────────────────────────────
+    # Semântica, não pontuação. Na mesma família, a versão que DECLARA
+    # destino (a lista) prevalece sobre a que só traz o mecanismo
+    # (`/sec/`, código solto) — nas duas ordens de chegada:
+    #   · o destino chega depois  → EVOLUI, mesmo com score menor;
+    #   · o mecanismo chega depois → não substitui, mesmo com score maior.
+    # O score não é tocado. Entre dois candidatos do mesmo lado (dois
+    # com destino, ou dois sem), segue valendo a regra de score abaixo.
+    #
+    # Fatos entregues pelo orquestrador; `None` em qualquer um deles
+    # preserva byte a byte o comportamento anterior (mesmo idioma de
+    # `midia_candidata`).
+    if destino_candidato is not None and destino_post is not None:
+        if destino_candidato and not destino_post:
+            if not tem_orcamento:
+                return _com_midia(Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
+                                          na_janela=na_janela,
+                                          score_atual=score_atual))
+            return _com_midia(Decisao(
+                EVOLUIR, "DESTINO_PREVALECE", novo_score=score,
+                exigir_imagem=fato_midia, permite_substituir=True,
+                na_janela=na_janela, score_atual=score_atual))
+        if destino_post and not destino_candidato:
+            return _com_midia(Decisao(IGNORAR, "MECANISMO_NAO_SUBSTITUI_DESTINO",
+                                      na_janela=na_janela,
+                                      score_atual=score_atual))
 
     # ── DECISÃO 1: score MAIOR → evolui (edita; fallback substitui) ──
     if score_cmp > score_atual:

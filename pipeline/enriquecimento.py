@@ -31,6 +31,7 @@ from dataclasses import dataclass, replace
 
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.identidade_oferta import identidade_canonica, ancoras, Ancora
+from pipeline.resolucao_identidade import PAPEL_DESTINO
 from pipeline.natureza import natureza
 from pipeline.score import calcular_score
 from pipeline.memoria_cupom import registrar_uso, registrar_se_inedito
@@ -56,6 +57,11 @@ class MensagemEnriquecida:
     score:    int
     ancoras:  tuple[Ancora, ...] = ()
     cupons_novos: int = 0
+    # Chaves dos DESTINOS DECLARADOS desta mensagem (espécie "destino"),
+    # projeção de `ancoras`. Consumido pela família (um destino não entra
+    # na família de OUTRO destino) e pela decisão (destino prevalece
+    # sobre mecanismo). Vazio para toda mensagem sem destino declarado.
+    destinos: tuple[str, ...] = ()
 
 def derivar(norm: MensagemNormalizada) -> MensagemEnriquecida:
     """DERIVAÇÃO PURA — determinística, sem I/O e sem mutação.
@@ -72,7 +78,8 @@ def derivar(norm: MensagemNormalizada) -> MensagemEnriquecida:
         ofertas=[a.chave for a in ancs],          # projeção de ancoras()
         score=calcular_score(norm),
         ancoras=tuple(ancs),
-        cupons_novos=0)
+        cupons_novos=0,
+        destinos=tuple(a.chave for a in ancs if a.especie == PAPEL_DESTINO))
     return enr
 
 

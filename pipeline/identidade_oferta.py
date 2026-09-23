@@ -114,7 +114,7 @@ def identidade_canonica(norm: "MensagemNormalizada") -> str:
 class Ancora:
     """Âncora tipada de família (MB v1.1, P6). `chave` é byte-idêntica à
     string historicamente emitida por identidades() — que agora é VISTA."""
-    especie: str   # "produto" | "cupom" | "campanha" | "cashback" | "fallback"
+    especie: str   # "produto" | "destino" | "cupom" | "campanha" | "cashback" | "fallback"
     chave: str
 
 
