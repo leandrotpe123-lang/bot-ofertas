@@ -49,4 +49,13 @@ def _log_decisao(d, montada, norm, estado: dict, score: int,
         log_out.info(
             f"🔁 [SCORE_NAO_EVOLUI] {identity} "
             f"atual={score} salvo={d.score_atual} chat={norm.chat}")
+    elif d.motivo == "DESTINO_PREVALECE":
+        log_out.info(
+            f"🎯 [DESTINO_PREVALECE] {identity} destino substitui mecanismo "
+            f"score {d.score_atual}→{score} chat={norm.chat}")
+    elif d.motivo == "MECANISMO_NAO_SUBSTITUI_DESTINO":
+        log_out.info(
+            f"🎯 [MECANISMO_NAO_SUBSTITUI_DESTINO] {identity} "
+            f"post já tem destino — mecanismo não substitui "
+            f"(score {score} x salvo {d.score_atual}) chat={norm.chat}")
 
