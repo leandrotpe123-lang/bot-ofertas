@@ -33,6 +33,7 @@ Mudanças v80.2 (em relação a v80.0):
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 
 from telethon import events
@@ -273,6 +274,14 @@ async def _preparar_processo() -> bool:
     if not fontes:
         log_sys.error("❌ Nenhuma fonte de origem resolvida — encerrando.")
         return False
+
+    # [S6.1] Sonda de ENTREGA — diagnóstico temporário, DESLIGADO por
+    # padrão. Sem SONDA_ENTREGA=1 o módulo nem é importado. Registrada
+    # ANTES dos handlers da casa para carimbar a chegada antes de
+    # qualquer processamento. Reverter: apagar este bloco e diagnostico/.
+    if os.environ.get("SONDA_ENTREGA") == "1":
+        from diagnostico.sonda_entrega import instalar as _instalar_sonda
+        _instalar_sonda(client, fontes)
 
     # 5. Handlers — UMA vez.
     _registrar_handlers(fontes)
