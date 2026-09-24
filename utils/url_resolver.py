@@ -91,7 +91,7 @@ def _res_entrada(depth: int) -> None:
 # não respondem corretamente a HEAD e exigem GET direto na resolução
 # de redirecionamento.
 _FORCA_GET_GENERICOS = frozenset({
-    "cutt.ly", "link.prmcz.com", 'click.linksynergy.com", "ofertou.ai", "tidd.ly",
+    "cutt.ly", "link.prmcz.com", "click.linksynergy.com", "ofertou.ai", "tidd.ly",
 })
 
 def _compor_forca_get() -> frozenset[str]:
