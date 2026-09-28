@@ -42,6 +42,7 @@ from telethon.errors import AuthKeyUnregisteredError, SessionPasswordNeededError
 import globals as g
 
 from client import client
+import ack_imediato
 
 import config
 from config import (
@@ -285,6 +286,12 @@ async def _preparar_processo() -> bool:
     if os.environ.get("SONDA_ENTREGA") == "1":
         from diagnostico.sonda_entrega import instalar as _instalar_sonda
         _instalar_sonda(client, fontes)
+
+    # [S6.4] ACK imediato — transporte. ANTES dos handlers da casa: o
+    # _dispatch_update aguarda os callbacks em sequência e este só agenda
+    # (nunca espera o pipeline). Pré-condição falhando => não instala,
+    # loga o motivo e o Telethon segue nativo. Ver ack_imediato.py.
+    ack_imediato.instalar(client)
 
     # 5. Handlers — UMA vez. A completude da entrada é ligada antes:
     # os handlers a alimentam desde o primeiro update, e ela devolve ao
