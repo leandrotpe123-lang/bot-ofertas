@@ -43,6 +43,7 @@ import globals as g
 
 from client import client
 import ack_imediato
+import heartbeat_sessao
 
 import config
 from config import (
@@ -212,6 +213,12 @@ async def _encerrar() -> None:
     if t is not None and not t.done():
         t.cancel()
 
+    # [S6.8-A] heartbeat — cancela e aguarda: sem task órfã, sem traceback.
+    t = _TASKS_FUNDO.get("heartbeat")
+    if t is not None and not t.done():
+        t.cancel()
+        await asyncio.gather(t, return_exceptions=True)
+
     # 4. HTTP
     try:
         if g._http_session is not None and not g._http_session.closed:
@@ -292,6 +299,10 @@ async def _preparar_processo() -> bool:
     # (nunca espera o pipeline). Pré-condição falhando => não instala,
     # loga o motivo e o Telethon segue nativo. Ver ack_imediato.py.
     ack_imediato.instalar(client)
+
+    # [S6.8-A] Heartbeat de sessão — PING público adicional, desligado
+    # sem HEARTBEAT_PING_S. Não bloqueia o boot; cancelado em _encerrar.
+    _TASKS_FUNDO["heartbeat"] = heartbeat_sessao.iniciar(client)
 
     # 5. Handlers — UMA vez. A completude da entrada é ligada antes:
     # os handlers a alimentam desde o primeiro update, e ela devolve ao
