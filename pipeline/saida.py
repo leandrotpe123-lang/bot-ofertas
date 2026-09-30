@@ -36,6 +36,7 @@ CONTRATO DE AQUISIÇÃO — uma operação de saída, UMA aquisição:
       editar_msg
       editar_por_id               (herdada; mesma família de editar_msg)
       _substituir_post_com_midia
+      apagar_post                 ([Frente 8] remoção do post fundido)
 
   INTERNAS (NÃO adquirem; uso EXCLUSIVO de dentro de uma pública):
       _enviar_msg_no_sem
@@ -335,3 +336,20 @@ async def _substituir_post_com_midia(
     move a fronteira do limitador de I/O."""
     async with config._SEM_ENVIO:
         return await _substituir_inner_no_sem(msg_id_dest_antigo, montada)
+
+
+# ─────────────────────────────────────────────────────────────────
+# [Frente 8] Remoção física do post FUNDIDO.
+#
+# Pública: UMA aquisição do _SEM_ENVIO por remoção. Não decide nada e
+# não persiste nada — quem fundiu (pipeline.convergencia) é quem chama,
+# SEMPRE depois do commit da fusão e fora de qualquer lock de domínio.
+# Erros (FloodWait inclusive) SOBEM para o chamador, que é o dono da
+# política de nova tentativa.
+# ─────────────────────────────────────────────────────────────────
+async def apagar_post(msg_id_dest: int) -> bool:
+    """Apaga a mensagem do destino. True quando o Telegram aceitou."""
+    from client import client
+    async with config._SEM_ENVIO:
+        await client.delete_messages(GRUPO_DESTINO, msg_id_dest)
+    return True

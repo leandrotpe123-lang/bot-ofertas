@@ -24,6 +24,16 @@ INVARIANTE: nenhum caminho daqui altera a mídia publicada contra a
 política. Vale para os TRÊS caminhos: edição, fallback de substituição
 (governado por d.permite_substituir, já rebaixado pela política em
 decidir()) e sincronização.
+
+[Frente 8] COMPOSIÇÃO EXIBIDA + GATILHO DE CONVERGÊNCIA
+-------------------------------------------------------
+Os caminhos que mudam o CONTEÚDO do post (novo envio, evolução,
+substituição, sincronização) gravam `exibidas` — as âncoras da mensagem
+cujo texto passou a estar no ar — e, só DEPOIS da persistência
+bem-sucedida, chamam `pos_escrita(msg_id_efetivo)`. O msg_id efetivo é
+o NOVO quando houve substituição. O upgrade de mídia não muda conteúdo:
+não grava composição e não chama `pos_escrita`. Este módulo continua
+sem decidir nada: quem decide a fusão é pipeline.convergencia.
 """
 from __future__ import annotations
 
@@ -53,7 +63,8 @@ from pipeline.vida_oferta import estampar
 from pipeline.publicacao_estado import _marcar
 
 async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
-                            edit_count, ofertas_familia, identity) -> bool:
+                            edit_count, ofertas_familia, identity,
+                            *, exibidas=None, pos_escrita=None) -> bool:
     """Executa a EVOLUÇÃO de um post existente: edita no lugar ou, em
     fallback autorizado, substitui com mídia. Persiste o novo estado com
     a união da família. Sem decisão — o caminho já foi decidido a montante.
@@ -82,7 +93,9 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             montada.plat, norm.chat,
             estado.get("janela_fim", 0), edit_count + 1,
             midia_chat=(norm.chat if d.trocar_midia else None),
-            score_versao=V_CONTEUDO)
+            score_versao=V_CONTEUDO, exibidas=exibidas)
+        if pos_escrita is not None:
+            pos_escrita(msg_id_dest)
         # [E4.0] Só APÓS a I/O e só com prova: midia_aplicada. Um
         # `res.ok` que caiu em texto-only NÃO registra nada, então a
         # mesma mídia continua elegível na próxima chegada.
@@ -126,7 +139,9 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             chat_origem=norm.chat if norm else "",
             msg_id_origem=montada.msg_id,
             midia_chat=(norm.chat if montada.imagem else ""),
-            score_versao=V_CONTEUDO)
+            score_versao=V_CONTEUDO, exibidas=exibidas)
+        if pos_escrita is not None:
+            pos_escrita(sent.id)            # o msg_id NOVO, nunca o antigo
         log_out.info(
             f"✅ [SUBSTITUIDO_OK] {identity} "
             f"novo_id={sent.id} score={d.novo_score}")
@@ -136,7 +151,8 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
 
 
 async def _aplicar_sincronizacao(montada, norm, score, estado, msg_id_dest,
-                                 ofertas_familia, identity, d) -> bool:
+                                 ofertas_familia, identity, d,
+                                 *, exibidas=None, pos_escrita=None) -> bool:
     """Executa a SINCRONIZAÇÃO: espelha no post o conteúdo editado pelo
     LÍDER. Distinta da evolução — NÃO incrementa edit_count, não disputa
     score. Preserva líder, janela e contador; atualiza texto/score e a
@@ -170,7 +186,9 @@ async def _aplicar_sincronizacao(montada, norm, score, estado, msg_id_dest,
         montada.plat, estado.get("lider", "") or norm.chat,
         estado.get("janela_fim", 0), estado.get("edit_count", 0),
         midia_chat=(norm.chat if d.trocar_midia else None),
-        score_versao=V_CONTEUDO)
+        score_versao=V_CONTEUDO, exibidas=exibidas)
+    if pos_escrita is not None:
+        pos_escrita(msg_id_dest)
     log_out.info(
         f"🔁 [SINCRONIZADO] {identity} chat={norm.chat} score={score} "
         f"edit_count={estado.get('edit_count', 0)} (preservado)"
@@ -232,7 +250,8 @@ async def _aplicar_upgrade_midia(montada, norm, d, estado, msg_id_dest,
 
 
 async def _aplicar_novo_envio(montada, norm, ofertas, score,
-                              identity) -> bool:
+                              identity, *, exibidas=None, superar=None,
+                              pos_escrita=None) -> bool:
     """Executa a PUBLICAÇÃO de um post novo: envia com retry, registra a
     janela e dispara os efeitos colaterais (idempotência, saturação,
     burst). Sem decisão — chamado quando não há post parente vivo."""
@@ -274,7 +293,11 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
                 chat_origem=norm.chat if norm else "",
                 msg_id_origem=montada.msg_id,
                 midia_chat=((norm.chat if norm else "") if img else ""),
-                score_versao=V_CONTEUDO)
+                score_versao=V_CONTEUDO,
+                exibidas=(ofertas if exibidas is None else exibidas),
+                superar=superar)
+            if pos_escrita is not None:
+                pos_escrita(sent.id)
             # [E4.0] `img` diz o que TENTAMOS enviar; chave_midia(sent)
             # diz o que o Telegram REALMENTE publicou. _enviar_msg_no_sem
             # tem fallback que devolve um send_message puro — nesse caso

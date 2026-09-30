@@ -7,7 +7,7 @@
 #
 # Este arquivo é FACHADA: sem lógica, sem SQL, sem estado.
 #
-# Reexporta as 20 FUNÇÕES. _db_conn e _db_lock NÃO são reexportados:
+# Reexporta as 27 FUNÇÕES. _db_conn e _db_lock NÃO são reexportados:
 # nenhum consumidor os acessa, e reexportá-los seria bug — o import
 # liga por VALOR e capturaria o None anterior a _init_db().
 from __future__ import annotations
@@ -25,11 +25,18 @@ from database_links import (
 from database_manutencao import _db_count_links, db_limpar
 from database_posts import (
     db_absorver_ofertas,
+    db_composicoes,
+    db_exibida,
+    db_fundir_posts,
     db_get_post,
     db_ofertas_de_post,
     db_origem_get,
     db_origem_set,
     db_overlap_posts,
+    db_registrar_conflito,
     db_registrar_post,
+    db_remocoes_pendentes,
     db_remover_post,
+    db_set_delete_status,
+    db_vizinhos,
 )

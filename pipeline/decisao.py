@@ -105,7 +105,8 @@ def decidir(norm, montada, score: int, estado: dict | None,
             *, midia_key_aceita: str = "",
             midia_candidata: bool | None = None,
             destino_candidato: bool | None = None,
-            destino_post: bool | None = None) -> Decisao:
+            destino_post: bool | None = None,
+            composicao: str | None = None) -> Decisao:
     """Decide a ação para um candidato: PUBLICAR (sem estado vivo),
     EVOLUIR ou IGNORAR (com estado). Não executa nada.
 
@@ -126,7 +127,12 @@ def decidir(norm, montada, score: int, estado: dict | None,
 
     `destino_candidato` / `destino_post` são FATOS de família: o
     candidato declara destino? a família do post já tem destino? Mesmo
-    idioma: keyword-only, e `None` preserva o comportamento anterior."""
+    idioma: keyword-only, e `None` preserva o comportamento anterior.
+
+    [Frente 8b] `composicao` é o FATO estrutural entregue pelo
+    orquestrador: a composição forte do candidato em relação ao que o
+    post EXIBE (familia.relacao_composicao) — IGUAL | AMPLIA | REDUZ |
+    PARCIAL. `None` preserva byte a byte o comportamento anterior."""
     if not estado:
         return Decisao(PUBLICAR, "SEM_ESTADO")
 
@@ -256,8 +262,19 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # Fatos entregues pelo orquestrador; `None` em qualquer um deles
     # preserva byte a byte o comportamento anterior (mesmo idioma de
     # `midia_candidata`).
+    #
+    # [Frente 8b] Outra fonte NUNCA faz produto/cupom/destino exibido
+    # sumir: um candidato que REDUZ ou é PARCIAL em relação ao que o
+    # post exibe não pode substituir o texto — nem por destino, nem por
+    # score. (A edição do LÍDER já saiu acima, em SINCRONIZAR: a fonte
+    # retirar o próprio produto é legítimo e não passa por aqui.)
+    perde_identidade = composicao in ("REDUZ", "PARCIAL")
     if destino_candidato is not None and destino_post is not None:
         if destino_candidato and not destino_post:
+            if perde_identidade:
+                return _com_midia(Decisao(IGNORAR, "COMPOSICAO_PERDERIA_IDENTIDADE",
+                                          na_janela=na_janela,
+                                          score_atual=score_atual))
             if not tem_orcamento:
                 return _com_midia(Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
                                           na_janela=na_janela,
@@ -270,6 +287,34 @@ def decidir(norm, montada, score: int, estado: dict | None,
             return _com_midia(Decisao(IGNORAR, "MECANISMO_NAO_SUBSTITUI_DESTINO",
                                       na_janela=na_janela,
                                       score_atual=score_atual))
+
+    # ── DECISÃO 0b: COMPOSIÇÃO ─────────────────────────────────────
+    # [Frente 8b] Score é autoridade de TEXTO entre conteúdos que
+    # representam a MESMA composição — e só entre eles.
+    #   · AMPLIA: o candidato continua exibindo toda a ESTRUTURA do
+    #     post e traz estrutura nova real (lista/container, código novo
+    #     junto dos antigos; em lista o código é atributo, 7B). A oferta cresce mesmo com score menor: descartar
+    #     o candidato jogaria produtos reais para a memória. O score
+    #     gravado é o do texto que vai ao ar (post_estado.score descreve
+    #     o texto publicado). Teto de edições respeitado.
+    #   · REDUZ / PARCIAL: substituir apagaria identidade exibida → não
+    #     evolui, qualquer que seja o score.
+    #   · IGUAL / None: regras de score abaixo, intocadas (F5).
+    # F5 continua valendo: o que ela barrou — texto de score menor que
+    # vencia só por trazer um código novo SEM conter o post — é PARCIAL
+    # aqui e não vence. O que muda é só o caso AMPLIA (cobre e cresce).
+    if composicao == "AMPLIA":
+        if not tem_orcamento:
+            return _com_midia(Decisao(IGNORAR, "EVOLUCAO_LIMITE_ATINGIDO",
+                                      na_janela=na_janela,
+                                      score_atual=score_atual))
+        return _com_midia(Decisao(
+            EVOLUIR, "COMPOSICAO_AMPLIADA", novo_score=score,
+            exigir_imagem=fato_midia, permite_substituir=True,
+            na_janela=na_janela, score_atual=score_atual))
+    if perde_identidade:
+        return _com_midia(Decisao(IGNORAR, "COMPOSICAO_PERDERIA_IDENTIDADE",
+                                  na_janela=na_janela, score_atual=score_atual))
 
     # ── DECISÃO 1: score MAIOR → evolui (edita; fallback substitui) ──
     if score_cmp > score_atual:

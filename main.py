@@ -58,6 +58,7 @@ from logger import log_sys, log_hc
 from pipeline.orchestrator import processar, _iniciar_orchestrator
 from pipeline.identidade import precarregar_usernames
 from pipeline import completude
+from pipeline import convergencia
 
 import plataformas
 
@@ -303,6 +304,14 @@ async def _preparar_processo() -> bool:
     # [S6.8-A] Heartbeat de sessão — PING público adicional, desligado
     # sem HEARTBEAT_PING_S. Não bloqueia o boot; cancelado em _encerrar.
     _TASKS_FUNDO["heartbeat"] = heartbeat_sessao.iniciar(client)
+
+    # [Frente 8] Remoções de posts FUNDIDOS que ficaram pendentes antes
+    # do restart: UMA consulta local, agora, sem varredura periódica.
+    # Só agenda tasks (não bloqueia o boot).
+    try:
+        convergencia.retomar_remocoes()
+    except Exception as e:
+        log_sys.error(f"❌ retomar_remocoes: {e}")
 
     # 5. Handlers — UMA vez. A completude da entrada é ligada antes:
     # os handlers a alimentam desde o primeiro update, e ela devolve ao

@@ -40,6 +40,9 @@ async def _foi_processado(msg_id: int) -> bool:
         return msg_id in g._IDS_PROC
 
 
+_MAX_SALTOS_FUSAO = 3
+
+
 def destino_vivo_de_origem(chat: str, msg_id: int):
     """Ponte Origem→Oferta: consulta o vínculo (infra pura, I7) e valida
     aqui a VIDA do post apontado (autoridade: vida_oferta). Devolve o
@@ -50,8 +53,19 @@ def destino_vivo_de_origem(chat: str, msg_id: int):
     dest = origem.consultar(chat, msg_id)
     if not dest:
         return None
-    estado = db_get_post(dest)
-    if estado and viva(estado.get("janela_fim") or 0.0, time.time()):
-        return dest
+    # [Frente 8] Post FUNDIDO não é destino: segue fused_into até o
+    # sobrevivente (cadeia curta e limitada). A fusão já redireciona as
+    # origens no banco; seguir aqui cobre qualquer vínculo gravado antes.
+    for _ in range(_MAX_SALTOS_FUSAO + 1):
+        estado = db_get_post(dest)
+        if not estado:
+            return None
+        if estado.get("fused_into"):
+            dest = estado["fused_into"]
+            continue
+        if viva(estado.get("janela_fim") or 0.0, time.time()):
+            return dest
+        return None
     return None
+
 

@@ -19,16 +19,22 @@ Contrato público:
   unir(msg_id_dest, ofertas)           -> list[str]
   absorver(msg_id_dest, ofertas)       -> int
   compartilhadas(msg_id_dest, ofertas) -> list[str]
+  fortes(chaves) / estrutura(chaves)   -> frozenset[str]
+  relacao_composicao(candidato, alvo)  -> IGUAL|AMPLIA|REDUZ|PARCIAL|None
+  plano_fusao(escrito, comp, scores)   -> Plano(fusoes, conflitos)
 """
 from __future__ import annotations
+
+from dataclasses import dataclass, field
 
 from database import (db_absorver_ofertas, db_get_post,
                       db_ofertas_de_post, db_overlap_posts)
 from logger import log_out
-from pipeline.resolucao_identidade import eh_chave_destino
+from pipeline.resolucao_identidade import eh_chave_destino, eh_chave_forte
 
 __all__ = ["post_da_familia", "unir", "absorver", "compartilhadas",
-           "tem_destino"]
+           "tem_destino", "fortes", "estrutura", "relacao_composicao",
+           "plano_fusao", "Plano"]
 
 
 def _escolher_post(candidatos: list) -> int:
@@ -141,3 +147,154 @@ def post_da_familia(ofertas: list, dest_fix=None, destinos: tuple = ()):
     msg_id_rel = _escolher_post(candidatos)
     log_out.info(f"🔎 [OVERLAP_MATCH] post:{msg_id_rel} casou por ofertas_compartilhadas={compartilhadas(msg_id_rel, ofertas)} | candidato={sorted(ofertas)} | candidatos={[c[0] for c in candidatos]} fix={dest_fix or '-'} post_ofertas={db_ofertas_de_post(msg_id_rel)}")
     return msg_id_rel
+
+
+# ─────────────────────────────────────────────────────────────────
+# [Frente 8] CONSOLIDAÇÃO ESTRUTURAL — regra PURA (sem banco, sem relógio)
+#
+# Quem decide se uma escrita cria duplicidade é pipeline.convergencia;
+# as regras que ela aplica moram aqui, puras e testáveis.
+#
+# VOCABULÁRIO
+#   fortes(post)     âncoras FORTES que o post EXIBE: produto exato,
+#                    cupom com código, destino declarado. Nunca o que
+#                    foi só aprendido, nunca a imagem, nunca campanha/
+#                    cashback/url/texto.
+#   estrutura(post)  as fortes que dizem O QUE a oferta é. Com destino
+#                    declarado, o código é ATRIBUTO (Frente 7B): duas
+#                    listas diferentes com o mesmo código não são a
+#                    mesma oferta; o `/sec/` sem destino continua contido
+#                    na lista que traz o código.
+#   duplicidade      estrutura(X) ∩ fortes(Y) ≠ ∅ entre dois posts vivos.
+#
+# P1 e P2 são ofertas DIFERENTES (mesma loja não prova nada). O que se
+# funde são POSTS: um post sai quando TUDO o que ele representa continua
+# exibido por sobreviventes reais. Nada é inventado, nada some.
+# ─────────────────────────────────────────────────────────────────
+IGUAL, AMPLIA, REDUZ, PARCIAL = "IGUAL", "AMPLIA", "REDUZ", "PARCIAL"
+
+
+def fortes(chaves) -> frozenset:
+    """Âncoras fortes de um conjunto de chaves."""
+    return frozenset(k for k in (chaves or ()) if eh_chave_forte(k))
+
+
+def estrutura(chaves) -> frozenset:
+    """Identidade estrutural: as fortes, sem os códigos quando há destino
+    declarado (neste caso o código é atributo da lista)."""
+    f = fortes(chaves)
+    if any(eh_chave_destino(k) for k in f):
+        return frozenset(k for k in f if eh_chave_destino(k)
+                         or k.split("|", 2)[1:2] != ["cup"])
+    return f
+
+
+def relacao_composicao(candidato, alvo):
+    """Composição do candidato em relação ao que o alvo EXIBE:
+    IGUAL | AMPLIA | REDUZ | PARCIAL — ou None quando um dos lados não
+    tem composição forte (legado, só fracas): comportamento de sempre,
+    decidido por score.
+
+    Mesma régua da consolidação (cobertura de ESTRUTURA por FORTES):
+      perde = alguma estrutura do alvo não seria mais exibida;
+      ganha = o candidato traz estrutura que o alvo não exibe.
+    Para produtos e cupons sem destino é a comparação de conjuntos
+    (⊋ / ⊊ / parcial). Em lista (destino declarado) o código é
+    atributo (Frente 7B): a mesma lista com outro código é IGUAL e o
+    score decide; a lista que chega sobre o `/sec/` do mesmo código
+    AMPLIA."""
+    c, a = fortes(candidato), fortes(alvo)
+    if not c or not a:
+        return None
+    perde = not estrutura(a) <= c
+    ganha = not estrutura(c) <= a
+    if perde and ganha:
+        return PARCIAL
+    if perde:
+        return REDUZ
+    if ganha:
+        return AMPLIA
+    return IGUAL
+
+
+@dataclass
+class Plano:
+    """Resultado da consolidação: quem sai, para quem vai cada âncora e
+    que duplicidade sobra sem solução real."""
+    fusoes: list = field(default_factory=list)     # [(perdedor, principal, {chave: dono})]
+    conflitos: list = field(default_factory=list)  # [(x, y, frozenset(compartilhadas))]
+
+    def envolve(self, mid) -> bool:
+        return any(mid in (x, y) for x, y, _ in self.conflitos)
+
+
+def _duplica(ex, fx, ey, fy) -> frozenset:
+    return (ex & fy) | (ey & fx)
+
+
+def plano_fusao(escrito: int, composicoes: dict, scores: dict | None = None):
+    """Decide a consolidação de um grupo de posts vivos.
+
+    `composicoes` = {msg_id: chaves EXIBIDAS}; `scores` = {msg_id: score
+    do texto publicado}. `escrito` é o post que acabou (ou vai acabar) de
+    exibir conteúdo novo. PURA.
+
+    Retirada GULOSA e DETERMINÍSTICA, do menos ao mais prioritário:
+      prioridade de FICAR = (|fortes|, score, é o escrito, −msg_id)
+        · estrutura primeiro (quem exibe mais não perde para quem exibe
+          menos — nenhum produto some);
+        · score só desempata composições do mesmo tamanho (autoridade de
+          texto entre conteúdos que representam a mesma coisa).
+      um post SAI quando toda a sua estrutura continua exibida pelos que
+      ficam (cobertura real, inclusive por mais de um sobrevivente).
+    Cada âncora forte do que sai vai para um sobrevivente que a EXIBE;
+    a origem vai para o principal (o que mais o cobre).
+    O que sobra duplicado sem ninguém redundante é CONFLITO — nunca
+    resolvido apagando conteúdo exclusivo."""
+    scores = scores or {}
+    f = {m: fortes(c) for m, c in (composicoes or {}).items()}
+    f = {m: s for m, s in f.items() if s}
+    e = {m: estrutura(s) for m, s in f.items()}
+    plano = Plano()
+    if escrito not in f:
+        return plano
+
+    def prio(m):
+        return (len(f[m]), scores.get(m, 0), m == escrito, -m)
+
+    vivos = set(f)
+    principal = {}
+    for m in sorted(f, key=prio):
+        outros = vivos - {m}
+        if not outros:
+            continue
+        exibido = frozenset().union(*(f[x] for x in outros))
+        if e[m] <= exibido:
+            principal[m] = max(outros, key=lambda x: (len(e[m] & f[x]), prio(x)))
+            vivos.discard(m)
+
+    def final(m):
+        seen = set()
+        while m in principal and m not in seen:
+            seen.add(m)
+            m = principal[m]
+        return m
+
+    for m in sorted(principal, key=prio):
+        p = final(m)
+        donos = {}
+        for k in f[m]:
+            if k in f[p]:
+                donos[k] = p
+            else:
+                quem = sorted(x for x in vivos if k in f[x])
+                donos[k] = quem[0] if quem else p
+        plano.fusoes.append((m, p, donos))
+
+    for x in sorted(vivos):
+        for y in sorted(vivos):
+            if x < y:
+                d = _duplica(e[x], f[x], e[y], f[y])
+                if d:
+                    plano.conflitos.append((x, y, d))
+    return plano

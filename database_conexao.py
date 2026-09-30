@@ -246,16 +246,30 @@ def _init_db():
             chat TEXT NOT NULL, msg_id INTEGER NOT NULL,
             dest INTEGER NOT NULL, ts REAL NOT NULL,
             PRIMARY KEY(chat, msg_id));
+        CREATE TABLE IF NOT EXISTS conflito_estrutural(
+            ts REAL NOT NULL, alvo INTEGER NOT NULL, chat TEXT NOT NULL,
+            msg_id INTEGER NOT NULL, motivo TEXT NOT NULL,
+            duplicadas TEXT NOT NULL, exclusivas TEXT NOT NULL,
+            pendentes TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS post_exibida(
+            msg_id_dest INTEGER NOT NULL, identity TEXT NOT NULL,
+            ts REAL NOT NULL,
+            PRIMARY KEY(msg_id_dest, identity));
         CREATE INDEX IF NOT EXISTS idx_lc_plat     ON links_cache(plat);
         CREATE INDEX IF NOT EXISTS idx_lc_ts       ON links_cache(ts);
         CREATE INDEX IF NOT EXISTS idx_sl_code     ON short_links(code);
         CREATE INDEX IF NOT EXISTS idx_oi_dest     ON oferta_index(msg_id_dest);
         CREATE INDEX IF NOT EXISTS idx_ci_lookup   ON cupom_idx(plat,codigo,ts);
+        CREATE INDEX IF NOT EXISTS idx_px_identity ON post_exibida(identity);
     """)
     for tabela, col, tipo in [
         ("links_cache",   "url_canon",        "TEXT"),
         ("post_estado",   "midia_chat",       "TEXT"),
         ("post_estado",   "score_versao",     "INTEGER"),
+        # [Frente 8] tombstone da fusão: para quem o post foi fundido e
+        # em que pé está a remoção física no Telegram.
+        ("post_estado",   "fused_into",       "INTEGER"),
+        ("post_estado",   "delete_status",    "TEXT"),
     ]:
         try:
             _db_conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {col} {tipo}")

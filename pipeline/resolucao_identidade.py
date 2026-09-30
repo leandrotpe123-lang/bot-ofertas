@@ -69,6 +69,34 @@ def eh_chave_destino(chave: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────
+# GRAMÁTICA DA FORÇA (Frente 8 — convergência de famílias)
+#
+# Reconhecimento PURO das chaves que este módulo emite; nenhuma regra
+# de precedência muda. Uma chave é FORTE quando identifica uma oferta
+# EXATA e por si só:
+#   produto ............ `<plat>|<id>`          (id do adaptador)
+#   cupom com código ... `<plat>|cup|<CÓDIGO>`
+#   destino declarado .. `<plat>|dest|<opaca>`
+# Todo o resto — campanha, cashback, cupom sem código, url, texto — é
+# FRACO: pode ajudar a família, mas nunca prova que dois posts são o
+# mesmo conjunto de ofertas.
+# ─────────────────────────────────────────────────────────────────
+_SEGMENTOS_DE_ESPECIE = frozenset(
+    {"cup", _SEGMENTO_DESTINO, "camp", "cash", "cupb", "url", "txt"})
+_SEGMENTOS_FORTES = frozenset({"cup", _SEGMENTO_DESTINO})
+
+
+def eh_chave_forte(chave: str) -> bool:
+    """Verdadeiro se `chave` é produto, cupom com código ou destino."""
+    partes = (chave or "").split("|", 2)
+    if len(partes) == 2:
+        return (bool(partes[0]) and bool(partes[1])
+                and partes[1] not in _SEGMENTOS_DE_ESPECIE)
+    return (len(partes) == 3 and partes[1] in _SEGMENTOS_FORTES
+            and bool(partes[2]))
+
+
+# ─────────────────────────────────────────────────────────────────
 # CONTRATO DE ENTRADA — evidências já derivadas
 # ─────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)

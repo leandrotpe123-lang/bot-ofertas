@@ -510,13 +510,18 @@ def _cenario_corrida():
     dest = novo_id()
     # post pobre e SEM midia: ambos os candidatos evoluem e a politica
     # autoriza TROCA/post_sem_midia no primeiro.
-    post_vivo(dest, ["shopee|RACE"], 1, "antigo pobre", BOM_A, "")
+    # [Frente 8] produto EXCLUSIVO do cenario: o fixture e usado por dois
+    # testes no mesmo banco, e um produto exato nao pode ter dois posts
+    # vivos (INV-PRODUTO) — antes, o segundo cenario roubava a ancora do
+    # post vivo deixado pelo primeiro.
+    oferta = f"shopee|RACE{dest}"
+    post_vivo(dest, [oferta], 1, "antigo pobre", BOM_A, "")
 
     n1 = norm(chat=BOM_A, texto="T1primeira R$ 10 50% off",
-              midia_key="mk-T1", oferta="shopee|RACE")
+              midia_key="mk-T1", oferta=oferta)
     n2 = norm(chat=BOM_B,
               texto="T2segunda R$ 20 50% off frete gratis acima de R$ 100",
-              midia_key="mk-T2", oferta="shopee|RACE")
+              midia_key="mk-T2", oferta=oferta)
     n1.media_obj = types.SimpleNamespace(tag="T1")
     n2.media_obj = types.SimpleNamespace(tag="T2")
 
