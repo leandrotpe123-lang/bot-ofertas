@@ -14,7 +14,8 @@ NÃO faz:
   - falar com o Telegram                (pipeline.saida)
 
 Contrato público:
-  post_da_familia(ofertas, dest_fix, destinos) -> int | None
+  post_da_familia(ofertas, dest_fix, destinos, titulo) -> int | None
+  eh_chave_container(chave) / mesmo_titulo(a, b) / so_container(ofertas)
   tem_destino(msg_id_dest)             -> bool
   unir(msg_id_dest, ofertas)           -> list[str]
   absorver(msg_id_dest, ofertas)       -> int
@@ -25,15 +26,20 @@ Contrato público:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
-from database import (db_absorver_ofertas, db_get_post,
+from database import (db_absorver_ofertas, db_exibida, db_get_post,
                       db_ofertas_de_post, db_overlap_posts)
 from logger import log_out
+from plataformas import registry
 from pipeline.resolucao_identidade import eh_chave_destino, eh_chave_forte
+from utils.textos import _RE_EMJ_NORM, _RUIDO_NORM, _rm_acentos
+from utils.urls import _netloc
 
-__all__ = ["post_da_familia", "unir", "absorver", "compartilhadas",
-           "tem_destino", "fortes", "estrutura", "relacao_composicao",
+__all__ = ["post_da_familia", "eh_chave_container", "mesmo_titulo",
+           "so_container",
+           "unir", "absorver", "compartilhadas", "tem_destino", "fortes", "estrutura", "relacao_composicao",
            "plano_fusao", "Plano"]
 
 
@@ -117,7 +123,264 @@ def _acolhe(msg_id_dest: int, destinos: tuple) -> bool:
     return not do_post or not do_post.isdisjoint(destinos)
 
 
-def post_da_familia(ofertas: list, dest_fix=None, destinos: tuple = ()):
+# ─────────────────────────────────────────────────────────────────
+# CONTAINER (incidente 30/09, post 24262)
+#
+# Controle Xbox, Caixa AIWA e Caixa Philco vieram só com links da MESMA
+# live Shopee (session 7187289): nenhum link carregava produto e as
+# três mensagens ganharam a mesma âncora fraca
+# `shopee|url|https://live.shopee.com.br/live/7187289`. A família as
+# juntou num post só — e daí vieram SYNC de outro produto e mídia de
+# outro produto no post do Controle.
+#
+# A URL de um CONTAINER (host declarado pela plataforma em
+# `hosts_container`) identifica a transmissão, não o produto. Quando é
+# TUDO o que o candidato compartilha com um post, o TÍTULO é o
+# discriminador: título equivalente casa; diferente ou ausente, não
+# casa (o candidato não contamina o post; vira post próprio).
+# Âncora forte (produto, cupom, destino) ou outra fraca continuam
+# decidindo como sempre — esta regra é só do container.
+# ─────────────────────────────────────────────────────────────────
+# TÍTULO = discriminador FRACO, só para âncora de container. Nunca
+# identidade: não sobrescreve âncora forte, não é usado quando há
+# qualquer outra âncora em comum. Determinístico e conservador — na
+# dúvida, SEPARA (contaminar um post com outro produto é pior que abrir
+# um post a mais). Tokens = 1ª linha, sem palavras vazias:
+#   · sem token de um lado            → não casa (live sem título);
+#   · algum lado CURTO (1–2 tokens)   → casa só se os conjuntos forem
+#     IGUAIS ("Controle Xbox" × "Controle para Xbox" casa;
+#     "Controle Xbox" × "Controle Xbox Preto" separa);
+#   · ALTERNATIVA DE COR do mesmo anúncio ("Carbon Black ou Pulse
+#     Red", "Preto/Branco", "nas cores Preta e Cinza") → as cores
+#     oferecidas saem da comparação dos DOIS lados (ver
+#     `_alternativas_de_cor`); o resto segue as regras abaixo;
+#   · ambos LONGOS (≥ 3 tokens)       → um CONTÉM o outro (cada lado com
+#     token próprio é variante e separa), o acréscimo não traz
+#     DISTINTIVO — quantidade, sufixo de modelo, cor ou qualquer token
+#     com dígito (capacidade, tamanho, modelo) — e o menor cobre ≥ 50%
+#     do maior (genérico × específico separa).
+# Números fazem parte do título (15 × 16, 50 × 55 polegadas): a
+# tokenização é própria — `_alma` descarta tokens curtos como "15".
+_TITULO_CURTO = 2
+_TITULO_COBERTURA = 0.5
+_TITULO_VAZIAS = frozenset({"para", "com", "por", "dos", "das", "nos", "nas",
+                            "uma", "uns", "umas", "the", "and", "for",
+                            "de", "da", "do", "em", "e", "a", "o"})
+_TITULO_DISTINTIVOS = frozenset({
+    # quantidade
+    "kit", "kits", "combo", "combos", "pack", "pacote", "conjunto", "jogo",
+    "par", "pares",
+    # sufixo de modelo
+    "pro", "max", "plus", "mini", "ultra", "lite", "air", "slim", "neo",
+    "turbo", "fe",
+    # cor
+    "preto", "preta", "branco", "branca", "cinza", "azul", "vermelho",
+    "vermelha", "verde", "amarelo", "amarela", "rosa", "roxo", "roxa",
+    "laranja", "marrom", "bege", "prata", "dourado", "dourada", "grafite",
+    "lilas", "black", "white", "gray", "grey", "blue", "red", "green",
+    "pink", "silver", "gold"})
+_TITULO_CORES = frozenset({
+    "preto", "preta", "branco", "branca", "cinza", "azul", "vermelho",
+    "vermelha", "verde", "amarelo", "amarela", "rosa", "roxo", "roxa",
+    "laranja", "marrom", "bege", "prata", "dourado", "dourada", "grafite",
+    "lilas", "black", "white", "gray", "grey", "blue", "red", "green",
+    "pink", "silver", "gold"})
+
+# ALTERNATIVA DE VARIANTE DE COR ("Carbon Black ou Pulse Red",
+# "Preto/Branco", "nas cores Preta e Cinza"): o MESMO anúncio oferecendo
+# mais de uma cor. Reconhecida só como CLÁUSULA FINAL introduzida por um
+# marcador, em que TODA opção é composta apenas de cor e de qualificador
+# de nome de cor (Pulse Red, Carbon Black, Robot White…) e tem ao menos
+# uma cor de fato. Qualquer outra coisa numa opção (produto, número,
+# modelo, "Pro", "iPhone 16") invalida a cláusula e o título é comparado
+# inteiro. "ou" sozinho não autoriza nada.
+_TITULO_QUALIFICADORES_COR = frozenset({
+    "carbon", "pulse", "robot", "shock", "midnight", "cosmic", "deep",
+    "electric", "velocity", "starlight", "volcanic", "nova", "sterling",
+    "glacier", "astral", "stellar", "mystic", "ice", "escuro", "escura",
+    "claro", "clara", "fosco", "fosca", "metalico", "metalica", "neon",
+    "pastel", "matte", "space", "night", "sky"})
+_RE_ALTERNATIVA = re.compile(
+    r"\s(?:ou|nas\s+cores|na\s+cor|cores)\s|\s*/\s*")
+_RE_OPCOES = re.compile(r"\s(?:ou|e)\s|,|/")
+
+
+def eh_chave_container(chave: str) -> bool:
+    """Âncora de fallback `plat|url|<url>` cuja URL é de CONTAINER."""
+    partes = (chave or "").split("|", 2)
+    if len(partes) != 3 or partes[1] != "url" or not partes[2]:
+        return False
+    host = _netloc(partes[2])
+    return bool(host) and any(
+        host == h or host.endswith("." + h)
+        for h in registry.compor_capacidade("hosts_container"))
+
+
+def _tokens_titulo(linha: str) -> frozenset:
+    """Tokens da linha-título: mesma limpeza de `utils.textos._alma`
+    (acentos, URLs, emojis, preço, ruído promocional), mas preservando
+    todo token com dígito — o número distingue modelo, tamanho e
+    capacidade."""
+    t = _rm_acentos(linha.lower())
+    t = re.sub(r"https?://\S+", " ", t)
+    t = re.sub(r"r\$\s*[\d.,]+", " ", t)
+    t = re.sub(r"\b\d+%", " ", t)
+    t = _RE_EMJ_NORM.sub(" ", t)
+    t = re.sub(r"[^\w\s]", " ", t)
+    return frozenset(w for w in t.split()
+                     if w not in _RUIDO_NORM
+                     and (len(w) > 2 or any(ch.isdigit() for ch in w)))
+
+
+def _linha_titulo(texto: str) -> str:
+    for linha in (texto or "").split("\n"):
+        if linha.strip():
+            return linha
+    return ""
+
+
+def _titulo(texto: str) -> frozenset:
+    """Tokens da 1ª linha não vazia."""
+    return _tokens_titulo(_linha_titulo(texto))
+
+
+def _eh_opcao_de_cor(opcao: str) -> bool:
+    toks = [w for w in re.sub(r"[^\w\s]", " ", opcao).split() if w]
+    return (bool(toks) and any(w in _TITULO_CORES for w in toks)
+            and all(w in _TITULO_CORES or w in _TITULO_QUALIFICADORES_COR
+                    for w in toks))
+
+
+def _alternativas_de_cor(texto: str) -> tuple:
+    """(base, cores): a linha-título sem a cláusula FINAL de alternativas
+    de cor e os tokens dessa cláusula — incluindo a cor que fecha a base
+    imediatamente antes do marcador (a 1ª opção: "Carbon Black ou Pulse
+    Red" → cores {carbon, black, pulse, red}). Sem cláusula válida:
+    (linha inteira, vazio). Marcador com opção que NÃO é cor ("ou iPhone
+    16", "ou Pulse", "ou Mesa Branca"): (linha inteira, None) — alternativa
+    de outra coisa, o título só casa se for idêntico."""
+    linha = _linha_titulo(texto)
+    t = " " + _rm_acentos(linha.lower()).strip() + " "
+    m = _RE_ALTERNATIVA.search(t)
+    if not m:
+        return linha, frozenset()
+    base, resto = t[:m.start()], t[m.end():]
+    opcoes = [o.strip() for o in _RE_OPCOES.split(" " + resto + " ") if o.strip()]
+    if not opcoes or not all(_eh_opcao_de_cor(o) for o in opcoes):
+        return linha, None
+    cores = set()
+    for o in opcoes:
+        cores |= set(o.split())
+    # a 1ª opção: a sequência de cor/qualificador que fecha a base
+    palavras = re.sub(r"[^\w\s]", " ", base).split()
+    while palavras and (palavras[-1] in _TITULO_CORES
+                        or palavras[-1] in _TITULO_QUALIFICADORES_COR):
+        cores.add(palavras.pop())
+    return " ".join(palavras), frozenset(cores)
+
+
+def mesmo_titulo(a: str, b: str) -> bool:
+    """Os dois textos anunciam, com CLAREZA, o mesmo produto pelo título?
+    Ausente, ambíguo ou limítrofe → False (não casa)."""
+    base_a, cores_a = _alternativas_de_cor(a)
+    base_b, cores_b = _alternativas_de_cor(b)
+    if cores_a is None or cores_b is None:
+        # alternativa que não é de cor: "ou" não autoriza nada
+        ta = _tokens_titulo(base_a) - _TITULO_VAZIAS
+        tb = _tokens_titulo(base_b) - _TITULO_VAZIAS
+        return bool(ta) and ta == tb
+    cores = cores_a | cores_b
+    ta = _tokens_titulo(base_a) - _TITULO_VAZIAS - cores
+    tb = _tokens_titulo(base_b) - _TITULO_VAZIAS - cores
+    if not ta or not tb:
+        return False
+    if min(len(ta), len(tb)) <= _TITULO_CURTO:
+        return ta == tb
+    menor, maior = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    if not menor <= maior:
+        return False
+    extra = maior - menor
+    if extra & _TITULO_DISTINTIVOS or any(ch.isdigit() for w in extra for ch in w):
+        return False
+    return len(menor) / len(maior) >= _TITULO_COBERTURA
+
+
+def _so_container(mid: int, ofertas: set) -> bool:
+    """O candidato `mid` compartilha com a mensagem SOMENTE âncoras de
+    container (pela posse ou pela exibição)?"""
+    comuns = ofertas & (set(db_ofertas_de_post(mid)) | db_exibida(mid))
+    return bool(comuns) and all(eh_chave_container(k) for k in comuns)
+
+
+def so_container(ofertas) -> bool:
+    """A mensagem só tem âncora(s) de container (nenhuma outra)?"""
+    ofertas = list(ofertas or ())
+    return bool(ofertas) and all(eh_chave_container(k) for k in ofertas)
+
+
+def _adotar_por_container(container: str, ofertas: list, titulo: str) -> list:
+    """Mensagem com identidade FORTE que não achou família pelo forte, mas
+    veio da mesma live de um post que só era conhecido pela live: com
+    título CLARAMENTE equivalente e sem outra identidade forte no post, o
+    post é a família — e o forte passa a ser a referência estrutural da
+    oferta (evolução/absorção seguem as regras de sempre)."""
+    ofs = set(ofertas)
+    aceitos = []
+    for mid, n in db_overlap_posts([container]):
+        chaves = set(db_ofertas_de_post(mid)) | db_exibida(mid)
+        if fortes(chaves) - ofs:
+            continue                      # outro forte: título não decide
+        if mesmo_titulo(titulo, (db_get_post(mid) or {}).get("texto", "")):
+            aceitos.append((mid, n))
+    if len(aceitos) > 1:
+        # Mais de um post só-live plausível: o forte não escolhe no escuro.
+        log_out.info(
+            f"🧬 [LIVE_ADOCAO_AMBIGUA] {sorted(ofs)} — posts "
+            f"{[m for m, _ in aceitos]} da live {container} passam pelo "
+            f"título; nenhum é adotado")
+        return []
+    if aceitos:
+        log_out.info(
+            f"🧬 [LIVE_ADOTA_FORTE] {sorted(ofs)} adota post:{aceitos[0][0]} "
+            f"da mesma live {container} — título equivalente, sem forte "
+            f"conflitante")
+    return aceitos
+
+
+def _filtrar_container(candidatos: list, ofertas: list, titulo: str) -> list:
+    if not any(eh_chave_container(k) for k in ofertas):
+        return candidatos                 # caminho comum: zero consulta
+    ofs = set(ofertas)
+    aceitos, por_titulo = [], []
+    for mid, n in candidatos:
+        if not _so_container(mid, ofs):
+            aceitos.append((mid, n))
+            continue
+        texto_post = (db_get_post(mid) or {}).get("texto", "")
+        if mesmo_titulo(titulo, texto_post):
+            por_titulo.append((mid, n))
+            continue
+        motivo = ("LIVE_SEM_IDENTIDADE" if not (_titulo(titulo)
+                                                and _titulo(texto_post))
+                  else "FAMILIA_TITULO_DIVERGENTE")
+        log_out.info(
+            f"🧬 [{motivo}] post:{mid} recusado — só compartilha container "
+            f"{sorted(k for k in ofs if eh_chave_container(k))} e o título "
+            f"não prova o mesmo produto (candidato="
+            f"{(titulo or '').strip().splitlines()[0][:60] if (titulo or '').strip() else '-'!r})")
+    if len(por_titulo) > 1:
+        # Mais de um post da mesma live com título equivalente (ex.: dois
+        # produtos fortes diferentes com o mesmo nome): ambíguo — o
+        # título não escolhe entre eles.
+        log_out.info(
+            f"🧬 [LIVE_AMBIGUA] posts {[m for m, _ in por_titulo]} passam pelo "
+            f"título — nenhum é aceito só pelo container")
+        por_titulo = []
+    return aceitos + por_titulo
+
+
+def post_da_familia(ofertas: list, dest_fix=None, destinos: tuple = (),
+                    titulo: str = "", container: str = ""):
     """Post vivo que acolhe estas ofertas, ou None se não houver.
     `dest_fix` fixa o alvo pelo vínculo de Origem (I2) e curto-circuita
     a busca por sobreposição (e a regra de destino: é a mesma origem).
@@ -138,6 +401,14 @@ def post_da_familia(ofertas: list, dest_fix=None, destinos: tuple = ()):
                 f"não colapsam, mesmo com cupom em comum")
             candidatos = [(mid, n) for mid, n in candidatos
                           if mid not in recusados]
+    if candidatos and not dest_fix:
+        # [Container] antes de QUALQUER escolha: o candidato recusado aqui
+        # nunca chega a DUP/SYNC/evolução/upgrade de mídia daquele post.
+        candidatos = _filtrar_container(candidatos, ofertas, titulo)
+    if (not candidatos and not dest_fix and container
+            and not so_container(ofertas) and eh_chave_container(container)):
+        # [Container] forte novo de uma oferta antes só conhecida pela live.
+        candidatos = _adotar_por_container(container, ofertas, titulo)
     if len(candidatos) > 1:
         log_out.debug(
             f"🧬 [FAMILIA_MULTI] {len(candidatos)} posts em sobreposição "

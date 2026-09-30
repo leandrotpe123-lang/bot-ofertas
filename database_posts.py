@@ -55,7 +55,7 @@ def db_get_post(msg_id_dest: int) -> Optional[dict]:
             row = db.execute(
                 "SELECT msg_id_dest,score,texto,plat,lider,janela_fim,"
                 "edit_count,ts,midia_chat,score_versao,fused_into,"
-                "delete_status"
+                "delete_status,lider_msg"
                 " FROM post_estado WHERE msg_id_dest=?",
                 (msg_id_dest,)).fetchone()
         if row:
@@ -72,6 +72,8 @@ def db_get_post(msg_id_dest: int) -> Optional[dict]:
                 # [Frente 8] None = post nunca fundido.
                 "fused_into": row[10],
                 "delete_status": row[11],
+                # [Live/24262] None = legado: SYNC pela regra antiga (chat).
+                "lider_msg": row[12],
             }
     except Exception as e:
         log_db.error(f"❌ db_get_post: {e}")
@@ -173,7 +175,8 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
                       midia_chat: Optional[str] = None,
                       score_versao: Optional[int] = None,
                       exibidas: Optional[list[str]] = None,
-                      superar: Optional[int] = None):
+                      superar: Optional[int] = None,
+                      lider_msg: Optional[int] = None):
 
     """Upsert do estado do post + mapeamento de cada oferta→post.
     Serve para publicação nova E evolução (idempotente).
@@ -187,7 +190,11 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
     `superar` — post que este SUPERA por renascimento: ele cede as
       âncoras e deixa de ser considerado exibidor (vira histórico).
     Âncora FORTE com dono vivo diferente NÃO é tomada: sobreposição
-    parcial não é prova de nada; só a fusão transfere posse."""
+    parcial não é prova de nada; só a fusão transfere posse.
+
+    `lider_msg` — msg_id de origem cujo TEXTO passou a estar no ar
+      (publicação nova, evolução). None = preserva o atual (sincronização,
+      mídia, gravações que não trocam o texto)."""
     try:
         agora = time.time()
         with _db() as db:
@@ -202,7 +209,7 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
                 "INSERT OR REPLACE INTO post_estado"
                 "(msg_id_dest,score,texto,plat,lider,"
                 "janela_fim,edit_count,ts,midia_chat,score_versao,"
-                "fused_into,delete_status)"
+                "fused_into,delete_status,lider_msg)"
                 " VALUES(?,?,?,?,?,?,?,?,"
                 " COALESCE(?,(SELECT midia_chat FROM post_estado"
                 "             WHERE msg_id_dest=?)),"
@@ -210,12 +217,15 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
                 "             WHERE msg_id_dest=?)),"
                 " (SELECT fused_into FROM post_estado WHERE msg_id_dest=?),"
                 " (SELECT delete_status FROM post_estado"
-                "   WHERE msg_id_dest=?))",
+                "   WHERE msg_id_dest=?),"
+                " COALESCE(?,(SELECT lider_msg FROM post_estado"
+                "             WHERE msg_id_dest=?)))",
                 (msg_id_dest, score, texto, plat, lider,
                  janela_fim, edit_count, agora,
                  midia_chat, msg_id_dest,
                  score_versao, msg_id_dest,
-                 msg_id_dest, msg_id_dest))
+                 msg_id_dest, msg_id_dest,
+                 lider_msg, msg_id_dest))
             preservadas = []
             for oferta in ofertas:
                 if not eh_chave_forte(oferta):

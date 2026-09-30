@@ -211,6 +211,15 @@ class Plataforma:
                           tem_sinal_cashback. Não contém lógica. None
                           equivale a não declarar; o core ignora.
 
+      - hosts_container : frozenset[str] | None. Hosts cujas URLs
+                          afiliadas LONGAS são CONTAINERS de vários
+                          produtos (ex.: uma transmissão ao vivo com a
+                          sacola de produtos). A URL identifica o
+                          container, NUNCA o produto: o core não deixa
+                          que ela, sozinha, junte ofertas de produtos
+                          diferentes. Não contém lógica. None equivale
+                          a não declarar; o core ignora.
+
       - afiliacao_vigente : (Afiliacao) -> bool | None. Pura, sem I/O.
                             Diz se uma afiliação guardada no cache de
                             links ainda obedece ao contrato VIGENTE
@@ -243,4 +252,5 @@ class Plataforma:
     encurtadores: Optional[frozenset[str]] = None
     hosts_campanha:       Optional[frozenset[str]] = None
     sinais_cashback:      Optional[frozenset[str]] = None
+    hosts_container:      Optional[frozenset[str]] = None
     afiliacao_vigente:    Optional[Callable[["Afiliacao"], bool]] = None

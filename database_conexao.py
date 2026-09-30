@@ -270,6 +270,9 @@ def _init_db():
         # em que pé está a remoção física no Telegram.
         ("post_estado",   "fused_into",       "INTEGER"),
         ("post_estado",   "delete_status",    "TEXT"),
+        # [Live/24262] a MENSAGEM de origem cujo texto está no ar: só ela
+        # sincroniza o post. NULL = legado (regra antiga, por chat).
+        ("post_estado",   "lider_msg",        "INTEGER"),
     ]:
         try:
             _db_conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {col} {tipo}")

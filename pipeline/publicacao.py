@@ -179,11 +179,26 @@ async def _enviar_inner(montada: MensagemMontada,
     # sob o lock) pode ter vizinhos a convergir. Sem família viva, a
     # primeira publicação não dispara convergência nenhuma.
     alvo_existente = False
+    exibidas_msg = None          # None = as próprias ofertas (aplicadores)
 
     if norm is not None and (ofertas or dest_fix):
         # Alvo FIXADO pelo vínculo de Origem (I2): edit de origem
         # vinculada nunca re-casa por conteúdo em outro post.
-        msg_id_rel = familia.post_da_familia(ofertas, dest_fix, destinos)
+        # [Container] a chave da live da mensagem, quando a identidade dela
+        # é outra (forte): só serve para ADOTAR o post da mesma live com
+        # título equivalente se o forte não achou família (familia).
+        ancora = getattr(norm, "ancora_url", "") or ""
+        container = f"{norm.plat}|url|{ancora}" if ancora else ""
+        if container in ofertas or not familia.eh_chave_container(container):
+            container = ""
+        # O texto publicado traz o link da live: a composição EXIBIDA
+        # inclui a chave do container (fraca — não conta como estrutura),
+        # para que mensagens só-live do mesmo produto continuem achando o
+        # post depois que um forte virou a referência dele.
+        exibidas_msg = list(ofertas) + ([container] if container else [])
+        msg_id_rel = familia.post_da_familia(ofertas, dest_fix, destinos,
+                                             titulo=montada.texto,
+                                             container=container)
         if msg_id_rel is not None:
             alvo_existente = True
             post_lock = await exclusao.lock_post(msg_id_rel)
@@ -212,8 +227,15 @@ async def _enviar_inner(montada: MensagemMontada,
                 # [Frente 8b] FATO estrutural, também congelado: a
                 # composição forte do candidato contra o que o post EXIBE
                 # (nunca o que ele só aprendeu, nunca a imagem).
-                composicao = familia.relacao_composicao(
-                    ofertas, db_exibida(msg_id_rel))
+                exibida_rel = db_exibida(msg_id_rel)
+                composicao = familia.relacao_composicao(ofertas, exibida_rel)
+                if (composicao is None and familia.so_container(ofertas)
+                        and familia.fortes(exibida_rel)):
+                    # [Container] o título casou, mas a mensagem só tem a
+                    # live e o post já exibe identidade FORTE: substituir
+                    # o texto apagaria o forte — o título nunca sobrescreve
+                    # identidade forte. Mídia segue a política.
+                    composicao = familia.REDUZ
                 d = decidir(norm, montada, score, estado, agora, is_edit,
                             midia_key_aceita=chave_aceita,
                             midia_candidata=norm.tem_midia,
@@ -323,7 +345,7 @@ async def _enviar_inner(montada: MensagemMontada,
                             montada, imagem=await materializar_imagem(norm))
                         return await _aplicar_novo_envio(
                             montada, norm, ofertas_renasce, score,
-                            identity, exibidas=ofertas,
+                            identity, exibidas=exibidas_msg,
                             superar=msg_id_rel, pos_escrita=pos)
 
                     if d.acao == "SINCRONIZAR":
@@ -335,7 +357,7 @@ async def _enviar_inner(montada: MensagemMontada,
                         return await _aplicar_sincronizacao(
                             montada, norm, score, estado, msg_id_rel,
                             ofertas_familia, identity, d,
-                            exibidas=ofertas, pos_escrita=pos)
+                            exibidas=exibidas_msg, pos_escrita=pos)
 
                     if d.acao != "EVOLUIR":
                         log_out.info(
@@ -362,7 +384,7 @@ async def _enviar_inner(montada: MensagemMontada,
                     return await _aplicar_evolucao(
                         montada, norm, d, estado, msg_id_dest,
                         edit_count, ofertas_familia, identity,
-                        exibidas=ofertas, pos_escrita=pos)
+                        exibidas=exibidas_msg, pos_escrita=pos)
                 # d.acao == PUBLICAR: estado sumiu sob o lock (substituído/
                 # limpo por outra task) → cai para NOVO ENVIO
 
@@ -379,5 +401,6 @@ async def _enviar_inner(montada: MensagemMontada,
     montada = replace(montada, imagem=await materializar_imagem(norm))
     return await _aplicar_novo_envio(
         montada, norm, ofertas, score, identity,
+        exibidas=exibidas_msg,
         pos_escrita=(pos if alvo_existente else None))
  

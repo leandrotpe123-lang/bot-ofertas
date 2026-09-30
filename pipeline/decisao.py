@@ -230,7 +230,15 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # NÃO usa _alma/_sim: aquilo é similaridade semântica de dedup e
     # normaliza preço (R$ → VALOR), então suprimiria uma queda de preço
     # legítima. Guarda de I/O exige igualdade byte a byte.
-    if is_edit and lider_atual and norm.chat == lider_atual:
+    #
+    # [Live/24262] Líder é a MENSAGEM cujo texto está no ar, não o canal:
+    # outra mensagem do mesmo canal que só foi vinculada ao post (casou
+    # a família e foi ignorada) NÃO o espelha ao ser editada — ela segue
+    # como candidata (composição/score). `lider_msg` None = post legado:
+    # regra antiga, por chat.
+    lider_msg = estado.get("lider_msg")
+    if (is_edit and lider_atual and norm.chat == lider_atual
+            and (lider_msg is None or norm.msg_id == lider_msg)):
         return _com_midia(Decisao(SINCRONIZAR, "SINCRONIZACAO",
                                   na_janela=na_janela,
                                   score_atual=score_atual,

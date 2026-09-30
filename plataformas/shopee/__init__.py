@@ -56,6 +56,17 @@ _HOSTS_CAMPANHA = frozenset({
     "premios.shopee.com.br", "flapremios.com.br",
 })
 
+# ── Hosts de CONTAINER ────────────────────────────────────────────
+# A live da Shopee é um CONTAINER: a mesma transmissão (session) vende
+# vários produtos pela sacola, e o link da live NÃO carrega o produto
+# (URLs reais de 30/09: universal-link/share?session=7187289&…, sem
+# loja/item). A identidade canônica da live (`/live/<session>`) segue
+# sendo a âncora de fallback, mas o core não a aceita, sozinha, como
+# prova de que duas mensagens são o mesmo produto.
+_HOSTS_CONTAINER = frozenset({
+    "live.shopee.com.br",
+})
+
 # ── Definição da plataforma ───────────────────────────────────────
 PLATAFORMA = Plataforma(
     identificador=_IDENTIFICADOR,
@@ -67,4 +78,5 @@ PLATAFORMA = Plataforma(
     encurtadores=_ENCURTADORES,
     hosts_campanha=_HOSTS_CAMPANHA,
     sinais_cashback=_SINAIS_CASHBACK,
+    hosts_container=_HOSTS_CONTAINER,
 )

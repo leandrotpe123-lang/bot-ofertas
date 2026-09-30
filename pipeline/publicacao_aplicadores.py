@@ -93,7 +93,8 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             montada.plat, norm.chat,
             estado.get("janela_fim", 0), edit_count + 1,
             midia_chat=(norm.chat if d.trocar_midia else None),
-            score_versao=V_CONTEUDO, exibidas=exibidas)
+            score_versao=V_CONTEUDO, exibidas=exibidas,
+            lider_msg=montada.msg_id)
         if pos_escrita is not None:
             pos_escrita(msg_id_dest)
         # [E4.0] Só APÓS a I/O e só com prova: midia_aplicada. Um
@@ -139,7 +140,8 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             chat_origem=norm.chat if norm else "",
             msg_id_origem=montada.msg_id,
             midia_chat=(norm.chat if montada.imagem else ""),
-            score_versao=V_CONTEUDO, exibidas=exibidas)
+            score_versao=V_CONTEUDO, exibidas=exibidas,
+            lider_msg=montada.msg_id)
         if pos_escrita is not None:
             pos_escrita(sent.id)            # o msg_id NOVO, nunca o antigo
         log_out.info(
@@ -295,7 +297,8 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
                 midia_chat=((norm.chat if norm else "") if img else ""),
                 score_versao=V_CONTEUDO,
                 exibidas=(ofertas if exibidas is None else exibidas),
-                superar=superar)
+                superar=superar,
+                lider_msg=montada.msg_id)
             if pos_escrita is not None:
                 pos_escrita(sent.id)
             # [E4.0] `img` diz o que TENTAMOS enviar; chave_midia(sent)
