@@ -122,6 +122,12 @@ class _PostFundido(Exception):
         self.status = status
 
 
+class _AdocaoObsoleta(Exception):
+    """[Cupom sem nome] o post escolhido por adoção genérico × assinatura
+    deixou de ser complementar entre a resolução da família e o lock.
+    Levantada ANTES de decidir(): refaz a busca, sem alvo fixo."""
+
+
 async def _enviar_resolvido(montada: MensagemMontada,
                             norm: Optional[MensagemNormalizada],
                             ofertas: list,
@@ -149,6 +155,8 @@ async def _enviar_resolvido(montada: MensagemMontada,
                 if f.status in ("pendente", "falhou"):
                     convergencia.agendar_remocao(f.perdedor)
                 dest_fix = f.sobrevivente
+            except _AdocaoObsoleta:
+                continue
         log_out.warning(
             f"⚠️ [REDIRECIONAMENTO_ESGOTADO] id={montada.msg_id} — cadeia "
             f"de fusão com mais de {_MAX_REDIRECIONAMENTOS} saltos; "
@@ -209,6 +217,10 @@ async def _enviar_inner(montada: MensagemMontada,
                     # o fallback "PUBLICAR" (ciclo morto → post novo).
                     raise _PostFundido(msg_id_rel, estado["fused_into"],
                                        estado.get("delete_status") or "")
+                if not dest_fix and familia.adocao_obsoleta(msg_id_rel, ofertas):
+                    # [Cupom sem nome] adoção revalidada sob o lock: o
+                    # alvo deixou de ser complementar → nova busca.
+                    raise _AdocaoObsoleta()
                 agora = time.time()
                 # [E4.0] O fato da mídia aceita é lido AQUI, pelo
                 # orquestrador, e entregue à decisão. decisao.py

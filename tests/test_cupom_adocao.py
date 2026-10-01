@@ -24,9 +24,16 @@ caso da regra. Quem decide o texto é o score de sempre.
   I  o rico com score menor não sobrescreve o seco (score decide)
   J  replay dos testes do operador 01/10 04:56 (1356 → 1357 → 1358)
   K  contrato direto de post_da_familia: destino, nome junto, prefixo
+  L  container LIVE + cupb: a adoção não acontece (nas duas ordens)
+  M  corrida: seco vivo; 30/90 e 10/119 escolhem o seco ANTES de qualquer
+     escrita (lock_post atrasado) — o primeiro a travar adota, o outro
+     revalida sob o lock, refaz a busca e vira post próprio
+  N  a mesma corrida com a ordem de chegada ao lock invertida
+  O  contrato direto de adocao_obsoleta (revalidação sob o lock)
 
     python tests/test_cupom_adocao.py
 """
+import asyncio
 import os
 import sys
 import time
@@ -37,7 +44,7 @@ from test_cupom_sem_codigo import (                             # noqa: E402
     identidades, msg, publicar)
 from _harness_e5 import rodar                                   # noqa: E402
 from database import db_posts_vivos_com_prefixo                 # noqa: E402
-from pipeline import familia                                    # noqa: E402
+from pipeline import exclusao, familia                          # noqa: E402
 
 CONVERTIDAS = -1003817694320
 
@@ -78,6 +85,8 @@ def test_A_seco_depois_rico_edita(r):
     r.check(any(m == posts[0] and "R$30 OFF em R$299" in t for m, t in cli.edits),
             "A.post_do_seco_ficou_rico", str(cli.edits))
     r.check(posts[2] is None, "A.copia_nao_duplica", str(posts))
+    r.check(bool(mot[2]) and not any(m.startswith("JANELA") for m in mot[2]),
+            "A.copia_decidida_no_mesmo_post", str(mot[2]))
 
 
 def test_B_rico_depois_seco_nao_rebaixa(r):
@@ -202,6 +211,127 @@ def test_J_replay_operador_01_10_0456(r):
     r.check(posts[1] is None and "EVOLUI" in mot[1],
             "J.1357_edita_o_1356", f"{posts} {mot[1]}")
     r.check(posts[2] is not None, "J.tech_post_proprio", str(posts))
+
+
+LIVE = "https://live.shopee.com.br/live/7187289"
+CUPOM_LIVE = ("🔥 Cupom R$ 10 OFF em R$ 50 Shopee\n\n🎟 Resgate o cupom na Live "
+              "shopee_br (sacola laranja)\nhttps://s.shopee.com.br/20vruIAJxg")
+
+
+def test_L_container_live_nao_adota(r):
+    live = msg(SAMUEL, CUPOM_LIVE, [LIVE])
+    r.check(identidades(live) == ["shopee|cupb|v:10-50"]
+            and familia.eh_chave_container(f"shopee|url|{live.ancora_url}"),
+            "L.cupb_com_container", f"{identidades(live)} {live.ancora_url}")
+    for nome, ordem in (("seco_depois_live", (msg(PROMOTOM, SECO), live)),
+                        ("live_depois_seco", (msg(SAMUEL, CUPOM_LIVE, [LIVE]),
+                                              msg(PROMOTOM, SECO)))):
+        out = {}
+
+        async def corpo(c, ordem=ordem):
+            for n in ordem:
+                await publicar(n, score=10 if n.chat == str(SAMUEL) else 3)
+            out["n"], out["edits"] = c.novos, list(c.edits)
+        cenario(corpo)
+        r.check(out["n"] == 2 and not out["edits"], f"L.{nome}", str(out))
+    # o mesmo cupom SEM live continua sendo adotado (a guarda é só do container)
+    sem_live = msg(SAMUEL, CUPOM_LIVE)
+    out = {}
+
+    async def corpo2(c):
+        await publicar(msg(PROMOTOM, SECO), score=3)
+        await publicar(sem_live, score=10)
+        out["n"] = c.novos
+    cenario(corpo2)
+    r.check(out["n"] == 1, "L.sem_container_adota", str(out))
+
+
+def _corrida(atrasos):
+    """seco publicado; depois 30/90 e 10/119 em paralelo, com lock_post
+    atrasado por chamada (`atrasos`) — as duas escolhem o seco antes de
+    qualquer escrita, e a ordem de chegada ao lock é controlada."""
+    real = exclusao.lock_post
+    chamadas = {"n": 0}
+
+    async def lento(mid):
+        i = chamadas["n"]
+        chamadas["n"] += 1
+        await asyncio.sleep(atrasos[i] if i < len(atrasos) else 0)
+        return await real(mid)
+
+    seco = msg(PROMOTOM, SECO)
+    a, b = msg(FADA, RICO_30_90), msg(SAMUEL, RICO_10_119)
+    out = {}
+
+    async def corpo(c):
+        await publicar(seco, score=3)
+        g = c.ids[-1]
+        chamadas["n"] = 0
+        exclusao.lock_post = lento
+        try:
+            await asyncio.gather(publicar(a, score=10), publicar(b, score=10))
+        finally:
+            exclusao.lock_post = real
+        out["g"], out["n"], out["ids"] = g, c.novos, list(c.ids)
+        out["edits"] = list(c.edits)
+        out["fam_g"] = set(db_ofertas_de_post(g))
+        out["fam_novo"] = (set(db_ofertas_de_post(c.ids[-1]))
+                           if c.ids[-1] != g else set())
+    cenario(corpo)
+    return out
+
+
+def _checa_corrida(r, rot, out, vencedor, perdedor):
+    r.check(out["n"] == 2, f"{rot}.dois_posts", str(out))
+    r.check(vencedor <= out["fam_g"] and not perdedor & out["fam_g"],
+            f"{rot}.seco_so_com_o_vencedor", str(out["fam_g"]))
+    r.check(perdedor <= out["fam_novo"] and not vencedor & out["fam_novo"],
+            f"{rot}.perdedor_em_post_proprio", str(out["fam_novo"]))
+    textos_g = [t for m, t in out["edits"] if m == out["g"]]
+    r.check(len(textos_g) == 1, f"{rot}.uma_edicao_no_seco", str(out["edits"]))
+
+
+V30 = {"shopee|cupb|v:30-299", "shopee|cupb|v:90-899"}
+V10 = {"shopee|cupb|v:10-119"}
+
+
+def test_M_corrida_30_90_trava_primeiro(r):
+    out = _corrida([0.0, 0.05])
+    _checa_corrida(r, "M", out, V30, V10)
+
+
+def test_N_corrida_ordem_invertida(r):
+    out = _corrida([0.05, 0.0])
+    _checa_corrida(r, "N", out, V10, V30)
+
+
+
+def test_O_contrato_adocao_obsoleta(r):
+    out = {}
+
+    async def corpo(c):
+        # cenário ambíguo (D): dois só-assinatura vivos → o seco fica só
+        await publicar(msg(FADA, RICO_10_119), score=10)
+        s_ = c.ids[-1]                      # 10/119: post só-assinatura
+        await publicar(msg(SAMUEL, RICO_30_90), score=10)
+        await publicar(msg(PROMOTOM, SECO), score=3)
+        g = c.ids[-1]                       # seco: post só-genérico
+        v30, v10 = ["shopee|cupb|v:30-299"], ["shopee|cupb|v:10-119"]
+        out["geral_complementar"] = familia.adocao_obsoleta(g, v30)
+        out["assinatura_x_assinatura"] = familia.adocao_obsoleta(s_, v30)
+        out["geral_x_assinatura"] = familia.adocao_obsoleta(
+            s_, ["shopee|cupb|geral"])
+        out["overlap"] = familia.adocao_obsoleta(s_, v10)
+        out["nome"] = familia.adocao_obsoleta(g, ["shopee|cupb|tech"])
+        out["s_eh_proprio"] = c.novos == 3
+    cenario(corpo)
+    r.check(out["s_eh_proprio"], "O.tres_posts_puros", str(out))
+    r.check(out["geral_complementar"] is False, "O.complementar_vale", str(out))
+    r.check(out["assinatura_x_assinatura"] is True,
+            "O.mesmo_tipo_e_obsoleto", str(out))
+    r.check(out["geral_x_assinatura"] is False, "O.geral_x_assinatura_vale", str(out))
+    r.check(out["overlap"] is False, "O.overlap_nao_e_adocao", str(out))
+    r.check(out["nome"] is False, "O.nome_fora_da_regra", str(out))
 
 
 if __name__ == "__main__":

@@ -42,7 +42,7 @@ from utils.textos import _RE_EMJ_NORM, _RUIDO_NORM, _rm_acentos
 from utils.urls import _netloc
 
 __all__ = ["post_da_familia", "eh_chave_container", "mesmo_titulo",
-           "so_container",
+           "so_container", "adocao_obsoleta",
            "unir", "absorver", "compartilhadas", "tem_destino", "fortes", "estrutura", "relacao_composicao",
            "plano_fusao", "Plano"]
 
@@ -448,6 +448,32 @@ def _adotar_cupom_sem_nome(ofertas: list) -> list:
     return aceitos
 
 
+def adocao_obsoleta(msg_id_dest: int, ofertas: list) -> bool:
+    """A adoção genérico × assinatura que escolheu `msg_id_dest` ainda
+    vale? Chamada SOB o lock do post, antes de decidir: entre a escolha
+    (sem lock) e o lock, outra mensagem pode ter sido adotada pelo mesmo
+    post e ele deixou de ser complementar (seco → 30/90 e 10/119
+    simultâneos). True = alvo obsoleto: refazer a busca.
+
+    Só a adoção é revalidada: candidato que compartilha âncora com o post
+    (overlap) ou que não é só cupom sem nome não é afetado."""
+    ofs = set(ofertas or ())
+    chaves = set(db_ofertas_de_post(msg_id_dest)) | db_exibida(msg_id_dest)
+    if not ofs or ofs & chaves:
+        return False
+    plat = next(iter(ofs)).split("|", 1)[0]
+    tipo = _so_cupom_sem_nome(ofs, plat)
+    if tipo is None:
+        return False
+    procura = "assinatura" if tipo == "geral" else "geral"
+    if _so_cupom_sem_nome(chaves, plat) == procura:
+        return False
+    log_out.info(
+        f"🧬 [CUPOM_ADOCAO_OBSOLETA] post:{msg_id_dest} deixou de ser "
+        f"só-{procura} antes do lock — {sorted(ofs)} refaz a busca")
+    return True
+
+
 def post_da_familia(ofertas: list, dest_fix=None, destinos: tuple = (),
                     titulo: str = "", container: str = ""):
     """Post vivo que acolhe estas ofertas, ou None se não houver.
@@ -478,8 +504,9 @@ def post_da_familia(ofertas: list, dest_fix=None, destinos: tuple = (),
             and not so_container(ofertas) and eh_chave_container(container)):
         # [Container] forte novo de uma oferta antes só conhecida pela live.
         candidatos = _adotar_por_container(container, ofertas, titulo)
-    if not candidatos and not dest_fix and not destinos:
-        # [Cupom sem nome] genérico × assinatura: candidato único.
+    if not candidatos and not dest_fix and not destinos and not container:
+        # [Cupom sem nome] genérico × assinatura: candidato único. Com
+        # container (live), a autoridade é a da Frente LIVE: sem adoção.
         candidatos = _adotar_cupom_sem_nome(ofertas)
     if len(candidatos) > 1:
         log_out.debug(
