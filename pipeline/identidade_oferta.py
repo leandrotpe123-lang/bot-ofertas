@@ -58,6 +58,9 @@ from pipeline.assunto import (          # noqa: E402
     eh_post_cashback,
     beneficio_do_cupom,
 )
+# A fachada pipeline.assunto está fora do escopo desta frente: a
+# assinatura vem direto do dono (assunto_oferta), sem lógica no caminho.
+from pipeline.assunto_oferta import assinatura_do_beneficio  # noqa: E402
 from pipeline.resolucao_identidade import (   # noqa: E402
     Evidencias,
     resolver,
@@ -131,7 +134,8 @@ def _evidencias(norm: "MensagemNormalizada") -> Evidencias:
         plataforma      = norm.plat,
         entidade_cupom  = eh_entidade_cupom(norm),
         codigos         = tuple(norm.cupons),
-        tema_campanha   = tema_da_campanha(texto),
+        tema_campanha   = tema_da_campanha(texto, norm.plat),
+        assinaturas_beneficio = assinatura_do_beneficio(texto),
         produtos        = tuple(norm.idents),
         tem_produto     = bool(norm.ids_globais),
         # Transporte puro: o snapshot já traz as identidades que os

@@ -21,7 +21,9 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Optional
+from pipeline.estado_evento import _RE_RETORNO
 from utils.cupom import linha_e_item_de_cupom
 
 # ── C3.1: DESCRITOR DE BENEFÍCIO — identidade do cupom SEM CÓDIGO ──
@@ -265,16 +267,190 @@ _RE_TEMA_CAMPANHA = re.compile(
     r"primeira\s+compra|assinantes?)\b", re.I)
 
 
-def tema_da_campanha(texto: str) -> str:
+def tema_da_campanha(texto: str, plat: str = "") -> str:
     """
     [F-C4] Identidade da campanha SEM código (INV-E3): o elemento
     textual mais estável — o nome que as fontes repetem ao falar da
     mesma campanha. Sem tema reconhecível → "geral" (bucket temporal
     da plataforma; tolerância conservadora ratificada, R5).
     Números NUNCA entram (INV-E2: limites/percentuais são estado).
+
+    [Cupom sem código] Dois níveis, nesta ordem:
+      1. NOME DECLARADO no título (`nome_declarado`) — só com `plat`;
+      2. vocabulário legado sobre o escopo do benefício (intocado).
+    Sem `plat`, só o nível 2: exatamente o comportamento anterior.
     """
+    if plat:
+        nome = nome_declarado(texto, plat)
+        if nome:
+            return nome
     m = _RE_TEMA_CAMPANHA.search(texto[:_ESCOPO_BENEFICIO])
     if not m:
         return "geral"
     bruto = re.sub(r"\s+", " ", m.group(1).lower())
     return _TEMAS_CAMPANHA.get(bruto, "geral")
+
+
+# ══════════ CUPOM SEM CÓDIGO — NOME DECLARADO DA CAMPANHA ══════════
+# Incidente 01/10 00:00: Fidelidade, Tech e "R$30/R$90" — campanhas
+# distintas, sem código — caíram todas em `cupb|geral` porque o nome
+# delas não está no vocabulário fechado acima. As fontes DECLARAM o nome
+# no título ("Novos Cupons Shopee Fidelidade (APP)", "Novo Cupom Shopee
+# Tech"); o que falta é reconhecer a declaração.
+#
+# A pergunta é estrutural — "este título DECLAROU um nome?" — e só
+# depois vem a chave. Cada palavra do título é de UMA classe; nome é o
+# que SOBRA quando todas as outras saem:
+#   plataforma ........ o próprio `plat` (pode vir separado: "mercado livre")
+#   substantivo cupom . cupom, cupons, cupão, cuponzão
+#   moldura ........... novidade, estado, urgência, chamada, horário
+#   reativação ........ vocabulário CANÔNICO (estado_evento._RE_RETORNO)
+#                       + a família de "renovar"
+#   benefício/valor ... R$, %, OFF, número, limite, mínimo, desconto
+#   qualificador ...... entre parênteses: "(APP)", "(Site)"
+#   conectivo ......... de, em, para, nos, ...
+# Declarou nome ⇔ sobram de 1 a 3 palavras de ≥ 3 letras. Nada sobrou →
+# genérico. Mais de 3 → prosa ou título de produto, não nome.
+# A chave é a sobra INTEIRA (nunca "a primeira palavra"): Black Friday ≠
+# Black Week, Clube Fidelidade ≠ Fidelidade. Na dúvida, não funde.
+#
+# Vocabulário é DETALHE DE IMPLEMENTAÇÃO (mesma doutrina de
+# _TEMAS_CAMPANHA): cada entrada tem evidência no corpus Shopee de
+# 31/08–01/10 (Fada, Samuel, Promotom, Fumotom).
+_NOME_CUPOM = frozenset({"cupom", "cupons", "cupao", "cuponzao", "cupoes"})
+_NOME_MOLDURA = frozenset({
+    # novidade / estado
+    "novo", "nova", "novos", "novas", "liberado", "liberada", "liberados",
+    "liberadas", "ativo", "ativa", "ativos", "ativas", "exclusivo",
+    "exclusiva", "exclusivos", "confirmado", "confirmados", "disponivel",
+    "disponiveis", "geral",
+    # urgência / chamada
+    "esgotando", "ultima", "ultimo", "chance", "vai", "sair", "comecou",
+    "comeca", "lembrando", "lembrete", "alerta", "atencao", "corre",
+    "urgente", "imperdivel", "resgate", "resgata", "aqui",
+    # horário
+    "hoje", "agora", "amanha", "meia", "noite", "partir", "horas",
+    # canal de resgate / autorreferência do grupo
+    "app", "site", "link", "links", "nosso", "nossa", "nossos", "nossas",
+    # família de "renovar" (fora do vocabulário canônico de retorno)
+    "renovado", "renovada", "renovados", "renovadas", "renova", "renovar",
+    "renovou",
+})
+_NOME_CONECTIVO = frozenset({
+    "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas", "para",
+    "pra", "com", "por", "ate", "e", "o", "a", "os", "as", "um", "uma",
+    "seu", "sua",
+})
+# Benefício, percentual e valor/limite NUNCA viram nome (INV-E2).
+_RE_NOME_VALOR = re.compile(
+    r"r\$\s*\d[\d.,]*|\d+\s*%|\b\d+(?:[.,/]\d+)*\b|"
+    r"\b(?:off|limite|limitad[oa]|acima|minimo|desconto|descontos|"
+    r"cashback)\b")
+# Data de EVENTO ("9.9", "10.10"): é o nome quando nada mais sobra
+# ("CUPONS RENOVADOS! 9.9 SHOPEE"). Não é valor: não tem R$ nem %.
+_RE_NOME_EVENTO = re.compile(r"(?<![\d$])\b(\d{1,2}\.\d{1,2})\b(?![.,]?\d|\s*%)")
+_NOME_MIN_LETRAS = 3
+_NOME_MAX_PALAVRAS = 3
+
+
+def _sem_acento(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", s)
+                   if unicodedata.category(c) != "Mn")
+
+
+def _linha_titulo(texto: str) -> str:
+    """1ª linha não vazia. Espaço duplo também encerra o título: há
+    fonte que cola o corpo no título sem quebra de linha."""
+    for linha in (texto or "").split("\n"):
+        if linha.strip():
+            return re.split(r"\s{2,}", linha.strip())[0]
+    return ""
+
+
+def nome_declarado(texto: str, plat: str) -> str:
+    """Nome de campanha DECLARADO no título, ou "" se não houver.
+
+    Responde primeiro "o título declarou um nome?" — e só então gera a
+    chave. Portão: o título é cabeçalho de campanha da PRÓPRIA
+    plataforma (cita `plat`); sem isso não há declaração."""
+    plat = _sem_acento((plat or "").lower())
+    if not plat:
+        return ""
+    t = _sem_acento(_linha_titulo(texto).lower())
+    t = re.sub(r"https?://\S+", " ", t)
+    t = re.sub(r"\([^)]*\)", " ", t)
+    # a plataforma pode vir com separação ("mercado livre")
+    re_plat = re.compile(r"\b" + r"[\s\-_.]*".join(map(re.escape, plat)) + r"\b")
+    if not re_plat.search(t):
+        return ""
+    t = re_plat.sub(" ", t)
+    # valor monetário sai ANTES da busca de evento: "R$ 9.90" não é 9.9
+    t = re.sub(r"r\$\s*\d[\d.,]*", " ", t)
+    eventos = _RE_NOME_EVENTO.findall(t)
+    t = _RE_RETORNO.sub(" ", t)
+    t = _RE_NOME_VALOR.sub(" ", t)
+    sobra = [w for w in re.findall(r"[a-z]+", t)
+             if len(w) >= _NOME_MIN_LETRAS
+             and w not in _NOME_CUPOM
+             and w not in _NOME_MOLDURA
+             and w not in _NOME_CONECTIVO]
+    if not sobra:
+        return eventos[0] if eventos else ""
+    if len(sobra) > _NOME_MAX_PALAVRAS:
+        return ""
+    # o nome que JÁ era tema legado mantém a chave de sempre
+    return _TEMAS_CAMPANHA.get(" ".join(sobra), "-".join(sobra))
+
+
+# ══════════ CUPOM SEM CÓDIGO E SEM NOME — ASSINATURA DO BENEFÍCIO ══════════
+# Sem código e sem nome declarado, o que a fonte declara da campanha é o
+# BENEFÍCIO: "R$30 OFF em R$299", "20% OFF limitado a R$20". No corpus,
+# a mesma campanha traz os MESMOS valores em todos os grupos (FADA =
+# SAMUEL = PROMOTOM em 100% dos pares); campanhas simultâneas diferem
+# justamente neles (30/299 × 10/119 × 20%-lim-20 na mesma madrugada).
+#
+# Cada cupom declarado vira UMA assinatura, como cada código vira uma
+# chave. É ÂNCORA FRACA (cupb), com a semântica de sempre: encontra a
+# família por overlap; nunca é identidade estrutural (Frente 8).
+# Refina INV-E2 no molde do cashback (`cash|<pct>`): o valor segue
+# sendo ESTADO onde há nome ou código; aqui é o único discriminante.
+_RE_ASS_PAR = re.compile(
+    r"r\$\s*(\d[\d.,]*)\s*off\s*(?:em\s+compras\s+acima\s+de|acima\s+de|em)"
+    r"\s*r\$\s*(\d[\d.,]*)")
+_RE_ASS_PCT = re.compile(
+    r"\b(\d{1,3})\s*%\s*off"
+    r"(?:\s*,?\s*(?:limite|limitad[oa]\s+a)\s*(?:de\s+)?r\$\s*(\d[\d.,]*))?")
+_RE_ASS_VLR = re.compile(r"r\$\s*(\d[\d.,]*)\s*off")
+# "Cupom Shopee 20/69" no título: R$20 OFF em R$69. O mínimo maior que
+# o dobro do desconto separa da data ("30/09").
+_RE_ASS_ABREV = re.compile(r"(?<![\d/.,])(\d{1,4})/(\d{2,5})(?![\d/])")
+
+
+def _valor(bruto: str) -> str:
+    """Valor canônico: "R$ 1.299" = "R$1299"; "69,90" = "69.9"."""
+    v = bruto.strip(".,")
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", v):
+        v = v.replace(".", "")
+    v = v.replace(",", ".")
+    try:
+        n = float(v)
+    except ValueError:
+        return v
+    return str(int(n)) if n == int(n) else f"{n:g}"
+
+
+def assinatura_do_beneficio(texto: str) -> tuple:
+    """Assinaturas dos cupons declarados no escopo do benefício, em
+    ordem canônica: `v:<desconto>-<mínimo>`, `p:<pct>[-<limite>]` e,
+    só sem nenhuma das duas, `v:<desconto>`. Vazio = nada declarado."""
+    t = _sem_acento(texto[:_ESCOPO_BENEFICIO].lower())
+    ass = {f"v:{_valor(a)}-{_valor(b)}" for a, b in _RE_ASS_PAR.findall(t)}
+    for a, b in _RE_ASS_ABREV.findall(_sem_acento(_linha_titulo(texto))):
+        if int(a) >= 5 and int(b) > 2 * int(a):
+            ass.add(f"v:{a}-{b}")
+    for p, lim in _RE_ASS_PCT.findall(t):
+        if _PCT_MIN <= int(p) <= _PCT_MAX:
+            ass.add(f"p:{p}-{_valor(lim)}" if lim else f"p:{p}")
+    if not ass:
+        ass = {f"v:{_valor(a)}" for a in _RE_ASS_VLR.findall(t)}
+    return tuple(sorted(ass))

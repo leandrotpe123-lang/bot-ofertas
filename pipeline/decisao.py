@@ -168,7 +168,8 @@ def decidir(norm, montada, score: int, estado: dict | None,
     trocar_midia, motivo_midia = politica_midia(
         fato_midia, norm.chat, estado, is_edit,
         chave_nova=getattr(norm, "midia_key", "") or "",
-        chave_aceita=midia_key_aceita or "")
+        chave_aceita=midia_key_aceita or "",
+        msg_novo=norm.msg_id)
 
     def _com_midia(d: Decisao) -> Decisao:
         """Anexa a decisão de mídia e faz a política GOVERNAR os

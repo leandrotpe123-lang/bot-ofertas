@@ -15,14 +15,24 @@ TROCA_FONTE_EDITOU = "TROCA/fonte_editou"
 PRESERVA_MIDIA_IGUAL  = "PRESERVA/midia_igual"
 
 
-def _regra_de_midia(imagem_nova, chat_novo, estado, is_edit=False):
-    """A POLÍTICA. Corpo preservado byte a byte; nenhuma das seis
-    saídas mudou de condição, de ordem ou de motivo."""
+def _regra_de_midia(imagem_nova, chat_novo, estado, is_edit=False,
+                    msg_novo=None):
+    """A POLÍTICA. Nenhuma das seis saídas mudou de ordem ou de motivo.
+
+    [Mídia/líder] TROCA/fonte_editou é a edição do LÍDER — a MENSAGEM
+    cujo texto está no ar (`estado["lider_msg"]`, a mesma autoridade da
+    Frente LIVE em decisao), não o canal. Outra mensagem do mesmo canal
+    editada (01/10: a 17526 "Tech" trocou a imagem do post 24393 dos
+    cupons 30/90) segue as regras de classe abaixo. `lider_msg` None =
+    post legado: regra antiga, por canal."""
     if not imagem_nova: return (False, PRESERVA_SEM_IMAGEM)
     dono = estado.get("midia_chat", DESCONHECIDA)
     if dono is DESCONHECIDA: return (False, PRESERVA_DESCONHECIDA)
     if dono == SEM_MIDIA: return (True, TROCA_POST_SEM_MIDIA)
-    if is_edit and chat_novo == dono: return (True, TROCA_FONTE_EDITOU)
+    lider_msg = estado.get("lider_msg")
+    if (is_edit and chat_novo == dono
+            and (lider_msg is None or msg_novo == lider_msg)):
+        return (True, TROCA_FONTE_EDITOU)
     nr, ar = midia_ruim(chat_novo), midia_ruim(dono)
     if nr and not ar: return (False, PRESERVA_NAO_REBAIXA)
     if not nr and ar: return (True, TROCA_UPGRADE)
@@ -30,7 +40,7 @@ def _regra_de_midia(imagem_nova, chat_novo, estado, is_edit=False):
 
 
 def politica_midia(imagem_nova, chat_novo, estado, is_edit=False,
-                   chave_nova="", chave_aceita=""):
+                   chave_nova="", chave_aceita="", msg_novo=None):
     """AUTORIDADE ÚNICA de mídia. Continua sendo esta função.
 
     [E4.0] GUARDA DE DELTA — não é política nova. A política roda
@@ -48,7 +58,7 @@ def politica_midia(imagem_nova, chat_novo, estado, is_edit=False,
     sem alteração. A guarda nunca inventa igualdade.
     """
     troca, motivo = _regra_de_midia(
-        imagem_nova, chat_novo, estado, is_edit)
+        imagem_nova, chat_novo, estado, is_edit, msg_novo)
     if troca and chave_nova and chave_aceita and chave_nova == chave_aceita:
         return (False, PRESERVA_MIDIA_IGUAL)
     return (troca, motivo)

@@ -115,6 +115,10 @@ class Evidencias:
     codigos:         Tuple[str, ...] = ()
     # tema textual da campanha, já resolvido (assunto_oferta)
     tema_campanha:   str = ""
+    # assinaturas dos cupons declarados sem código, já extraídas
+    # (assunto_oferta.assinatura_do_beneficio). OPACAS: o resolvedor
+    # não sabe o que "v:30-299" significa; só as usa como chave.
+    assinaturas_beneficio: Tuple[str, ...] = ()
     # produtos identificados pelos adaptadores: (plataforma, id, tipo)
     produtos:        Tuple[Tuple[str, str, str], ...] = ()
     # o post tem produto identificado? (espelha ids_globais)
@@ -260,7 +264,20 @@ def resolver(ev: Evidencias) -> List[Entidade]:
             # (que só indexa códigos reais) — garantido por
             # construção, pois o efeito de cupom só roda sobre os
             # códigos, aqui vazios.
-            _add("cupom-beneficio", f"{plat}|cupb|{ev.tema_campanha}")
+            #
+            # [Cupom sem código] Níveis EXCLUSIVOS por mensagem:
+            #   tema (nome declarado ou legado) → UMA chave;
+            #   sem tema e com assinatura de benefício → UMA chave por
+            #     cupom declarado (como um código por chave);
+            #   nada disso → "geral".
+            # A mensagem nomeada nunca recebe assinatura: nome e
+            # assinatura não compartilham chave. Toda chave aqui segue
+            # `cupb` — ÂNCORA FRACA, mesma semântica de sempre.
+            if ev.tema_campanha == "geral" and ev.assinaturas_beneficio:
+                for a in ev.assinaturas_beneficio:
+                    _add("cupom-beneficio", f"{plat}|cupb|{a}")
+            else:
+                _add("cupom-beneficio", f"{plat}|cupb|{ev.tema_campanha}")
         return saida
 
     # C3 — quando o CUPOM é o assunto, o produto no link é VEÍCULO e não
