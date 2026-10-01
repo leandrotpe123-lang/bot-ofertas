@@ -21,7 +21,8 @@ import unicodedata
 from plataformas import registry
 
 # Contrato INTERNO da camada — ver cabeçalho de filtros_estrutura.
-from pipeline.filtros_estrutura import _RE_ENUM, _RE_URL_BLOCO, _eh_rotulo
+from pipeline.filtros_estrutura import (_RE_ENUM, _RE_URL_BLOCO, _eh_rotulo,
+                                       urls_do_bloco)
 from pipeline.normalizacao_texto import sem_marcacao
 
 # ══════════════════════════════════════════════════════════════════
@@ -89,7 +90,7 @@ def _bloco_permanece(bloco: list, mapa: dict, preservar) -> bool:
          permanece só se ancorado numa plataforma conhecida.
     """
     texto = " ".join(bloco)
-    urls = _RE_URL_BLOCO.findall(texto)
+    urls = urls_do_bloco(texto)
     if not urls:
         return True
     if any(_publicavel(u, mapa, preservar) for u in urls):

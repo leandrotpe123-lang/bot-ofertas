@@ -31,6 +31,25 @@ from pipeline.normalizacao_texto import sem_marcacao
 
 _RE_URL_BLOCO = re.compile(r'https?://\S+')
 
+# URLs de um bloco para DECIDIR pertencimento. O texto chega com a
+# marcação do Telegram: hiperlink embutido (MessageEntityTextUrl) vem
+# como `[rótulo](url)`. `\S+` capturava `url](url)` — URL que não está
+# no mapa —, e o bloco de um link convertido era removido como se não
+# tivesse convertido (post 24381). Aqui o link Markdown vira a própria
+# URL de destino e a extração para nos mesmos delimitadores da ingestão
+# (`pipeline.ingestao._RE_URL`), para que as duas pontas comparem a
+# MESMA URL.
+_RE_LINK_MD = re.compile(r'\[[^\]\n]*\]\((https?://[^)\s]+)\)')
+_RE_URL_EXATA = re.compile(
+    r'https?://[^\s\)\]>,"\'<\u200b\u200c\u200d\u2060]+')
+
+
+def urls_do_bloco(texto: str) -> list:
+    """URLs do texto, com link Markdown `[rótulo](url)` resolvido para a
+    `url`, na ordem em que aparecem."""
+    plano = _RE_LINK_MD.sub(lambda m: f" {m.group(1)} ", texto or "")
+    return _RE_URL_EXATA.findall(plano)
+
 # Enumeração de bloco em todas as grafias observadas:
 # 1️⃣ | ① | (1) | 1. | 1) | 1 -
 _RE_ENUM = re.compile(
