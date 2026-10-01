@@ -30,10 +30,14 @@ import re
 from dataclasses import dataclass, field
 
 from database import (db_absorver_ofertas, db_exibida, db_get_post,
-                      db_ofertas_de_post, db_overlap_posts)
+                      db_ofertas_de_post, db_overlap_posts,
+                      db_posts_vivos_com_prefixo)
 from logger import log_out
 from plataformas import registry
-from pipeline.resolucao_identidade import eh_chave_destino, eh_chave_forte
+from pipeline.resolucao_identidade import (chave_cupom_geral,
+                                           eh_chave_assinatura,
+                                           eh_chave_destino, eh_chave_forte,
+                                           prefixo_cupom_sem_codigo)
 from utils.textos import _RE_EMJ_NORM, _RUIDO_NORM, _rm_acentos
 from utils.urls import _netloc
 
@@ -379,6 +383,71 @@ def _filtrar_container(candidatos: list, ofertas: list, titulo: str) -> list:
     return aceitos + por_titulo
 
 
+# ─────────────────────────────────────────────────────────────────
+# CUPOM SEM NOME — GENÉRICO × ASSINATURA (madrugada Shopee)
+#
+# Toda noite às 23:59 o Promotom posta "Cupons Shopee" seco — sem nome e
+# sem benefício (`cupb|geral`) — e logo depois Fada/Samuel postam a
+# MESMA rodada com os valores ("R$30 OFF em R$299", `cupb|v:30-299`).
+# As chaves não se tocam: o seco ficava parado e o rico virava outro
+# post (testes 1356/1357 de 01/10 → posts 24418 e 24419).
+#
+# O genérico não identifica campanha nenhuma; a assinatura não traz
+# nome. Quando NÃO houver mais nada que os diferencie, os dois se
+# encontram por ADOÇÃO DE CANDIDATO ÚNICO — o mesmo idioma da Frente
+# LIVE (`_adotar_por_container`):
+#   · assinatura sem família → adota o ÚNICO post vivo que é SÓ genérico
+#     da plataforma (nada além de `cupb|geral`);
+#   · genérico sem família   → adota o ÚNICO post vivo que é SÓ
+#     assinatura da plataforma (nada além de `cupb|<x>:<y>`).
+# Mais de um plausível → ninguém adota (na dúvida, não funde). Nome
+# declarado, cupom com código, destino, produto, url — qualquer outra
+# âncora no candidato ou no post — tira o caso desta regra. A adoção só
+# escolhe a FAMÍLIA; quem decide o texto é a decisão de sempre (o mais
+# rico evolui pelo score; o seco que chega depois só ensina a âncora).
+# Um post adotado deixa de ser "só genérico": a regra não se repete
+# sobre ele — uma segunda assinatura diferente vira post próprio.
+# ─────────────────────────────────────────────────────────────────
+def _so_cupom_sem_nome(chaves, plat: str):
+    """"geral" | "assinatura" | None — a natureza das chaves quando TODAS
+    são cupom sem nome da plataforma, de um tipo só."""
+    chaves = set(chaves or ())
+    if not chaves:
+        return None
+    if chaves == {chave_cupom_geral(plat)}:
+        return "geral"
+    prefixo = prefixo_cupom_sem_codigo(plat)
+    if all(k.startswith(prefixo) and eh_chave_assinatura(k) for k in chaves):
+        return "assinatura"
+    return None
+
+
+def _adotar_cupom_sem_nome(ofertas: list) -> list:
+    """Candidato só-genérico ou só-assinatura sem família: o ÚNICO post
+    vivo do tipo complementar, da mesma plataforma, é a família."""
+    ofs = set(ofertas or ())
+    plat = next(iter(ofs)).split("|", 1)[0] if ofs else ""
+    tipo = _so_cupom_sem_nome(ofs, plat)
+    if tipo is None:
+        return []
+    procura = "assinatura" if tipo == "geral" else "geral"
+    aceitos = []
+    for mid in db_posts_vivos_com_prefixo(prefixo_cupom_sem_codigo(plat)):
+        chaves = set(db_ofertas_de_post(mid)) | db_exibida(mid)
+        if _so_cupom_sem_nome(chaves, plat) == procura:
+            aceitos.append((mid, 0))
+    if len(aceitos) > 1:
+        log_out.info(
+            f"🧬 [CUPOM_ADOCAO_AMBIGUA] {sorted(ofs)} — posts "
+            f"{[m for m, _ in aceitos]} só-{procura} vivos; nenhum é adotado")
+        return []
+    if aceitos:
+        log_out.info(
+            f"🧬 [CUPOM_ADOTA] {sorted(ofs)} ({tipo}) adota post:{aceitos[0][0]}"
+            f" só-{procura} — único cupom sem nome vivo da plataforma")
+    return aceitos
+
+
 def post_da_familia(ofertas: list, dest_fix=None, destinos: tuple = (),
                     titulo: str = "", container: str = ""):
     """Post vivo que acolhe estas ofertas, ou None se não houver.
@@ -409,6 +478,9 @@ def post_da_familia(ofertas: list, dest_fix=None, destinos: tuple = (),
             and not so_container(ofertas) and eh_chave_container(container)):
         # [Container] forte novo de uma oferta antes só conhecida pela live.
         candidatos = _adotar_por_container(container, ofertas, titulo)
+    if not candidatos and not dest_fix and not destinos:
+        # [Cupom sem nome] genérico × assinatura: candidato único.
+        candidatos = _adotar_cupom_sem_nome(ofertas)
     if len(candidatos) > 1:
         log_out.debug(
             f"🧬 [FAMILIA_MULTI] {len(candidatos)} posts em sobreposição "

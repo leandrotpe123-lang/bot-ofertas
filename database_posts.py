@@ -113,6 +113,34 @@ def db_overlap_posts(ofertas: list[str]) -> list[tuple[int, int]]:
         return []
 
 
+def db_posts_vivos_com_prefixo(prefixo: str) -> list[int]:
+    """Posts VIVOS (mesma régua de db_overlap_posts: janela aberta e não
+    fundido) que possuem ou exibem alguma âncora começando por
+    `prefixo`. Uso: adoção de cupom sem nome (familia), que precisa
+    enxergar as famílias de assinatura de uma plataforma sem conhecer
+    os valores. Prefixo vazio → []."""
+    if not prefixo:
+        return []
+    padrao = (prefixo.replace("\\", "\\\\").replace("%", "\\%")
+              .replace("_", "\\_") + "%")
+    try:
+        with _db() as db:
+            rows = db.execute(
+                "SELECT DISTINCT x.msg_id_dest"
+                "  FROM (SELECT identity, msg_id_dest FROM oferta_index"
+                "         WHERE identity LIKE ? ESCAPE '\\'"
+                "        UNION"
+                "        SELECT identity, msg_id_dest FROM post_exibida"
+                "         WHERE identity LIKE ? ESCAPE '\\') x"
+                "  JOIN post_estado pe ON pe.msg_id_dest = x.msg_id_dest"
+                f" WHERE {_VIVO_PE} ORDER BY x.msg_id_dest",
+                (padrao, padrao, time.time())).fetchall()
+        return [r[0] for r in rows]
+    except Exception as e:
+        log_db.error(f"❌ db_posts_vivos_com_prefixo: {e}")
+        return []
+
+
 def db_ofertas_de_post(msg_id_dest: int) -> list[str]:
     """Todas as ofertas que compõem um post (caminho inverso, via
     idx_oi_dest). Usado para calcular ofertas novas na evolução e

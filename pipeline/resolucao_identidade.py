@@ -69,6 +69,38 @@ def eh_chave_destino(chave: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────
+# GRAMÁTICA DO CUPOM SEM CÓDIGO (`cupb`)
+#
+# Mesmo idioma do destino: quem emite é quem reconhece. As três formas
+# que o ramo `cupb` emite são distinguíveis só pela cadeia gravada:
+#   genérico .... `<plat>|cupb|geral`      (sem nome e sem benefício)
+#   assinatura .. `<plat>|cupb|<x>:<y>`    (sem nome; o benefício, OPACO)
+#   nome ........ `<plat>|cupb|<nome>`     (nunca contém ":")
+# Nome nunca contém ":" por construção (palavras, data de evento ou
+# chave legada); a assinatura sempre contém. O conteúdo continua opaco.
+# ─────────────────────────────────────────────────────────────────
+_SEGMENTO_CUPOM_SEM_CODIGO = "cupb"
+TEMA_GERAL = "geral"
+
+
+def prefixo_cupom_sem_codigo(plat: str) -> str:
+    """Prefixo comum às chaves `cupb` da plataforma."""
+    return f"{plat}|{_SEGMENTO_CUPOM_SEM_CODIGO}|"
+
+
+def chave_cupom_geral(plat: str) -> str:
+    """Chave do cupom genérico da plataforma: `<plat>|cupb|geral`."""
+    return f"{prefixo_cupom_sem_codigo(plat)}{TEMA_GERAL}"
+
+
+def eh_chave_assinatura(chave: str) -> bool:
+    """Verdadeiro se `chave` é assinatura de benefício (`cupb` sem nome)."""
+    partes = (chave or "").split("|", 2)
+    return (len(partes) == 3 and partes[1] == _SEGMENTO_CUPOM_SEM_CODIGO
+            and ":" in partes[2])
+
+
+# ─────────────────────────────────────────────────────────────────
 # GRAMÁTICA DA FORÇA (Frente 8 — convergência de famílias)
 #
 # Reconhecimento PURO das chaves que este módulo emite; nenhuma regra
@@ -273,11 +305,13 @@ def resolver(ev: Evidencias) -> List[Entidade]:
             # A mensagem nomeada nunca recebe assinatura: nome e
             # assinatura não compartilham chave. Toda chave aqui segue
             # `cupb` — ÂNCORA FRACA, mesma semântica de sempre.
-            if ev.tema_campanha == "geral" and ev.assinaturas_beneficio:
+            if ev.tema_campanha == TEMA_GERAL and ev.assinaturas_beneficio:
                 for a in ev.assinaturas_beneficio:
-                    _add("cupom-beneficio", f"{plat}|cupb|{a}")
+                    _add("cupom-beneficio",
+                         f"{prefixo_cupom_sem_codigo(plat)}{a}")
             else:
-                _add("cupom-beneficio", f"{plat}|cupb|{ev.tema_campanha}")
+                _add("cupom-beneficio",
+                     f"{prefixo_cupom_sem_codigo(plat)}{ev.tema_campanha}")
         return saida
 
     # C3 — quando o CUPOM é o assunto, o produto no link é VEÍCULO e não

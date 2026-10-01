@@ -22,7 +22,8 @@ O QUE ESTE ARQUIVO PROVA:
   10  família: nome × assinatura; nome × geral → posts diferentes
   11  composição {v:30-299} × {v:30-299, v:90-899}: mesma família pelo
       overlap fraco, relacao_composicao None, decisão pelo SCORE
-  12  replay real de 01/10 00:00 (textos e links reais, na ordem)
+  12  replay real de 01/10 00:00 (textos e links reais, na ordem):
+      o seco do Promotom é EDITADO para o 30/90 (Fase 2)
 
     python tests/test_cupom_sem_codigo.py
 """
@@ -541,27 +542,37 @@ def test_12_replay_01_10(r):
     # o link /m/<slug> NÃO influencia a identidade (frente própria)
     r.check(identidades(msgs[2][1]) == identidades(msgs[3][1]),
             "12.link_nao_muda_identidade")
-    posts = {}
+    posts, motivos = {}, {}
 
     async def corpo(c):
         for rot, n, _chave in msgs:
-            antes = c.novos
+            antes, m0 = c.novos, len(MOTIVOS)
             await publicar(n)
             posts[rot] = c.ids[-1] if c.novos > antes else None
+            motivos[rot] = MOTIVOS[m0:]
     cli = cenario(corpo)
-    # 4 posts: Promotom (geral), Fidelidade, 30/90, Tech
-    r.check(cli.novos == 4, "12.quatro_posts", f"novos={cli.novos} {posts}")
-    for rot in ("PROM 110370", "FADA 17524", "FADA 17525", "FADA 17526"):
+    # 3 posts: o seco do Promotom vira o 30/90 (adoção genérico ×
+    # assinatura, Fase 2), Fidelidade e Tech em posts próprios
+    r.check(cli.novos == 3, "12.tres_posts", f"novos={cli.novos} {posts}")
+    for rot in ("PROM 110370", "FADA 17524", "FADA 17526"):
         r.check(posts.get(rot) is not None, f"12.publicou.{rot}", str(posts))
-    for rot in ("SAM 118699", "SAM 118700", "SAM 118705"):
-        r.check(posts.get(rot) is None, f"12.duplicata_nao_publica.{rot}", str(posts))
-    # nenhuma campanha caiu na família de outra
+    for rot in ("FADA 17525", "SAM 118699", "SAM 118700", "SAM 118705"):
+        r.check(posts.get(rot) is None, f"12.nao_abre_post.{rot}", str(posts))
+    prom = posts.get("PROM 110370")
+    r.check("EVOLUI" in motivos.get("FADA 17525", []),
+            "12.30_90_edita_o_seco_do_promotom", str(motivos.get("FADA 17525")))
+    r.check(any(mid == prom and "R$30 OFF em R$299" in txt
+                and "R$90 OFF em R$899" in txt for mid, txt in cli.edits),
+            "12.post_do_promotom_ficou_rico", str([(m, t[:40]) for m, t in cli.edits]))
+    of = db_ofertas_de_post(prom) if prom else []
+    r.check({"shopee|cupb|geral", "shopee|cupb|v:30-299", "shopee|cupb|v:90-899"}
+            <= set(of), "12.familia_do_promotom_cresce", str(of))
+    # nome nunca entra na família do genérico/assinatura
     for rot, chave in (("FADA 17524", "shopee|cupb|fidelidade"),
-                       ("FADA 17525", "shopee|cupb|v:30-299"),
                        ("FADA 17526", "shopee|cupb|tech")):
         dest = posts.get(rot)
         of = db_ofertas_de_post(dest) if dest else []
-        r.check(chave in of and "shopee|cupb|geral" not in of,
+        r.check(chave in of and not any(":" in k or k.endswith("|geral") for k in of),
                 f"12.familia_propria.{rot}", str(of))
 
 
