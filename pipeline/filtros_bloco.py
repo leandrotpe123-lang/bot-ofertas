@@ -178,6 +178,64 @@ def _rotulo_orfao(bloco: list) -> bool:
             and not _RE_URL_BLOCO.search(bloco[0]))
 
 
+# ─────────────────────────────────────────────────────────────────
+# SEÇÃO DE LOJA (post 24384 — God of War Laufey)
+#
+# Post multi-loja organiza um PARÁGRAFO por loja: "-Kabum / -CUPOM:
+# VIPOFWAR / link". `_segmentar` nunca deixa cupom ou conteúdo entrar
+# no bloco da URL (protege título e preço de oferta única), então só a
+# linha do link saía e "-Kabum + CUPOM" ficavam soltos no post.
+#
+# Um parágrafo sai INTEIRO quando é a seção de uma loja cujo link não
+# converteu — todas as condições:
+#   · teve URL removida e não sobrou nenhum link nele;
+#   · não é o 1º parágrafo com conteúdo (título);
+#   · tudo o que sobrou nele é linha CURTA (loja, cupom, preço da loja);
+#     linha longa é descrição e preserva o parágrafo;
+#   · outro parágrafo manteve link PUBLICÁVEL (a oferta continua).
+# Fora disso, comportamento de antes.
+# ─────────────────────────────────────────────────────────────────
+_SECAO_LINHA_CURTA = 40
+
+
+def _tem_url(bloco: list) -> bool:
+    return bool(bloco) and bool(urls_do_bloco(" ".join(bloco)))
+
+
+def _secoes_de_loja_sem_conversao(blocos: list, mantidos: list, mapa: dict,
+                                  preservar) -> set:
+    paragrafos, atual = [], []
+    for i, b in enumerate(blocos):
+        if not b:
+            if atual:
+                paragrafos.append(atual)
+                atual = []
+            continue
+        atual.append(i)
+    if atual:
+        paragrafos.append(atual)
+
+    def publicavel(i):
+        return mantidos[i] and any(_publicavel(u, mapa, preservar)
+                                   for u in urls_do_bloco(" ".join(blocos[i])))
+
+    fora = set()
+    for n, par in enumerate(paragrafos):
+        if n == 0:
+            continue                                    # título
+        removeu = any(not mantidos[i] and _tem_url(blocos[i]) for i in par)
+        sobrou_link = any(mantidos[i] and _tem_url(blocos[i]) for i in par)
+        if not removeu or sobrou_link:
+            continue
+        curtas = all(len(sem_marcacao(l).strip()) <= _SECAO_LINHA_CURTA
+                     for i in par if mantidos[i] for l in blocos[i])
+        if not curtas:
+            continue
+        if any(publicavel(i) for m, q in enumerate(paragrafos) if m != n for i in q):
+            fora.update(par)
+    return fora
+
+
 def filtrar_blocos(texto: str, mapa: dict, preservar=()) -> str:
     """Remove os blocos que não geraram oferta publicável.
 
@@ -186,8 +244,10 @@ def filtrar_blocos(texto: str, mapa: dict, preservar=()) -> str:
     vazias, para que o texto pareça ter nascido assim.
     """
     originais = _segmentar(texto)
-    blocos = [b for b in originais
-              if not b or _bloco_permanece(b, mapa, preservar)]
+    mantidos = [not b or _bloco_permanece(b, mapa, preservar) for b in originais]
+    fora = _secoes_de_loja_sem_conversao(originais, mantidos, mapa, preservar)
+    blocos = [b for i, b in enumerate(originais)
+              if mantidos[i] and i not in fora]
     blocos = [b for b in blocos if not (b and _rotulo_orfao(b))]
 
     # Renumerar só faz sentido depois de REMOVER. É a própria razão de

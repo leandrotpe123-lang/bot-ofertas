@@ -46,6 +46,7 @@ NÃO faz:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -136,6 +137,13 @@ class MensagemNormalizada:
 # ─────────────────────────────────────────────────────────────────
 # ENTRYPOINT — NORMALIZAÇÃO
 # ─────────────────────────────────────────────────────────────────
+def _cupons_no_texto(cupons: List[str], texto: str) -> List[str]:
+    """Os cupons que continuam no texto publicado, na ordem original."""
+    alvo = (texto or "").upper()
+    return [c for c in cupons
+            if re.search(rf"(?<![A-Z0-9]){re.escape(c)}(?![A-Z0-9])", alvo)]
+
+
 async def normalizar(
     bruta: MensagemBruta,
     is_override: bool = False,
@@ -223,6 +231,9 @@ async def normalizar(
     from pipeline.filtros import filtrar_blocos
     texto_limpo = filtrar_blocos(
         texto_limpo, mapa_publicacao, preservar_lst)
+    # Cupom cuja seção não foi ao ar (loja sem conversão, post 24384)
+    # não é da oferta: nem identidade, nem score, nem montagem.
+    cupons = _cupons_no_texto(cupons, texto_limpo)
     texto_analise = sem_marcacao(texto_limpo)
 
     log_nrm.info(
