@@ -100,8 +100,13 @@ def absorver(msg_id_dest: int, ofertas: list) -> int:
 
 
 def destinos_do_post(msg_id_dest: int) -> set:
-    """Destinos declarados que a família do post já reconhece."""
-    return {k for k in db_ofertas_de_post(msg_id_dest) if eh_chave_destino(k)}
+    """Destinos declarados que o post EXIBE.
+
+    [24423] Fato estrutural, nunca memória: oferta_index guarda também
+    o que a família só APRENDEU (absorver) — serve para encontrá-la, não
+    para dizer o que o post mostra. Destino só aprendido não faz o post
+    "ter destino" (decisão) nem recusar outro destino (_acolhe)."""
+    return {k for k in db_exibida(msg_id_dest) if eh_chave_destino(k)}
 
 
 def tem_destino(msg_id_dest: int) -> bool:
