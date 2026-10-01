@@ -16,6 +16,7 @@ NÃO faz:
 Contrato público:
   post_da_familia(ofertas, dest_fix, destinos, titulo) -> int | None
   eh_chave_container(chave) / mesmo_titulo(a, b) / so_container(ofertas)
+  mutexes_de_adocao(ofertas, destinos, container) -> list[str]  (só lock)
   tem_destino(msg_id_dest)             -> bool
   unir(msg_id_dest, ofertas)           -> list[str]
   absorver(msg_id_dest, ofertas)       -> int
@@ -42,7 +43,7 @@ from utils.textos import _RE_EMJ_NORM, _RUIDO_NORM, _rm_acentos
 from utils.urls import _netloc
 
 __all__ = ["post_da_familia", "eh_chave_container", "mesmo_titulo",
-           "so_container", "adocao_obsoleta",
+           "so_container", "adocao_obsoleta", "mutexes_de_adocao",
            "unir", "absorver", "compartilhadas", "tem_destino", "fortes", "estrutura", "relacao_composicao",
            "plano_fusao", "Plano"]
 
@@ -472,6 +473,42 @@ def adocao_obsoleta(msg_id_dest: int, ofertas: list) -> bool:
         f"🧬 [CUPOM_ADOCAO_OBSOLETA] post:{msg_id_dest} deixou de ser "
         f"só-{procura} antes do lock — {sorted(ofs)} refaz a busca")
     return True
+
+
+# ─────────────────────────────────────────────────────────────────
+# [Corrida de adoção] MUTEXES SINTÉTICOS
+#
+# A adoção (cupom sem nome; container LIVE) escolhe a família lendo o
+# banco SEM o lock do post. Os locks de identidade eram só as âncoras
+# concretas: `cupb|geral` × `cupb|<x>:<y>`, e a live × o forte da mesma
+# live, não têm chave em comum — duas mensagens complementares quase
+# simultâneas não viam o post uma da outra e cada uma abria o seu.
+#
+# Estas chaves entram SÓ no conjunto de locks de identidade de
+# publicacao.enviar(): nunca em ofertas, família, banco ou decisão.
+# Nenhuma é chave real: `*` não ocorre em `cupb` (geral | <x>:<y> |
+# tema) e a espécie `url*` não existe (eh_chave_container exige `url`).
+# ─────────────────────────────────────────────────────────────────
+def mutexes_de_adocao(ofertas, destinos: tuple = (), container: str = "") -> list:
+    """Mutexes de adoção do candidato (lista ordenada; vazia = nenhum):
+      · `<plat>|cupb|*` — quem pode entrar em _adotar_cupom_sem_nome
+        (só genérico ou só assinatura, sem destino e sem container);
+      · `<plat>|url*|<live>` — toda mensagem com container: o separado
+        (live + forte, que adota) e o que está nas ofertas (só-live, que
+        é adotado) usam a MESMA chave."""
+    ofs = set(ofertas or ())
+    if not ofs:
+        return []
+    mutexes = set()
+    if not destinos and not container:
+        plat = next(iter(ofs)).split("|", 1)[0]
+        if _so_cupom_sem_nome(ofs, plat) is not None:
+            mutexes.add(f"{prefixo_cupom_sem_codigo(plat)}*")
+    for chave in ofs | {container}:
+        if chave and eh_chave_container(chave):
+            plat, _url, live = chave.split("|", 2)
+            mutexes.add(f"{plat}|url*|{live}")
+    return sorted(mutexes)
 
 
 def post_da_familia(ofertas: list, dest_fix=None, destinos: tuple = (),

@@ -76,6 +76,13 @@ async def enviar(montada: MensagemMontada,
     # consumidos pela família e pela decisão. Vazio = comportamento
     # de antes.
     destinos: tuple = tuple(getattr(enr, "destinos", ()) or ())
+    # [Corrida de adoção] Locks de identidade = ofertas concretas + os
+    # mutexes SINTÉTICOS de adoção (cupom sem nome, container LIVE), numa
+    # única ordenação — a ordem global de aquisição continua total. Os
+    # mutexes só serializam: nunca entram em `ofertas` (família, banco,
+    # decisão). Ver familia.mutexes_de_adocao.
+    travas = sorted(set(ofertas) | set(familia.mutexes_de_adocao(
+        ofertas, destinos, _container_de(norm, ofertas))))
 
 # ── Camada 0: ORIGEM (Fase 1 do MB) — lock mais externo (I6) ──
     if norm is not None:
@@ -88,9 +95,9 @@ async def enviar(montada: MensagemMontada,
                 return True
             if ofertas:
                 async with contextlib.AsyncExitStack() as stack:
-                    for of in sorted(ofertas):
+                    for chave in travas:
                         await stack.enter_async_context(
-                            await exclusao.lock_identidade(of))
+                            await exclusao.lock_identidade(chave))
                     return await _enviar_resolvido(
                         montada, norm, ofertas, score, is_edit, dest_fix,
                         destinos=destinos)
@@ -99,8 +106,8 @@ async def enviar(montada: MensagemMontada,
                 destinos=destinos)
     if ofertas:
         async with contextlib.AsyncExitStack() as stack:
-            for of in sorted(ofertas):
-                await stack.enter_async_context(await exclusao.lock_identidade(of))
+            for chave in travas:
+                await stack.enter_async_context(await exclusao.lock_identidade(chave))
             return await _enviar_resolvido(montada, norm, ofertas, score,
                                            is_edit, destinos=destinos)
     return await _enviar_resolvido(montada, norm, ofertas, score, is_edit,
@@ -167,6 +174,20 @@ async def _enviar_resolvido(montada: MensagemMontada,
             await convergencia.consolidar(escrito)
 
 
+def _container_de(norm: Optional[MensagemNormalizada], ofertas: list) -> str:
+    """[Container] a chave da live da mensagem, quando a identidade dela
+    é outra (forte): só serve para ADOTAR o post da mesma live com
+    título equivalente se o forte não achou família (familia). Vazio
+    quando não há live ou quando a live já é a própria oferta."""
+    if norm is None:
+        return ""
+    ancora = getattr(norm, "ancora_url", "") or ""
+    container = f"{norm.plat}|url|{ancora}" if ancora else ""
+    if container in ofertas or not familia.eh_chave_container(container):
+        return ""
+    return container
+
+
 async def _enviar_inner(montada: MensagemMontada,
                         norm: Optional[MensagemNormalizada],
                         ofertas: list,
@@ -192,13 +213,7 @@ async def _enviar_inner(montada: MensagemMontada,
     if norm is not None and (ofertas or dest_fix):
         # Alvo FIXADO pelo vínculo de Origem (I2): edit de origem
         # vinculada nunca re-casa por conteúdo em outro post.
-        # [Container] a chave da live da mensagem, quando a identidade dela
-        # é outra (forte): só serve para ADOTAR o post da mesma live com
-        # título equivalente se o forte não achou família (familia).
-        ancora = getattr(norm, "ancora_url", "") or ""
-        container = f"{norm.plat}|url|{ancora}" if ancora else ""
-        if container in ofertas or not familia.eh_chave_container(container):
-            container = ""
+        container = _container_de(norm, ofertas)
         # O texto publicado traz o link da live: a composição EXIBIDA
         # inclui a chave do container (fraca — não conta como estrutura),
         # para que mensagens só-live do mesmo produto continuem achando o

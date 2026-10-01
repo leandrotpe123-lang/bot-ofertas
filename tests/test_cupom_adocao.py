@@ -27,7 +27,9 @@ caso da regra. Quem decide o texto é o score de sempre.
   L  container LIVE + cupb: a adoção não acontece (nas duas ordens)
   M  corrida: seco vivo; 30/90 e 10/119 escolhem o seco ANTES de qualquer
      escrita (lock_post atrasado) — o primeiro a travar adota, o outro
-     revalida sob o lock, refaz a busca e vira post próprio
+     revalida sob o lock, refaz a busca e vira post próprio (mutex
+     sintético desligado: prova a segunda linha de defesa isolada; a
+     primeira está em test_corrida_adocao)
   N  a mesma corrida com a ordem de chegada ao lock invertida
   O  contrato direto de adocao_obsoleta (revalidação sob o lock)
 
@@ -249,8 +251,15 @@ def test_L_container_live_nao_adota(r):
 def _corrida(atrasos):
     """seco publicado; depois 30/90 e 10/119 em paralelo, com lock_post
     atrasado por chamada (`atrasos`) — as duas escolhem o seco antes de
-    qualquer escrita, e a ordem de chegada ao lock é controlada."""
+    qualquer escrita, e a ordem de chegada ao lock é controlada.
+
+    SEGUNDA linha de defesa, isolada: o mutex sintético `<plat>|cupb|*`
+    (primeira linha, test_corrida_adocao) serializaria as duas antes da
+    escolha e esta janela não existiria. Aqui ele é desligado para provar
+    que a revalidação sob o lock do post (adocao_obsoleta) continua
+    sozinha impedindo a dupla adoção."""
     real = exclusao.lock_post
+    mutexes_reais = familia.mutexes_de_adocao
     chamadas = {"n": 0}
 
     async def lento(mid):
@@ -268,10 +277,12 @@ def _corrida(atrasos):
         g = c.ids[-1]
         chamadas["n"] = 0
         exclusao.lock_post = lento
+        familia.mutexes_de_adocao = lambda *_a, **_k: []
         try:
             await asyncio.gather(publicar(a, score=10), publicar(b, score=10))
         finally:
             exclusao.lock_post = real
+            familia.mutexes_de_adocao = mutexes_reais
         out["g"], out["n"], out["ids"] = g, c.novos, list(c.ids)
         out["edits"] = list(c.edits)
         out["fam_g"] = set(db_ofertas_de_post(g))
