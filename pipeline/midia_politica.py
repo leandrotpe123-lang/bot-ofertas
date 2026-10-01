@@ -13,6 +13,10 @@ TROCA_FONTE_EDITOU = "TROCA/fonte_editou"
 # continuam decidindo a POLÍTICA; este só reporta que a política
 # autorizou uma troca que não tem delta e por isso não vira I/O.
 PRESERVA_MIDIA_IGUAL  = "PRESERVA/midia_igual"
+# [24423] Motivo da DECISÃO, não da política: o candidato REDUZ/PARCIAL
+# não representa o que o post exibe, então não troca a imagem dele
+# (decisao.decidir rebaixa a troca; a política acima fica intocada).
+PRESERVA_COMPOSICAO   = "PRESERVA/composicao"
 
 
 def _regra_de_midia(imagem_nova, chat_novo, estado, is_edit=False,

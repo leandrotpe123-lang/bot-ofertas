@@ -62,7 +62,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from config import _MAX_EDITS
-from pipeline.midia_politica import politica_midia
+from pipeline.midia_politica import PRESERVA_COMPOSICAO, politica_midia
 from pipeline.score import V_LEGADO, score_na_escala
 from pipeline.vida_oferta import viva
 from pipeline.reativacao import eh_reativacao
@@ -278,6 +278,15 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # score. (A edição do LÍDER já saiu acima, em SINCRONIZAR: a fonte
     # retirar o próprio produto é legítimo e não passa por aqui.)
     perde_identidade = composicao in ("REDUZ", "PARCIAL")
+    if perde_identidade:
+        # [24423] ...e não troca a IMAGEM: quem não representa o que o post
+        # exibe não fala por ele, nem no texto nem na mídia (a foto do
+        # Samuel 118773, PARCIAL, subiu no post do Promotom 110373 por
+        # TROCA/post_sem_midia). Toda saída daqui para baixo passa por
+        # _com_midia, que rebaixa também permite_substituir/exigir_imagem.
+        # SINCRONIZAR (líder), RENASCER e ciclo morto saíram acima:
+        # intocados. A política (politica_midia) segue intocada.
+        trocar_midia, motivo_midia = False, PRESERVA_COMPOSICAO
     if destino_candidato is not None and destino_post is not None:
         if destino_candidato and not destino_post:
             if perde_identidade:

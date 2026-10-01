@@ -261,7 +261,8 @@ async def _enviar_inner(montada: MensagemMontada,
                     # [Container] o título casou, mas a mensagem só tem a
                     # live e o post já exibe identidade FORTE: substituir
                     # o texto apagaria o forte — o título nunca sobrescreve
-                    # identidade forte. Mídia segue a política.
+                    # identidade forte. Como todo REDUZ, também não troca
+                    # a imagem do post (decisao, [24423]).
                     composicao = familia.REDUZ
                 d = decidir(norm, montada, score, estado, agora, is_edit,
                             midia_key_aceita=chave_aceita,
