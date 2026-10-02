@@ -23,19 +23,29 @@ CADÊNCIA — intervalo entre INÍCIOS de pings ≈ T. O tempo gasto no ping
 o anterior terminou: nunca há dois em voo. Se um ping demorar mais que
 T, o seguinte sai assim que ele termina, sem rajada de recuperação.
 
-PROTEÇÕES — o heartbeat é auxiliar e nunca pode comprometer o bot:
+PROTEÇÕES — o heartbeat é auxiliar e nunca pode comprometer o bot.
+Falha TRANSITÓRIA pausa e volta; só falha PERMANENTE desativa:
   - timeout explícito por ping;
-  - 3 timeouts seguidos → desativa (sucesso zera o contador);
-  - FloodWait ou qualquer RPCError → desativa;
-  - erro de conexão → registra e segue (a reconexão é do Telethon);
+  - 3 falhas transitórias seguidas (timeout, erro de conexão) → PAUSA
+    (sucesso zera o contador);
+  - RPCError transitório (500, 503, 303, flood sem prazo, código
+    desconhecido) → PAUSA na hora (o servidor respondeu com erro);
+  - a PAUSA cresce em backoff exponencial conservador — 30 s, 60 s,
+    120 s, 240 s, teto 300 s — e zera no primeiro sucesso; depois dela
+    o laço volta à cadência normal. Em falha persistente: no máximo
+    uma rodada de tentativas a cada 5 min, nunca uma tempestade;
+  - FloodWait → dorme EXATAMENTE o prazo pedido e volta;
+  - permanente de autenticação/configuração (400, 401, 403, 404, 406)
+    → desativa na hora, sem nenhuma nova tentativa;
   - desconectado → pula o ciclo;
-  - qualquer outra exceção → desativa.
+  - qualquer outra exceção (defeito, não rede) → desativa.
 
 VARIÁVEL HEARTBEAT_PING_S — ausente, vazia, 0, negativa ou inválida:
 DESLIGADO. Decimal aceito. Abaixo de 1 s vale 1 s (piso desta frente).
 
-LOGS — nenhum por ping: uma linha no boot, um resumo a cada ~10 min e
-um WARNING se desativar.
+LOGS — nenhum por ping: uma linha no boot, um resumo a cada ~10 min,
+um WARNING por PAUSA/FLOODWAIT, um INFO ao RETOMAR e um WARNING se
+desativar.
 
 REVERSÃO: remover a variável (ou 0) e reiniciar.
 """
@@ -61,8 +71,16 @@ __all__ = ["iniciar", "intervalo_configurado"]
 _VARIAVEL = "HEARTBEAT_PING_S"
 _PISO_S = 1.0            # nesta frente, nunca abaixo de 1 s
 _TIMEOUT_S = 10.0        # ~100x o RTT medido (85 ms); cobre fila atrás de upload
-_MAX_TIMEOUTS = 3        # timeouts SEGUIDOS antes de desativar
+_MAX_TIMEOUTS = 3        # falhas transitórias SEGUIDAS antes de pausar
 _RESUMO_S = 600.0        # um resumo a cada ~10 min
+_PAUSA_BASE_S = 30.0     # 1ª pausa; dobra a cada pausa seguida sem sucesso
+_PAUSA_MAX_S = 300.0     # teto da pausa: falha persistente = 1 rodada a cada 5 min
+
+# Erros de autenticação/configuração: nenhuma nova tentativa os resolve.
+# Todo outro RPCError é tratado como transitório (pausa com backoff).
+_PERMANENTES = (errors.BadRequestError, errors.UnauthorizedError,
+                errors.ForbiddenError, errors.NotFoundError,
+                errors.AuthKeyError)
 
 
 def intervalo_configurado() -> Optional[float]:
@@ -81,12 +99,14 @@ def intervalo_configurado() -> Optional[float]:
 
 class _Estatistica:
     __slots__ = ("pings", "ok", "timeouts", "erros_conn", "desconectado",
+                 "erros_rpc", "pausas", "floodwaits",
                  "rtts", "ultimo_rtt_ms", "inicio")
 
     def __init__(self) -> None:
         self.inicio = time.monotonic()
         self.pings = self.ok = self.timeouts = 0
         self.erros_conn = self.desconectado = 0
+        self.erros_rpc = self.pausas = self.floodwaits = 0
         self.rtts: list = []
         self.ultimo_rtt_ms = -1
 
@@ -96,7 +116,9 @@ class _Estatistica:
             f"💓 HEARTBEAT|RESUMO|pings={self.pings}|ok={self.ok}"
             f"|timeouts={self.timeouts}|erros_conn={self.erros_conn}"
             f"|desconectado={self.desconectado}"
-            f"|rtt_ult_ms={self.ultimo_rtt_ms}|rtt_med_ms={med}")
+            f"|rtt_ult_ms={self.ultimo_rtt_ms}|rtt_med_ms={med}"
+            f"|erros_rpc={self.erros_rpc}|pausas={self.pausas}"
+            f"|floodwaits={self.floodwaits}")
         self.__init__()
 
 
@@ -104,17 +126,46 @@ def _desativar(motivo: str) -> None:
     log_sys.warning(f"💓 HEARTBEAT|DESATIVADO|motivo={motivo}")
 
 
+def _sair_se_cancelado() -> None:
+    """Python < 3.12: wait_for ENGOLE o cancelamento quando o ping
+    termina (com sucesso ou erro) no mesmo instante do cancel() — o laço
+    seguiria e o shutdown esperaria a task para sempre. O pedido fica
+    registrado em cancelling(); aqui ele é honrado. Em 3.12+ (produção:
+    3.13) é no-op: wait_for já propaga o cancelamento."""
+    tarefa = asyncio.current_task()
+    if tarefa is not None and tarefa.cancelling():
+        raise asyncio.CancelledError
+
+
 async def _laco(client, intervalo: float, timeout: float = _TIMEOUT_S,
-                resumo_s: float = _RESUMO_S) -> None:
+                resumo_s: float = _RESUMO_S, pausa_base: float = _PAUSA_BASE_S,
+                pausa_max: float = _PAUSA_MAX_S) -> None:
     """Task única e sequencial. Termina por cancelamento, encerramento
-    do processo ou desativação pelo circuit breaker."""
+    do processo ou erro PERMANENTE. Falha transitória nunca a mata:
+    pausa (backoff exponencial com teto) e volta à cadência normal."""
     est = _Estatistica()
-    seguidos = 0
+    falhas = 0               # transitórias seguidas (timeout, conexão)
+    pausas = 0               # pausas seguidas sem nenhum sucesso no meio
+    retomar = ""             # motivo da última interrupção, até o 1º sucesso
     ultimo_inicio = time.monotonic()
+
+    async def _pausar(motivo: str) -> None:
+        nonlocal falhas, pausas, retomar, ultimo_inicio
+        _sair_se_cancelado()
+        pausas += 1
+        est.pausas += 1
+        pausa = min(pausa_base * 2 ** (pausas - 1), pausa_max)
+        log_sys.warning(
+            f"💓 HEARTBEAT|PAUSA|motivo={motivo}|pausa_s={pausa:g}|pausas={pausas}")
+        await asyncio.sleep(pausa)
+        falhas, retomar = 0, motivo
+        ultimo_inicio = time.monotonic() - intervalo   # tenta logo após a pausa
+
     try:
         while True:
             espera = intervalo - (time.monotonic() - ultimo_inicio)
             await asyncio.sleep(max(0.0, espera))
+            _sair_se_cancelado()
             ultimo_inicio = time.monotonic()
 
             if time.monotonic() - est.inicio >= resumo_s:
@@ -134,16 +185,35 @@ async def _laco(client, intervalo: float, timeout: float = _TIMEOUT_S,
                     timeout)
             except asyncio.TimeoutError:
                 est.timeouts += 1
-                seguidos += 1
-                if seguidos >= _MAX_TIMEOUTS:
-                    _desativar(f"{seguidos}_timeouts_seguidos")
-                    return
+                falhas += 1
+                if falhas >= _MAX_TIMEOUTS:
+                    await _pausar(f"{falhas}_falhas_seguidas")
                 continue
-            except errors.RPCError as e:
+            except errors.FloodError as e:
+                segundos = getattr(e, "seconds", None)
+                if not isinstance(segundos, int) or segundos < 0:
+                    est.erros_rpc += 1
+                    await _pausar(type(e).__name__)
+                    continue
+                est.floodwaits += 1
+                log_sys.warning(f"💓 HEARTBEAT|FLOODWAIT|s={segundos}")
+                _sair_se_cancelado()
+                await asyncio.sleep(segundos)       # exatamente o prazo pedido
+                falhas, retomar = 0, type(e).__name__
+                ultimo_inicio = time.monotonic() - intervalo
+                continue
+            except _PERMANENTES as e:
                 _desativar(type(e).__name__)
                 return
+            except errors.RPCError as e:
+                est.erros_rpc += 1
+                await _pausar(type(e).__name__)
+                continue
             except (ConnectionError, OSError):
                 est.erros_conn += 1
+                falhas += 1
+                if falhas >= _MAX_TIMEOUTS:
+                    await _pausar(f"{falhas}_falhas_seguidas")
                 continue
             except asyncio.CancelledError:
                 raise
@@ -151,7 +221,10 @@ async def _laco(client, intervalo: float, timeout: float = _TIMEOUT_S,
                 _desativar(f"inesperado_{type(e).__name__}")
                 return
 
-            seguidos = 0
+            if retomar:
+                log_sys.info(
+                    f"💓 HEARTBEAT|RETOMADO|apos={retomar}|pausas={pausas}")
+            falhas, pausas, retomar = 0, 0, ""
             est.ok += 1
             est.ultimo_rtt_ms = round((time.monotonic() - t0) * 1000)
             est.rtts.append(est.ultimo_rtt_ms)

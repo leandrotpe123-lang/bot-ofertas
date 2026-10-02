@@ -226,45 +226,141 @@ def t10_timeout_e_reset(r):
     r.ok(not any("DESATIVADO" in x for x in cap.linhas), "não desativou")
 
 
-def t11_tres_timeouts_desativa(r):
-    cli = _ClienteFalso(falhas=["trava", "trava", "trava", None])
+# Pausas curtas para teste (produção: 30 s → 300 s). Mesma lógica.
+_PB, _PM = 0.1, 0.4
+
+
+def _pausas(linhas):
+    """[(motivo, pausa_s)] de cada HEARTBEAT|PAUSA logada."""
+    out = []
+    for x in linhas:
+        if "HEARTBEAT|PAUSA|" in x:
+            campos = dict(c.split("=", 1) for c in x.split("|") if "=" in c)
+            out.append((campos.get("motivo"), float(campos.get("pausa_s", "nan"))))
+    return out
+
+
+def t11_um_timeout_nao_pausa(r):
+    cli = _ClienteFalso(falhas=["trava", None, None])
 
     async def cenario():
-        t = asyncio.get_running_loop().create_task(hb._laco(cli, 0.01, timeout=0.05))
+        t = asyncio.get_running_loop().create_task(
+            hb._laco(cli, 0.01, timeout=0.05, pausa_base=_PB, pausa_max=_PM))
+        await asyncio.sleep(0.3)
+        vivo = not t.done()
+        t.cancel()
+        await asyncio.gather(t, return_exceptions=True)
+        return vivo
+    with _Captura() as cap:
+        vivo = _rodar(cenario())
+    r.ok(vivo and len(cli.chamadas) >= 3, f"1 timeout: segue pingando (chamadas={len(cli.chamadas)})")
+    r.ok(not any("PAUSA" in x or "DESATIVADO" in x for x in cap.linhas), "sem pausa, sem desativar")
+
+
+def t12_tres_timeouts_pausam_e_retomam(r):
+    cli = _ClienteFalso(falhas=["trava", "trava", "trava", None, None])
+
+    async def cenario():
+        t = asyncio.get_running_loop().create_task(
+            hb._laco(cli, 0.01, timeout=0.05, pausa_base=_PB, pausa_max=_PM))
         await asyncio.sleep(0.6)
-        return t
+        vivo = not t.done()
+        t.cancel()
+        await asyncio.gather(t, return_exceptions=True)
+        return vivo
     with _Captura() as cap:
-        t = _rodar(cenario())
-    r.ok(t.done() and t.exception() is None, "task terminou limpa")
-    r.ok(len(cli.chamadas) == 3, f"parou no 3º timeout (chamadas={len(cli.chamadas)})")
-    r.ok(any("HEARTBEAT|DESATIVADO|motivo=3_timeouts_seguidos" in x for x in cap.linhas),
-         "WARNING de desativação")
+        vivo = _rodar(cenario())
+    r.ok(vivo, "3 timeouts NÃO matam a task")
+    r.ok(_pausas(cap.linhas)[:1] == [("3_falhas_seguidas", _PB)], f"PAUSA logada ({_pausas(cap.linhas)})")
+    inicios = [c[0] for c in cli.chamadas]
+    r.ok(len(inicios) >= 5 and inicios[3] - inicios[2] >= 0.05 + _PB - 0.02,
+         "a 4ª tentativa só sai depois da pausa")
+    r.ok(any("HEARTBEAT|RETOMADO|apos=3_falhas_seguidas|pausas=1" in x for x in cap.linhas),
+         "RETOMADO logado no 1º sucesso")
+    r.ok(not any("DESATIVADO" in x for x in cap.linhas), "nunca desativa por timeout")
 
 
-def t12_floodwait_desativa(r):
-    cli = _ClienteFalso(falhas=[_flood(30), None])
+def t13_floodwait_respeita_o_prazo_e_volta(r):
+    cli = _ClienteFalso(falhas=[_flood(1), None, None])
 
     async def cenario():
         t = asyncio.get_running_loop().create_task(hb._laco(cli, 0.01))
-        await asyncio.sleep(0.3)
-        return t
+        await asyncio.sleep(1.4)
+        vivo = not t.done()
+        t.cancel()
+        await asyncio.gather(t, return_exceptions=True)
+        return vivo
     with _Captura() as cap:
-        t = _rodar(cenario())
-    r.ok(t.done() and len(cli.chamadas) == 1, "FloodWait → para na hora, sem martelar")
-    r.ok(any("DESATIVADO|motivo=FloodWaitError" in x for x in cap.linhas), "motivo=FloodWaitError")
+        vivo = _rodar(cenario())
+    inicios = [c[0] for c in cli.chamadas]
+    r.ok(vivo and len(inicios) >= 2, f"FloodWait não mata a task (chamadas={len(inicios)})")
+    r.ok(len(inicios) >= 2 and inicios[1] - inicios[0] >= 0.99,
+         f"esperou o prazo pedido ({[round(b - a, 3) for a, b in zip(inicios, inicios[1:])]})")
+    r.ok(any("HEARTBEAT|FLOODWAIT|s=1" in x for x in cap.linhas), "FLOODWAIT logado")
+    r.ok(any("HEARTBEAT|RETOMADO|apos=FloodWaitError" in x for x in cap.linhas), "RETOMADO logado")
+    r.ok(not any("DESATIVADO" in x for x in cap.linhas), "não desativa")
 
 
-def t13_rpcerror_desativa(r):
-    cli = _ClienteFalso(falhas=[errors.RPCError(request=None, message="X", code=400), None])
+def t13b_rpc_transitorio_pausa_e_retoma(r):
+    for nome, erro in (("ServerError", errors.ServerError(request=None, message="INTERNAL")),
+                       ("TimedOutError", errors.TimedOutError(request=None, message="TIMEOUT")),
+                       ("RPCError", errors.RPCError(request=None, message="X", code=599))):
+        cli = _ClienteFalso(falhas=[erro, None, None])
+
+        async def cenario(cli=cli):
+            t = asyncio.get_running_loop().create_task(
+                hb._laco(cli, 0.01, pausa_base=_PB, pausa_max=_PM))
+            await asyncio.sleep(0.4)
+            vivo = not t.done()
+            t.cancel()
+            await asyncio.gather(t, return_exceptions=True)
+            return vivo
+        with _Captura() as cap:
+            vivo = _rodar(cenario())
+        inicios = [c[0] for c in cli.chamadas]
+        r.ok(vivo and len(inicios) >= 2, f"{nome}: task viva e volta a pingar ({len(inicios)})")
+        r.ok(_pausas(cap.linhas)[:1] == [(nome, _PB)], f"{nome}: PAUSA imediata ({_pausas(cap.linhas)})")
+        r.ok(len(inicios) >= 2 and inicios[1] - inicios[0] >= _PB - 0.02, f"{nome}: respeitou a pausa")
+        r.ok(any(f"RETOMADO|apos={nome}" in x for x in cap.linhas), f"{nome}: RETOMADO")
+
+
+def t13c_permanente_desativa_sem_retry(r):
+    for nome, erro in (("BadRequestError", errors.BadRequestError(request=None, message="X")),
+                       ("UnauthorizedError", errors.UnauthorizedError(request=None, message="X")),
+                       ("AuthKeyUnregisteredError", errors.AuthKeyUnregisteredError(request=None)),
+                       ("ForbiddenError", errors.ForbiddenError(request=None, message="X"))):
+        cli = _ClienteFalso(falhas=[erro, None])
+
+        async def cenario(cli=cli):
+            t = asyncio.get_running_loop().create_task(
+                hb._laco(cli, 0.01, pausa_base=_PB, pausa_max=_PM))
+            await asyncio.sleep(0.3)
+            return t
+        with _Captura() as cap:
+            t = _rodar(cenario())
+        r.ok(t.done() and t.exception() is None and len(cli.chamadas) == 1,
+             f"{nome}: desativa na 1ª, sem nova tentativa (chamadas={len(cli.chamadas)})")
+        r.ok(any(f"DESATIVADO|motivo={nome}" in x for x in cap.linhas), f"{nome}: motivo logado")
+        r.ok(not _pausas(cap.linhas), f"{nome}: nenhuma pausa/retry")
+
+
+def t13d_backoff_cresce_com_teto_e_zera_no_sucesso(r):
+    srv = lambda: errors.ServerError(request=None, message="INTERNAL")  # noqa: E731
+    cli = _ClienteFalso(falhas=[srv(), srv(), srv(), srv(), None, srv(), None])
 
     async def cenario():
-        t = asyncio.get_running_loop().create_task(hb._laco(cli, 0.01))
-        await asyncio.sleep(0.3)
-        return t
+        t = asyncio.get_running_loop().create_task(
+            hb._laco(cli, 0.01, pausa_base=0.05, pausa_max=0.15))
+        await asyncio.sleep(0.9)
+        t.cancel()
+        await asyncio.gather(t, return_exceptions=True)
     with _Captura() as cap:
-        t = _rodar(cenario())
-    r.ok(t.done() and len(cli.chamadas) == 1, "RPCError → desativa")
-    r.ok(any("DESATIVADO|motivo=RPCError" in x for x in cap.linhas), "motivo=RPCError")
+        _rodar(cenario())
+    seq = [p for _m, p in _pausas(cap.linhas)]
+    r.ok(seq[:5] == [0.05, 0.1, 0.15, 0.15, 0.05], f"30→60→120…teto, zera no sucesso (proporcional: {seq})")
+    r.ok(hb._PAUSA_BASE_S == 30.0 and hb._PAUSA_MAX_S == 300.0, "produção: 30 s → teto 300 s")
+    r.ok(hb._TIMEOUT_S == 10.0 and hb._PISO_S == 1.0 and hb._MAX_TIMEOUTS == 3,
+         "timeout, piso e limiar de falhas inalterados")
 
 
 def t14_erro_conexao_segue(r):
@@ -316,6 +412,47 @@ def t16_cancelamento_limpo(r):
          f"cancelamento em voo termina limpo, sem exceção vazada (res={res})")
 
 
+class _ClienteCancelaNoMesmoTick:
+    """O ping termina no MESMO tick em que a task do heartbeat é
+    cancelada — a janela em que wait_for (Python < 3.12) engole o
+    cancelamento. `falha` None = ping ok; exceção = ping com erro."""
+
+    def __init__(self, falha=None):
+        self.falha, self.alvo, self.chamadas = falha, None, 0
+
+    def is_connected(self):
+        return True
+
+    async def __call__(self, request):
+        self.chamadas += 1
+        if self.chamadas == 2 and self.alvo is not None:
+            asyncio.get_running_loop().call_soon(self.alvo.cancel)
+            if self.falha is not None:
+                raise self.falha
+        return types.Pong(msg_id=1, ping_id=request.ping_id)
+
+
+def t16b_cancelamento_no_mesmo_tick_do_ping(r):
+    for rot, falha in (("ping_ok", None),
+                       ("ping_erro", errors.ServerError(request=None, message="X"))):
+        cli = _ClienteCancelaNoMesmoTick(falha)
+
+        async def cenario(cli=cli):
+            t = asyncio.get_running_loop().create_task(
+                hb._laco(cli, 0.01, pausa_base=30.0, pausa_max=300.0))
+            cli.alvo = t
+            t0 = time.monotonic()
+            res = await asyncio.wait_for(asyncio.gather(t, return_exceptions=True), 2.0)
+            return t, res, time.monotonic() - t0, cli.chamadas
+        try:
+            t, res, dt, n = _rodar(cenario())
+            r.ok(t.done() and res == [None] and dt < 1.0 and n == 2,
+                 f"{rot}: cancel honrado mesmo engolido pelo wait_for "
+                 f"(res={res}, {dt:.3f}s, chamadas={n})")
+        except Exception as e:                       # noqa: BLE001
+            r.ok(False, f"{rot}: task não terminou após cancel ({type(e).__name__})")
+
+
 def t17_encerrando_sai_e_shutdown(r):
     cli = _ClienteFalso()
 
@@ -338,6 +475,55 @@ def t17_encerrando_sai_e_shutdown(r):
     r.ok("_TASKS_FUNDO.get('heartbeat')" in src and "t.cancel()" in src
          and "asyncio.gather(t, return_exceptions=True)" in src,
          "_encerrar cancela E aguarda a task do heartbeat")
+
+
+def t17b_conexao_seguida_pausa_cancelamento_e_shutdown_na_pausa(r):
+    # 3 erros de conexão seguidos: mesma régua dos timeouts → pausa
+    cli = _ClienteFalso(falhas=[ConnectionError("a"), OSError("b"), ConnectionError("c"), None])
+
+    async def pausa():
+        t = asyncio.get_running_loop().create_task(
+            hb._laco(cli, 0.01, pausa_base=_PB, pausa_max=_PM))
+        await asyncio.sleep(0.4)
+        vivo = not t.done()
+        t.cancel()
+        await asyncio.gather(t, return_exceptions=True)
+        return vivo
+    with _Captura() as cap:
+        vivo = _rodar(pausa())
+    r.ok(vivo and _pausas(cap.linhas)[:1] == [("3_falhas_seguidas", _PB)],
+         f"3 erros de conexão → pausa, task viva ({_pausas(cap.linhas)})")
+
+    # cancelamento NO MEIO de uma pausa longa: sai limpo e na hora
+    cli2 = _ClienteFalso(falhas=[errors.ServerError(request=None, message="X")])
+
+    async def cancela():
+        t = asyncio.get_running_loop().create_task(
+            hb._laco(cli2, 0.01, pausa_base=30.0, pausa_max=300.0))
+        await asyncio.sleep(0.1)
+        t0 = time.monotonic()
+        t.cancel()
+        res = await asyncio.gather(t, return_exceptions=True)
+        return t, res, time.monotonic() - t0
+    t, res, dt = _rodar(cancela())
+    r.ok(t.done() and not t.cancelled() and res == [None] and dt < 0.5,
+         f"cancelamento durante a pausa termina limpo e imediato (res={res}, {dt:.3f}s)")
+
+    # shutdown (g._encerrando) durante a pausa: ao acordar, sai sem pingar
+    cli3 = _ClienteFalso(falhas=[errors.ServerError(request=None, message="X"), None])
+
+    async def encerra():
+        t = asyncio.get_running_loop().create_task(
+            hb._laco(cli3, 0.01, pausa_base=0.2, pausa_max=0.2))
+        await asyncio.sleep(0.05)
+        g._encerrando = True
+        try:
+            await asyncio.sleep(0.35)
+            return t.done(), len(cli3.chamadas)
+        finally:
+            g._encerrando = False
+    fim, n = _rodar(encerra())
+    r.ok(fim and n == 1, f"encerrando durante a pausa: sai sem nova tentativa (chamadas={n})")
 
 
 def t18_off_nao_cria_task(r):
