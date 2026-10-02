@@ -32,6 +32,11 @@ expansão e a API são simuladas em memória, com contagem de chamadas.
       é servido; com expansão em timeout → ausência, nunca a curta
   09  cache saudável continua servido sem rede (cache-first intacto)
   10  contrato puro de afiliacao_vigente
+  11  cache envenenado NÃO é renovado: detectado (por afilia ou pelo
+      normalizador), é descartado das duas camadas — a leitura renovaria
+      o ts e a linha ruim nunca expiraria (o Promotom repete os mesmos
+      encurtadores toda noite). Com expansão em timeout: AUSENTE e
+      nenhuma linha; com expansão real: a linha nova, correta
 
     python tests/test_shopee_expansao.py
 """
@@ -230,6 +235,40 @@ def test_10_contrato_afiliacao_vigente(r):
     r.check(v(Afiliacao(publicada="https://s.shopee.com.br/N",
                         canonica="https://live.shopee.com.br/live/7187289")) is True,
             "10.live_valida")
+
+
+def test_11_cache_envenenado_nao_e_renovado(r):
+    import time
+    from database_conexao import _db
+    from utils.urls import _cache_key
+    velho = time.time() - 10 * 86400
+
+    def linha(url):
+        with _db() as db:
+            return db.execute("SELECT ts, url_canon FROM links_cache WHERE url_orig=?",
+                              (_cache_key(url),)).fetchone()
+    casos = (("afilia", lambda: shp.afilia(CURTA_35169, None)),
+             ("normalizador", lambda: normalizacao_links._normalizar_um(CURTA_35169, None)))
+    for rot, chamar in casos:
+        for exp_rot, expansao, canon_final in (("timeout", lambda u: u, None),
+                                                ("expande", lambda u: PRODUTO, PRODUTO_LIMPO)):
+            rede = _Rede(expansao)
+
+            async def fluxo(chamar=chamar):
+                registrar_link(CURTA_35169, ENVENENADO, "shopee")
+                with _db() as db:
+                    db.execute("UPDATE links_cache SET ts=? WHERE url_orig=?",
+                               (velho, _cache_key(CURTA_35169)))
+                _limpar_memoria()
+                await chamar()
+                return linha(CURTA_35169), consultar_link(CURTA_35169)
+            depois, servida = _com_rede(rede, fluxo)
+            if canon_final is None:
+                r.check(depois is None, f"11.{rot}.{exp_rot}.linha_ruim_removida", str(depois))
+                r.check(servida is None, f"11.{rot}.{exp_rot}.nada_em_memoria", str(servida))
+            else:
+                r.check(depois is not None and depois[1] == canon_final,
+                        f"11.{rot}.{exp_rot}.linha_nova_correta", str(depois))
 
 
 if __name__ == "__main__":

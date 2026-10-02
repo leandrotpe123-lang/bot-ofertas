@@ -199,6 +199,12 @@ def _set_final(url: str, valor: Afiliacao):
             _final_cache.popitem(last=False)
 
 
+def _del_final(url: str) -> None:
+    from utils.urls import _cache_key
+    with _cache_lock:
+        _final_cache.pop(_cache_key(url), None)
+
+
 def _get_raw(url: str) -> Optional[str]:
     from utils.urls import _cache_key
     with _cache_lock:

@@ -15,8 +15,9 @@ por este módulo:
   - cache persistente : tabela de links no banco, sobrevive a
                         reinícios do processo
 
-As plataformas conhecem apenas as duas funções públicas deste
-módulo. Não conhecem o banco nem a estrutura de cache em memória.
+As plataformas conhecem apenas as funções públicas deste módulo
+(consultar, registrar, descartar). Não conhecem o banco nem a
+estrutura de cache em memória.
 
 Este módulo pertence ao core. Depende das camadas de cache e de
 persistência existentes; não depende de nenhuma plataforma.
@@ -26,8 +27,8 @@ from __future__ import annotations
 from typing import Optional
 
 from plataformas.contrato import Afiliacao
-from database import db_get_link, db_set_link
-from globals import _get_final, _set_final
+from database import db_get_link, db_remover_link, db_set_link
+from globals import _del_final, _get_final, _set_final
 from logger import log_nrm
 
 
@@ -87,3 +88,22 @@ def registrar_link(url_original: str, afiliacao: Afiliacao | str,
         # o cache em memória já foi atualizado, e a ausência da
         # entrada no banco apenas implicará reprocessamento futuro.
         log_nrm.warning(f"⚠️ registrar_link (persistência): {e}")
+
+
+def descartar_link(url_original: str) -> None:
+    """
+    Remove a entrada de uma URL original das duas camadas.
+
+    Para a plataforma que constatou que a entrada guardada NÃO vale
+    (por exemplo, canônica que não é identidade): ignorá-la não basta,
+    porque a consulta persistente renova o ts a cada leitura e a
+    entrada ruim nunca expiraria. Falha na remoção persistente é
+    registrada e isolada, como na gravação.
+    """
+    if not url_original:
+        return
+    _del_final(url_original)
+    try:
+        db_remover_link(url_original)
+    except Exception as e:
+        log_nrm.warning(f"⚠️ descartar_link (persistência): {e}")

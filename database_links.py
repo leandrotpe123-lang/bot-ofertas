@@ -54,6 +54,18 @@ def db_set_link(url_orig: str, url_conv: str, url_canon: str, plat: str):
     except Exception as e:
         log_db.error(f"❌ db_set_link: {e}")
 
+def db_remover_link(url_orig: str) -> None:
+    """Remove a entrada de uma URL original. Para entrada que a
+    plataforma declarou inválida: ignorá-la não basta, porque
+    db_get_link renova o ts a cada leitura e ela nunca expiraria."""
+    try:
+        from utils.urls import _cache_key
+        url_orig = _cache_key(url_orig)
+        with _db() as db:
+            db.execute("DELETE FROM links_cache WHERE url_orig=?", (url_orig,))
+    except Exception as e:
+        log_db.error(f"❌ db_remover_link: {e}")
+
 # ── short_links ───────────────────────────────────────────────────
 def db_get_short(code: str) -> Optional[str]:
     try:

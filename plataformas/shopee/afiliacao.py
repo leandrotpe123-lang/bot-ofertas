@@ -27,7 +27,7 @@ import aiohttp
 import config
 from logger import log_nrm
 from plataformas.contrato import AUSENTE, Afiliacao
-from utils.cache_links import consultar_link, registrar_link
+from utils.cache_links import consultar_link, descartar_link, registrar_link
 from utils.url_resolver import desencurtar
 from utils.urls import _netloc, _sanitizar_url
 
@@ -209,11 +209,14 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         return url
 
     # Consulta ao cache mediado. Entrada cuja canônica ainda é encurtador
-    # (gravada antes da guarda de expansão abaixo) não é servida.
+    # (gravada antes da guarda de expansão abaixo) não é servida — e é
+    # DESCARTADA: a leitura renova o ts e a entrada ruim nunca expiraria.
     cache = consultar_link(url)
-    if cache and afiliacao_vigente(cache):
-        _perf_marca("cache")
-        return cache
+    if cache:
+        if afiliacao_vigente(cache):
+            _perf_marca("cache")
+            return cache
+        descartar_link(url)
 
     # Expansão de encurtador próprio, quando aplicável.
     url_expandida = url
