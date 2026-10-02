@@ -31,6 +31,8 @@ canônica REAL (amazon._construir_url_afiliada) como no pipeline.
   05  /dp/<ASIN> → âncora de produto idêntica; duas fontes, um post
   06  primevideo.com continua campanha; registry só perdeu amazon.com.br
   07  fast-path da tag intacto: /dp/ preserva tudo e troca só a tag
+  08  /deals ESTÁVEL entre fontes: rastreamentos diferentes (ref_,
+      linkCode, barra final, tag alheia) → mesma âncora, um post
 
     python tests/test_amazon_campanha.py
 """
@@ -184,6 +186,24 @@ def test_07_fast_path_da_tag_intacto(r):
     saida = amazon._construir_url_afiliada(entrada)
     r.check(saida == entrada.replace("tag=outra-20", f"tag={TAG}"),
             "07.troca_so_a_tag", saida)
+
+
+def test_08_deals_estavel_entre_fontes(r):
+    fontes = [(FADA, "https://www.amazon.com.br/deals?ref_=nav_cs_gb&tag=fada-20"),
+              (SAMUEL, "https://www.amazon.com.br/deals?linkCode=ll2&tag=samuel-20&ref_=as_li_ss_tl"),
+              (FUMOTOM, "https://www.amazon.com.br/deals/?tag=fumo-20")]
+    ns = [amz(chat, "🔥 Ofertas do Dia Amazon\nhttps://amzn.to/x", u) for chat, u in fontes]
+    esperada = [f"amazon|url|https://www.amazon.com.br/deals?tag={TAG}"]
+    r.check(all(chaves(n) == esperada for n in ns), "08.mesma_ancora",
+            str([chaves(n) for n in ns]))
+    out = {}
+
+    async def corpo(c):
+        for n in ns:
+            await publicar(n, score=5)
+        out["novos"] = c.novos
+    cenario(corpo)
+    r.check(out["novos"] == 1, "08.tres_fontes_um_post", str(out))
 
 
 if __name__ == "__main__":
