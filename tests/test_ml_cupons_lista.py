@@ -25,8 +25,9 @@ CORPUS REAL (t.me/s, texto e códigos monoespaçados fiéis): Promotom
       negativos (sem código, sem desconto, com URL, preço de produto)
   02  natureza: 1368 com produto-vitrine é CUPOM; produto do Samuel
       continua PRODUTO; sem códigos, o gate é o de antes
-  03  título com conteúdo depois não é rótulo órfão; órfão de verdade
-      continua saindo
+  03  rótulo com o conteúdo logo depois não é órfão (título, cabeçalho
+      "🚨🚨 TUTORIAL:" no meio); órfão de verdade continua saindo, também
+      em cadeia ("Veja:" → "Link extra:" → link que não converteu)
   04  1367 → 1368: UM post; editado para a versão com listas; PROMOAQU,
       DESCONTOSMELI e OFERTA continuam no ar com o resgate; exibida =
       união; canal de cupons igual
@@ -208,6 +209,14 @@ def test_03_titulo_nao_e_rotulo_orfao(r):
     so_rotulo = "Cupons de hoje:\n\nhttps://kabum.com.br/x"
     r.check(filtrar_blocos(so_rotulo, {}) == "", "03.titulo_sem_conteudo_sai",
             repr(filtrar_blocos(so_rotulo, {})))
+    meio = ("Oferta X\nhttps://meli.la/a\n\n🚨🚨 TUTORIAL:\n\n"
+            "1. Entre no APP\n2. Copie o cupom")
+    r.check("🚨🚨 TUTORIAL:" in filtrar_blocos(meio, {"https://meli.la/a": "x"}),
+            "03.cabecalho_do_meio_com_conteudo_fica")
+    cadeia = ("Oferta X\nhttps://meli.la/a\n\nVeja:\n\nLink extra:\n\n"
+              "https://kabum.com.br/x")
+    saida = filtrar_blocos(cadeia, {"https://meli.la/a": "x"})
+    r.check(saida == "Oferta X\nhttps://meli.la/a", "03.orfaos_em_cadeia_saem", repr(saida))
 
 
 def test_04_1367_depois_1368_um_post_editado_nada_some(r):

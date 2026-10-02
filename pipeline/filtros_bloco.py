@@ -246,16 +246,21 @@ def filtrar_blocos(texto: str, mapa: dict, preservar=()) -> str:
     originais = _segmentar(texto)
     mantidos = [not b or _bloco_permanece(b, mapa, preservar) for b in originais]
     fora = _secoes_de_loja_sem_conversao(originais, mantidos, mapa, preservar)
-    blocos = [b for i, b in enumerate(originais)
-              if mantidos[i] and i not in fora]
-    # O TÍTULO (1º bloco com conteúdo) não é rótulo órfão enquanto houver
-    # conteúdo depois dele: "🔥 Cupons do Mercado Livre ativos agora:"
+    fica = [mantidos[i] and i not in fora for i in range(len(originais))]
+    # Rótulo ÓRFÃO é o que perdeu o conteúdo que anunciava: o próximo
+    # bloco com conteúdo saiu, ou não existe. Rótulo com o conteúdo logo
+    # depois FICA — o título "🔥 Cupons do Mercado Livre ativos agora:"
     # seguido de linha em branco e da lista saía do post (id=1368, 02/10)
-    # — e, sem título, o post de cupom deixava de ser reconhecido.
-    titulo = next((i for i, b in enumerate(blocos) if b), None)
-    blocos = [b for i, b in enumerate(blocos)
-              if not (b and _rotulo_orfao(b)
-                      and not (i == titulo and any(blocos[i + 1:])))]
+    # e, sem título, o post de cupom nem era reconhecido; "🚨🚨 TUTORIAL:"
+    # da Fada também saía com os passos no post.
+    for i in reversed(range(len(originais))):     # o rótulo seguinte decide antes
+        b = originais[i]
+        if fica[i] and b and _rotulo_orfao(b):
+            prox = next((j for j in range(i + 1, len(originais))
+                         if originais[j]), None)
+            if prox is None or not fica[prox]:
+                fica[i] = False
+    blocos = [b for i, b in enumerate(originais) if fica[i]]
 
     # Renumerar só faz sentido depois de REMOVER. É a própria razão de
     # ser de _renumerar: "numeração quebrada denuncia remoção". Sem
