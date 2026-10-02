@@ -28,12 +28,16 @@ __all__ = ["eh_entidade_cupom", "natureza"]
 def eh_entidade_cupom(norm: MensagemNormalizada) -> bool:
     """[F-C4 / INV-E5] Decisão ÚNICA de natureza cupom-como-entidade
     (gate R1×R2 + R2+). Alimenta âncoras E canônica — nenhuma camada
-    pode enxergar uma natureza diferente das demais."""
+    pode enxergar uma natureza diferente das demais.
+
+    Os códigos declarados (T0) entram no gate: a linha que declara um
+    deles é item de cupom em qualquer formato (utils.cupom)."""
     texto = norm.texto_analise
-    return eh_post_cupom(texto) and (
+    return eh_post_cupom(texto, norm.cupons) and (
         not norm.ids_globais
-        or beneficio_e_de_loja(texto)
-        or (len(norm.cupons) >= 2 and not tem_preco_de_item(texto)))
+        or beneficio_e_de_loja(texto, norm.cupons)
+        or (len(norm.cupons) >= 2
+            and not tem_preco_de_item(texto, norm.cupons)))
 
 
 def natureza(norm: MensagemNormalizada) -> str:

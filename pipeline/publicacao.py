@@ -37,6 +37,7 @@ from pipeline import convergencia
 from pipeline import exclusao
 from pipeline import familia
 from pipeline import origem
+from pipeline import retencao_cupons
 from pipeline.montagem import MensagemMontada, materializar_imagem
 from pipeline.normalizacao import MensagemNormalizada
 from pipeline.enriquecimento import MensagemEnriquecida
@@ -188,6 +189,15 @@ def _container_de(norm: Optional[MensagemNormalizada], ofertas: list) -> str:
     return container
 
 
+def _limite_texto(estado: dict, chave_aceita: str) -> int:
+    """Tamanho máximo do texto do post: legenda quando ele tem (ou pode
+    ter) mídia, mensagem de texto quando nasceu sem. Na dúvida, legenda."""
+    midia = estado.get("midia_chat")
+    if midia is None or midia or chave_aceita:
+        return retencao_cupons.LIMITE_LEGENDA
+    return retencao_cupons.LIMITE_TEXTO
+
+
 async def _enviar_inner(montada: MensagemMontada,
                         norm: Optional[MensagemNormalizada],
                         ofertas: list,
@@ -264,12 +274,32 @@ async def _enviar_inner(montada: MensagemMontada,
                     # identidade forte. Como todo REDUZ, também não troca
                     # a imagem do post (decisao, [24423]).
                     composicao = familia.REDUZ
+                # [ML lista] A versão COM DESTINO (cada cupom com a sua
+                # lista) sobre o post só-mecanismo (`/sec/`) que não traz
+                # todos os cupons exibidos: o texto composto mantém no ar
+                # os que só o post tinha (retencao_cupons). A decisão
+                # recebe a composição do que vai ser EXIBIDO — que cobre
+                # tudo e acrescenta a lista (AMPLIA). Sem retenção segura,
+                # nada muda: a edição segue bloqueada. O texto composto só
+                # vai ao ar se a decisão for EVOLUIR (ver abaixo).
+                composta = None
+                if (destino_candidato and not destino_post
+                        and composicao in (familia.REDUZ, familia.PARCIAL)):
+                    composta = retencao_cupons.reter(
+                        montada.texto, estado.get("texto") or "",
+                        familia.fortes(exibida_rel) - familia.fortes(ofertas),
+                        limite=_limite_texto(estado, chave_aceita))
+                    if composta is not None:
+                        composicao = familia.relacao_composicao(
+                            list(ofertas) + list(composta.retidas),
+                            exibida_rel)
                 d = decidir(norm, montada, score, estado, agora, is_edit,
                             midia_key_aceita=chave_aceita,
                             midia_candidata=norm.tem_midia,
                             destino_candidato=destino_candidato,
                             destino_post=destino_post,
-                            composicao=composicao)
+                            composicao=composicao,
+                            retencao=composta is not None)
 
                 # ══ [E5.0] PORTÃO A — MATERIALIZAÇÃO SOB DEMANDA ══
                 # Só quando a política AUTORIZOU tocar a imagem
@@ -295,7 +325,33 @@ async def _enviar_inner(montada: MensagemMontada,
                                     midia_candidata=False,
                                     destino_candidato=destino_candidato,
                                     destino_post=destino_post,
-                                    composicao=composicao)
+                                    composicao=composicao,
+                                    retencao=composta is not None)
+
+                # [ML lista] Só a EVOLUÇÃO leva o texto composto. Na
+                # SINCRONIZAÇÃO o líder espelha a PRÓPRIA mensagem e o
+                # bloco retido (de outra fonte) que já está no ar fica —
+                # nunca um código que o próprio líder tirou. Qualquer
+                # outra ação: nada composto.
+                if d.acao == SINCRONIZAR:
+                    composta = retencao_cupons.manter(
+                        montada.texto, estado.get("texto") or "", ofertas,
+                        exibida_rel,
+                        limite=_limite_texto(estado, chave_aceita))
+                elif d.acao != EVOLUIR:
+                    composta = None
+                exibir = list(ofertas)
+                if composta is not None:
+                    montada = replace(montada, texto=composta.texto)
+                    exibir = list(ofertas) + list(composta.retidas)
+                    exibidas_msg = list(exibidas_msg) + list(composta.retidas)
+                    if d.acao == SINCRONIZAR:
+                        d = replace(d, texto_igual=(
+                            montada.texto == (estado.get("texto") or "")))
+                    log_out.info(
+                        f"🧩 [CUPONS_RETIDOS] post:{msg_id_rel} {d.motivo} "
+                        f"manteve {list(composta.retidas)} "
+                        f"(id={norm.msg_id} chat={norm.chat})")
 
                 # ══ [Frente 8b] VEREDITO ESTRUTURAL — autoridade única ══
                 # Toda escrita de CONTEÚDO num post existente (evolução,
@@ -308,7 +364,7 @@ async def _enviar_inner(montada: MensagemMontada,
                 if d.acao in (EVOLUIR, SINCRONIZAR, RENASCER):
                     v = convergencia.avaliar(
                         -1 if d.acao == RENASCER else msg_id_rel,
-                        ofertas, score,
+                        exibir if d.acao != RENASCER else ofertas, score,
                         superar=(msg_id_rel if d.acao == RENASCER else None),
                         chat=norm.chat, msg_id=norm.msg_id)
                     if not v.permitido:

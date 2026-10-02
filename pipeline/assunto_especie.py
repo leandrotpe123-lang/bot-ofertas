@@ -18,7 +18,7 @@ import re
 from typing import Optional
 
 from pipeline.estado_evento import _KW_EVENTO
-from utils.cupom import _KW_CUPOM, linha_e_item_de_cupom
+from utils.cupom import _KW_CUPOM, linha_declara_cupom, linha_e_item_de_cupom
 
 # ─────────────────────────────────────────────────────────────────
 # Detecção do TIPO do post (define qual identidade usar)
@@ -95,20 +95,27 @@ def _cupom_e_sujeito(titulo: str) -> bool:
     return True
 
 
-def _eh_lista_cupons(texto: str) -> bool:
+def _item(linha: str, codigos=()) -> bool:
+    """Linha de item de cupom: a forma "…: COD" (utils.cupom) ou a
+    declaração de um dos códigos T0 da mensagem com marcador de
+    desconto, qualquer que seja o separador. Sem `codigos`, só a forma."""
+    return linha_e_item_de_cupom(linha) or linha_declara_cupom(linha, codigos)
+
+
+def _eh_lista_cupons(texto: str, codigos=()) -> bool:
     """
     Detecta se o post é uma LISTA DE CUPONS (não um cupom único).
-    Critério: 2+ linhas no formato "R$ X OFF em R$ Y: CODIGO".
+    Critério: 2+ linhas de item de cupom (ver _item).
     """
     linhas = texto.strip().split("\n")
     linhas_lista = sum(
         1 for l in linhas
-        if linha_e_item_de_cupom(l)
+        if _item(l, codigos)
     )
     return linhas_lista >= 2
 
 
-def _eh_post_cupom(texto: str) -> bool:
+def _eh_post_cupom(texto: str, codigos=()) -> bool:
     """
     Detecta se o post é 'tipo cupom' — onde o cupom é o ASSUNTO PRINCIPAL.
 
@@ -121,6 +128,10 @@ def _eh_post_cupom(texto: str) -> bool:
 
     Casos (d) e (e) cobrem cards Shopee com título genérico ("Leo Indica
     / Ofertas Insanas") + linha "🎟️ 50% Cashback ... : BRUIANHEZ10".
+
+    `codigos` (T0 da mensagem): (b) e (c) reconhecem também a linha que
+    declara um código com marcador de desconto, em qualquer formato
+    ("… — COD"). Vazio: exatamente o comportamento anterior.
     """
     linhas = [l for l in texto.strip().split("\n") if l.strip()]
     if not linhas:
@@ -134,11 +145,11 @@ def _eh_post_cupom(texto: str) -> bool:
         return True
 
     # Caso (b): título já é "R$ X OFF: CODIGO" / "X% OFF: CODIGO"
-    if linha_e_item_de_cupom(titulo):
+    if _item(titulo, codigos):
         return True
 
     # Caso (c): 2+ linhas formato lista (reusa _eh_lista_cupons)
-    if _eh_lista_cupons(texto):
+    if _eh_lista_cupons(texto, codigos):
         return True
 
     # Caso (d): cashback presente nas primeiras 5 linhas + cupom
@@ -205,14 +216,15 @@ def _extrair_pct_cashback(texto: str) -> str:
     m = _RE_PCT.search(primeiras)
     return m.group(1) if m else ""
 
-def eh_lista_cupons(texto: str) -> bool:
-    """O post é uma LISTA de cupons (2+ linhas 'R$X OFF em R$Y: COD')?"""
-    return _eh_lista_cupons(texto)
+def eh_lista_cupons(texto: str, codigos=()) -> bool:
+    """O post é uma LISTA de cupons (2+ linhas de item de cupom)?"""
+    return _eh_lista_cupons(texto, codigos)
 
 
-def eh_post_cupom(texto: str) -> bool:
-    """O assunto do post é um CUPOM (código promocional)?"""
-    return _eh_post_cupom(texto)
+def eh_post_cupom(texto: str, codigos=()) -> bool:
+    """O assunto do post é um CUPOM (código promocional)? `codigos`: os
+    T0 da mensagem (ver _eh_post_cupom)."""
+    return _eh_post_cupom(texto, codigos)
 
 
 def eh_post_cashback(texto: str, tem_sinal_cashback: bool) -> bool:

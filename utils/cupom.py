@@ -136,6 +136,37 @@ def _codigos_por_recorte(linha: str, recortes) -> List[str]:
     return achados
 
 
+# ── Linha que declara um cupom DESTA mensagem — PREDICADO DE GATE ──
+# A FORMA da linha varia por grupo ("…: COD", "… — COD", "COD - …",
+# condições entre parênteses "(mín. R$79, limite R$100)"); o que não
+# varia é o CÓDIGO que a própria fonte marcou (T0). Uma linha que
+# contém um código declarado e um marcador de desconto é item de
+# cupom: os valores dela são benefício e condição, nunca preço de
+# produto. Medido em produção (id=1368, 02/10): "10% OFF (mín. R$79,
+# limite R$100) — PROMOML" virou preço de item, o post de 15 cupons
+# virou produto pelo link de resgate e DUPLICOU o post dos mesmos
+# cupons.
+#
+# Não infere código: só RECONHECE, na linha, códigos já declarados
+# (doutrina de evidência acima). Sem códigos, devolve False — quem não
+# os passa mantém o gate exatamente como era.
+_RE_MARCADOR_DESCONTO = re.compile(r'\bOFF\b|%|\bdesconto\b', re.I)
+
+
+def linha_declara_cupom(linha: str, codigos=()) -> bool:
+    """PREDICADO ESTRUTURAL: a linha declara um dos `codigos` (T0 desta
+    mensagem) junto de um marcador de desconto? Linha com URL nunca."""
+    l = (linha or "").strip()
+    if not l or not codigos or "http" in l.lower():
+        return False
+    if not _RE_MARCADOR_DESCONTO.search(l):
+        return False
+    up = l.upper()
+    return any(
+        re.search(rf'(?<![A-Z0-9_-]){re.escape(c.upper())}(?![A-Z0-9_-])', up)
+        for c in codigos if c)
+
+
 def linha_e_item_de_cupom(linha: str) -> bool:
     """PREDICADO ESTRUTURAL: esta linha tem forma de item de cupom?
 

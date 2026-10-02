@@ -25,7 +25,10 @@ sintéticas (bloqueadas neste ambiente); o ML aqui é só DADO de teste.
       chega, PARCIAL) e MECANISMO_NAO_SUBSTITUI_DESTINO com PARCIAL não
       trocam; com IGUAL a mídia segue a política
   04  decidir(): SINCRONIZAR (edição do líder) com REDUZ mantém a política
-  05  caminho real 24423: a foto do Samuel NÃO sobe no post do Promotom
+  05  caminho real 24423: a foto do Samuel NÃO sobe no post do Promotom.
+      [ML lista, 02/10] O texto agora evolui para a versão com listas
+      (cupons só do Promotom retidos — retencao_cupons): é edição de
+      TEXTO no lugar, sem mídia, sem apagar+reenviar
   06  caminho real REDUZ: Fada 17529 (só PROMOML, com foto) não troca
   07  caminho real IGUAL: imagem de classe melhor ainda faz upgrade
   08  caminho real AMPLIA: evolui texto e imagem
@@ -258,11 +261,14 @@ def test_05_24423_foto_do_samuel_nao_sobe(r):
         out["decisao"] = list(MOTIVOS_MIDIA)
         out["midia_chat"] = (db_get_post(out["post"]) or {}).get("midia_chat")
     c = cenario(corpo)
-    r.check(out["decisao"] == [("COMPOSICAO_PERDERIA_IDENTIDADE", PRESERVA_COMPOSICAO)],
+    r.check(out["decisao"] == [("DESTINO_PREVALECE", PRESERVA_COMPOSICAO)],
             "05.decisao", str(out["decisao"]))
     r.check(c.imagens_em(out["post"]) == [], "05.post_continua_sem_a_foto_do_samuel",
             str(c.imagens_em(out["post"])))
-    r.check(not c.edits, "05.nenhuma_escrita_no_telegram", str(c.edits))
+    edits = [(i, t) for i, t, img in c.edits if i == out["post"] and not img]
+    r.check(len(c.edits) == 1 and len(edits) == 1
+            and "OPAECONOMIZEI" in edits[0][1] and "DESCONTOSMELI" in edits[0][1],
+            "05.so_o_texto_editado_no_lugar_nada_some", str(c.edits)[:300])
     r.check(out["midia_chat"] == "", "05.midia_chat_intacto", repr(out["midia_chat"]))
 
 

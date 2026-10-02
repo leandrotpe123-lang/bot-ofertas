@@ -248,7 +248,14 @@ def filtrar_blocos(texto: str, mapa: dict, preservar=()) -> str:
     fora = _secoes_de_loja_sem_conversao(originais, mantidos, mapa, preservar)
     blocos = [b for i, b in enumerate(originais)
               if mantidos[i] and i not in fora]
-    blocos = [b for b in blocos if not (b and _rotulo_orfao(b))]
+    # O TÍTULO (1º bloco com conteúdo) não é rótulo órfão enquanto houver
+    # conteúdo depois dele: "🔥 Cupons do Mercado Livre ativos agora:"
+    # seguido de linha em branco e da lista saía do post (id=1368, 02/10)
+    # — e, sem título, o post de cupom deixava de ser reconhecido.
+    titulo = next((i for i, b in enumerate(blocos) if b), None)
+    blocos = [b for i, b in enumerate(blocos)
+              if not (b and _rotulo_orfao(b)
+                      and not (i == titulo and any(blocos[i + 1:])))]
 
     # Renumerar só faz sentido depois de REMOVER. É a própria razão de
     # ser de _renumerar: "numeração quebrada denuncia remoção". Sem

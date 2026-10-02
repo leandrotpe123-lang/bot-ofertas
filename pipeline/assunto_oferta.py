@@ -24,7 +24,7 @@ import re
 import unicodedata
 from typing import Optional
 from pipeline.estado_evento import _RE_RETORNO
-from utils.cupom import linha_e_item_de_cupom
+from utils.cupom import linha_declara_cupom, linha_e_item_de_cupom
 
 # ── C3.1: DESCRITOR DE BENEFÍCIO — identidade do cupom SEM CÓDIGO ──
 # Cupom com código usa o código. Cupom sem código precisa de uma
@@ -182,7 +182,7 @@ def _condicoes_do_beneficio(t: str) -> set:
     return pos
 
 
-def _faixas_de_item_cupom(t: str) -> list:
+def _faixas_de_item_cupom(t: str, codigos=()) -> list:
     """Intervalos [inicio, fim) das linhas que são ITEM DE CUPOM.
 
     [F-C6] Terceira forma do mesmo conceito. Numa linha cuja ESTRUTURA
@@ -197,11 +197,16 @@ def _faixas_de_item_cupom(t: str) -> list:
 
     Exclusão POR LINHA: preço de produto em qualquer outra linha
     continua contando normalmente.
+
+    `codigos` (os T0 da mensagem): a linha que declara um deles com
+    marcador de desconto também é item de cupom, qualquer que seja o
+    separador (utils.cupom.linha_declara_cupom). Vazio: só a forma
+    "…: COD", exatamente como antes.
     """
     faixas = []
     base = 0
     for linha in t.splitlines(keepends=True):
-        if linha_e_item_de_cupom(linha):
+        if linha_e_item_de_cupom(linha) or linha_declara_cupom(linha, codigos):
             faixas.append((base, base + len(linha)))
         base += len(linha)
     # LISTA, não linha solta. "Fone R$ 199: JBL10" é ambíguo — pode ser
@@ -211,13 +216,14 @@ def _faixas_de_item_cupom(t: str) -> list:
     return faixas if len(faixas) >= 2 else []
 
 
-def tem_preco_de_item(t: str) -> bool:
+def tem_preco_de_item(t: str, codigos=()) -> bool:
     """Existe valor R$ que seja preço do PRODUTO — isto é, que não seja
     desconto (OFF), condição do benefício (piso/teto), nem valor de uma
-    linha estruturalmente reconhecida como item de cupom?"""
+    linha estruturalmente reconhecida como item de cupom? `codigos`:
+    ver _faixas_de_item_cupom."""
     descontos = {m.start() for m in _RE_DESC_VAL.finditer(t)}
     condicoes = _condicoes_do_beneficio(t)
-    itens_cupom = _faixas_de_item_cupom(t)
+    itens_cupom = _faixas_de_item_cupom(t, codigos)
     for m in _RE_PRECO_ITEM.finditer(t):
         if any(ini <= m.start() < fim for ini, fim in itens_cupom):
             continue
@@ -229,7 +235,7 @@ def tem_preco_de_item(t: str) -> bool:
     return False
 
 
-def beneficio_e_de_loja(texto: str) -> bool:
+def beneficio_e_de_loja(texto: str, codigos=()) -> bool:
     """
     Discriminador R1×R2 — executa a TABELA do MB ratificado:
       · escopo-loja explícito ("em tudo", "no app", "acima de R$",
@@ -239,6 +245,7 @@ def beneficio_e_de_loja(texto: str) -> bool:
       · qualquer preço de item presente e sem escopo → dúvida → ITEM
         (zona cinzenta ratificada: prevalece o produto)
     O dono desta regra é o MB — este código apenas a executa.
+    `codigos`: ver _faixas_de_item_cupom.
     """
     t = texto[:_ESCOPO_BENEFICIO]
     beneficio = bool(_RE_BEN_PCT.search(t) or _RE_BEN_VLR.search(t)
@@ -247,7 +254,7 @@ def beneficio_e_de_loja(texto: str) -> bool:
         return False
     if _RE_ESCOPO_LOJA.search(t):
         return True
-    return not tem_preco_de_item(t)
+    return not tem_preco_de_item(t, codigos)
 
 
 _TEMAS_CAMPANHA = {

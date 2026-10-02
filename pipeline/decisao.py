@@ -106,7 +106,8 @@ def decidir(norm, montada, score: int, estado: dict | None,
             midia_candidata: bool | None = None,
             destino_candidato: bool | None = None,
             destino_post: bool | None = None,
-            composicao: str | None = None) -> Decisao:
+            composicao: str | None = None,
+            retencao: bool = False) -> Decisao:
     """Decide a ação para um candidato: PUBLICAR (sem estado vivo),
     EVOLUIR ou IGNORAR (com estado). Não executa nada.
 
@@ -132,7 +133,14 @@ def decidir(norm, montada, score: int, estado: dict | None,
     [Frente 8b] `composicao` é o FATO estrutural entregue pelo
     orquestrador: a composição forte do candidato em relação ao que o
     post EXIBE (familia.relacao_composicao) — IGUAL | AMPLIA | REDUZ |
-    PARCIAL. `None` preserva byte a byte o comportamento anterior."""
+    PARCIAL. `None` preserva byte a byte o comportamento anterior.
+
+    [ML lista] `retencao` é FATO do orquestrador: a composição só cobre
+    o que o post exibe porque o texto composto mantém no ar cupons de
+    OUTRA fonte (pipeline.retencao_cupons). O texto evolui; a imagem
+    publicada fica — quem não cobre o post sozinho não fala pela mídia
+    dele (a mesma regra do REDUZ/PARCIAL abaixo), e a edição é no lugar,
+    nunca apagar+reenviar. False preserva byte a byte o anterior."""
     if not estado:
         return Decisao(PUBLICAR, "SEM_ESTADO")
 
@@ -278,7 +286,7 @@ def decidir(norm, montada, score: int, estado: dict | None,
     # score. (A edição do LÍDER já saiu acima, em SINCRONIZAR: a fonte
     # retirar o próprio produto é legítimo e não passa por aqui.)
     perde_identidade = composicao in ("REDUZ", "PARCIAL")
-    if perde_identidade:
+    if perde_identidade or retencao:
         # [24423] ...e não troca a IMAGEM: quem não representa o que o post
         # exibe não fala por ele, nem no texto nem na mídia (a foto do
         # Samuel 118773, PARCIAL, subiu no post do Promotom 110373 por

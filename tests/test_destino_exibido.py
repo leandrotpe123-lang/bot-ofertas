@@ -14,6 +14,13 @@ em comum: PARCIAL → COMPOSICAO_PERDERIA_IDENTIDADE, texto preservado. Mas
 Regra: oferta_index = memória para ENCONTRAR a família (continua);
 post_exibida = fato estrutural do que o post MOSTRA (decide destino).
 
+[ML lista, 02/10] O 24423 real (110373 SEM foto) agora EDITA para a versão
+com listas, mantendo no ar os cupons só do Promotom (retencao_cupons): o
+post passa a EXIBIR os destinos (test_01, último bloco). O estado "destino
+só aprendido" continua existindo quando a retenção não cabe — o post COM
+foto, cuja legenda (≤ 1024) não comporta o texto composto — e é por ele
+que os testes abaixo exercitam a regra.
+
 CORPUS REAL (t.me/s/<canal>, texto e códigos fiéis): Promotom 110373,
 Samuel 118773. Os `meli.la` são bloqueados neste ambiente: a URL longa de
 cada lista é sintética (mesma forma `lista.mercadolivre.com.br/<container>
@@ -39,6 +46,8 @@ plataforma é tocado: o ML aqui é só DADO de teste.
 """
 import os
 import sys
+import types
+from dataclasses import replace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_familia_destino import (                              # noqa: E402
@@ -107,12 +116,22 @@ def destinos(chaves):
     return {k for k in chaves if eh_chave_destino(k)}
 
 
-def _24423(corpo_extra=None):
-    """Replay do 24423: 110373 abre, 118773 casa e é ignorado (PARCIAL)."""
+def _com_foto(n):
+    tag = f"m{n.msg_id}"
+    return replace(n, tem_midia=True, media_obj=types.SimpleNamespace(tag=tag),
+                   midia_key=f"k-{tag}")
+
+
+def _24423(corpo_extra=None, foto=True):
+    """Replay do 24423: 110373 abre, 118773 casa e é ignorado (PARCIAL).
+    `foto=True`: o 110373 com foto — a legenda não comporta o texto com os
+    cupons retidos, então o Samuel continua ignorado (destino só aprendido).
+    `foto=False`: o 24423 real de hoje — a lista EDITA o post."""
     out = {}
 
     async def corpo(c):
-        await publicar(promotom_110373(), score=26)
+        p = promotom_110373()
+        await publicar(_com_foto(p) if foto else p, score=26)
         out["post"] = post = c_ids(c)[-1]
         MOTIVOS.clear()
         sam = samuel_118773()
@@ -167,9 +186,18 @@ def _zerar_banco():
             db.execute(f"DELETE FROM {t}")
 
 
+async def _baixar(media, file=None):
+    """Mídia de teste: a foto existe (o Cliente base não baixa nada)."""
+    if file is not None and getattr(media, "tag", None):
+        file.write((media.tag + "|").encode().ljust(4096, b"x"))
+        return "arquivo"
+    return None
+
+
 def cenario(corpo):                                             # noqa: F811
     async def com_ids(c):
         _registrar_ids(c)
+        c.download_media = _baixar
         await corpo(c)
     _zerar_banco()
     return _cenario_real(com_ids)
@@ -188,6 +216,16 @@ def test_01_destino_so_aprendido_nao_e_destino_do_post(r):
     r.check(out["tem_destino"] is False, "01.tem_destino_False", str(out["tem_destino"]))
     r.check(out["destinos_do_post"] == set(), "01.destinos_do_post_vazio",
             str(out["destinos_do_post"]))
+
+    # o 24423 real (110373 sem foto): a lista EDITA o post e mantém no ar
+    # os cupons só do Promotom — o destino passa a ser EXIBIDO, de verdade
+    _cli, real = _24423(foto=False)
+    cups = {k.split("|")[2] for k in real["exibe"] if "|cup|" in k}
+    r.check(real["motivos_samuel"] == ["DESTINO_PREVALECE"] and real["novos_apos_samuel"] == 1,
+            "01.real_lista_edita_o_post", str(real["motivos_samuel"]))
+    r.check(real["dest_samuel"] <= real["exibe"] and real["tem_destino"] is True
+            and set(C_110373) <= cups, "01.real_exibe_listas_e_nenhum_cupom_some",
+            str(sorted(real["exibe"]))[:300])
 
 
 def test_02_mesmo_destino_exibido_e_destino_do_post(r):
@@ -246,8 +284,10 @@ def test_04_destino_diferente_nao_e_recusado_por_destino_aprendido(r):
     """Antes: a lista da Fada era recusada (FAMILIA_OUTRO_DESTINO) só
     porque o post APRENDEU as listas do Samuel, e virava post próprio.
     Agora o post (que não exibe destino) a acolhe pelo código, como
-    acolheria sem o Samuel; a decisão é a da Frente 8, intocada: PARCIAL
-    não substitui o texto (COMPOSICAO_PERDERIA_IDENTIDADE, auditada)."""
+    acolheria sem o Samuel, e decide NO POST. [ML lista, 02/10] A lista
+    da Fada é PARCIAL, mas o texto dela + os cupons retidos do Promotom
+    cabem na legenda: a lista edita o post sem nenhum cupom sumir
+    (DESTINO_PREVALECE) — antes, COMPOSICAO_PERDERIA_IDENTIDADE."""
     async def extra(c, out):
         MOTIVOS.clear()
         fada = msg(FADA, T_FADA_OUTRA_LISTA,
@@ -256,12 +296,15 @@ def test_04_destino_diferente_nao_e_recusado_por_destino_aprendido(r):
         await publicar(fada, score=26)
         out["fada_novo_post"] = c.novos > antes
         out["motivos_fada"] = list(MOTIVOS)
+        out["exibe_depois"] = set(db_exibida(out["post"]))
     _cli, out = _24423(extra)
     # a família recusada pelo destino só aprendido abria um post novo
     r.check(out["fada_novo_post"] is False, "04.casa_o_post_pelo_codigo",
             f"novo={out['fada_novo_post']} motivos={out['motivos_fada']}")
-    r.check(out["motivos_fada"] == ["COMPOSICAO_PERDERIA_IDENTIDADE"],
-            "04.decidido_no_post_pela_frente8", str(out["motivos_fada"]))
+    r.check(out["motivos_fada"] == ["DESTINO_PREVALECE"],
+            "04.decidido_no_post_lista_edita", str(out["motivos_fada"]))
+    cups = {k.split("|")[2] for k in out["exibe_depois"] if "|cup|" in k}
+    r.check(set(C_110373) <= cups, "04.nenhum_cupom_exibido_some", str(sorted(cups)))
 
 
 # Mecanismo (`/sec/`) que AMPLIA o que o post exibe: os 12 códigos do
