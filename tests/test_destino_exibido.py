@@ -29,6 +29,11 @@ plataforma é tocado: o ML aqui é só DADO de teste.
       MECANISMO_NAO_SUBSTITUI_DESTINO); com destino EXIBIDO continua barrado
   06  a memória continua: as âncoras aprendidas seguem em oferta_index e
       seguem encontrando a família
+  07  post VIVO com post_exibida VAZIA e destino só na memória: continua
+      sem destino — nenhum fallback para oferta_index (seria o 24423 de
+      volta). Legado pré-Frente 8b não existe vivo: janela_fim é fixada
+      no nascimento (25 min) e todo nascimento desde 4c6110b grava a
+      exibida; o único vivo com exibida vazia é o nascido sem âncoras.
 
     python tests/test_destino_exibido.py
 """
@@ -305,6 +310,27 @@ def test_06_memoria_continua_encontrando_a_familia(r):
     r.check(out["memoria_tem"], "06.ancora_aprendida_continua_na_memoria")
     r.check(out["overlap"] == out["post"], "06.memoria_continua_achando_o_post",
             str(out["overlap"]))
+
+
+def test_07_exibida_vazia_sem_fallback_para_memoria(r):
+    import time
+    from database_posts import db_absorver_ofertas, db_registrar_post
+    _zerar_banco()
+    post, agora = 24999, time.time()
+    destino = sorted(destinos(familia_destinos_samuel()))[0]
+    db_registrar_post(post, [], 26, "texto qualquer", "mercadolivre", str(PROMOTOM),
+                      agora + 900, 0, exibidas=[])
+    db_absorver_ofertas(post, [destino])
+    r.check(destino in db_ofertas_de_post(post) and not db_exibida(post),
+            "07.so_memoria", f"{db_ofertas_de_post(post)} {db_exibida(post)}")
+    r.check(familia.tem_destino(post) is False, "07.tem_destino_False")
+    r.check(familia.destinos_do_post(post) == set(), "07.destinos_do_post_vazio")
+    r.check(familia._acolhe(post, (OUTRO_DESTINO,)) is True, "07.acolhe_outro_destino")
+
+
+def familia_destinos_samuel():
+    from pipeline.enriquecimento import enriquecer
+    return enriquecer(samuel_118773()).ofertas
 
 
 if __name__ == "__main__":
