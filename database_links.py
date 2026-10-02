@@ -66,12 +66,22 @@ def db_get_short(code: str) -> Optional[str]:
         log_db.error(f"❌ db_get_short: {e}")
         return None
 
-def db_set_short(code: str, url: str):
+def db_set_short(code: str, url: str) -> Optional[str]:
+    """Grava code→url SEM sobrescrever (link já publicado continua
+    valendo) e devolve a URL que o código REALMENTE aponta depois:
+    `url` (gravou agora, ou já era dela), outra URL (colisão — o código
+    pertence a outro destino) ou None (falha de banco). Quem publica
+    compara: nunca publica código que leva a outro lugar."""
     try:
         with _db() as db:
             db.execute(
                 "INSERT OR IGNORE INTO short_links(code,url,ts) VALUES(?,?,?)",
                 (code, url, time.time()))
+            row = db.execute(
+                "SELECT url FROM short_links WHERE code=?", (code,)
+            ).fetchone()
+        return row[0] if row else None
     except Exception as e:
         log_db.error(f"❌ db_set_short: {e}")
+        return None
 

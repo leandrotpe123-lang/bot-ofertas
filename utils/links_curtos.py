@@ -48,18 +48,29 @@ def registrar_codigo(codigo: str, url_destino: str) -> bool:
     Entrada inválida: a ausência de `codigo` ou de `url_destino`
     constitui uso incorreto da função e resulta em ValueError.
 
-    Falha operacional: uma falha na gravação é registrada e isolada,
-    e a função retorna False. A função retorna True quando a
-    gravação é concluída.
+    Retorna True SOMENTE quando, depois da gravação, o código aponta
+    para `url_destino` (gravado agora ou já era dele). Colisão — o
+    código já pertence a OUTRA URL — e falha operacional retornam
+    False: quem publica nunca recebe confirmação de um código que leva
+    a outro lugar ou que não foi gravado. O log carrega só o código,
+    nunca a URL.
     """
     if not codigo or not url_destino:
         raise ValueError("codigo e url_destino são obrigatórios")
     try:
-        db_set_short(codigo, url_destino)
-        return True
+        gravada = db_set_short(codigo, url_destino)
     except Exception as e:
         log_sys.warning(f"⚠️ registrar_codigo: {e}")
         return False
+    if gravada == url_destino:
+        return True
+    if gravada is None:
+        log_sys.warning(f"⚠️ registrar_codigo: falha na gravação | codigo={codigo}")
+    else:
+        log_sys.warning(
+            f"⚠️ registrar_codigo: colisão — código já aponta para outro "
+            f"destino | codigo={codigo}")
+    return False
 
 
 def consultar_codigo(codigo: str) -> Optional[str]:

@@ -59,17 +59,28 @@ if not SHORT_BASE_URL:
 
 # ── Derivação do código curto ─────────────────────────────────────
 _TAMANHO_CODIGO = 7
+# Códigos tentados por URL antes do escape para o link longo. 28 bits
+# por código: a chance de 8 colisões seguidas é desprezível; o teto só
+# limita o custo quando o banco está falhando.
+_MAX_TENTATIVAS_CODIGO = 8
 
 
-def _derivar_codigo(url_afiliada: str) -> str:
+def _derivar_codigo(url_afiliada: str, tentativa: int = 0) -> str:
     """
     Deriva um código curto estável e determinístico a partir da URL
-    afiliada. Uma mesma URL produz sempre o mesmo código, o que
-    torna o registro idempotente e coerente com a semântica de não
-    sobrescrita da mediação de persistência.
+    afiliada. Uma mesma URL produz sempre a mesma SEQUÊNCIA de códigos,
+    o que torna o registro idempotente e coerente com a semântica de
+    não sobrescrita da mediação de persistência.
+
+    Tentativa 0 é o sha256(url)[:7] de sempre — todo código já
+    publicado continua idêntico. Só na colisão (o código já pertence a
+    outra URL) a tentativa n ≥ 1 deriva de `url + NUL + n`: NUL não
+    ocorre em URL, então a semente salgada nunca é a de outra URL.
     """
+    semente = (url_afiliada if not tentativa
+               else f"{url_afiliada}\x00{tentativa}")
     return hashlib.sha256(
-        url_afiliada.encode()
+        semente.encode()
     ).hexdigest()[:_TAMANHO_CODIGO]
 
 
@@ -107,19 +118,24 @@ def encurtar(url_afiliada: str) -> str:
         raise ValueError("url_afiliada é obrigatória")
 
     try:
-        codigo = _derivar_codigo(url_afiliada)
-        registrado = registrar_codigo(codigo, url_afiliada)
+        # O código publicado tem de apontar para ESTA URL: registrar_codigo
+        # só confirma quando aponta. Na colisão, o próximo da sequência
+        # determinística; esgotada (ou banco falhando), escape longo.
+        for tentativa in range(_MAX_TENTATIVAS_CODIGO):
+            codigo = _derivar_codigo(url_afiliada, tentativa)
+            if registrar_codigo(codigo, url_afiliada):
+                url_curta = _compor_url_curta(codigo)
+                log_sys.info(
+                    f"🔗 encurtado | codigo={codigo}"
+                    + (f" | tentativa={tentativa}" if tentativa else ""))
+                return url_curta
 
-        if not registrado:
-            log_sys.warning(
-                f"⚠️ encurtar: falha no registro, escape para link "
-                f"longo | codigo={codigo}"
-            )
-            return url_afiliada
-
-        url_curta = _compor_url_curta(codigo)
-        log_sys.info(f"🔗 encurtado | codigo={codigo}")
-        return url_curta
+        log_sys.warning(
+            f"⚠️ encurtar: nenhum código registrado em "
+            f"{_MAX_TENTATIVAS_CODIGO} tentativas, escape para link longo "
+            f"| codigo={_derivar_codigo(url_afiliada)}"
+        )
+        return url_afiliada
 
     except Exception as exc:
         log_sys.warning(
