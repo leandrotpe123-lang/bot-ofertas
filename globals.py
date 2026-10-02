@@ -133,33 +133,6 @@ async def _get_session() -> aiohttp.ClientSession:
         return _http_session
 
 
-# ── Sessões HTTP ADICIONAIS (pool próprio de uma plataforma) ──────
-# O core não sabe de quem é nem por quê: só garante que o encerramento
-# feche cada uma junto com a sessão comum (main._encerrar, passo 4 —
-# depois do drain).
-_sessoes_extras: list = []
-
-
-def registrar_sessao_extra(sessao) -> None:
-    if sessao is not None and sessao not in _sessoes_extras:
-        _sessoes_extras.append(sessao)
-
-
-async def fechar_sessoes_extras() -> int:
-    """Fecha e esquece as sessões registradas; devolve quantas fechou.
-    Nunca levanta: falha ao fechar uma não impede as outras."""
-    fechadas = 0
-    while _sessoes_extras:
-        sessao = _sessoes_extras.pop()
-        try:
-            if not sessao.closed:
-                await sessao.close()
-                fechadas += 1
-        except Exception as e:
-            log_db.error(f"❌ fechar sessão HTTP extra: {type(e).__name__}")
-    return fechadas
-
-
 # ── Inicialização de todos os globals async ───────────────────────
 def _init_globals():
     """
