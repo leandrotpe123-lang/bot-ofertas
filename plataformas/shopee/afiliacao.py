@@ -29,16 +29,19 @@ from logger import log_nrm
 from plataformas.contrato import AUSENTE, Afiliacao
 from utils.cache_links import consultar_link, descartar_link, registrar_link
 from utils.url_resolver import desencurtar
-from utils.urls import _netloc, _sanitizar_url
+from utils.urls import _cache_key, _netloc, _sanitizar_url
 
 from .links import (
     _DOMINIOS,
     _ENCURTADORES,
     _IDENTIFICADOR,
+    PAGINA_CARRINHO,
+    PAGINA_CARTEIRA,
     _bate_dominio,
     _canonica_live,
     _url_produto_canonica,
     limpa_url,
+    pagina_da_conta,
 )
 
 
@@ -48,8 +51,17 @@ _SHP_SECRET = os.environ.get("SHOPEE_SECRET", "")
 
 # ── Endpoint do serviço de afiliados ──────────────────────────────
 _ENDPOINT_AFILIADOS = "https://open-api.affiliate.shopee.com.br/graphql"
-_TENTATIVAS_AFILIACAO = 3
-_TIMEOUT_AFILIACAO = 12
+# TETO de tempo. A API responde em ~0,2 s (média medida em produção,
+# 83 chamadas, 0 falha). Antes: 3 tentativas de 12 s + esperas de 1,5 e
+# 3 s — uma conexão travada prendia o post por até 40 s, e a tentativa
+# seguinte (que costuma responder na hora) só vinha depois de 12 s.
+# Agora o prazo CRESCE por tentativa: a travada é abandonada em 3 s e
+# refeita numa conexão nova; uma API lenta, mas viva, ainda tem 5 e
+# 8 s. Pior caso 3+0,5+5+1+8 = 17,5 s. O prazo vale só para a
+# requisição — a espera na fila do semáforo HTTP não conta.
+_TIMEOUTS_AFILIACAO = (3, 5, 8)
+_TENTATIVAS_AFILIACAO = len(_TIMEOUTS_AFILIACAO)
+_ESPERA_ENTRE_TENTATIVAS = 0.5      # 0,5 s, depois 1 s
 # ── Instrumentação TEMPORÁRIA de desempenho ───────────────────────
 # Ligada só com SHP_PERF=1; desligada, cada gancho é um `if` sobre
 # uma constante de módulo — custo nulo. Não grava em disco, não faz
@@ -107,6 +119,60 @@ def _perf_marca(via: str, t0: float = 0.0) -> None:
 # serviço de afiliados. É política de afiliação, não classificação.
 _REPASSE_DIRETO = frozenset({"flapremios.com.br"})
 
+# ── LINKS FIXOS do operador: carteira de cupons e carrinho ────────
+# Mesmo princípio do `/sec/` próprio do Mercado Livre: a página é a
+# mesma para todo mundo, então sai sempre o NOSSO link — os que o
+# canal publica há semanas (a API devolve exatamente estes para as
+# duas páginas; conferido no histórico do canal desde 24/09).
+_LINK_FIXO = {
+    PAGINA_CARTEIRA: "https://s.shopee.com.br/8pkZllbmly",
+    PAGINA_CARRINHO: "https://s.shopee.com.br/1qapQu2VFM",
+}
+
+# Encurtadores CONHECIDOS que levam a essas páginas — trocados NA HORA,
+# sem expandir e sem chamar a API: o código curto da Shopee é fixo
+# (sempre o mesmo destino). Valor = a canônica que a expansão daria (a
+# página limpa), usada só quando o cache não tem a gravada — a
+# identidade do post fica a mesma. Fonte: URLs expandidas enviadas
+# pelo operador em 02/10 e o corpus dos canais (Fada 1qU7Zs67MB e
+# 7plKiu5H62; Promotom/fumotom 70GSVaUJxC e 7fW9IpEnZG; os nossos).
+# Código fora daqui que leve a essas páginas também sai com o link
+# fixo, mas só depois de expandido (regra de destino em `afilia`):
+# adivinhar pelo rótulo "Resgate aqui" levaria cupom de página
+# própria para a carteira.
+_CURTOS_CONHECIDOS = {
+    "1qU7Zs67MB": "https://shopee.com.br/user/voucher-wallet",   # Fada · Resgate aqui
+    "7plKiu5H62": "https://shopee.com.br/cart/",                 # Fada · Carrinho
+    "70GSVaUJxC": "https://shopee.com.br/user/voucher-wallet",   # Promotom · Resgate aqui
+    "7fW9IpEnZG": "https://shopee.com.br/cart",                  # Promotom · Carrinho
+    "8pkZllbmly": "https://shopee.com.br/user/voucher-wallet",   # nosso · carteira
+    "1qapQu2VFM": "https://shopee.com.br/cart",                  # nosso · carrinho
+}
+
+
+def _curto_conhecido(url: str) -> Optional[str]:
+    """A canônica de um encurtador conhecido de carteira/carrinho, ou
+    None. Compara o código exato (a Shopee diferencia maiúsculas) e só
+    em `s.shopee.com.br` — cada encurtador tem os próprios códigos;
+    query e fragmento não mudam o destino de um código curto."""
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return None
+    if (parsed.netloc or "").lower() != "s.shopee.com.br":
+        return None
+    return _CURTOS_CONHECIDOS.get((parsed.path or "").strip("/"))
+
+
+def _fixo(canonica: str) -> Optional[Afiliacao]:
+    """O nosso link fixo para a página da conta, com a canônica
+    recebida (a identidade não muda); None para qualquer outra página."""
+    pagina = pagina_da_conta(canonica)
+    if pagina is None:
+        return None
+    return Afiliacao(publicada=_LINK_FIXO[pagina], canonica=canonica)
+
 async def _chamar_servico_afiliados(
     url_produto: str, sessao: aiohttp.ClientSession,
 ) -> Optional[str]:
@@ -117,7 +183,7 @@ async def _chamar_servico_afiliados(
     novas tentativas com intervalo progressivo. Devolve o link
     afiliado, ou None quando o serviço não o produz.
     """
-    for tentativa in range(1, _TENTATIVAS_AFILIACAO + 1):
+    for tentativa, prazo in enumerate(_TIMEOUTS_AFILIACAO, start=1):
         try:
             ts = str(int(time.time()))
             payload = json.dumps(
@@ -142,9 +208,7 @@ async def _chamar_servico_afiliados(
                 async with sessao.post(
                     _ENDPOINT_AFILIADOS,
                     data=payload, headers=headers,
-                    timeout=aiohttp.ClientTimeout(
-                        total=_TIMEOUT_AFILIACAO,
-                    ),
+                    timeout=aiohttp.ClientTimeout(total=prazo),
                 ) as resposta:
                     dados = await resposta.json()
                     link = (
@@ -164,7 +228,7 @@ async def _chamar_servico_afiliados(
         except Exception as e:
             log_nrm.warning(f"⚠️ SHP t={tentativa}: {e}")
         if tentativa < _TENTATIVAS_AFILIACAO:
-            await asyncio.sleep(tentativa * 1.5)
+            await asyncio.sleep(tentativa * _ESPERA_ENTRE_TENTATIVAS)
     return None
 
 
@@ -183,7 +247,13 @@ def afiliacao_vigente(afiliacao: object) -> bool:
     if publicada is None and isinstance(afiliacao, str):
         publicada = afiliacao
     canonica = getattr(afiliacao, "canonica", None) or publicada or ""
-    return _netloc(canonica) not in _ENCURTADORES
+    if _netloc(canonica) in _ENCURTADORES:
+        return False
+    # Carteira e carrinho saem SEMPRE com o nosso link fixo: entrada que
+    # publicaria outro link para essas páginas não é servida — `afilia`
+    # a refaz (sem API) e sobrescreve.
+    fixo = _fixo(canonica)
+    return fixo is None or publicada == fixo.publicada
 
 
 async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
@@ -207,6 +277,20 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         registrar_link(url, url, _IDENTIFICADOR)
         _perf_marca("repasse")
         return url
+
+    # Carteira e carrinho por encurtador CONHECIDO: o nosso link fixo,
+    # na hora — sem expandir e sem API. A canônica é a que o cache já
+    # tem para essa página (a identidade gravada fica byte a byte); sem
+    # ela, a da tabela.
+    canonica_conhecida = _curto_conhecido(url)
+    if canonica_conhecida:
+        gravada = getattr(consultar_link(url), "canonica", None)
+        if not gravada or pagina_da_conta(gravada) != pagina_da_conta(canonica_conhecida):
+            gravada = canonica_conhecida
+        resultado = _fixo(gravada)
+        registrar_link(url, resultado, _IDENTIFICADOR)
+        _perf_marca("fixo")
+        return resultado
 
     # Consulta ao cache mediado. Entrada cuja canônica ainda é encurtador
     # (gravada antes da guarda de expansão abaixo) não é servida — e é
@@ -239,11 +323,36 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
                 f"⚠️ SHP expansão não resolveu o encurtador — ausente: {url[:60]}")
             return AUSENTE
 
-    # Chamada ao serviço de afiliados, sobre a URL limpa.
     url_limpa = limpa_url(url_expandida)
+    canonica = url_limpa
+    if (_netloc(url_limpa) or "").lower() == "live.shopee.com.br":
+        canonica = _canonica_live(url_limpa)
+
+    # Destino é a carteira ou o carrinho: o nosso link fixo, sem API.
+    fixo = _fixo(canonica)
+    if fixo:
+        registrar_link(url, fixo, _IDENTIFICADOR)
+        _perf_marca("fixo_destino")
+        return fixo
+
+    # Cache por DESTINO: outro link (de outra fonte) já levou a esta
+    # mesma URL limpa — a API devolve o mesmo link para a mesma URL de
+    # origem, então o que ela deu da outra vez é reusado sem chamá-la.
+    # Só entrada feita pela API (link curto da Shopee) é reusada.
+    anterior = consultar_link(url_limpa)
+    if (isinstance(anterior, Afiliacao)
+            and _netloc(anterior.publicada) in _ENCURTADORES
+            and afiliacao_vigente(anterior)):
+        resultado = Afiliacao(publicada=anterior.publicada, canonica=canonica)
+        registrar_link(url, resultado, _IDENTIFICADOR)
+        _perf_marca("destino")
+        return resultado
+
+    # Chamada ao serviço de afiliados, sobre a URL limpa.
     _t = _perf_agora()
     link = await _chamar_servico_afiliados(url_limpa, sessao)
     _perf_marca("api", _t)
+    pela_limpa = bool(link)
 
     # Mecanismo de recuperação: tenta a URL canônica de produto.
     if not link:
@@ -262,10 +371,12 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         log_nrm.warning(f"⚠️ SHP validação falhou: {link}")
         return AUSENTE
 
-    canonica = url_limpa
-    if (_netloc(url_limpa) or "").lower() == "live.shopee.com.br":
-        canonica = _canonica_live(url_limpa)
     resultado = Afiliacao(publicada=link, canonica=canonica)
     registrar_link(url, resultado, _IDENTIFICADOR)
+    # Grava também pelo destino — só o que a API deu para a PRÓPRIA URL
+    # limpa (a recuperação usou outra URL de origem).
+    if (pela_limpa and _netloc(link) in _ENCURTADORES
+            and _cache_key(url_limpa) != _cache_key(url)):
+        registrar_link(url_limpa, resultado, _IDENTIFICADOR)
     return resultado
 

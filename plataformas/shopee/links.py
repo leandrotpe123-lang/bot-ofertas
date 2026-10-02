@@ -181,6 +181,35 @@ def limpa_url(url: str) -> str:
         return url
 
 
+# ── Páginas da CONTA: carteira de cupons e carrinho ───────────────
+# "Resgate aqui" leva à carteira de cupons (/user/voucher-wallet) e
+# "Carrinho" ao carrinho (/cart) — páginas da conta de quem clica, sem
+# produto e sem campanha: o link de qualquer fonte leva ao mesmo lugar
+# (URLs reais da Fada e do Promotom, 02/10: só muda o rastreio de
+# afiliado, que `limpa_url` já descarta). Uma URL limpa ainda com
+# parâmetro (loja/item) não é a página pura e fica de fora.
+PAGINA_CARTEIRA = "carteira"
+PAGINA_CARRINHO = "carrinho"
+_PAGINAS_DA_CONTA = {
+    "/user/voucher-wallet": PAGINA_CARTEIRA,
+    "/cart": PAGINA_CARRINHO,
+}
+
+
+def pagina_da_conta(url: str) -> Optional[str]:
+    """A página da conta (carteira ou carrinho) para a qual a URL limpa
+    leva, ou None. Pura e determinística."""
+    try:
+        parsed = urlparse(url or "")
+    except Exception:
+        return None
+    if (parsed.netloc or "").lower() not in ("shopee.com.br", "www.shopee.com.br"):
+        return None
+    if parsed.query:
+        return None
+    return _PAGINAS_DA_CONTA.get((parsed.path or "").rstrip("/").lower())
+
+
 def _canonica_live(url: str) -> str:
     """
     Identidade canônica de uma live da Shopee. A live é identificada
