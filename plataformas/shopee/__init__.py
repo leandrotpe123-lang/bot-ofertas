@@ -20,7 +20,7 @@ from plataformas.contrato import (
     Plataforma,
 )
 
-from .afiliacao import afilia
+from .afiliacao import afilia, afiliacao_vigente
 from .links import (
     _IDENTIFICADOR,
     _ENCURTADORES,
@@ -79,4 +79,7 @@ PLATAFORMA = Plataforma(
     hosts_campanha=_HOSTS_CAMPANHA,
     sinais_cashback=_SINAIS_CASHBACK,
     hosts_container=_HOSTS_CONTAINER,
+    # Entrada de cache cuja canônica ainda é encurtador (expansão que
+    # não aconteceu) não é servida: `afilia` refaz e sobrescreve.
+    afiliacao_vigente=afiliacao_vigente,
 )

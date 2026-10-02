@@ -168,6 +168,24 @@ async def _chamar_servico_afiliados(
     return None
 
 
+def afiliacao_vigente(afiliacao: object) -> bool:
+    """
+    Capacidade opcional do contrato. Pura, sem I/O.
+
+    Falsa quando a canônica gravada ainda é um ENCURTADOR da Shopee: a
+    expansão não aconteceu (desencurtar devolve a própria entrada em
+    timeout ou falha de rede) e a identidade derivada seria a URL curta
+    — única por link, nunca o produto. Entradas assim, gravadas antes
+    desta guarda, deixam de ser servidas: `afilia` refaz a expansão e,
+    no sucesso, sobrescreve a entrada.
+    """
+    publicada = getattr(afiliacao, "publicada", None)
+    if publicada is None and isinstance(afiliacao, str):
+        publicada = afiliacao
+    canonica = getattr(afiliacao, "canonica", None) or publicada or ""
+    return _netloc(canonica) not in _ENCURTADORES
+
+
 async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     """
     Converte uma URL da Shopee na sua forma afiliada.
@@ -190,9 +208,10 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         _perf_marca("repasse")
         return url
 
-    # Consulta ao cache mediado.
+    # Consulta ao cache mediado. Entrada cuja canônica ainda é encurtador
+    # (gravada antes da guarda de expansão abaixo) não é servida.
     cache = consultar_link(url)
-    if cache:
+    if cache and afiliacao_vigente(cache):
         _perf_marca("cache")
         return cache
 
@@ -206,6 +225,15 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
             _perf_marca("expansao", _t)
         except Exception as e:
             log_nrm.warning(f"⚠️ SHP expansão falhou: {e}")
+            return AUSENTE
+        # desencurtar devolve a PRÓPRIA entrada em timeout/falha de rede.
+        # Continuar daria à API a URL curta e gravaria no cache uma
+        # canônica curta — identidade única por link, nunca o produto.
+        # Mesmo contrato da Amazon: expansão que não saiu do encurtador
+        # é ausência, sem API e sem cache.
+        if _netloc(url_expandida) in _ENCURTADORES:
+            log_nrm.warning(
+                f"⚠️ SHP expansão não resolveu o encurtador — ausente: {url[:60]}")
             return AUSENTE
 
     # Chamada ao serviço de afiliados, sobre a URL limpa.
