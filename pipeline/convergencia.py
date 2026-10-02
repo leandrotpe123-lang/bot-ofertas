@@ -34,6 +34,8 @@ REMOÇÃO FÍSICA:
     banco; o status fica 'falhou' e é retomado no próximo boot.
   · RECUPERAÇÃO NO BOOT: uma consulta local única (retomar_remocoes),
     sem varredura periódica.
+  · o mesmo caminho remove o post que a FONTE apagou em todas as origens
+    (pipeline.origem_apagada) — só o rótulo do log muda.
 
 NÃO faz:
   - decidir publicar/editar/ignorar (pipeline.decisao)
@@ -62,8 +64,9 @@ from telethon.errors import FloodWaitError
 
 import globals as g
 from database import (db_composicoes, db_exibida, db_fundir_posts,
-                      db_registrar_conflito, db_remocoes_pendentes,
-                      db_set_delete_status, db_vizinhos)
+                      db_get_post, db_registrar_conflito,
+                      db_remocoes_pendentes, db_set_delete_status,
+                      db_vizinhos)
 from logger import log_out
 from pipeline import espelho_cupons, exclusao, familia, saida
 
@@ -269,26 +272,27 @@ def _avisar_pendentes(escrito, plano) -> None:
             f"post:{escrito}) — nenhum conteúdo exclusivo é apagado")
 
 
-def agendar_remocao(msg_id_dest: int) -> None:
-    """Agenda a remoção física do post fundido numa task PRÓPRIA —
-    nunca aguardada por quem funde. Idempotente por post."""
+def agendar_remocao(msg_id_dest: int, motivo: str = "FUSAO") -> None:
+    """Agenda a remoção física do post encerrado numa task PRÓPRIA —
+    nunca aguardada por quem o encerrou. Idempotente por post.
+    `motivo` só rotula o log: FUSAO ou ORIGEM_APAGADA (a fonte apagou)."""
     t = _EM_CURSO.get(msg_id_dest)
     if t is not None and not t.done():
         return
-    t = asyncio.get_running_loop().create_task(_remover(msg_id_dest))
+    t = asyncio.get_running_loop().create_task(_remover(msg_id_dest, motivo))
     _EM_CURSO[msg_id_dest] = t
     t.add_done_callback(lambda _t, m=msg_id_dest: _EM_CURSO.pop(m, None)
                         if _EM_CURSO.get(m) is _t else None)
 
 
-async def _remover(msg_id_dest: int) -> None:
+async def _remover(msg_id_dest: int, motivo: str = "FUSAO") -> None:
     for tentativa in range(1, _TENTATIVAS + 1):
         if g._encerrando:
             return                          # fica 'pendente' para o boot
         try:
             await saida.apagar_post(msg_id_dest)
             db_set_delete_status(msg_id_dest, "ok")
-            log_out.info(f"🗑 [FUSAO_REMOVIDO] post:{msg_id_dest}")
+            log_out.info(f"🗑 [{motivo}_REMOVIDO] post:{msg_id_dest}")
             espelho_cupons.removido(msg_id_dest)
             return
         except asyncio.CancelledError:
@@ -297,25 +301,28 @@ async def _remover(msg_id_dest: int) -> None:
             espera = min(float(e.seconds), _FLOOD_MAX_S)
         except Exception as e:                      # noqa: BLE001
             log_out.warning(
-                f"⚠️ [FUSAO_REMOCAO] post:{msg_id_dest} "
+                f"⚠️ [{motivo}_REMOCAO] post:{msg_id_dest} "
                 f"tentativa {tentativa}/{_TENTATIVAS}: {type(e).__name__}: {e}")
             espera = _ESPERA_BASE_S * (2 ** (tentativa - 1))
         if tentativa < _TENTATIVAS:
             await asyncio.sleep(espera)
     db_set_delete_status(msg_id_dest, "falhou")
     log_out.warning(
-        f"⚠️ [FUSAO_REMOCAO_FALHOU] post:{msg_id_dest} — a fusão lógica "
-        f"permanece; remoção retomada no próximo boot")
+        f"⚠️ [{motivo}_REMOCAO_FALHOU] post:{msg_id_dest} — o post segue "
+        f"encerrado no banco; remoção retomada no próximo boot")
 
 
 def retomar_remocoes() -> int:
     """BOOT — uma consulta local única: reagenda a remoção dos posts
-    fundidos com status 'pendente' ou 'falhou'. Não é varredura
-    periódica: roda uma vez, no boot. Devolve quantas agendou."""
+    encerrados (fundidos ou apagados em todas as fontes) com status
+    'pendente' ou 'falhou'. Não é varredura periódica: roda uma vez, no
+    boot. Devolve quantas agendou."""
     ids = db_remocoes_pendentes(_RETOMAR_LIMITE)
     for mid in ids:
-        agendar_remocao(mid)
+        estado = db_get_post(mid) or {}
+        agendar_remocao(mid, "FUSAO" if estado.get("fused_into")
+                        else "ORIGEM_APAGADA")
     if ids:
-        log_out.info(f"🗑 [FUSAO_RETOMADA] {len(ids)} remoção(ões) "
+        log_out.info(f"🗑 [REMOCAO_RETOMADA] {len(ids)} remoção(ões) "
                      f"pendente(s) reagendada(s): {ids}")
     return len(ids)

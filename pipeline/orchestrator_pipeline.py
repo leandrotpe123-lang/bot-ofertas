@@ -28,6 +28,7 @@ from pipeline.identidade import checar_e_marcar
 from pipeline.ingestao import ingerir
 from pipeline.montagem import montar
 from pipeline.normalizacao import normalizar
+from pipeline import origem_apagada
 from pipeline.publicacao import destino_vivo_de_origem, enviar
 
 
@@ -44,6 +45,14 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         bruta = await ingerir(event)
     except Exception as e:
         log_sys.error(f"❌ ingestao: {e}")
+        return
+
+    # ── Origem APAGADA na fonte enquanto esperava: nem entra (nova ou
+    #    edição). Best-effort sem lock; a autoridade é a publicação.
+    if origem_apagada.apagada(bruta.chat, msg_id):
+        log_sys.info(
+            f"🧭 TL | id={msg_id} chat={bruta.chat} | DESCARTE | "
+            f"motivo=ORIGEM_APAGADA")
         return
 
     # ── Idempotência (somente novas) — chave (chat canônico, msg_id) ──

@@ -204,7 +204,8 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
                       score_versao: Optional[int] = None,
                       exibidas: Optional[list[str]] = None,
                       superar: Optional[int] = None,
-                      lider_msg: Optional[int] = None):
+                      lider_msg: Optional[int] = None,
+                      substitui: Optional[int] = None):
 
     """Upsert do estado do post + mapeamento de cada oferta→post.
     Serve para publicação nova E evolução (idempotente).
@@ -222,7 +223,12 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
 
     `lider_msg` — msg_id de origem cujo TEXTO passou a estar no ar
       (publicação nova, evolução). None = preserva o atual (sincronização,
-      mídia, gravações que não trocam o texto)."""
+      mídia, gravações que não trocam o texto).
+
+    `substitui` — corpo físico ANTIGO que este substitui (apagar+reenviar):
+      TODAS as origens dele passam a este, não só a que disparou a troca
+      (I5). Sem isso, as outras fontes do post ficavam apontando para uma
+      mensagem que não existe mais."""
     try:
         agora = time.time()
         with _db() as db:
@@ -291,6 +297,10 @@ def db_registrar_post(msg_id_dest: int, ofertas: list[str], score: int,
                     f"🧷 [ANCORA_PRESERVADA] post:{msg_id_dest} não toma "
                     f"{sorted(preservadas)} — já têm dono vivo (só a fusão "
                     f"transfere posse)")
+            if substitui is not None:
+                db.execute(
+                    "UPDATE origem_post SET dest=?, ts=? WHERE dest=?",
+                    (msg_id_dest, agora, substitui))
             if chat_origem and msg_id_origem:
                 db.execute(
                     "INSERT OR REPLACE INTO origem_post"
@@ -321,6 +331,70 @@ def db_origem_set(chat: str, msg_id: int, dest: int):
                 " VALUES(?,?,?,?)", (chat, msg_id, dest, time.time()))
     except Exception as e:
         log_db.error(f"❌ db_origem_set: {e}")
+
+
+def db_desvincular_origem(chat: str, msg_id: int, dest: int,
+                          agora: float) -> tuple:
+    """A FONTE APAGOU a mensagem (chat, msg_id). Numa transação só:
+      1. confirma que o vínculo ainda aponta para `dest` — o chamador
+         segura o lock do post `dest`, e fusão e substituição só mudam
+         vínculo sob esse lock;
+      2. apaga o vínculo;
+      3. se o post ficou SEM NENHUMA origem, encerra a vida dele, marca a
+         remoção física 'pendente' e apaga a composição exibida: deixa
+         de existir para família, decisão e convergência.
+    Devolve (situação, n):
+      ("sem_vinculo", 0)    o vínculo já não existe;
+      ("mudou", novo_dest)  o vínculo aponta para outro post: refazer;
+      ("mantido", restam)   outras origens ainda seguram o post;
+      ("sem_post", 0)       o post saiu do banco (retenção);
+      ("ja_removido", 0)    post fundido ou já encerrado para remoção;
+      ("morto", 0)          encerrado agora: remover do canal;
+      ("erro", 0)           nada mudou (rollback)."""
+    try:
+        with _db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                row = db.execute(
+                    "SELECT dest FROM origem_post WHERE chat=? AND msg_id=?",
+                    (chat, msg_id)).fetchone()
+                if row is None:
+                    res = ("sem_vinculo", 0)
+                elif int(row[0]) != dest:
+                    res = ("mudou", int(row[0]))
+                else:
+                    db.execute(
+                        "DELETE FROM origem_post WHERE chat=? AND msg_id=?",
+                        (chat, msg_id))
+                    pe = db.execute(
+                        "SELECT fused_into, delete_status FROM post_estado"
+                        " WHERE msg_id_dest=?", (dest,)).fetchone()
+                    restam = db.execute(
+                        "SELECT COUNT(*) FROM origem_post WHERE dest=?",
+                        (dest,)).fetchone()[0]
+                    if pe is None:
+                        res = ("sem_post", 0)
+                    elif pe[0] is not None or pe[1] is not None:
+                        res = ("ja_removido", 0)
+                    elif restam:
+                        res = ("mantido", restam)
+                    else:
+                        db.execute(
+                            "UPDATE post_estado SET janela_fim=MIN(janela_fim, ?),"
+                            " delete_status='pendente' WHERE msg_id_dest=?",
+                            (agora, dest))
+                        db.execute(
+                            "DELETE FROM post_exibida WHERE msg_id_dest=?",
+                            (dest,))
+                        res = ("morto", 0)
+                db.execute("COMMIT")
+            except Exception:
+                db.execute("ROLLBACK")
+                raise
+        return res
+    except Exception as e:
+        log_db.error(f"❌ db_desvincular_origem: {e}")
+        return ("erro", 0)
 
 
 def db_remover_post(msg_id_dest: int):
@@ -514,13 +588,14 @@ def db_set_delete_status(msg_id_dest: int, status: str) -> None:
 
 
 def db_remocoes_pendentes(limite: int = 100) -> list[int]:
-    """Posts fundidos cuja remoção física não se concluiu (boot)."""
+    """Posts fundidos OU apagados em todas as fontes cuja remoção física
+    não se concluiu (boot). delete_status só é gravado por esses dois
+    caminhos; post vivo nunca o tem."""
     try:
         with _db() as db:
             rows = db.execute(
                 "SELECT msg_id_dest FROM post_estado"
-                " WHERE fused_into IS NOT NULL"
-                "   AND delete_status IN ('pendente','falhou')"
+                " WHERE delete_status IN ('pendente','falhou')"
                 " ORDER BY msg_id_dest LIMIT ?", (limite,)).fetchall()
         return [r[0] for r in rows]
     except Exception as e:

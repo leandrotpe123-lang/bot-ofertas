@@ -60,6 +60,7 @@ from pipeline.orchestrator import processar, _iniciar_orchestrator
 from pipeline.identidade import precarregar_usernames
 from pipeline import completude
 from pipeline import convergencia
+from pipeline import origem_apagada
 
 import plataformas
 
@@ -328,6 +329,9 @@ async def _preparar_processo() -> bool:
     # MESMO ponto de entrada as mensagens que o Telegram não entregou.
     completude.instalar(client, fontes, processar)
     _registrar_handlers(fontes)
+    # [Origem apagada] A fonte apagou → o post sai do canal quando
+    # nenhuma origem dele ficou no ar. O handler só agenda.
+    origem_apagada.instalar(client, fontes)
 
     # 6. Tarefas de fundo — UMA instância de cada por processo.
     # _iniciar_orchestrator é aguardado, não posto em task: ele apenas

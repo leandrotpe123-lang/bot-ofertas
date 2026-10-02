@@ -37,6 +37,7 @@ from pipeline import convergencia
 from pipeline import exclusao
 from pipeline import familia
 from pipeline import origem
+from pipeline import origem_apagada
 from pipeline import retencao_cupons
 from pipeline.montagem import MensagemMontada, materializar_imagem
 from pipeline.normalizacao import MensagemNormalizada
@@ -88,6 +89,14 @@ async def enviar(montada: MensagemMontada,
 # ── Camada 0: ORIGEM (Fase 1 do MB) — lock mais externo (I6) ──
     if norm is not None:
         async with await origem.lock_origem(norm.chat, norm.msg_id):
+            if origem_apagada.apagada(norm.chat, norm.msg_id):
+                # [Origem apagada] a fonte apagou esta mensagem enquanto
+                # ela estava na fila: nada publica nem edita. Conferido
+                # sob o MESMO lock em que a exclusão a marca.
+                log_out.info(
+                    f"🗑 [ORIGEM_APAGADA] ({norm.chat},{norm.msg_id}) — "
+                    f"apagada na fonte antes de publicar; descartada")
+                return True
             dest_fix = destino_vivo_de_origem(norm.chat, norm.msg_id)
             if dest_fix and not is_edit:
                 log_out.info(

@@ -19,11 +19,18 @@ INVARIANTES (contrato arquitetural — mais importante que o código):
                       identidade ou decisão. A validação de VIDA do post
                       apontado é responsabilidade do chamador.
 
- ESCRITA (dono único: a tabela origem_post, via database) — dois gatilhos:
+ ESCRITA (dono único: a tabela origem_post, via database) — gatilhos:
    NASCIMENTO ... db_registrar_post(chat_origem, msg_id_origem) — mesma
-                  transação do post (I4/I5). Novo envio e substituição.
+                  transação do post (I4/I5). Novo envio e substituição;
+                  na substituição TODAS as origens do corpo antigo passam
+                  ao novo (substitui=).
    ENCONTRO ..... origem.registrar() no funil pós-decisão — todo evento
                   que casa alvo existente, inclusive descartes (I1).
+   FUSÃO ........ db_fundir_posts redireciona as origens do fundido.
+   EXCLUSÃO ..... db_desvincular_origem — a fonte apagou a mensagem: o
+                  vínculo sai; post sem origem nenhuma é encerrado
+                  (pipeline.origem_apagada, sob o lock de ORIGEM e o do
+                  post).
  Nenhum outro ponto do sistema escreve o vínculo.
 
 Consumidores futuros previstos (MB Fases 3-4): replies e comentários

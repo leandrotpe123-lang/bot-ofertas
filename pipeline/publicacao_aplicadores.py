@@ -158,7 +158,7 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             msg_id_origem=montada.msg_id,
             midia_chat=(norm.chat if montada.imagem else ""),
             score_versao=V_CONTEUDO, exibidas=exibidas,
-            lider_msg=montada.msg_id)
+            lider_msg=montada.msg_id, substitui=msg_id_dest)
         if pos_escrita is not None:
             pos_escrita(sent.id)            # o msg_id NOVO, nunca o antigo
         espelho_cupons.substituido(msg_id_dest, sent)
