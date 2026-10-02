@@ -12,7 +12,6 @@ import time
 from typing import Optional
 
 from database_conexao import _db
-from logger import log_db
 
 
 def db_espelho_get(msg_id_dest: int) -> Optional[int]:
@@ -23,8 +22,7 @@ def db_espelho_get(msg_id_dest: int) -> Optional[int]:
                 "SELECT msg_id_espelho FROM espelho_post WHERE msg_id_dest=?",
                 (msg_id_dest,)).fetchone()
         return row[0] if row else None
-    except Exception as e:
-        log_db.error(f"❌ db_espelho_get: {e}")
+    except Exception:
         return None
 
 
@@ -34,8 +32,8 @@ def db_espelho_set(msg_id_dest: int, msg_id_espelho: int) -> None:
             db.execute(
                 "INSERT OR REPLACE INTO espelho_post(msg_id_dest,msg_id_espelho,ts)"
                 " VALUES(?,?,?)", (msg_id_dest, msg_id_espelho, time.time()))
-    except Exception as e:
-        log_db.error(f"❌ db_espelho_set: {e}")
+    except Exception:
+        pass
 
 
 def db_espelho_del(msg_id_dest: int) -> None:
@@ -43,8 +41,8 @@ def db_espelho_del(msg_id_dest: int) -> None:
         with _db() as db:
             db.execute("DELETE FROM espelho_post WHERE msg_id_dest=?",
                        (msg_id_dest,))
-    except Exception as e:
-        log_db.error(f"❌ db_espelho_del: {e}")
+    except Exception:
+        pass
 
 
 def db_espelho_mover(antigo: int, novo: int) -> None:
@@ -55,5 +53,5 @@ def db_espelho_mover(antigo: int, novo: int) -> None:
             db.execute(
                 "UPDATE espelho_post SET msg_id_dest=?, ts=? WHERE msg_id_dest=?",
                 (novo, time.time(), antigo))
-    except Exception as e:
-        log_db.error(f"❌ db_espelho_mover: {e}")
+    except Exception:
+        pass

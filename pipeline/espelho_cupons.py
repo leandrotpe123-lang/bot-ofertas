@@ -16,7 +16,7 @@ VELOCIDADE: o canal principal nunca espera o espelho. Os aplicadores só
 NOTIFICAM (put_nowait, sem await) DEPOIS de o post principal estar no
 ar e gravado. Um trabalhador único e sequencial processa em ordem FIFO:
 a cópia sai ~1 RTT depois do principal. Falha do espelho (rede,
-FloodWait, permissão) nunca afeta o principal — é registrada e segue.
+FloodWait, permissão) nunca afeta o principal — é contida e a fila segue.
 
 CICLO DE VIDA espelhado: publicação/renascimento (cria), evolução,
 sincronização do líder e upgrade de mídia (edita), substituição
@@ -33,7 +33,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import time
 from typing import Optional
 
 from telethon.errors import FloodWaitError, MessageNotModifiedError
@@ -42,7 +41,6 @@ import config
 from config import GRUPO_DESTINO
 from database import (db_espelho_del, db_espelho_get, db_espelho_mover,
                       db_espelho_set, db_exibida)
-from logger import log_out, log_sys
 from pipeline.resolucao_identidade import eh_identidade_cupom
 
 __all__ = ["canal_configurado", "iniciar", "encerrar", "publicado",
@@ -76,10 +74,8 @@ def iniciar() -> Optional[asyncio.Task]:
     canal = canal_configurado()
     if canal is None:
         _canal, _fila = None, None
-        log_sys.info("🎟 ESPELHO_CUPONS|OFF")
         return None
     _canal, _fila = canal, asyncio.Queue(maxsize=_FILA_MAX)
-    log_sys.info(f"🎟 ESPELHO_CUPONS|ATIVO|canal={canal}")
     return asyncio.get_running_loop().create_task(_laco(_fila))
 
 
@@ -92,9 +88,6 @@ async def encerrar(tarefa: Optional[asyncio.Task]) -> None:
     if fila is not None and not fila.empty():
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(fila.join(), _DRENO_S)
-        if not fila.empty():
-            log_out.warning(
-                f"⚠️ ESPELHO_CUPONS|SHUTDOWN|pendentes={fila.qsize()}")
     tarefa.cancel()
     await asyncio.gather(tarefa, return_exceptions=True)
 
@@ -124,37 +117,32 @@ def removido(msg_id_dest: int) -> None:
 def _notificar(tipo: str, msg_id_dest: int, extra) -> None:
     if _fila is None:
         return
-    try:
-        _fila.put_nowait((tipo, msg_id_dest, extra, time.monotonic()))
-    except asyncio.QueueFull:
-        log_out.warning(
-            f"⚠️ ESPELHO_CUPONS|FILA_CHEIA|descartado={tipo}|post:{msg_id_dest}")
+    with contextlib.suppress(asyncio.QueueFull):
+        _fila.put_nowait((tipo, msg_id_dest, extra))
 
 
 # ── Trabalhador único, sequencial ─────────────────────────────────
 async def _laco(fila: asyncio.Queue) -> None:
     try:
         while True:
-            tipo, mid, extra, t0 = await fila.get()
+            tipo, mid, extra = await fila.get()
             try:
-                await _processar(tipo, mid, extra, t0)
+                await _processar(tipo, mid, extra)
             except asyncio.CancelledError:
                 raise
-            except Exception as e:                     # noqa: BLE001
-                log_out.warning(
-                    f"⚠️ ESPELHO_CUPONS|FALHOU|{tipo}|post:{mid}|"
-                    f"{type(e).__name__}: {e}")
+            except Exception:                          # noqa: BLE001
+                pass                       # falha do espelho nunca afeta nada
             finally:
                 fila.task_done()
     except asyncio.CancelledError:
         return
 
 
-async def _processar(tipo: str, mid: int, extra, t0: float) -> None:
+async def _processar(tipo: str, mid: int, extra) -> None:
     if tipo == "removido":
         esp = db_espelho_get(mid)
         if esp is not None:
-            await _apagar(mid, esp, "post_removido", t0)
+            await _apagar(mid, esp)
         return
 
     if tipo == "substituido":
@@ -175,27 +163,21 @@ async def _processar(tipo: str, mid: int, extra, t0: float) -> None:
     esp = db_espelho_get(mid)
     if esp is None:
         if cupom:
-            await _criar(mid, principal, t0)
+            await _criar(mid, principal)
         return
     if not cupom:
-        await _apagar(mid, esp, "deixou_de_ser_cupom", t0)
+        await _apagar(mid, esp)
         return
     midia = tipo == "substituido" or (tipo == "conteudo" and extra)
-    await _editar(mid, esp, principal, midia, t0)
+    await _editar(mid, esp, principal, midia)
 
 
-def _ms(t0: float) -> int:
-    return round((time.monotonic() - t0) * 1000)
-
-
-async def _criar(mid: int, principal, t0: float) -> None:
+async def _criar(mid: int, principal) -> None:
     copia = await _io(lambda c: _copiar(c, principal))
     db_espelho_set(mid, copia.id)
-    log_out.info(
-        f"🎟 ESPELHO_CUPONS|CRIADO|post:{mid}→espelho:{copia.id}|ms={_ms(t0)}")
 
 
-async def _editar(mid: int, esp: int, principal, midia: bool, t0: float) -> None:
+async def _editar(mid: int, esp: int, principal, midia: bool) -> None:
     arquivo = _midia_copiavel(principal) if midia else None
     try:
         await _io(lambda c: c.edit_message(
@@ -206,28 +188,20 @@ async def _editar(mid: int, esp: int, principal, midia: bool, t0: float) -> None
         return
     except FloodWaitError:
         raise
-    except Exception as e:                             # noqa: BLE001
+    except Exception:                                  # noqa: BLE001
         if arquivo is None:
             raise
         # Espelho nasceu sem mídia (o principal ganhou a primeira imagem
         # agora): a mesma limitação do Telegram do canal principal. O
         # espelho é refeito como cópia fiel do que está no ar.
-        log_out.info(
-            f"🎟 ESPELHO_CUPONS|REFAZ|post:{mid}|{type(e).__name__}")
-        await _apagar(mid, esp, "refaz_com_midia", t0)
-        await _criar(mid, principal, t0)
-        return
-    log_out.info(
-        f"🎟 ESPELHO_CUPONS|EDITADO|post:{mid}→espelho:{esp}"
-        f"{'|+midia' if arquivo is not None else ''}|ms={_ms(t0)}")
+        await _apagar(mid, esp)
+        await _criar(mid, principal)
 
 
-async def _apagar(mid: int, esp: int, motivo: str, t0: float) -> None:
+async def _apagar(mid: int, esp: int) -> None:
     with contextlib.suppress(Exception):
         await _io(lambda c: c.delete_messages(_canal, esp))
     db_espelho_del(mid)
-    log_out.info(
-        f"🎟 ESPELHO_CUPONS|APAGADO|post:{mid}→espelho:{esp}|{motivo}|ms={_ms(t0)}")
 
 
 def _midia_copiavel(mensagem):
