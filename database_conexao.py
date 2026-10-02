@@ -255,6 +255,9 @@ def _init_db():
             msg_id_dest INTEGER NOT NULL, identity TEXT NOT NULL,
             ts REAL NOT NULL,
             PRIMARY KEY(msg_id_dest, identity));
+        CREATE TABLE IF NOT EXISTS espelho_post(
+            msg_id_dest INTEGER PRIMARY KEY,
+            msg_id_espelho INTEGER NOT NULL, ts REAL NOT NULL);
         CREATE INDEX IF NOT EXISTS idx_lc_plat     ON links_cache(plat);
         CREATE INDEX IF NOT EXISTS idx_lc_ts       ON links_cache(ts);
         CREATE INDEX IF NOT EXISTS idx_sl_code     ON short_links(code);

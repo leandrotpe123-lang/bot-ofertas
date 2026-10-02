@@ -128,6 +128,30 @@ def eh_chave_forte(chave: str) -> bool:
             and bool(partes[2]))
 
 
+def eh_chave_produto(chave: str) -> bool:
+    """Verdadeiro se `chave` é produto exato: `<plat>|<id>`."""
+    partes = (chave or "").split("|", 2)
+    return (len(partes) == 2 and bool(partes[0]) and bool(partes[1])
+            and partes[1] not in _SEGMENTOS_DE_ESPECIE)
+
+
+def eh_chave_cupom(chave: str) -> bool:
+    """Verdadeiro se `chave` é cupom: com código (`cup`) ou sem código
+    (`cupb` — nome, assinatura ou geral)."""
+    partes = (chave or "").split("|", 2)
+    return (len(partes) == 3 and bool(partes[2])
+            and partes[1] in ("cup", _SEGMENTO_CUPOM_SEM_CODIGO))
+
+
+def eh_identidade_cupom(chaves) -> bool:
+    """A composição é de CUPOM: tem âncora de cupom e nenhuma de produto.
+    Produto com cupom continua produto (C3/R1×R2: o cupom é atributo);
+    cashback, campanha, destino sem código, url e texto não são cupom."""
+    chaves = list(chaves or ())
+    return (any(eh_chave_cupom(k) for k in chaves)
+            and not any(eh_chave_produto(k) for k in chaves))
+
+
 # ─────────────────────────────────────────────────────────────────
 # CONTRATO DE ENTRADA — evidências já derivadas
 # ─────────────────────────────────────────────────────────────────

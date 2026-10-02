@@ -65,7 +65,7 @@ from database import (db_composicoes, db_exibida, db_fundir_posts,
                       db_registrar_conflito, db_remocoes_pendentes,
                       db_set_delete_status, db_vizinhos)
 from logger import log_out
-from pipeline import exclusao, familia, saida
+from pipeline import espelho_cupons, exclusao, familia, saida
 
 __all__ = ["avaliar", "auditar_composicao", "consolidar", "Veredito", "agendar_remocao",
            "retomar_remocoes"]
@@ -289,6 +289,7 @@ async def _remover(msg_id_dest: int) -> None:
             await saida.apagar_post(msg_id_dest)
             db_set_delete_status(msg_id_dest, "ok")
             log_out.info(f"🗑 [FUSAO_REMOVIDO] post:{msg_id_dest}")
+            espelho_cupons.removido(msg_id_dest)
             return
         except asyncio.CancelledError:
             raise

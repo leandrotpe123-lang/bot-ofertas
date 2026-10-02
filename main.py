@@ -44,6 +44,7 @@ import globals as g
 from client import client
 import ack_imediato
 import heartbeat_sessao
+from pipeline import espelho_cupons
 
 import config
 from config import (
@@ -220,6 +221,10 @@ async def _encerrar() -> None:
         t.cancel()
         await asyncio.gather(t, return_exceptions=True)
 
+    # [Cupons] espelho — dá alguns segundos para a fila esvaziar e
+    # cancela limpo (antes de fechar HTTP/Telegram).
+    await espelho_cupons.encerrar(_TASKS_FUNDO.get("espelho"))
+
     # 4. HTTP
     try:
         if g._http_session is not None and not g._http_session.closed:
@@ -304,6 +309,10 @@ async def _preparar_processo() -> bool:
     # [S6.8-A] Heartbeat de sessão — PING público adicional, desligado
     # sem HEARTBEAT_PING_S. Não bloqueia o boot; cancelado em _encerrar.
     _TASKS_FUNDO["heartbeat"] = heartbeat_sessao.iniciar(client)
+
+    # [Cupons] Espelho do post de CUPOM no canal de cupons — desligado
+    # sem CANAL_CUPONS. Trabalhador único; o canal principal nunca espera.
+    _TASKS_FUNDO["espelho"] = espelho_cupons.iniciar()
 
     # [Frente 8] Remoções de posts FUNDIDOS que ficaram pendentes antes
     # do restart: UMA consulta local, agora, sem varredura periódica.

@@ -32,6 +32,7 @@ def db_limpar():
             db.execute("DELETE FROM cupom_idx    WHERE ts<?", (agora - 30 * 86400,))
             db.execute("DELETE FROM origem_post  WHERE ts<?", (agora - 30 * 86400,))
             db.execute("DELETE FROM post_exibida WHERE ts<?", (agora - 30 * 86400,))
+            db.execute("DELETE FROM espelho_post WHERE ts<?", (agora - 30 * 86400,))
             db.execute("DELETE FROM conflito_estrutural WHERE ts<?", (agora - 30 * 86400,))
         if len(_raw_cache) > 3000:
             for k in list(_raw_cache.keys())[:1000]:

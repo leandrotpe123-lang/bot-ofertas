@@ -34,6 +34,11 @@ bem-sucedida, chamam `pos_escrita(msg_id_efetivo)`. O msg_id efetivo é
 o NOVO quando houve substituição. O upgrade de mídia não muda conteúdo:
 não grava composição e não chama `pos_escrita`. Este módulo continua
 sem decidir nada: quem decide a fusão é pipeline.convergencia.
+
+[Cupons] Depois de cada escrita bem-sucedida no canal principal, o
+aplicador NOTIFICA pipeline.espelho_cupons (put_nowait, sem await): o
+post de cupom ganha/atualiza a cópia no canal de cupons sem atrasar o
+principal. Desligado sem CANAL_CUPONS.
 """
 from __future__ import annotations
 
@@ -56,6 +61,7 @@ from pipeline.saida import (
     editar_msg,
     _substituir_post_com_midia,
 )
+from pipeline import espelho_cupons
 from pipeline.score import V_CONTEUDO
 from pipeline.vida_oferta import estampar
 
@@ -97,6 +103,7 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             lider_msg=montada.msg_id)
         if pos_escrita is not None:
             pos_escrita(msg_id_dest)
+        espelho_cupons.conteudo(msg_id_dest, midia=res.midia_aplicada)
         # [E4.0] Só APÓS a I/O e só com prova: midia_aplicada. Um
         # `res.ok` que caiu em texto-only NÃO registra nada, então a
         # mesma mídia continua elegível na próxima chegada.
@@ -144,6 +151,7 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             lider_msg=montada.msg_id)
         if pos_escrita is not None:
             pos_escrita(sent.id)            # o msg_id NOVO, nunca o antigo
+        espelho_cupons.substituido(msg_id_dest, sent)
         log_out.info(
             f"✅ [SUBSTITUIDO_OK] {identity} "
             f"novo_id={sent.id} score={d.novo_score}")
@@ -191,6 +199,8 @@ async def _aplicar_sincronizacao(montada, norm, score, estado, msg_id_dest,
         score_versao=V_CONTEUDO, exibidas=exibidas)
     if pos_escrita is not None:
         pos_escrita(msg_id_dest)
+    if not no_op:
+        espelho_cupons.conteudo(msg_id_dest, midia=midia_aplicada)
     log_out.info(
         f"🔁 [SINCRONIZADO] {identity} chat={norm.chat} score={score} "
         f"edit_count={estado.get('edit_count', 0)} (preservado)"
@@ -241,6 +251,8 @@ async def _aplicar_upgrade_midia(montada, norm, d, estado, msg_id_dest,
         estado.get("lider", ""),
         estado.get("janela_fim", 0), estado.get("edit_count", 0),
         midia_chat=norm.chat)
+    if res.midia_aplicada:
+        espelho_cupons.conteudo(msg_id_dest, midia=True)
     # score_versao NAO e passado: o score nao foi tocado, entao rotular
     # como v2 criaria um score v1 com etiqueta v2 — estado corrompido,
     # pior que continuar legado. O post moderniza quando o TEXTO evoluir.
@@ -301,6 +313,9 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
                 lider_msg=montada.msg_id)
             if pos_escrita is not None:
                 pos_escrita(sent.id)
+            # [Cupons] Post no ar e gravado: o espelho só é NOTIFICADO
+            # (sem await) — o canal principal nunca espera o de cupons.
+            espelho_cupons.publicado(sent.id, sent)
             # [E4.0] `img` diz o que TENTAMOS enviar; chave_midia(sent)
             # diz o que o Telegram REALMENTE publicou. _enviar_msg_no_sem
             # tem fallback que devolve um send_message puro — nesse caso
