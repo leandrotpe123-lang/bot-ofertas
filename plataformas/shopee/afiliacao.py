@@ -187,7 +187,6 @@ async def _chamar_servico_afiliados(
     afiliado, ou None quando o serviço não o produz.
     """
     for tentativa, prazo in enumerate(_TIMEOUTS_AFILIACAO, start=1):
-        conexao.usada()
         try:
             ts = str(int(time.time()))
             payload = json.dumps(
@@ -274,9 +273,9 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     url = _sanitizar_url(url)
     netloc = _netloc(url)
     _perf_entrada(url)
-    # Pool próprio da Shopee (conexão com a API sempre aberta). Fora do
+    # Pool próprio da Shopee (conexão ociosa aberta 60 s). Fora do
     # processo do bot, ou desligado, segue a sessão recebida do core.
-    sessao = await conexao.sessao(sessao, aquecer=_ENDPOINT_AFILIADOS)
+    sessao = await conexao.sessao(sessao)
 
     # Domínio de repasse direto: devolvido sem afiliação.
     if _bate_dominio(netloc, _REPASSE_DIRETO):

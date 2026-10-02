@@ -41,9 +41,9 @@ import sys
 import time
 
 import aiohttp                                                  # real, antes do harness
-# Conexão sempre aberta tem teste próprio (test_shopee_conexao): aqui a
-# afiliação usa a sessão recebida, sem toque em host real.
-os.environ["SHP_CONEXAO_QUENTE"] = "0"
+# O pool próprio tem teste próprio (test_shopee_conexao): aqui a
+# afiliação usa a sessão recebida.
+os.environ["SHP_POOL_PROPRIO"] = "0"
 from aiohttp import web
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

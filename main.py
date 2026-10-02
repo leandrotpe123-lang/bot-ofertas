@@ -225,13 +225,16 @@ async def _encerrar() -> None:
     # curso terminar e cancela limpo (antes de fechar HTTP/Telegram).
     await espelho_cupons.encerrar()
 
-    # 4. HTTP
+    # 4. HTTP — a sessão comum e as sessões próprias de plataforma
     try:
         if g._http_session is not None and not g._http_session.closed:
             await g._http_session.close()
             log_sys.info("🌐 HTTP session fechada")
     except Exception as e:
         log_sys.error(f"❌ close http: {e}")
+    extras = await g.fechar_sessoes_extras()
+    if extras:
+        log_sys.info(f"🌐 sessões HTTP próprias fechadas: {extras}")
 
     # 5. Telegram — e' isto que faz run_until_disconnected retornar
     try:
