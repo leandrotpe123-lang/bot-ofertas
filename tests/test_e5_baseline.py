@@ -201,7 +201,7 @@ def test_T15_vida_oferta_fronteira(r: Resultado):
     r.check(viva(fim, fim) is False, "T15.vida.fronteira")
     r.check(viva(fim, fim + 0.001) is False, "T15.vida.morto")
     r.check(estampar(100.0) == 100.0 + VIDA_OFERTA_S, "T15.vida.estampar")
-    r.check(VIDA_OFERTA_S == 1500, "T15.vida.constante", str(VIDA_OFERTA_S))
+    r.check(VIDA_OFERTA_S == 3600, "T15.vida.constante", str(VIDA_OFERTA_S))
 
 
 def test_T15_familia_e_identidade_no_db_real(r: Resultado):
