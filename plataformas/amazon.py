@@ -80,8 +80,13 @@ _SHORTS_OFICIAIS = frozenset({
 })
 
 # ── Hosts de campanha ─────────────────────────────────────────────
+# `amazon.com.br` NÃO é host de campanha: a âncora de campanha é
+# host+caminho SEM query, e o domínio inteiro fazia toda busca (`/s`),
+# toda categoria (`/b`) e `/deals` colapsarem numa família só (P0-1).
+# Cada página Amazon já tem identidade própria: produto (/dp/), e a
+# canônica afiliada — que preserva k/node/rh e descarta rastreamento —
+# no fallback de URL (promoção /promotion/psp/<ID> e demais páginas).
 _HOSTS_CAMPANHA = frozenset({
-    "amazon.com.br",
     "primevideo.com",
 })
 
