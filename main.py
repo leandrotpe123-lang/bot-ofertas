@@ -61,6 +61,7 @@ from pipeline.identidade import precarregar_usernames
 from pipeline import completude
 from pipeline import convergencia
 from pipeline import origem_apagada
+from pipeline import sucessao
 
 import plataformas
 
@@ -330,8 +331,11 @@ async def _preparar_processo() -> bool:
     completude.instalar(client, fontes, processar)
     _registrar_handlers(fontes)
     # [Origem apagada] A fonte apagou → o post sai do canal quando
-    # nenhuma origem dele ficou no ar. O handler só agenda.
+    # nenhuma origem dele ficou no ar. O handler só agenda. Se quem
+    # apagou era a CHEFE e outra fonte segura o post, ela assume
+    # (sucessão), entrando pelo MESMO ponto de entrada.
     origem_apagada.instalar(client, fontes)
+    sucessao.instalar(client, fontes, processar, origem_apagada.apagadas)
 
     # 6. Tarefas de fundo — UMA instância de cada por processo.
     # _iniciar_orchestrator é aguardado, não posto em task: ele apenas

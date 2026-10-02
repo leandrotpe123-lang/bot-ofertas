@@ -341,8 +341,9 @@ def db_desvincular_origem(chat: str, msg_id: int, dest: int,
          vínculo sob esse lock;
       2. apaga o vínculo;
       3. se o post ficou SEM NENHUMA origem, encerra a vida dele, marca a
-         remoção física 'pendente' e apaga a composição exibida: deixa
-         de existir para família, decisão e convergência.
+         remoção física 'pendente' e apaga a composição exibida e as
+         âncoras (oferta_index): deixa de existir para família, decisão
+         e convergência — a identidade é esquecida.
     Devolve (situação, n):
       ("sem_vinculo", 0)    o vínculo já não existe;
       ("mudou", novo_dest)  o vínculo aponta para outro post: refazer;
@@ -386,6 +387,11 @@ def db_desvincular_origem(chat: str, msg_id: int, dest: int,
                         db.execute(
                             "DELETE FROM post_exibida WHERE msg_id_dest=?",
                             (dest,))
+                        # ESQUECE a identidade: o post apagado não é dono
+                        # de âncora nenhuma (a repostagem nasce limpa).
+                        db.execute(
+                            "DELETE FROM oferta_index WHERE msg_id_dest=?",
+                            (dest,))
                         res = ("morto", 0)
                 db.execute("COMMIT")
             except Exception:
@@ -395,6 +401,64 @@ def db_desvincular_origem(chat: str, msg_id: int, dest: int,
     except Exception as e:
         log_db.error(f"❌ db_desvincular_origem: {e}")
         return ("erro", 0)
+
+
+def db_origens_do_post(dest: int) -> list:
+    """[(chat, msg_id)] das origens ligadas ao post, da ligação mais
+    recente para a mais antiga."""
+    try:
+        with _db() as db:
+            return [(r[0], int(r[1])) for r in db.execute(
+                "SELECT chat, msg_id FROM origem_post WHERE dest=?"
+                " ORDER BY ts DESC, chat DESC, msg_id DESC", (dest,)).fetchall()]
+    except Exception as e:
+        log_db.error(f"❌ db_origens_do_post: {e}")
+        return []
+
+
+def _lider_ligado(db, dest: int, lider: str, lider_msg) -> bool:
+    if lider_msg is None:                    # legado: líder por canal
+        q = ("SELECT 1 FROM origem_post WHERE dest=? AND chat=?",
+             (dest, lider))
+    else:
+        q = ("SELECT 1 FROM origem_post WHERE dest=? AND chat=? AND msg_id=?",
+             (dest, lider, lider_msg))
+    return db.execute(*q).fetchone() is not None
+
+
+def db_transferir_lideranca(dest: int, chat: str, msg_id: int,
+                            agora: float) -> bool:
+    """SUCESSÃO — a mensagem (chat, msg_id) passa a ser a LÍDER do post.
+    Numa transação, só se TUDO continua valendo: post vivo, não fundido,
+    não encerrado; a líder atual não está mais entre as origens; e a
+    sucessora ainda está ligada ao post. Texto e score não mudam aqui: a
+    sincronização com a mensagem da sucessora é que os troca."""
+    try:
+        with _db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                pe = db.execute(
+                    "SELECT lider, lider_msg FROM post_estado"
+                    f" WHERE msg_id_dest=? AND {_VIVO_SQL}"
+                    " AND delete_status IS NULL", (dest, agora)).fetchone()
+                ok = (pe is not None and bool(pe[0])
+                      and not _lider_ligado(db, dest, pe[0], pe[1])
+                      and db.execute(
+                          "SELECT 1 FROM origem_post WHERE chat=? AND msg_id=?"
+                          " AND dest=?", (chat, msg_id, dest)).fetchone()
+                      is not None)
+                if ok:
+                    db.execute(
+                        "UPDATE post_estado SET lider=?, lider_msg=?"
+                        " WHERE msg_id_dest=?", (chat, msg_id, dest))
+                db.execute("COMMIT")
+            except Exception:
+                db.execute("ROLLBACK")
+                raise
+        return ok
+    except Exception as e:
+        log_db.error(f"❌ db_transferir_lideranca: {e}")
+        return False
 
 
 def db_remover_post(msg_id_dest: int):

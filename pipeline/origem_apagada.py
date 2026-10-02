@@ -24,9 +24,13 @@ COMO:
        · lê o vínculo, trava o POST apontado (ordem da casa: ORIGEM →
          POST) e, numa transação, desfaz o vínculo — e, se não sobrou
          origem nenhuma, encerra o post (database.db_desvincular_origem);
-  3. fora dos locks, a remoção física é a da fusão
-     (convergencia.agendar_remocao): tentativas, FloodWait, status
-     persistido, canal de cupons e retomada no boot.
+  3. fora dos locks:
+       · post encerrado → o bot ESQUECE a oferta (pipeline.esquecimento;
+         o banco esquece na própria transação) e a remoção física é a da
+         fusão (convergencia.agendar_remocao): tentativas, FloodWait,
+         status persistido, canal de cupons e retomada no boot;
+       · post mantido → se a apagada era a CHEFE, a fonte que sobrou
+         assume (pipeline.sucessao).
 
 CORRIDAS:
   · publicação da mesma origem em curso: termina antes (lock de ORIGEM);
@@ -50,7 +54,7 @@ import time
 import globals as g
 from database import db_desvincular_origem
 from logger import log_out
-from pipeline import convergencia, exclusao, origem
+from pipeline import convergencia, esquecimento, exclusao, origem, sucessao
 from pipeline.identidade import username_de
 
 __all__ = ["instalar", "agendar", "apagadas", "apagada"]
@@ -123,35 +127,41 @@ def agendar(chat_id, ids) -> None:
 
 
 async def apagadas(chat: str, ids) -> list:
-    """Trata cada id apagado na fonte `chat`. A remoção física de cada
-    post encerrado é agendada assim que ele é encerrado. Devolve os
-    posts encerrados."""
+    """Trata cada id apagado na fonte `chat`. Fora de todos os locks:
+    post encerrado → esquece a oferta e agenda a remoção física na hora;
+    post mantido → confere a sucessão da chefe. Devolve os posts
+    encerrados."""
     encerrados = []
     for msg_id in ids:
         try:
-            dest = await _uma(chat, int(msg_id))
+            situacao, dest = await _uma(chat, int(msg_id))
         except asyncio.CancelledError:
             raise
         except Exception as e:                      # noqa: BLE001
             log_out.error(f"❌ origem apagada {_nome(chat)} id={msg_id}: {e}",
                           exc_info=True)
             continue
-        if dest is not None:                        # fora de todos os locks
-            g.midia_aceita_drop(dest)
+        if situacao in ("morto", "mantido"):
+            esquecimento.origem_saiu(chat, int(msg_id), dest)
+        if situacao == "morto":
+            await esquecimento.post_saiu(dest)
             convergencia.agendar_remocao(dest, "ORIGEM_APAGADA")
             encerrados.append(dest)
+        elif situacao == "mantido":
+            sucessao.agendar(dest)
     return encerrados
 
 
-async def _uma(chat: str, msg_id: int):
-    """Uma origem apagada. Devolve o post ENCERRADO agora, ou None."""
+async def _uma(chat: str, msg_id: int) -> tuple:
+    """Uma origem apagada. Devolve (situação, post) — situação de
+    database.db_desvincular_origem."""
     async with await origem.lock_origem(chat, msg_id):
         _lembrar(chat, msg_id)
         dest = origem.consultar(chat, msg_id)
         situacao, n = "sem_vinculo", 0
         for _ in range(_MAX_REFAZER + 1):
             if not dest:
-                return None
+                return "sem_vinculo", None
             async with await exclusao.lock_post(dest):
                 situacao, n = db_desvincular_origem(chat, msg_id, dest,
                                                     time.time())
@@ -162,13 +172,12 @@ async def _uma(chat: str, msg_id: int):
             log_out.warning(
                 f"⚠️ [ORIGEM_APAGADA] {_nome(chat)} id={msg_id} — vínculo "
                 f"mudou {_MAX_REFAZER + 1}x sob o lock; nada removido")
-            return None
+            return "mudou", None
     if situacao == "morto":
         log_out.info(
             f"🗑 [ORIGEM_APAGADA] {_nome(chat)} id={msg_id} → post:{dest} "
             f"sem nenhuma origem no ar — removendo do canal")
-        return dest
-    if situacao == "mantido":
+    elif situacao == "mantido":
         log_out.info(
             f"🗑 [ORIGEM_APAGADA] {_nome(chat)} id={msg_id} → post:{dest} "
             f"MANTIDO — {n} origem(ns) ainda no ar")
@@ -180,4 +189,4 @@ async def _uma(chat: str, msg_id: int):
         log_out.warning(
             f"⚠️ [ORIGEM_APAGADA] {_nome(chat)} id={msg_id} → post:{dest} "
             f"falha no banco — nada removido")
-    return None
+    return situacao, dest

@@ -14,7 +14,8 @@ pipeline.deduplicacao.
 
 CONTRATO INTERNO DA CAMADA — LEIA ANTES DE ALTERAR:
   _atomic_check_and_claim tem prefixo `_`, mas NÃO é privado deste
-  arquivo: é chamado por pipeline.deduplicacao. O underscore foi
+  arquivo: é chamado por pipeline.deduplicacao. _liberar, pelo mesmo
+  idioma, é chamado por pipeline.esquecimento. O underscore foi
   PRESERVADO na extração para não renomear nada fora de escopo —
   dívida registrada, não descuido. Não é reexportado.
 
@@ -84,3 +85,11 @@ async def _atomic_check_and_claim(fp: str, janela: float) -> Tuple[bool, Optiona
         # Claim
         g._atomic_mem[fp] = agora
         return False, ts
+
+
+async def _liberar(fp: str) -> bool:
+    """Desfaz o claim de `fp` (se existir). Mecanismo puro: quem decide
+    QUANDO liberar é o chamador (pipeline.esquecimento). Devolve se havia
+    claim."""
+    async with (await _get_atomic_lck()):
+        return g._atomic_mem.pop(fp, None) is not None

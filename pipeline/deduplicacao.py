@@ -31,6 +31,7 @@ from __future__ import annotations
 import time
 
 from logger import log_ded
+from pipeline import esquecimento
 from pipeline.reativacao import eh_reativacao
 # ── Camada fina de compatibilidade (Front 1, passo de extração) ──
 
@@ -110,6 +111,9 @@ async def deve_enviar_async(enr: MensagemEnriquecida) -> bool:
                     f"chat={chat} → bloqueada (já reativou recente)"
                 )
                 return False
+            # A reserva é desta MENSAGEM: se a fonte a apagar e o post
+            # sair, o esquecimento a solta (a repostagem passa).
+            esquecimento.reserva(norm.chat, norm.msg_id, fp_reativ)
             log_ded.info(
                 f"♻️ [REATIVACAO_OK] {identity} tipo={tipo} "
                 f"chat={chat} → enviar() decide"
