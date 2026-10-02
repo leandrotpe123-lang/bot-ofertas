@@ -2,9 +2,10 @@
 Camada 7 — Banco: espelho do post no canal de cupons.
 
 Responsabilidade ÚNICA: a tabela `espelho_post` — qual mensagem do
-canal de cupons espelha qual post do canal principal. É PROJEÇÃO: não
-participa de identidade, família, decisão nem convergência. O único
-escritor é o trabalhador de pipeline.espelho_cupons (sequencial).
+canal de cupons corresponde a qual post do canal principal. É PROJEÇÃO:
+não participa de identidade, família, decisão nem convergência. Os
+escritores são as operações de pipeline.espelho_cupons, em fila por
+post (nunca duas ao mesmo tempo no mesmo post).
 """
 from __future__ import annotations
 

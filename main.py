@@ -221,9 +221,9 @@ async def _encerrar() -> None:
         t.cancel()
         await asyncio.gather(t, return_exceptions=True)
 
-    # [Cupons] espelho — dá alguns segundos para a fila esvaziar e
-    # cancela limpo (antes de fechar HTTP/Telegram).
-    await espelho_cupons.encerrar(_TASKS_FUNDO.get("espelho"))
+    # [Cupons] canal de cupons — dá alguns segundos para o que está em
+    # curso terminar e cancela limpo (antes de fechar HTTP/Telegram).
+    await espelho_cupons.encerrar()
 
     # 4. HTTP
     try:
@@ -310,9 +310,10 @@ async def _preparar_processo() -> bool:
     # sem HEARTBEAT_PING_S. Não bloqueia o boot; cancelado em _encerrar.
     _TASKS_FUNDO["heartbeat"] = heartbeat_sessao.iniciar(client)
 
-    # [Cupons] Espelho do post de CUPOM no canal de cupons — desligado
-    # sem CANAL_CUPONS. Trabalhador único; o canal principal nunca espera.
-    _TASKS_FUNDO["espelho"] = espelho_cupons.iniciar()
+    # [Cupons] Post de CUPOM sai também no canal de cupons, ao mesmo
+    # tempo — desligado sem CANAL_CUPONS. Não cria task; o canal
+    # principal nunca espera.
+    espelho_cupons.iniciar()
 
     # [Frente 8] Remoções de posts FUNDIDOS que ficaram pendentes antes
     # do restart: UMA consulta local, agora, sem varredura periódica.

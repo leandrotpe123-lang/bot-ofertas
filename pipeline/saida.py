@@ -43,6 +43,11 @@ CONTRATO DE AQUISIÇÃO — uma operação de saída, UMA aquisição:
       _editar_inner_no_sem
       _substituir_inner_no_sem
 
+  [Cupons] pipeline.espelho_cupons é a ÚNICA outra fronteira: o seu
+  _io (e o upload único de preparar_arquivo) adquire UMA vez e chama
+  _enviar_msg_no_sem / _editar_inner_no_sem com destino= o canal de
+  cupons — mesma regra, nunca aninhada, nunca de dentro de uma pública.
+
 asyncio.Semaphore NÃO é reentrante — e com 3 vagas a reentrada não
 falha na hora: ela só trava quando 3 tarefas estiverem aninhadas ao
 mesmo tempo. É um deadlock que aparece somente sob carga. Daí a regra
@@ -59,6 +64,16 @@ import config
 from config import GRUPO_DESTINO
 from logger import log_out
 from pipeline.montagem import MensagemMontada
+
+
+class _Mudo:
+    """Logger que não escreve: as rotinas de envio/edição servem também
+    ao canal de cupons (destino=), que não loga."""
+    def __getattr__(self, _nome):
+        return lambda *a, **k: None
+
+
+_SEM_LOG = _Mudo()
 
 
 # ── [E4.0] Resultado de uma edição ────────────────────────────────
@@ -85,34 +100,40 @@ class ResultadoEdicao(NamedTuple):
 
 
 # ── Envio ─────────────────────────────────────────────────────────
-async def _enviar_msg_no_sem(texto: str, img) -> object:
+async def _enviar_msg_no_sem(texto: str, img, *,
+                             destino=GRUPO_DESTINO) -> object:
     """Envia SEM adquirir _SEM_ENVIO. Use APENAS de dentro de uma
     função pública que já segura o semáforo.
 
     Os fallbacks internos (send_file+caption → send_file sem caption →
-    send_message) fazem parte DESTA operação e ficam sob a mesma vaga."""
+    send_message) fazem parte DESTA operação e ficam sob a mesma vaga.
+
+    `destino` — o canal de cupons usa a MESMA rotina (publicação
+    simultânea, pipeline.espelho_cupons). Default: o canal principal.
+    Só o canal principal loga."""
     from client import client
+    log = log_out if destino == GRUPO_DESTINO else _SEM_LOG
     if img:
         if len(texto) <= 1024:
             try:
-                return await client.send_file(GRUPO_DESTINO, img, caption=texto,
+                return await client.send_file(destino, img, caption=texto,
                                               parse_mode="md", force_document=False)
             except Exception as e:
-                log_out.warning(f"⚠️ send_file+caption: {e}")
+                log.warning(f"⚠️ send_file+caption: {e}")
                 try:
-                    await client.send_file(GRUPO_DESTINO, img, force_document=False)
-                    return await client.send_message(GRUPO_DESTINO, texto,
+                    await client.send_file(destino, img, force_document=False)
+                    return await client.send_message(destino, texto,
                                                      parse_mode="md", link_preview=True)
                 except Exception as e2:
-                    log_out.warning(f"⚠️ send_file sem caption: {e2}")
+                    log.warning(f"⚠️ send_file sem caption: {e2}")
         else:
             try:
-                await client.send_file(GRUPO_DESTINO, img, force_document=False)
-                return await client.send_message(GRUPO_DESTINO, texto,
+                await client.send_file(destino, img, force_document=False)
+                return await client.send_message(destino, texto,
                                                  parse_mode="md", link_preview=False)
             except Exception as e:
-                log_out.warning(f"⚠️ send_file longo: {e}")
-    return await client.send_message(GRUPO_DESTINO, texto,
+                log.warning(f"⚠️ send_file longo: {e}")
+    return await client.send_message(destino, texto,
                                      parse_mode="md", link_preview=True)
 
 
@@ -139,9 +160,11 @@ async def _enviar_msg(texto: str, img) -> object:
 async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
                                 imagem_nova=None,
                                 exigir_imagem: bool = False,
-                                trocar_midia: bool = True) -> ResultadoEdicao:
+                                trocar_midia: bool = True,
+                                *, destino=GRUPO_DESTINO) -> ResultadoEdicao:
     """Edita mensagem sem adquirir _SEM_ENVIO. Use APENAS dentro de
-    funções que já seguram o semáforo.
+    funções que já seguram o semáforo. `destino` como em
+    _enviar_msg_no_sem (default: o canal principal; só ele loga).
 
     Com exigir_imagem=True, se a edição COM imagem falhar (post nasceu
     sem mídia), devolve False SEM editar só o texto, para o chamador cair
@@ -168,6 +191,7 @@ async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
     contraditório — sem autorização não há imagem a exigir. A Fase 2
     (política de mídia) é quem deve impedir essa combinação."""
     from client import client
+    log = log_out if destino == GRUPO_DESTINO else _SEM_LOG
     # A mídia só entra na chamada se houver AUTORIZAÇÃO e imagem.
     midia = imagem_nova if trocar_midia else None
     for t in range(1, 4):
@@ -181,27 +205,27 @@ async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
             if midia:
                 try:
                     await client.edit_message(
-                        GRUPO_DESTINO, msg_id_dest, texto_novo,
+                        destino, msg_id_dest, texto_novo,
                         parse_mode="md", file=midia,
                     )
                     midia_aplicada = True
                 except Exception as e_img:
                     if exigir_imagem:
-                        log_out.info(
+                        log.info(
                             f"🖼 imagem não entrou (post sem mídia) "
                             f"dest_id={msg_id_dest}: {e_img}"
                         )
                         return ResultadoEdicao(False, False)
                     await client.edit_message(
-                        GRUPO_DESTINO, msg_id_dest, texto_novo,
+                        destino, msg_id_dest, texto_novo,
                         parse_mode="md",
                     )
             else:
                 await client.edit_message(
-                    GRUPO_DESTINO, msg_id_dest, texto_novo,
+                    destino, msg_id_dest, texto_novo,
                     parse_mode="md",
                 )
-            log_out.info(f"✏️ Editado | dest_id={msg_id_dest}")
+            log.info(f"✏️ Editado | dest_id={msg_id_dest}")
             return ResultadoEdicao(True, midia_aplicada)
         except MessageNotModifiedError:
             # Nada mudou no destino — conservadoramente, a mídia NÃO
@@ -209,13 +233,13 @@ async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
             return ResultadoEdicao(True, False)
         except FloodWaitError as e:
             if e.seconds > 120:
-                log_out.warning(
+                log.warning(
                     f"⚠️ FloodWait longo {e.seconds}s — abortando edição"
                 )
                 return ResultadoEdicao(False, False)
             await asyncio.sleep(e.seconds)
         except Exception as e:
-            log_out.error(f"❌ edit t={t}: {e}")
+            log.error(f"❌ edit t={t}: {e}")
             if t < 3:
                 await asyncio.sleep(2 ** t)
     return ResultadoEdicao(False, False)

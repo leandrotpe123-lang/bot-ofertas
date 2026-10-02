@@ -35,10 +35,12 @@ o NOVO quando houve substituição. O upgrade de mídia não muda conteúdo:
 não grava composição e não chama `pos_escrita`. Este módulo continua
 sem decidir nada: quem decide a fusão é pipeline.convergencia.
 
-[Cupons] Depois de cada escrita bem-sucedida no canal principal, o
-aplicador NOTIFICA pipeline.espelho_cupons (put_nowait, sem await): o
-post de cupom ganha/atualiza a cópia no canal de cupons sem atrasar o
-principal. Desligado sem CANAL_CUPONS.
+[Cupons] Post de cupom sai nos DOIS canais ao mesmo tempo: o envio e a
+edição do canal de cupons (pipeline.espelho_cupons) são disparados no
+mesmo instante dos do principal, que nunca os aguarda. Quando o
+principal termina, o aplicador só AGENDA a conferência (sem await): o
+que não saiu igual é refeito copiando o principal. Desligado sem
+CANAL_CUPONS.
 """
 from __future__ import annotations
 
@@ -80,8 +82,12 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
     intacta — e o fallback de substituição está desarmado (decidir() já
     rebaixou d.permite_substituir), porque repostar apagaria a imagem
     boa de forma irrecuperável."""
+    # [Cupons] Post de cupom: a MESMA edição sai no canal de cupons em
+    # paralelo (com troca de mídia, a imagem sobe uma vez para os dois).
+    imagem, junto = await espelho_cupons.edicao_junto(
+        msg_id_dest, exibidas, montada.texto, montada.imagem, d.trocar_midia)
     res = await editar_msg(
-        msg_id_dest, montada.texto, montada.imagem,
+        msg_id_dest, montada.texto, imagem,
         exigir_imagem=d.exigir_imagem, trocar_midia=d.trocar_midia)
     if res.ok:
         # Edição preserva o msg_id: NÃO removemos o post.
@@ -103,7 +109,10 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             lider_msg=montada.msg_id)
         if pos_escrita is not None:
             pos_escrita(msg_id_dest)
-        espelho_cupons.conteudo(msg_id_dest, midia=res.midia_aplicada)
+        if junto is not None:
+            espelho_cupons.conferir(msg_id_dest, junto, res)
+        else:
+            espelho_cupons.conteudo(msg_id_dest, midia=res.midia_aplicada)
         # [E4.0] Só APÓS a I/O e só com prova: midia_aplicada. Um
         # `res.ok` que caiu em texto-only NÃO registra nada, então a
         # mesma mídia continua elegível na próxima chegada.
@@ -123,6 +132,7 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
         log_out.warning(
             f"⚠️ [EDIT_FALHOU] {identity} motivo={d.motivo} "
             f"midia={d.motivo_midia}")
+        espelho_cupons.conferir(msg_id_dest, junto, res)   # reconcilia
         return True
 
     log_out.info(
@@ -157,6 +167,7 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
             f"novo_id={sent.id} score={d.novo_score}")
     else:
         log_out.warning(f"⚠️ [SUBSTITUI_FALHOU] {identity}")
+        espelho_cupons.conferir(msg_id_dest, junto, res)   # reconcilia
     return True
 
 
@@ -179,15 +190,21 @@ async def _aplicar_sincronizacao(montada, norm, score, estado, msg_id_dest,
     # líder, janela, edit_count — segue idêntico. A economia é
     # exclusivamente a chamada ao Telegram.
     no_op = d.texto_igual and not d.trocar_midia
+    junto = res = None
     if no_op:
         ok, midia_aplicada = True, False
     else:
+        # [Cupons] A mesma sincronização sai no canal de cupons em paralelo.
+        imagem, junto = await espelho_cupons.edicao_junto(
+            msg_id_dest, exibidas, montada.texto, montada.imagem,
+            d.trocar_midia)
         res = await editar_msg(
-            msg_id_dest, montada.texto, montada.imagem, exigir_imagem=False,
+            msg_id_dest, montada.texto, imagem, exigir_imagem=False,
             trocar_midia=d.trocar_midia)
         ok, midia_aplicada = res.ok, res.midia_aplicada
     if not ok:
         log_out.warning(f"⚠️ [SYNC_FALHOU] {identity} chat={norm.chat}")
+        espelho_cupons.conferir(msg_id_dest, junto, res)   # reconcilia
         return True
     if midia_aplicada:
         g.midia_aceita_set(msg_id_dest, getattr(norm, "midia_key", ""))
@@ -199,7 +216,9 @@ async def _aplicar_sincronizacao(montada, norm, score, estado, msg_id_dest,
         score_versao=V_CONTEUDO, exibidas=exibidas)
     if pos_escrita is not None:
         pos_escrita(msg_id_dest)
-    if not no_op:
+    if junto is not None:
+        espelho_cupons.conferir(msg_id_dest, junto, res)
+    elif not no_op:
         espelho_cupons.conteudo(msg_id_dest, midia=midia_aplicada)
     log_out.info(
         f"🔁 [SINCRONIZADO] {identity} chat={norm.chat} score={score} "
@@ -228,12 +247,16 @@ async def _aplicar_upgrade_midia(montada, norm, d, estado, msg_id_dest,
     familia.unir(msg_id, []): é operação de domínio, e unir com lista
     vazia seria um leitor disfarçado com semântica de escrita."""
     texto_atual = estado.get("texto", "") or montada.texto
+    # [Cupons] A mesma troca de mídia sai no canal de cupons em paralelo.
+    imagem, junto = await espelho_cupons.edicao_junto(
+        msg_id_dest, None, texto_atual, montada.imagem, True)
     res = await editar_msg(
-        msg_id_dest, texto_atual, montada.imagem,
+        msg_id_dest, texto_atual, imagem,
         exigir_imagem=False, trocar_midia=True)
     if not res.ok:
         log_out.warning(
             f"⚠️ [UPGRADE_MIDIA_FALHOU] {identity} chat={norm.chat}")
+        espelho_cupons.conferir(msg_id_dest, junto, res)   # reconcilia
         return True
     # [E4.0] Prova antes do registro — ver _aplicar_evolucao.
     if res.midia_aplicada:
@@ -251,7 +274,9 @@ async def _aplicar_upgrade_midia(montada, norm, d, estado, msg_id_dest,
         estado.get("lider", ""),
         estado.get("janela_fim", 0), estado.get("edit_count", 0),
         midia_chat=norm.chat)
-    if res.midia_aplicada:
+    if junto is not None:
+        espelho_cupons.conferir(msg_id_dest, junto, res)
+    elif res.midia_aplicada:
         espelho_cupons.conteudo(msg_id_dest, midia=True)
     # score_versao NAO e passado: o score nao foi tocado, entao rotular
     # como v2 criaria um score v1 com etiqueta v2 — estado corrompido,
@@ -270,6 +295,14 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
     janela e dispara os efeitos colaterais (idempotência, saturação,
     burst). Sem decisão — chamado quando não há post parente vivo."""
     img = montada.imagem
+    # [Cupons] Post de cupom: os DOIS canais no MESMO instante — a imagem
+    # sobe uma vez (o mesmo upload que o envio faria) e o envio ao canal de
+    # cupons é disparado junto com o do principal, que não o espera.
+    tarefa_cupons = None
+    if espelho_cupons.vai_para_cupons(
+            ofertas if exibidas is None else exibidas):
+        img, img_cupons = await espelho_cupons.preparar_arquivo(img)
+        tarefa_cupons = espelho_cupons.publicar_junto(montada.texto, img_cupons)
     sent = None
     for t in range(1, 4):
         try:
@@ -283,7 +316,9 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
 
     if not sent:
         log_out.error(f"❌ Envio falhou | @{montada.chat}")
+        espelho_cupons.abortar(tarefa_cupons)
         return False
+    espelho_cupons.vincular(sent.id, tarefa_cupons, sent)
 
     # Gravar estado IMEDIATAMENTE após envio. Falhas secundárias
     # (mapa, sat, burst) NÃO devem deixar o post sem registro — senão
@@ -313,9 +348,6 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
                 lider_msg=montada.msg_id)
             if pos_escrita is not None:
                 pos_escrita(sent.id)
-            # [Cupons] Post no ar e gravado: o espelho só é NOTIFICADO
-            # (sem await) — o canal principal nunca espera o de cupons.
-            espelho_cupons.publicado(sent.id, sent)
             # [E4.0] `img` diz o que TENTAMOS enviar; chave_midia(sent)
             # diz o que o Telegram REALMENTE publicou. _enviar_msg_no_sem
             # tem fallback que devolve um send_message puro — nesse caso
