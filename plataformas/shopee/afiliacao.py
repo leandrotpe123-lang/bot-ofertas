@@ -31,6 +31,7 @@ from utils.cache_links import consultar_link, descartar_link, registrar_link
 from utils.url_resolver import desencurtar
 from utils.urls import _cache_key, _netloc, _sanitizar_url
 
+from . import conexao
 from .links import (
     _DOMINIOS,
     _ENCURTADORES,
@@ -112,7 +113,9 @@ def _perf_marca(via: str, t0: float = 0.0) -> None:
             f"{k}={v}" for k, v in sorted(_perf_c.items())
             if not k.startswith("_")
         )
-        log_nrm.debug(f"📊 SHP perf | {contas} | media {medias}")
+        conexoes = conexao.resumo()
+        log_nrm.debug(f"📊 SHP perf | {contas} | media {medias}"
+                      + (f" | conexao {conexoes}" if conexoes else ""))
 
 # ── Política de repasse direto (sem afiliação) ────────────────────
 # Domínio cujas URLs são publicadas como recebidas, sem passar pelo
@@ -184,6 +187,7 @@ async def _chamar_servico_afiliados(
     afiliado, ou None quando o serviço não o produz.
     """
     for tentativa, prazo in enumerate(_TIMEOUTS_AFILIACAO, start=1):
+        conexao.usada()
         try:
             ts = str(int(time.time()))
             payload = json.dumps(
@@ -270,6 +274,9 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     url = _sanitizar_url(url)
     netloc = _netloc(url)
     _perf_entrada(url)
+    # Pool próprio da Shopee (conexão com a API sempre aberta). Fora do
+    # processo do bot, ou desligado, segue a sessão recebida do core.
+    sessao = await conexao.sessao(sessao, aquecer=_ENDPOINT_AFILIADOS)
 
     # Domínio de repasse direto: devolvido sem afiliação.
     if _bate_dominio(netloc, _REPASSE_DIRETO):
