@@ -1,0 +1,67 @@
+# CI do FOGUETÃO — gate da main (check obrigatório: "testes").
+#
+# Roda a suíte REAL: cada tests/test_*.py como programa standalone, pelo
+# mesmo script usado localmente (scripts/testes.sh). pytest NÃO é critério.
+#
+#   pull_request → valida o PR antes do merge (check exigido pelo ruleset);
+#   push na main → valida o commit que a Railway vai implantar (Wait for CI);
+#   workflow_dispatch → execução manual.
+#
+# Este arquivo é GOVERNANÇA: mudar eventos, nome do job, Python ou o script
+# é PR próprio, revisado pelo dono — nunca junto de uma correção.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # PR: a execução mais nova cancela a anterior do mesmo PR.
+  # push/dispatch: uma execução por commit — cada commit da main precisa do
+  # próprio resultado, porque é por ele que a Railway espera antes do deploy.
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  testes:
+    # O NOME deste job é o check obrigatório configurado no ruleset da main.
+    name: testes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Python 3.13 (mesma versão menor da produção — railway.toml)
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Dependências de produção (requirements.txt)
+        run: python -m pip install -r requirements.txt
+
+      - name: Ambiente (versões efetivamente instaladas)
+        run: |
+          python --version
+          python -m pip freeze
+
+      - name: Compilação do código de produção
+        run: python -m compileall -q -x '(^|/)(\.git|\.venv|venv|tests|testes_ml)(/|$)' .
+
+      - name: Suíte standalone (tests/test_*.py)
+        env:
+          PYTHON: python
+        run: bash scripts/testes.sh
