@@ -309,10 +309,14 @@ async def _cenario_i():
     # cede: o líder conclui e remove a entrada antes de a segunda
     # tarefa rodar. Cada uma tem a própria entrada => contenção zero.
     # É o caso Netshoes: colisão de chave que nunca vira espera.
+    # Guarda o OBJETO, não id(): no caso de sucesso as duas entradas têm
+    # vidas que não se sobrepõem, e o CPython reusa o endereço de um objeto
+    # já liberado — dois id() iguais não provariam espera (falso negativo
+    # medido: 83 de 300 execuções sob carga).
     vistos = []
 
     async def op_registra():
-        vistos.append(id(_entradas.get("n")))
+        vistos.append(_entradas.get("n"))
         return "ok"
 
     await asyncio.gather(
@@ -320,7 +324,8 @@ async def _cenario_i():
         uma_por_vez("n", op_registra),
     )
     assert len(vistos) == 2
-    assert vistos[0] != vistos[1], "houve espera onde não deveria haver"
+    assert vistos[0] is not None and vistos[1] is not None
+    assert vistos[0] is not vistos[1], "houve espera onde não deveria haver"
     assert em_execucao() == 0
 
 
