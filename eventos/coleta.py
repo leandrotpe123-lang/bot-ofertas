@@ -2,7 +2,8 @@
 Proveniência [F1.2-A1] — COLETA SEGURA: a única porta do pipeline para o
 anel de eventos.
 
-O pipeline nunca monta payload fora daqui. Ele chama
+Instrumentado (da A2 em diante), o pipeline nunca montará payload fora
+daqui: chamará
     eventos.emitir_de("tipo", lambda: (corr, dados), local="modulo.ponto")
 e esta camada garante (contrato F1.2 A.3/A.6/A.8; testes em
 tests/test_eventos_{coleta,tamanho,segredos,contrato}.py):
@@ -27,6 +28,11 @@ tests/test_eventos_{coleta,tamanho,segredos,contrato}.py):
   C7 Adiamento .... dentro de adiar(), a task dona só CAPTURA (cópia
                     saneada); máscara, ajuste e anel saem no fim do
                     escopo, fora dos locks. Tasks filhas emitem direto.
+
+A A1 entrega SÓ esta infraestrutura: nenhum ponto do pipeline a chama.
+C1–C7 são garantias do mecanismo, provadas com fluxo simulado; a de cada
+caminho real (inclusive um execucao.fim por caminho) só existe quando a
+A2 ligar esse caminho.
 
 h12 é um PSEUDÔNIMO estável para comparar igualdade (sha256 truncado em
 12 hexadecimais, sem sal, igual entre boots). NÃO é segredo nem mecanismo
@@ -118,12 +124,59 @@ def _nao_finito(x: float) -> str:
 # curto nem credencial. O resto vira ⟨url:host:h12⟩.
 # ─────────────────────────────────────────────────────────────────
 _SEM_URL = "\\s<>\"'`\u27e8\u27e9\u200b-\u200d\u2060"
-_RE_URL = re.compile(
-    rf"https?://[^{_SEM_URL}]+"
-    rf"|(?<![\w@.:/\u27e8-])(?:[a-z0-9][a-z0-9-]{{0,62}}\.)+[a-z]{{2,24}}"
-    rf"(?::\d{{1,5}})?(?:/[^{_SEM_URL}]*)?",
-    re.IGNORECASE)
-_FIM_URL = ".,;)>]}!?"           # o mesmo corte final de ingestao.ingerir
+# URL SEM esquema: a mesma gramática que o navegador aplica depois do
+# esquema — [usuário[:senha]@]host[:porta][(/ \ ? #)resto], com host =
+# nome com ponto (rótulos Unicode; ponto ASCII ou ideográfico), IPv4,
+# [IPv6] ou localhost. Tirar o "https://" nunca tira a proteção.
+# Começo só em fronteira e quantificadores possessivos: custo linear.
+_PONTO = "[.\u3002\uff0e\uff61]"
+# rótulo: letras/dígitos Unicode separados por hífen — sem "_", que
+# encadearia rótulos pelo texto todo (custo quadrático)
+_ROTULO = r"[^\W_]++(?:-++[^\W_]++)*+"
+_NOME = rf"(?:{_ROTULO}{_PONTO})+[^\W\d_]{{2,24}}{_PONTO}?"
+_IPV6 = (r"\[(?=[0-9a-f.:]{0,45}::|(?:[0-9a-f.]{0,39}:){3})[0-9a-f:.]{2,45}"
+         r"(?:%[\w.~-]{1,32})?\]")
+_OCTETO = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
+_IPV4 = rf"(?:{_OCTETO}\.){{3}}{_OCTETO}"
+_HOST = rf"(?:{_NOME}|{_IPV6}|{_IPV4}|localhost)"
+_RESTO = rf"[/\\?#][^{_SEM_URL}]*"
+_CAUDA = rf"(?::\d{{0,5}})?(?:{_RESTO})?"                  # porta e resto, se houver
+_CAUDA_CERTA = rf"(?::\d{{1,5}}(?:{_RESTO})?|{_RESTO})"    # porta ou resto, obrigatório
+# usuário/senha: RFC 3986 sem ':' e sem a aspa, que aqui termina a URL
+_USUARIO = r"[\w\-.~%!$&()*+,;=]"
+_FORA_DE_NOME = r"(?<![.\u3002\uff0e\uff61-])"    # com a guarda: não começa no meio de um nome
+
+
+def _detector(com_usuario: bool) -> "re.Pattern":
+    """Token e esquema primeiro (primeiro caractere fixo); o resto só onde
+    não segue letra/dígito. Custo linear e baixo por posição."""
+    usuario = ([rf"(?<![\w\-.~%!$&()*+,;=:]){_USUARIO}*+"             # nunca depois de ':'
+                rf"(?:(?::{_USUARIO}*+)++@{_HOST}{_CAUDA}"              # usuário:senha@host
+                rf"|(?<={_USUARIO})@{_HOST}{_CAUDA_CERTA})"]            # usuário@host/…
+               if com_usuario else [])
+    return re.compile(
+        r"\u27e8url:[a-z0-9.?-]{1,253}:[0-9a-f]{12}\u27e9"             # token já aplicado: fica
+        rf"|https?://[^{_SEM_URL}]+"
+        r"|(?<![^\W_])(?:" + "|".join(usuario + [
+            # IPv4 e localhost soltos são número de versão e palavra: só com porta ou resto
+            rf"{_FORA_DE_NOME}(?=[\dl])(?:{_IPV4}|localhost)(?![\w.-]){_CAUDA_CERTA}",
+            rf"{_FORA_DE_NOME}{_IPV6}{_CAUDA}",
+            rf"{_FORA_DE_NOME}{_NOME}{_CAUDA}"]) + ")",
+        re.IGNORECASE)
+
+
+_RE_URL = _detector(True)
+_RE_URL_SEM_ARROBA = _detector(False)    # sem "@" no texto, usuário nunca casa
+# Onde partir um trecho que saiu LIMPO por inteiro: o que não é caractere
+# de URL (RFC 3986, letra/dígito Unicode de IRI, ponto ideográfico) e o
+# "](" do link markdown — o trecho pode ter engolido o que veio colado
+# depois da URL (emoji, aspas, [url](url)) e assim escondido o código curto.
+_RE_CORTE = re.compile(r"(\]\(|[^\w\-.~:/?#\[\]@!$&()*+,;=%\\\u3002\uff0e\uff61]+)")
+# O corte final de ingestao.ingerir, mais * e ~ (ênfase markdown em volta
+# do link) e : ("loja.com/AbC123: corre!") — senão a pontuação colada
+# esconderia o código curto do caminho.
+_FIM_URL = ".,;)>]}!?*~:"
+_PONTOS_IDNA = str.maketrans({"\u3002": ".", "\uff0e": ".", "\uff61": "."})
 _RE_IP = re.compile(r"[\d.]+")
 _RE_HOST = re.compile(r"[a-z0-9.-]{1,253}")
 _RE_CODIGO = re.compile(r"[A-Za-z0-9_-]{4,24}")
@@ -183,6 +236,8 @@ def _parece_codigo(seg: str) -> bool:
 def _classificar(u: str) -> Tuple[Optional[str], str]:
     """(motivo, host). motivo None: a URL pode ir em claro."""
     base = u if u[:8].lower().startswith(("http://", "https://")) else "https://" + u
+    # O navegador lê \ como / e o ponto ideográfico como ponto (urlsplit, não).
+    base = base.replace("\\", "/").translate(_PONTOS_IDNA)
     try:
         p = urlsplit(base)
         host = (p.hostname or "").rstrip(".")
@@ -226,24 +281,52 @@ def _token(u: str) -> Optional[str]:
     return f"\u27e8url:{_host_seguro(host)}:{h12(u)}\u27e9"
 
 
-def _trocar(m: "re.Match") -> str:
-    bruto = m.group(0)
+def _substituto(bruto: str) -> Optional[str]:
+    """Token no lugar do trecho; None quando ele pode ficar em claro."""
     u = bruto.rstrip(_FIM_URL)
-    if not u:
-        return bruto
-    tok = _token(u)
+    if u.count("[") > u.count("]"):      # o corte final não leva o ] do [IPv6]
+        j = bruto.find("]", len(u))
+        if j != -1:
+            u = bruto[:j + 1]
+    tok = _token(u) if u else None
     if tok is None:
-        return bruto
+        return None
     _C["urls_protegidas"] += 1
     return tok + bruto[len(u):]
+
+
+def _trocar_pedaco(m: "re.Match") -> str:
+    bruto = m.group(0)
+    if bruto[0] == "\u27e8":
+        return bruto                     # token já aplicado: idempotente
+    novo = _substituto(bruto)
+    return bruto if novo is None else novo
+
+
+def _trocar(m: "re.Match") -> str:
+    bruto = m.group(0)
+    if bruto[0] == "\u27e8":
+        return bruto                     # token já aplicado: idempotente
+    novo = _substituto(bruto)
+    if novo is not None:
+        return novo                      # sensível por inteiro: sai inteiro
+    if _RE_CORTE.search(bruto) is None:
+        return bruto
+    # Limpo por inteiro, com algo colado que não é URL: cada pedaço vale
+    # sozinho, lido como texto novo — o que uma segunda passada veria.
+    partes = _RE_CORTE.split(bruto)
+    for i in range(0, len(partes), 2):
+        partes[i] = _RE_URL.sub(_trocar_pedaco, partes[i])
+    return "".join(partes)
 
 
 def mascarar_urls(texto: str) -> str:
     """Troca cada URL que não pode ir em claro por ⟨url:host:h12⟩; a
     pontuação final fica. Idempotente."""
-    if "." not in texto and "://" not in texto:
-        return texto                     # sem ponto nem esquema não há URL
-    return _RE_URL.sub(_trocar, texto)
+    if ("." not in texto and "[" not in texto and "://" not in texto
+            and texto.isascii() and "localhost" not in texto.lower()):
+        return texto                     # nada com forma de URL (ponto Unicode: não ASCII)
+    return (_RE_URL if "@" in texto else _RE_URL_SEM_ARROBA).sub(_trocar, texto)
 
 
 def representar_url(url) -> dict:

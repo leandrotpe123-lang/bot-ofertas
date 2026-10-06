@@ -32,22 +32,27 @@ pipeline (T2) e o fim de execução sai exatamente uma vez.
   13  fluxo simulado de uma oferta (entrada → fila → publicação): anel
       desligado, ligado, coletores sabotados e estágios internos
       sabotados → o caminho e os efeitos da oferta são idênticos
-  14  fachada: exportações, catálogo e contadores; import BLINDADO
-      (subprocesso com eventos.coleta quebrado → F1.1 intacta, coleta
-      no-op)
+  14  fachada: exportações REAIS (sem substituto), catálogo e contadores;
+      import SEM rede: erro de programação em coleta.py ou catalogo.py
+      (subprocesso, cópia do pacote) quebra o import com o tipo
+      verdadeiro; a dormência vem só do caminho rápido (desligado,
+      nenhum estágio interno roda e nenhum contador muda)
   15  custo desligado: limite folgado (sanidade, não benchmark)
 
     python tests/test_eventos_coleta.py
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import enum
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from typing import NamedTuple
 
@@ -714,10 +719,35 @@ def test_13_fluxo_simulado_identico(r):
             "13.nada_vaza")
 
 
-def test_14_fachada_e_import_blindado(r):
-    r.check(eventos.coleta_disponivel is True and eventos.emitir_de is coleta.emitir_de
-            and eventos.execucao is coleta.execucao and eventos.adiar is coleta.adiar,
-            "14.exportacoes_reais")
+_ROTEIRO_IMPORT = (
+    "import sys\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "if len(sys.argv) > 2:\n"
+    "    sys.modules[sys.argv[2]] = None\n"
+    "import eventos\n"
+    "assert eventos.__file__.startswith(sys.argv[1]), eventos.__file__\n"
+    "print('IMPORTOU')\n")
+
+
+def _importar_copia(pasta: str, *extra: str):
+    """`import eventos` num processo novo, isolado (-I), a partir da cópia
+    do pacote em `pasta` — nunca do repositório."""
+    ambiente = {k: v for k, v in os.environ.items()
+                if not k.startswith(("API_PRIVADA", "EVENTOS_", "TELEGRAM"))}
+    return subprocess.run([sys.executable, "-I", "-c", _ROTEIRO_IMPORT, pasta, *extra],
+                          capture_output=True, text=True, timeout=60, env=ambiente,
+                          cwd=pasta)
+
+
+def test_14_fachada_e_import_sem_rede(r):
+    r.check(eventos.emitir_de is coleta.emitir_de and eventos.execucao is coleta.execucao
+            and eventos.adiar is coleta.adiar
+            and eventos.transferir_execucao is coleta.transferir_execucao
+            and eventos.inicio_na_fila is coleta.inicio_na_fila
+            and eventos.marcar_desfecho is coleta.marcar_desfecho
+            and eventos.saude_coleta is coleta.saude_coleta
+            and eventos.catalogo is catalogo
+            and not hasattr(eventos, "coleta_disponivel"), "14.exportacoes_reais")
     s = eventos.saude_coleta()
     r.check(set(s) == {"chamadas", "emitidos", "recusados", "falhas_coleta",
                        "falhas_internas", "cortados", "urls_protegidas", "adiados",
@@ -727,30 +757,75 @@ def test_14_fachada_e_import_blindado(r):
     r.check(rc["versao"] == catalogo.VERSAO == 1 and isinstance(rc["hash"], str)
             and len(rc["hash"]) == 16 and rc["tipos"] == len(catalogo.TIPOS),
             "14.resumo_catalogo", str(rc))
-    roteiro = (
-        "import sys\n"
-        "sys.path.insert(0, sys.argv[1])\n"
-        "sys.modules['eventos.coleta'] = None\n"
-        "import eventos\n"
-        "assert eventos.coleta_disponivel is False\n"
-        "reg = eventos.instalar(100, 1 << 20)\n"
-        "assert eventos.emitir('processo.iniciado', {'a': 1}) == 1\n"
-        "rodou = []\n"
-        "eventos.emitir_de('origem.recebida', lambda: rodou.append(1) or ({}, {}), local='x')\n"
-        "with eventos.execucao(lambda: {}):\n"
-        "    with eventos.adiar():\n"
-        "        pass\n"
-        "eventos.transferir_execucao(None); eventos.inicio_na_fila(); eventos.marcar_desfecho('ERRO')\n"
-        "assert rodou == [] and reg.saude()['seq_ultimo'] == 1\n"
-        "assert eventos.saude_coleta() == {'disponivel': False}\n"
-        "assert eventos.resumo_catalogo()['versao'] == 1\n"
-        "print('OK')\n")
-    ambiente = {k: v for k, v in os.environ.items()
-                if not k.startswith(("API_PRIVADA", "EVENTOS_", "TELEGRAM"))}
-    p = subprocess.run([sys.executable, "-c", roteiro, RAIZ], capture_output=True,
-                       text=True, timeout=60, env=ambiente, cwd=RAIZ)
-    r.check(p.returncode == 0 and p.stdout.strip() == "OK", "14.import_blindado",
-            (p.stdout + p.stderr)[-600:])
+    original = catalogo._RESUMO
+    catalogo._RESUMO, tipos = None, catalogo.TIPOS
+    catalogo.TIPOS = None                              # sabota o cálculo
+    try:
+        rc = eventos.resumo_catalogo()
+    finally:
+        catalogo.TIPOS, catalogo._RESUMO = tipos, original
+    r.check(rc == {"versao": 1, "hash": None, "tipos": None},
+            "14.resumo_catalogo_nunca_levanta", str(rc))
+
+    # Nenhum import do pacote fica dentro de try: erro de programação na
+    # coleta ou no catálogo não pode virar no-op silencioso.
+    for arq in ("__init__.py", "coleta.py", "catalogo.py"):
+        with open(os.path.join(RAIZ, "eventos", arq), encoding="utf-8") as f:
+            arvore = ast.parse(f.read())
+        presos = [n.lineno for t in ast.walk(arvore)
+                  if isinstance(t, (ast.Try, getattr(ast, "TryStar", ast.Try)))
+                  for n in ast.walk(t) if isinstance(n, (ast.Import, ast.ImportFrom))]
+        r.check(presos == [], f"14.import_fora_de_try.{arq}", str(presos))
+
+    # Erro REAL de programação em coleta.py ou catalogo.py quebra o import
+    # (e portanto a suíte e a CI), com o tipo verdadeiro; o pacote íntegro
+    # importa (controle); eventos.coleta ausente também quebra (era o caso
+    # que o import blindado da primeira versão da A1 calava).
+    with tempfile.TemporaryDirectory() as tmp:
+        shutil.copytree(os.path.join(RAIZ, "eventos"), os.path.join(tmp, "eventos"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        p = _importar_copia(tmp)
+        r.check(p.returncode == 0 and p.stdout.strip() == "IMPORTOU", "14.controle_importa",
+                (p.stdout + p.stderr)[-600:])
+        p = _importar_copia(tmp, "eventos.coleta")
+        r.check(p.returncode != 0 and "ModuleNotFoundError" in p.stderr
+                and "IMPORTOU" not in p.stdout, "14.coleta_ausente_quebra",
+                (p.stdout + p.stderr)[-600:])
+    for arq in ("coleta.py", "catalogo.py"):
+        with tempfile.TemporaryDirectory() as tmp:
+            shutil.copytree(os.path.join(RAIZ, "eventos"), os.path.join(tmp, "eventos"),
+                            ignore=shutil.ignore_patterns("__pycache__"))
+            with open(os.path.join(tmp, "eventos", arq), "a", encoding="utf-8") as f:
+                f.write("\n_BUG_DE_PROGRAMACAO = nome_que_nao_existe_a1\n")
+            p = _importar_copia(tmp)
+        r.check(p.returncode != 0 and "NameError" in p.stderr
+                and "nome_que_nao_existe_a1" in p.stderr and "IMPORTOU" not in p.stdout,
+                f"14.bug_em_{arq}_aparece", (p.stdout + p.stderr)[-600:])
+
+    # Dormência = só o caminho rápido: desligado, nenhum estágio interno
+    # roda e nenhum contador muda.
+    eventos.desligar()
+    tocados = []
+    nomes = ("_rodar_coletor", "_capturar", "_entregar", "_despachar", "_ultimo_recurso",
+             "_raiz", "_encerrar")
+    originais = {n: getattr(coleta, n) for n in nomes}
+    try:
+        for n in nomes:
+            setattr(coleta, n, lambda *_a, _n=n, **_k: tocados.append(_n))
+        antes = eventos.saude_coleta()
+        eventos.emitir_de("origem.recebida", lambda: tocados.append("coletor") or ({}, {}),
+                          local="t.14", minimo=lambda: tocados.append("minimo") or {})
+        with eventos.execucao(lambda: tocados.append("ids") or {}):
+            with eventos.adiar():
+                eventos.marcar_desfecho("ERRO")
+                eventos.inicio_na_fila()
+                eventos.transferir_execucao(None)
+        depois = eventos.saude_coleta()
+    finally:
+        for n, f in originais.items():
+            setattr(coleta, n, f)
+    r.check(tocados == [] and antes == depois, "14.dormencia_e_o_caminho_rapido",
+            str((tocados, antes, depois)))
 
 
 def test_15_custo_desligado(r):

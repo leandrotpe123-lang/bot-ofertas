@@ -15,10 +15,12 @@ GARANTIAS (ver eventos.anel e tests/test_eventos_anel.py):
 Quem lê é a API privada (eventos.api_privada), a pedido do Brain. O
 worker nunca envia nada a ninguém.
 
-[F1.2-A1] O pipeline não chama emitir(): usa emitir_de(), a coleta
-preguiçosa e blindada de eventos.coleta (o coletor só roda com o registro
-instalado e nenhuma falha dele chega a quem chamou). emitir() direto fica
-para main.py (processo.*). O catálogo de tipos e enums é eventos.catalogo.
+[F1.2-A1] Regra: o pipeline nunca chama emitir(). Instrumentado (da A2
+em diante), usará emitir_de(), a coleta preguiçosa e blindada de
+eventos.coleta (o coletor só roda com o registro instalado e nenhuma falha
+dele chega a quem chamou); na A1 ele ainda não emite nada. emitir() direto
+fica para main.py (processo.*). O catálogo de tipos e enums é
+eventos.catalogo.
 
 Fronteira: este pacote não importa telethon, globals, database nem
 sqlite3 — garantido por tests/test_eventos_main.py.
@@ -34,7 +36,7 @@ __all__ = ["instalar", "desligar", "emitir", "registro_atual",
            "Registro", "ler_cursor", "ENVELOPE_V", "MAX_EVENTO_BYTES",
            "MAX_TEXTO", "emitir_de", "execucao", "transferir_execucao",
            "inicio_na_fila", "marcar_desfecho", "adiar", "saude_coleta",
-           "resumo_catalogo", "coleta_disponivel"]
+           "resumo_catalogo"]
 
 _registro: Optional[Registro] = None
 
@@ -77,52 +79,20 @@ def emitir(tipo: str, dados: Optional[dict] = None,
 
 
 # ── [F1.2-A1] Coleta segura e catálogo ────────────────────────────
-# Import BLINDADO: se a infraestrutura nova não carregar, a F1.1 segue
-# igual e a coleta vira no-op — o boot do worker não depende disto.
+# Import DIRETO, sem rede: erro de programação em eventos.coleta ou
+# eventos.catalogo quebra o `import eventos` — e com ele a suíte e a CI —
+# em vez de virar no-op silencioso. A dormência NÃO vem daqui: vem do
+# caminho rápido de cada entrada da coleta (registro não instalado →
+# retorna antes de rodar qualquer coisa). Garantido por
+# tests/test_eventos_coleta.py (14).
 # (Fica no fim: eventos.coleta lê _registro desta fachada.)
-try:
-    from eventos import catalogo
-except Exception:                                      # noqa: BLE001
-    catalogo = None
-try:
-    from eventos.coleta import (adiar, emitir_de, execucao, inicio_na_fila,
-                                marcar_desfecho, saude_coleta,
-                                transferir_execucao)
-    coleta_disponivel = True
-except Exception:                                      # noqa: BLE001
-    coleta_disponivel = False
-
-    def emitir_de(*_a, **_k) -> None:
-        return None
-
-    def transferir_execucao(*_a, **_k) -> None:
-        return None
-
-    def inicio_na_fila(*_a, **_k) -> None:
-        return None
-
-    def marcar_desfecho(*_a, **_k) -> None:
-        return None
-
-    def saude_coleta() -> dict:
-        return {"disponivel": False}
-
-    class _Nulo:
-        def __init__(self, *_a, **_k) -> None:
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_exc) -> bool:
-            return False
-
-    execucao = adiar = _Nulo
+from eventos import catalogo                                  # noqa: E402
+from eventos.coleta import (adiar, emitir_de, execucao,       # noqa: E402
+                            inicio_na_fila, marcar_desfecho, saude_coleta,
+                            transferir_execucao)
 
 
 def resumo_catalogo() -> dict:
-    """Versão e hash do catálogo (processo.iniciado). Nunca levanta."""
-    try:
-        return catalogo.resumo()
-    except Exception:                                  # noqa: BLE001
-        return {"versao": None, "hash": None, "tipos": None}
+    """Versão e hash do catálogo (processo.iniciado). Nunca levanta: a
+    proteção é a do próprio catalogo.resumo()."""
+    return catalogo.resumo()

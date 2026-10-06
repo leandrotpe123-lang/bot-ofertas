@@ -16,6 +16,15 @@ F1.2-A1 — SEGREDOS E URLs: nada sensível entra num evento.
       {h12, host, motivo}, sem a URL
   06  h12: 12 hexadecimais, estável, igualdade — e documentado como
       pseudônimo, não segredo nem mecanismo de segurança
+  07  URL SEM esquema: cada URL protegida, sem e com https://, em 19
+      contextos de texto (markdown, ênfase, "Link:", "//", pontuação…)
+      → mesmo motivo nas duas formas, token no lugar, nenhum canário,
+      idempotente; ponta a ponta pelo anel; URL limpa sem esquema e
+      texto comum (versão, hora, e-mail, [1]) ficam intactos
+  08  sorteio determinístico de textos com URLs protegidas e limpas
+      (com e sem esquema) entre separadores reais → nunca levanta,
+      nenhum canário, idempotente; texto patológico de 16 KiB → custo
+      linear (o caso quadrático custaria centenas de ms)
 
     python tests/test_eventos_segredos.py
 """
@@ -24,7 +33,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import random
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _harness_e5 import preparar, rodar  # noqa: E402
@@ -204,6 +215,138 @@ def test_06_h12(r):
     doc = (coleta.__doc__ or "") + (coleta.h12.__doc__ or "")
     r.check("PSEUDÔNIMO" in doc and "NÃO é segredo" in doc and "mecanismo" in doc,
             "06.documentado_como_pseudonimo")
+
+
+# Tirar o "https://" nunca tira a proteção: cada URL vai SEM esquema e,
+# com https://, tem de dar o MESMO motivo.
+SEM_ESQUEMA = {
+    # pedidas no fechamento da A1
+    "amzn.to/CanArio9": "AFILIADA",
+    "a.co/d/CanArio9": "AFILIADA",
+    "amazon.com.br/dp/B0ABCDEF12?tag=canario-20": "PARAMETROS",
+    "www.amazon.com.br/dp/B0ABCDEF12/ref=as_li_canario": "PARAMETROS",
+    "www.exemplo.com/p?aff_id=canario": "PARAMETROS",
+    "www.exemplo.com/CanArio9": "CODIGO",
+    "s.shopee.com.br/CanArio1": "AFILIADA",
+    "user:canario@exemplo.com/x": "CREDENCIAL",
+    "user:canario@exemplo.com": "CREDENCIAL",
+    "token-canario@exemplo.com/x": "CREDENCIAL",
+    "[::1]/canario": "INVALIDA",
+    "[2001:db8::1]:8080/canario": "INVALIDA",
+    "[fd12:3456::1]": "INVALIDA",
+    "localhost:8080/canario": "INVALIDA",
+    "localhost/canario": "INVALIDA",
+    "worker.railway.internal:8080/canario": "INVALIDA",
+    "impressora.local/canario": "INVALIDA",
+    # a mesma classe de fuga, achada na auditoria do fechamento
+    "192.168.0.10/canario": "INVALIDA",
+    "10.0.0.1:8080/canario": "INVALIDA",
+    "www.exemplo.com?ref=canario": "PARAMETROS",
+    "www.exemplo.com#canario": "PARAMETROS",
+    "amzn.to./CanArio9": "AFILIADA",
+    "amzn.to:/CanArio9": "AFILIADA",
+    "amzn.to\\CanArio9": "AFILIADA",
+    "amzn\u3002to/CanArio9": "AFILIADA",
+    "lojaça.com.br/CanArio9": "CODIGO",
+}
+CONTEXTOS = ["{0}", "veja {0} agora", "({0})", "[link]({0})", "[{0}]({0})", '"{0}"',
+             "Link:{0}", "\u2192{0}", "{0}.", "{0},", "{0}!", "\n{0}\n", "_{0}_", "*{0}*",
+             "~{0}~", "<{0}>", "//{0}", "href={0}", "Oferta\U0001F600{0}\U0001F600"]
+LIMPAS_SEM_ESQUEMA = ["amazon.com.br/dp/B0ABCDEF12", "www.netshoes.com.br/tenis-corrida",
+                      "t.me/canal", "produto.mercadolivre.com.br/MLB-1234567890-produto-legal-_JM"]
+TEXTO_COMUM = ["Sr.Fulano pagou R$1.299,90", "[10:30:15]", "versão 1.2.3.4 e 192.168.0.100",
+               "fulano@gmail.com", "localhost", "[1] [ab] [cafe]", "R$ 10/12 às 14:30",
+               "ver 2.0/3.1", "texto\u3002texto", "\u5c0f\u7c73\u3002\u624b\u673a"]
+
+
+def test_07_url_sem_esquema(r):
+    motivos = [(u, coleta._classificar(u)[0], coleta._classificar("https://" + u)[0], m)
+               for u, m in SEM_ESQUEMA.items()]
+    r.check([x for x in motivos if not (x[1] == x[2] == x[3])] == [],
+            "07.mesmo_motivo_com_e_sem_esquema",
+            str([x for x in motivos if not (x[1] == x[2] == x[3])]))
+    r.check(set(SEM_ESQUEMA.values()) <= catalogo.ENUMS["motivo_url_protegida"],
+            "07.motivos_do_catalogo")
+    fugas = []
+    for u in SEM_ESQUEMA:
+        for forma in (u, "https://" + u):
+            for ctx in CONTEXTOS:
+                t = ctx.format(forma)
+                m = coleta.mascarar_urls(t)
+                if (CANARIO in m.lower() or forma in m or "\u27e8url:" not in m
+                        or coleta.mascarar_urls(m) != m):
+                    fugas.append((t, m))
+    r.check(fugas == [], "07.nenhuma_fuga_sem_esquema",
+            f"{len(fugas)} fugas: {fugas[:4]}")
+    rep = [coleta.representar_url(u) for u in SEM_ESQUEMA]
+    r.check(all(set(x) == {"h12", "host", "motivo"} for x in rep)
+            and CANARIO not in json.dumps(rep, ensure_ascii=False).lower(),
+            "07.representar_url_sem_esquema", str(rep[:3]))
+    # ponta a ponta: pelo emitir_de até o anel (texto, chave, corr)
+    reg = _anel()
+    for i, u in enumerate(SEM_ESQUEMA):
+        dados = {f"c{j}": ctx.format(u) for j, ctx in enumerate(CONTEXTOS)}
+        dados[u] = "chave"
+        eventos.emitir_de("origem.recebida", lambda d=dados, u=u, i=i: ({"link": u, "msg": i}, d),
+                          local="t.07")
+    r.check(_proibidos(_bruto(reg)) == [] and reg.saude()["seq_ultimo"] == len(SEM_ESQUEMA),
+            "07.anel_sem_canario", str(_proibidos(_bruto(reg))))
+    # o que não é URL protegida não muda
+    mudou = [(t, coleta.mascarar_urls(t)) for u in LIMPAS_SEM_ESQUEMA
+             for t in (ctx.format(u) for ctx in CONTEXTOS) if coleta.mascarar_urls(t) != t]
+    r.check(mudou == [], "07.limpa_sem_esquema_legivel", str(mudou[:4]))
+    mudou = [(t, coleta.mascarar_urls(t)) for t in TEXTO_COMUM if coleta.mascarar_urls(t) != t]
+    r.check(mudou == [], "07.texto_comum_intacto", str(mudou))
+
+
+# Separadores que de fato terminam uma URL (espaço, aspas, emoji, "](" …).
+# Colar duas URLs com caractere legal de URL ("." ")" "~") forma UMA URL só:
+# isso é outra classe, fora deste teste.
+_SEPARADORES = [" ", "\n", "\t", "\u201c", "\u201d", '"', "'", "<", ">", "\U0001F525",
+                "\U0001F600", "|", "\u2026", "](", " - ", ": ", ", ", ". ", "! ", "? ", "`",
+                "^", "{", "}", " (", ") ", " [", "] ", " *", "* ", " _", "_ ", " ~", "~ "]
+_PATOLOGICOS = ["a:", "a.a.", "[", "[::", "@", "a@", "1.1.1.", "localhost:", "a", "-", "](",
+                "\U0001F600", "x.co/](", "u:p@", "a.co/x", "ab.cd ", "[a:b:c", "_a.b_",
+                "a:b@c.de/", "a\u3002", "x:" + "y" * 100 + " ", "1.2.3.4/", "[::1]", "a_",
+                "a.b_c.d_", "\u201ca.b/C1\u201d", "a.b/c](", "a:a@", "::@", "a.b\u2026"]
+
+
+def test_08_sorteio_e_custo_linear(r):
+    rng = random.Random(20261006)
+    protegidas = list(SEM_ESQUEMA)
+    limpas = LIMPAS_SEM_ESQUEMA + ["Sr.Fulano", "R$1.299,90", "fulano@gmail.com", "Oferta"]
+    ruins = []
+    for _ in range(3000):
+        partes = []
+        for _ in range(rng.randrange(1, 6)):
+            partes.append(rng.choice(_SEPARADORES))
+            x = rng.choice(protegidas + limpas)
+            if x in SEM_ESQUEMA and rng.random() < 0.5:
+                x = rng.choice(["https://", "http://", "HTTPS://", "//"]) + x
+            partes.append(x)
+        partes.append(rng.choice(_SEPARADORES))
+        t = "".join(partes)
+        try:
+            m = coleta.mascarar_urls(t)
+        except Exception as e:                         # noqa: BLE001
+            ruins.append((t, repr(e)))
+            continue
+        if CANARIO in m.lower() or coleta.mascarar_urls(m) != m:
+            ruins.append((t, m))
+    r.check(ruins == [], "08.sorteio_sem_fuga_e_idempotente", f"{len(ruins)}: {ruins[:3]}")
+    lentos = []
+    for bloco in _PATOLOGICOS:
+        t = (bloco * 16384)[:16384]
+        melhor = min(_cronometrar(coleta.mascarar_urls, t) for _ in range(2))
+        if melhor > 0.25:
+            lentos.append((bloco[:12], round(melhor * 1000)))
+    r.check(lentos == [], "08.custo_linear_16KiB", f"ms: {lentos}")
+
+
+def _cronometrar(f, x) -> float:
+    t0 = time.perf_counter()
+    f(x)
+    return time.perf_counter() - t0
 
 
 if __name__ == "__main__":
