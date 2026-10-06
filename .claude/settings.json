@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "mcp__github__merge_pull_request",
+      "mcp__github__enable_pr_auto_merge",
+
+      "mcp__Railway__accept-deploy",
+      "mcp__Railway__connect-service-source",
+      "mcp__Railway__create-bucket",
+      "mcp__Railway__create-deployment",
+      "mcp__Railway__create-function",
+      "mcp__Railway__create-project",
+      "mcp__Railway__create-service",
+      "mcp__Railway__create-tcp-proxy",
+      "mcp__Railway__create-volume",
+      "mcp__Railway__create-webhook",
+      "mcp__Railway__delete-bucket",
+      "mcp__Railway__delete-domain",
+      "mcp__Railway__delete-feature-flag",
+      "mcp__Railway__delete-service",
+      "mcp__Railway__delete-tcp-proxy",
+      "mcp__Railway__delete-volume",
+      "mcp__Railway__delete-webhook",
+      "mcp__Railway__deploy-template",
+      "mcp__Railway__generate-domain",
+      "mcp__Railway__get-bucket-credentials",
+      "mcp__Railway__list-variables",
+      "mcp__Railway__railway-agent",
+      "mcp__Railway__redeploy",
+      "mcp__Railway__reset-bucket-credentials",
+      "mcp__Railway__restart-service",
+      "mcp__Railway__retry-domain-certificate",
+      "mcp__Railway__set-feature-flag",
+      "mcp__Railway__set-service-tracing",
+      "mcp__Railway__set-variables",
+      "mcp__Railway__test-webhook",
+      "mcp__Railway__update-bucket",
+      "mcp__Railway__update-domain",
+      "mcp__Railway__update-function-source-code",
+      "mcp__Railway__update-service",
+      "mcp__Railway__update-volume",
+      "mcp__Railway__update-webhook",
+
+      "Bash(git push origin main)",
+      "Bash(git push origin main *)",
+      "Bash(git push origin HEAD:main)",
+      "Bash(git push origin HEAD:main *)",
+      "Bash(git push -u origin main)",
+      "Bash(git push -u origin main *)",
+
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/*.session)",
+      "Read(./**/*.session-journal)"
+    ]
+  }
+}
