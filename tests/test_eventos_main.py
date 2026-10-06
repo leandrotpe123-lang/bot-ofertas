@@ -300,8 +300,9 @@ def test_06_ligar_api_privada_real(r):
         r.check(vivo and isinstance(fim, asyncio.CancelledError) and len(vidas) >= 3,
                 "06.vida_periodica", f"vivo={vivo} vidas={len(vidas)}")
         r.check(vidas and set(vidas[0]["dados"]) == {"fila", "workers", "encerrando",
-                                                       "ciclo", "anel"}
-                and vidas[0]["dados"]["anel"]["boot_id"] == reg.boot_id,
+                                                       "ciclo", "coleta", "anel"}
+                and vidas[0]["dados"]["anel"]["boot_id"] == reg.boot_id
+                and vidas[0]["dados"]["coleta"] == eventos.saude_coleta(),
                 "06.vida_com_retrato", str(vidas[0]["dados"] if vidas else None))
         # (d) retrato que falha não mata o laço
         falhas = {"n": 0}
