@@ -115,3 +115,30 @@ _MAX_IDADE_NOVA_S = 120.0
 # Timeout do download_media do Telethon (segundos)
 # Protege workers de travar infinito se Telegram engasgar
 _TIMEOUT_DOWNLOAD_MIDIA = 15.0
+
+
+# ── [F1.1] Proveniência — API privada do worker (somente leitura) ──
+# Sem API_PRIVADA_PORTA E API_PRIVADA_SEGREDO válidos nada liga:
+# eventos.emitir() fica no-op e nenhuma porta abre (ver main e
+# eventos/). Valor inválido NUNCA derruba o boot: cai no padrão
+# (desligado / limites padrão).
+def _int_env(nome: str, padrao: int, minimo: int, maximo: int) -> int:
+    """Inteiro de variável de ambiente dentro de [minimo, maximo];
+    ausente, inválido ou fora da faixa → `padrao`."""
+    bruto = os.environ.get(nome, "")
+    try:
+        valor = int(bruto) if bruto.strip() else padrao
+    except ValueError:
+        return padrao
+    return valor if minimo <= valor <= maximo else padrao
+
+
+_PORTA_PUBLICA         = _int_env("PORT", 8080, 1, 65535)
+# Porta interna de um proxy TCP PÚBLICO da Railway, se existir (variável
+# fornecida pela própria Railway). A API privada nunca liga nela.
+_PORTA_TCP_PUBLICA     = _int_env("RAILWAY_TCP_APPLICATION_PORT", 0, 1, 65535)
+API_PRIVADA_PORTA      = _int_env("API_PRIVADA_PORTA", 0, 1025, 65535)   # 0 = desligada
+API_PRIVADA_SEGREDO    = os.environ.get("API_PRIVADA_SEGREDO", "")
+EVENTOS_ANEL_MAX       = _int_env("EVENTOS_ANEL_MAX", 20_000, 1_000, 100_000)
+EVENTOS_ANEL_MAX_BYTES = _int_env("EVENTOS_ANEL_MAX_BYTES", 32 << 20,
+                                  1 << 20, 256 << 20)
