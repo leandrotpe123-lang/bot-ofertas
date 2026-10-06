@@ -67,6 +67,9 @@ import plataformas
 
 from web.redirect import _iniciar_servidor_web, _encerrar_servidor_web
 
+import eventos
+from eventos import api_privada
+
 
 # ── Health check ────────────────────────────────────────────────
 async def _health_check() -> None:
@@ -138,6 +141,47 @@ def _log_lifecycle(fase: str) -> None:
     )
 
 
+# ── [F1.1] Proveniência: API privada + sinal de vida dos eventos ──
+# Só existe com API_PRIVADA_PORTA e API_PRIVADA_SEGREDO válidos (ver
+# _preparar_processo). O worker nunca envia nada: o Brain lê a API.
+_VIDA_EVENTOS_S = 60
+
+
+def _saude_processo() -> dict:
+    """Retrato do processo para /v1/saude e processo.vida — só memória."""
+    return {"fila": len(g._buf), "workers": g._w_ativos,
+            "encerrando": bool(g._encerrando), "ciclo": _CICLO}
+
+
+async def _ligar_api_privada() -> None:
+    """Liga a API privada (rede privada dual-stack) e, ligada, emite
+    processo.vida a cada _VIDA_EVENTOS_S. Sem escuta privada ou com erro
+    a proveniência inteira é desligada — sem leitor, nada se acumula — e
+    o worker segue igual."""
+    try:
+        ok = await api_privada.iniciar(
+            config.API_PRIVADA_PORTA, config.API_PRIVADA_SEGREDO,
+            eventos.registro_atual, _saude_processo,
+            porta_publica=config._PORTA_PUBLICA,
+            porta_tcp_publica=config._PORTA_TCP_PUBLICA)
+    except Exception as e:
+        log_sys.error(f"❌ api privada: {e}")
+        ok = False
+    if not ok:
+        eventos.desligar()
+        return
+    while True:
+        await asyncio.sleep(_VIDA_EVENTOS_S)
+        reg = eventos.registro_atual()
+        if reg is None:
+            return
+        try:
+            eventos.emitir("processo.vida",
+                           {**_saude_processo(), "anel": reg.saude()})
+        except Exception as e:
+            log_sys.error(f"❌ processo.vida: {e}")
+
+
 # ── Handlers de evento ──────────────────────────────────────────
 def _registrar_handlers(fontes) -> None:
     """
@@ -184,6 +228,7 @@ def _on_sinal(sig) -> None:
         return
     g._encerrando = True
     log_sys.info(f"🛑 sinal {sig!s} recebido — admissao fechada")
+    eventos.emitir("processo.encerrando", {"sinal": str(sig)})
     _TAREFA_SHUTDOWN = asyncio.create_task(_encerrar())
 
 
@@ -223,6 +268,13 @@ async def _encerrar() -> None:
         t.cancel()
         await asyncio.gather(t, return_exceptions=True)
 
+    # [F1.1] sinal de vida dos eventos — cancela e aguarda. A porta da
+    # API privada é solta adiante, depois do web e antes do banco.
+    t = _TASKS_FUNDO.get("api_privada")
+    if t is not None and not t.done():
+        t.cancel()
+        await asyncio.gather(t, return_exceptions=True)
+
     # [Cupons] canal de cupons — dá alguns segundos para o que está em
     # curso terminar e cancela limpo (antes de fechar HTTP/Telegram).
     await espelho_cupons.encerrar()
@@ -246,6 +298,12 @@ async def _encerrar() -> None:
         await _encerrar_servidor_web()
     except Exception as e:
         log_sys.error(f"❌ web cleanup: {e}")
+
+    # 6b. [F1.1] API privada — idempotente; antes do banco.
+    try:
+        await api_privada.encerrar()
+    except Exception as e:
+        log_sys.error(f"❌ api privada cleanup: {e}")
 
     # 7. DB
     try:
@@ -275,6 +333,23 @@ async def _preparar_processo() -> bool:
 
     # 2. Banco de dados — UMA conexão por processo.
     _init_db()
+
+    # 2b. [F1.1] Proveniência — DESLIGADA sem API_PRIVADA_PORTA e
+    # API_PRIVADA_SEGREDO válidos: nada é instalado e emitir() segue
+    # no-op. Ligada, só guarda eventos em memória (eventos/anel.py);
+    # quem lê é a API privada, ligada no passo 6.
+    _motivo = api_privada.motivo_desligada(
+        config.API_PRIVADA_PORTA, config.API_PRIVADA_SEGREDO,
+        config._PORTA_PUBLICA, config._PORTA_TCP_PUBLICA)
+    if _motivo:
+        log_sys.info(f"🧾 proveniência desligada | {_motivo}")
+    elif eventos.instalar(config.EVENTOS_ANEL_MAX,
+                          config.EVENTOS_ANEL_MAX_BYTES) is None:
+        log_sys.error("❌ proveniência: registro não pôde ser criado — segue desligada")
+    else:
+        eventos.emitir("processo.iniciado", {
+            "anel_max": config.EVENTOS_ANEL_MAX,
+            "anel_max_bytes": config.EVENTOS_ANEL_MAX_BYTES})
 
     # 3. Primeira conexão ao Telegram.
     log_sys.info("🔌 Conectando...")
@@ -344,6 +419,10 @@ async def _preparar_processo() -> bool:
     _TASKS_FUNDO["health"] = asyncio.create_task(_health_check())
     await _iniciar_orchestrator()
     _TASKS_FUNDO["web"] = asyncio.create_task(_iniciar_servidor_web())
+    # [F1.1] API privada (só leitura, rede privada) + processo.vida — UMA task
+    # por processo, e só com a proveniência ligada no passo 2b.
+    if eventos.registro_atual() is not None:
+        _TASKS_FUNDO["api_privada"] = asyncio.create_task(_ligar_api_privada())
 
     # 7. Sinais — instalados no PROCESSO, onde nascem os recursos que o
     # teardown finaliza (simetria criar/finalizar). add_signal_handler e
@@ -383,6 +462,7 @@ async def _run() -> bool:
         return False
 
     log_sys.info("🚀 FOGUETÃO — ONLINE")
+    eventos.emitir("processo.online", {"ciclo": _CICLO})
     _log_lifecycle("run")
 
     await client.run_until_disconnected()
