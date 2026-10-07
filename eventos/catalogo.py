@@ -150,6 +150,8 @@ ENUMS: Dict[str, FrozenSet[str]] = {
 # Rótulos dos pontos de emissão: um por ponto, registrado pela frente que
 # liga o ponto. A1: o fim de execução, emitido pela própria coleta. A2-E:
 # o funil de entrada (pipeline/orchestrator*.py), até a chamada a enviar.
+# A2-R: a completude e a sucessão (pipeline/completude.py e
+# pipeline/sucessao.py), que não abrem execução.
 LOCAIS: FrozenSet[str] = frozenset({
     "eventos.execucao.fim",
     # A2-E — origem.recebida e os descartes antes da fila
@@ -170,6 +172,19 @@ LOCAIS: FrozenSet[str] = frozenset({
     "orchestrator_pipeline.pipeline.dedup",
     "orchestrator_pipeline.pipeline.erro_dedup",
     "orchestrator_pipeline.pipeline.erro_montar",
+    # A2-R — a completude: buraco, busca e entrega da recuperada
+    "completude.observar.buraco",
+    "completude.observar.buraco_grande",
+    "completude.buscar_e_entregar.erro_busca",
+    "completude.buscar_e_entregar.ausente",
+    "completude.buscar_e_entregar.servico",
+    "completude.buscar_e_entregar.recuperada",
+    "completude.buscar_e_entregar.entrega_falhou",
+    "completude.recuperar.abortada",
+    # A2-R — a sucessão da chefe
+    "sucessao.suceder.ciclo_fechado",
+    "sucessao.suceder.busca_falhou",
+    "sucessao.suceder.lideranca_transferida",
 })
 
 # Chaves que a coleta preenche: o que o coletor puser nelas é sobrescrito.
