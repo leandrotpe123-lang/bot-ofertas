@@ -148,9 +148,11 @@ _VIDA_EVENTOS_S = 60
 
 
 def _saude_processo() -> dict:
-    """Retrato do processo para /v1/saude e processo.vida — só memória."""
+    """Retrato do processo para /v1/saude e processo.vida — só memória.
+    [F1.2-A1] `coleta`: contadores da coleta segura (nunca levanta)."""
     return {"fila": len(g._buf), "workers": g._w_ativos,
-            "encerrando": bool(g._encerrando), "ciclo": _CICLO}
+            "encerrando": bool(g._encerrando), "ciclo": _CICLO,
+            "coleta": eventos.saude_coleta()}
 
 
 async def _ligar_api_privada() -> None:
@@ -349,7 +351,8 @@ async def _preparar_processo() -> bool:
     else:
         eventos.emitir("processo.iniciado", {
             "anel_max": config.EVENTOS_ANEL_MAX,
-            "anel_max_bytes": config.EVENTOS_ANEL_MAX_BYTES})
+            "anel_max_bytes": config.EVENTOS_ANEL_MAX_BYTES,
+            "catalogo": eventos.resumo_catalogo()})
 
     # 3. Primeira conexão ao Telegram.
     log_sys.info("🔌 Conectando...")
