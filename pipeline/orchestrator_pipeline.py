@@ -20,6 +20,7 @@ comportamento.
 """
 from __future__ import annotations
 
+import eventos
 import globals as g
 from logger import log_sys
 from pipeline.deduplicacao import deve_enviar_async
@@ -37,6 +38,11 @@ async def _pipeline(event, is_edit: bool = False) -> None:
     """
     Fluxo da pipeline. Chama cada camada na ordem e propaga is_edit
     até a publicação. Não toma decisão de negócio.
+
+    [F1.2-A2-E] Cada descarte daqui sai também como origem.descartada,
+    logo depois do log de sempre: ponto PRE (fora de qualquer lock) e a
+    exceção só pela classe, em `excecao`. O que acontece dentro de enviar
+    é da C1.
     """
     msg_id = event.message.id
 
@@ -45,6 +51,12 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         bruta = await ingerir(event)
     except Exception as e:
         log_sys.error(f"❌ ingestao: {e}")
+        eventos.emitir_de("origem.descartada", lambda: (
+            {"chat": str(event.chat_id), "msg": msg_id},
+            {"motivo": "ERRO_INGESTAO", "etapa": "PIPELINE", "ponto": "PRE",
+             "is_edit": bool(is_edit), "efeitos_parciais": "NENHUM",
+             "excecao": type(e).__name__}),
+            local="orchestrator_pipeline.pipeline.erro_ingestao")
         return
 
     # ── Origem APAGADA na fonte enquanto esperava: nem entra (nova ou
@@ -53,6 +65,11 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         log_sys.info(
             f"🧭 TL | id={msg_id} chat={bruta.chat} | DESCARTE | "
             f"motivo=ORIGEM_APAGADA")
+        eventos.emitir_de("origem.descartada", lambda: (
+            {"chat": bruta.chat, "msg": msg_id},
+            {"motivo": "ORIGEM_APAGADA", "etapa": "PIPELINE", "ponto": "PRE",
+             "is_edit": bool(is_edit), "efeitos_parciais": "NENHUM"}),
+            local="orchestrator_pipeline.pipeline.origem_apagada")
         return
 
     # ── Idempotência (somente novas) — chave (chat canônico, msg_id) ──
@@ -60,6 +77,11 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         log_sys.info(
             f"🧭 TL | id={msg_id} chat={bruta.chat} | DESCARTE | "
             f"motivo=JA_PROCESSADO")
+        eventos.emitir_de("origem.descartada", lambda: (
+            {"chat": bruta.chat, "msg": msg_id},
+            {"motivo": "JA_PROCESSADO", "etapa": "PIPELINE", "ponto": "PRE",
+             "is_edit": bool(is_edit), "efeitos_parciais": "NENHUM"}),
+            local="orchestrator_pipeline.pipeline.ja_processado")
         return
 
     # ── Fast-path ORIGEM (Fase 1): NEW de origem já publicada nem entra
@@ -71,6 +93,12 @@ async def _pipeline(event, is_edit: bool = False) -> None:
             log_sys.info(
                 f"🧭 TL | id={msg_id} chat={bruta.chat} | DESCARTE | "
                 f"motivo=ORIGEM_JA_PUBLICADA dest={_dv}")
+            eventos.emitir_de("origem.descartada", lambda: (
+                {"chat": bruta.chat, "msg": msg_id},
+                {"motivo": "ORIGEM_JA_PUBLICADA", "etapa": "PIPELINE", "ponto": "PRE",
+                 "is_edit": bool(is_edit), "efeitos_parciais": "POSSIVEIS",
+                 "dest": _dv}),
+                local="orchestrator_pipeline.pipeline.origem_ja_publicada")
             return
     log_sys.info(
         f"{'✏️' if is_edit else '📩'} @{bruta.chat} | "
@@ -82,11 +110,23 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         norm = await normalizar(bruta)
     except Exception as e:
         log_sys.error(f"❌ normalizar: {e}")
+        eventos.emitir_de("origem.descartada", lambda: (
+            {"chat": bruta.chat, "msg": msg_id},
+            {"motivo": "ERRO_NORMALIZAR", "etapa": "PIPELINE", "ponto": "PRE",
+             "is_edit": bool(is_edit), "efeitos_parciais": "POSSIVEIS",
+             "excecao": type(e).__name__}),
+            local="orchestrator_pipeline.pipeline.erro_normalizar")
         return
     if norm is None:
         log_sys.info(
             f"🧭 TL | id={msg_id} chat={bruta.chat} | DESCARTE | "
             f"motivo=NORMALIZACAO_VAZIA")
+        eventos.emitir_de("origem.descartada", lambda: (
+            {"chat": bruta.chat, "msg": msg_id},
+            {"motivo": "NORMALIZACAO_VAZIA", "etapa": "PIPELINE", "ponto": "PRE",
+             "is_edit": bool(is_edit), "efeitos_parciais": "POSSIVEIS",
+             "sub_motivo": "DESCONHECIDO", "n_links": len(bruta.links)}),
+            local="orchestrator_pipeline.pipeline.normalizacao_vazia")
         return
 
     # ── Camada 3a: Enriquecimento (derivados prontos p/ consumo) ─
@@ -104,9 +144,21 @@ async def _pipeline(event, is_edit: bool = False) -> None:
                 log_sys.info(
                     f"🧭 TL | id={msg_id} chat={norm.chat} | DESCARTE | "
                     f"motivo=DEDUP")
+                eventos.emitir_de("origem.descartada", lambda: (
+                    {"chat": bruta.chat, "msg": msg_id},
+                    {"motivo": "DEDUP", "etapa": "PIPELINE", "ponto": "PRE",
+                     "is_edit": bool(is_edit), "efeitos_parciais": "POSSIVEIS",
+                     "sub_motivo": "DESCONHECIDO"}),
+                    local="orchestrator_pipeline.pipeline.dedup")
                 return
         except Exception as e:
             log_sys.error(f"❌ deve_enviar: {e}")
+            eventos.emitir_de("origem.descartada", lambda: (
+                {"chat": bruta.chat, "msg": msg_id},
+                {"motivo": "ERRO_DEDUP", "etapa": "PIPELINE", "ponto": "PRE",
+                 "is_edit": bool(is_edit), "efeitos_parciais": "POSSIVEIS",
+                 "excecao": type(e).__name__}),
+                local="orchestrator_pipeline.pipeline.erro_dedup")
             return
 
 
@@ -115,6 +167,12 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         montada = await montar(norm)
     except Exception as e:
         log_sys.error(f"❌ montar: {e}")
+        eventos.emitir_de("origem.descartada", lambda: (
+            {"chat": bruta.chat, "msg": msg_id},
+            {"motivo": "ERRO_MONTAR", "etapa": "PIPELINE", "ponto": "PRE",
+             "is_edit": bool(is_edit), "efeitos_parciais": "POSSIVEIS",
+             "excecao": type(e).__name__}),
+            local="orchestrator_pipeline.pipeline.erro_montar")
         return
 
     # ── Camada 5: Publicação ──────────────────────────────────────

@@ -90,11 +90,16 @@ class EventoRecuperado:
 
     Não é um evento do Telethon e não finge ser: só expõe o que
     `processar`, `ingerir` e a identidade leem do evento. A mensagem é
-    a do próprio Telethon, devolvida pela busca."""
-    __slots__ = ("message",)
+    a do próprio Telethon, devolvida pela busca.
 
-    def __init__(self, message) -> None:
+    [F1.2-A2-E] `via` diz por onde a mensagem voltou ao ponto de entrada:
+    RECUPERACAO (esta completude, o padrão) ou SUCESSAO (a sucessão da
+    chefe). Só a observação lê (origem.recebida); o pipeline não."""
+    __slots__ = ("message", "via")
+
+    def __init__(self, message, via: str = "RECUPERACAO") -> None:
         self.message = message
+        self.via = via
 
     @property
     def chat_id(self):

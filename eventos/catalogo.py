@@ -147,9 +147,30 @@ ENUMS: Dict[str, FrozenSet[str]] = {
                               "nao_aplicavel"}),
 }
 
-# Rótulos dos pontos de emissão. A A1 não liga nenhum ponto no pipeline:
-# só o fim de execução, emitido pela própria coleta.
-LOCAIS: FrozenSet[str] = frozenset({"eventos.execucao.fim"})
+# Rótulos dos pontos de emissão: um por ponto, registrado pela frente que
+# liga o ponto. A1: o fim de execução, emitido pela própria coleta. A2-E:
+# o funil de entrada (pipeline/orchestrator*.py), até a chamada a enviar.
+LOCAIS: FrozenSet[str] = frozenset({
+    "eventos.execucao.fim",
+    # A2-E — origem.recebida e os descartes antes da fila
+    "orchestrator.processar.recebida",
+    "orchestrator.processar.edit_antigo",
+    "orchestrator.processar.nova_antiga",
+    "orchestrator.processar.erro_entrada",
+    "orchestrator_fila.enfileirar.encerrando",
+    "orchestrator_fila.enfileirar.fila_cheia",
+    "orchestrator_fila.blindado.erro_worker",
+    # A2-E — os descartes PRE do _pipeline
+    "orchestrator_pipeline.pipeline.erro_ingestao",
+    "orchestrator_pipeline.pipeline.origem_apagada",
+    "orchestrator_pipeline.pipeline.ja_processado",
+    "orchestrator_pipeline.pipeline.origem_ja_publicada",
+    "orchestrator_pipeline.pipeline.erro_normalizar",
+    "orchestrator_pipeline.pipeline.normalizacao_vazia",
+    "orchestrator_pipeline.pipeline.dedup",
+    "orchestrator_pipeline.pipeline.erro_dedup",
+    "orchestrator_pipeline.pipeline.erro_montar",
+})
 
 # Chaves que a coleta preenche: o que o coletor puser nelas é sobrescrito.
 RESERVADAS_CORR: FrozenSet[str] = frozenset({"exec", "exec_pai"})

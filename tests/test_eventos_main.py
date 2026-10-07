@@ -19,8 +19,9 @@ variáveis válidas, nada liga:
       exceção contida; ligada → processo.vida periódico; falha no retrato
       não mata o laço
   07  fronteiras: eventos/ não importa banco, sqlite3, telethon, globals,
-      client, pipeline nem config; só main.py importa eventos (nenhum
-      módulo do pipeline foi tocado)
+      client, pipeline nem config; quem importa eventos é uma lista
+      FECHADA: main.py e o funil de entrada (pipeline/orchestrator*.py,
+      F1.2-A2-E) — importador novo quebra este teste
   08  a API só tem GET /v1/saude e GET /v1/eventos; o app PÚBLICO
       (web/redirect.py, porta PORT) não tem nada de /v1 nem importa eventos
   09  o segredo nunca entra em log: nenhuma chamada de log recebe o segredo
@@ -359,8 +360,12 @@ def test_07_fronteiras(r):
                         or (isinstance(n, ast.ImportFrom)
                             and (n.module or "").split(".")[0] == "eventos")):
                     importadores.append(rel)
-    r.check(sorted(set(importadores)) == ["main.py"], "07.so_main_importa_eventos",
-            str(sorted(set(importadores))))
+    # [F1.2-A2-E] Lista FECHADA e exata (decisão D2 do dono): main.py e os
+    # três módulos do funil de entrada. Qualquer outro importador quebra.
+    r.check(sorted(set(importadores)) == ["main.py", "pipeline/orchestrator.py",
+                                          "pipeline/orchestrator_fila.py",
+                                          "pipeline/orchestrator_pipeline.py"],
+            "07.importadores_lista_fechada", str(sorted(set(importadores))))
 
 
 def test_08_rotas(r):
