@@ -156,5 +156,5 @@ async def _suceder(dest: int) -> None:
         log_out.info(
             f"👑 [SUCESSAO] post:{dest} — a chefe apagou; {_nome(chat)} "
             f"id={msg_id} assume e o post passa a espelhar a mensagem dela")
-        await _estado["despachar"](EventoRecuperado(m), is_edit=True)
+        await _estado["despachar"](EventoRecuperado(m, via="SUCESSAO"), is_edit=True)
         return

@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import asyncio
 
+import eventos
 import globals as g
 from logger import log_sys
 from pipeline.orchestrator_pipeline import _pipeline
@@ -71,10 +72,14 @@ async def _executar(event, is_edit: bool) -> None:
     Já dentro da lane da origem. Toma vaga do orçamento e roda o
     pipeline. g._w_ativos conta pipelines EM EXECUÇÃO — o incremento e
     o decremento são síncronos, atômicos no event loop de thread única.
+
+    [F1.2-A2-E] inicio_na_fila() marca o fim da espera (lane + orçamento)
+    da execução — só depois de tomar a vaga (espera_ms do execucao.fim).
     """
     async with _orcamento:
         g._w_ativos += 1
         try:
+            eventos.inicio_na_fila()
             await _pipeline(event, is_edit)
         finally:
             g._w_ativos -= 1
@@ -85,6 +90,11 @@ async def _blindado(event, is_edit: bool) -> None:
     Isolamento por evento: uma falha não contamina as demais tasks.
     Substitui o try/except que vivia no laço do worker. CancelledError
     é BaseException e é repassada — cancelamento não é falha.
+
+    [F1.2-A2-E] A falha isolada vira origem.descartada ERRO_WORKER — só a
+    classe da exceção, em `excecao` (erro_tipo é chave da coleta); efeitos
+    POSSIVEIS, porque não se sabe onde parou — e o desfecho da execução
+    vira ERRO. O log é o de sempre e vem antes.
     """
     try:
         await _executar(event, is_edit)
@@ -92,6 +102,12 @@ async def _blindado(event, is_edit: bool) -> None:
         raise
     except Exception as e:
         log_sys.error(f"❌ Worker: {e}", exc_info=True)
+        eventos.emitir_de("origem.descartada", lambda: (
+            {"chat": str(event.chat_id), "msg": event.message.id},
+            {"motivo": "ERRO_WORKER", "ponto": "PRE", "is_edit": bool(is_edit),
+             "efeitos_parciais": "POSSIVEIS", "excecao": type(e).__name__}),
+            local="orchestrator_fila.blindado.erro_worker")
+        eventos.marcar_desfecho("ERRO", e)
 
 
 # ── Admissão e dispatch ───────────────────────────────────────────
@@ -110,16 +126,32 @@ async def _enfileirar(event, is_edit: bool) -> None:
     [E3.4] O guard de encerramento e' a PRIMEIRA instrucao e nao tem
     await antes do create_task: ou a task ja' nasceu (e sera' drenada),
     ou e' recusada. Nao existe estado intermediario.
+
+    [F1.2-A2-E] Os dois descartes daqui saem como origem.descartada
+    (ENCERRANDO, FILA_CHEIA), sem await. Criada a task, a execução de
+    `processar` passa a ser dela: o execucao.fim sai quando ela terminar.
     """
     if g._encerrando:
+        eventos.emitir_de("origem.descartada", lambda: (
+            {"chat": str(event.chat_id), "msg": event.message.id},
+            {"motivo": "ENCERRANDO", "etapa": "FILA", "ponto": "PRE",
+             "is_edit": bool(is_edit), "efeitos_parciais": "NENHUM"}),
+            local="orchestrator_fila.enfileirar.encerrando")
         return
 
     if len(g._buf) >= _FILA_MAX:
         log_sys.warning(f"⚠️ Fila cheia | id={event.message.id}")
+        eventos.emitir_de("origem.descartada", lambda: (
+            {"chat": str(event.chat_id), "msg": event.message.id},
+            {"motivo": "FILA_CHEIA", "etapa": "FILA", "ponto": "PRE",
+             "is_edit": bool(is_edit), "efeitos_parciais": "NENHUM",
+             "ocupacao": len(g._buf)}),
+            local="orchestrator_fila.enfileirar.fila_cheia")
         return
 
     chave = f"lane|{event.chat_id}"
     tarefa = asyncio.create_task(uma_por_vez(chave, _blindado, event, is_edit))
+    eventos.transferir_execucao(tarefa)
 
     # Referência forte obrigatória: create_task sem referência permite
     # que o coletor descarte a task no meio da execução. O callback

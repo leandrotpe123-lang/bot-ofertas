@@ -106,10 +106,23 @@ def _extrair_code_entities(message) -> List[str]:
         return []
 
 
+def texto_de(message) -> str:
+    """[F1.2-A2-E] O texto que o pipeline lê da mensagem: o formatado
+    (markdown do Telethon) ou, sem ele, o cru; "" se não houver. Pura.
+    FONTE ÚNICA: ingerir e o evento origem.recebida leem por aqui."""
+    return message.text or getattr(message, "message", "") or ""
+
+
+def links_de(texto: str) -> List[str]:
+    """[F1.2-A2-E] As URLs com esquema do texto, sem a pontuação final.
+    Pura. FONTE ÚNICA: ingerir e o evento origem.recebida leem por aqui."""
+    return [u.strip().rstrip('.,;)>]}!?') for u in _RE_URL.findall(texto)]
+
+
 async def ingerir(event) -> MensagemBruta:
     """Extrai dados crus da mensagem. Zero lógica de negócio."""
-    texto = event.message.text or getattr(event.message, "message", "") or ""
-    links = [u.strip().rstrip('.,;)>]}!?') for u in _RE_URL.findall(texto)]
+    texto = texto_de(event.message)
+    links = links_de(texto)
     tem_midia = (
         event.message.media is not None
         and not isinstance(event.message.media, MessageMediaWebPage)
