@@ -17,9 +17,14 @@ tests/test_eventos_{coleta,tamanho,segredos,contrato}.py):
   C3 Pura ......... sem await, sem I/O, sem banco, sem log.
   C4 Segura ....... só primitivos: objeto desconhecido vira
                     "<objeto:Classe>", NUNCA str(obj) — um Message do
-                    Telethon impresso traria access_hash. URL que carrega
-                    afiliado, parâmetro, código curto ou credencial vira
-                    ⟨url:host:h12⟩ em qualquer texto, chave ou valor.
+                    Telethon impresso traria access_hash. BARREIRA
+                    fail-closed antes de todo reg.emitir (mascarar_urls):
+                    nenhuma URL com caminho, query, fragmento, credencial
+                    ou identificador de afiliado sai em claro — em valor,
+                    chave, lista, estrutura aninhada, tipo ou local —
+                    conheça o classificador o domínio ou não. Host sozinho
+                    é metadado permitido. URL em campo estruturado só como
+                    representar_url(): {host, h12, motivo, plataforma}.
   C5 Limitada ..... evento ≤ TETO_EVENTO por construção e sempre dentro
                     dos limites do anel F1.1, que o guarda intacto.
   C6 Execução ..... `exec` por execução e `exec_pai` nas derivadas;
@@ -34,11 +39,12 @@ C1–C7 são garantias do mecanismo, provadas com fluxo simulado; a de cada
 caminho real (inclusive um execucao.fim por caminho) só existe quando a
 A2 ligar esse caminho.
 
-h12 é um PSEUDÔNIMO estável para comparar igualdade (sha256 truncado em
-12 hexadecimais, sem sal, igual entre boots). NÃO é segredo nem mecanismo
-de segurança: quem tem uma URL candidata confirma se ela bate. A proteção
-vem de a URL não entrar no evento; a URL exata continua recuperável pelo
-worker a partir de (chat, msg).
+h12 (ver h12()) é IMPRESSÃO DIGITAL probabilística de 48 bits — SHA-256
+truncado, sem sal, igual entre boots: identifica por igualdade com alta
+probabilidade (é o que a chave plataforma|url|h12 usa), mas colisão é
+possível. NÃO é segredo nem mecanismo de segurança: quem tem uma URL
+candidata confirma se ela bate. A proteção é a barreira; a URL exata
+continua recuperável pelo worker a partir de (chat, msg).
 
 Uso a partir do laço do worker (uma thread), como todo o pipeline.
 """
@@ -53,6 +59,7 @@ import json
 import math
 import re
 import time
+import unicodedata
 from typing import Any, Callable, Optional, Tuple
 from urllib.parse import urlsplit
 
@@ -62,7 +69,8 @@ from eventos.anel import MAX_TEXTO
 
 __all__ = ["emitir_de", "execucao", "transferir_execucao", "inicio_na_fila",
            "marcar_desfecho", "exec_atual", "adiar", "prova_banco", "h12",
-           "representar_url", "mascarar_urls", "saude_coleta", "TETO_EVENTO"]
+           "representar_url", "mascarar_urls", "previa", "saude_coleta",
+           "TETO_EVENTO"]
 
 # ── Limites — todos DENTRO dos do anel F1.1, que então não corta nada ──
 TETO_EVENTO = 12 * 1024          # evento serializado, envelope incluso
@@ -120,62 +128,38 @@ def _nao_finito(x: float) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────
-# URLs — em claro só a que não carrega afiliado, parâmetro, código
-# curto nem credencial. O resto vira ⟨url:host:h12⟩.
+# URLs — BARREIRA fail-closed e metadados.
+#
+# A barreira (mascarar_urls, que _proteger aplica antes de todo
+# reg.emitir) não reconhece URL: todo pedaço de texto capaz de levar
+# caminho, query, fragmento ou credencial de URL vira ⟨…⟩. Assim nenhuma
+# URL com caminho, query, fragmento, credencial ou identificador de
+# afiliado sai em claro, conheça o classificador o domínio ou não. Host
+# sozinho é metadado permitido. O erro possível é mascarar demais.
+#
+# O classificador (_classificar) só extrai metadado (host, motivo)
+# enquanto a URL ainda está em memória: errar não expõe nada.
 # ─────────────────────────────────────────────────────────────────
-_SEM_URL = "\\s<>\"'`\u27e8\u27e9\u200b-\u200d\u2060"
-# URL SEM esquema: a mesma gramática que o navegador aplica depois do
-# esquema — [usuário[:senha]@]host[:porta][(/ \ ? #)resto], com host =
-# nome com ponto (rótulos Unicode; ponto ASCII ou ideográfico), IPv4,
-# [IPv6] ou localhost. Tirar o "https://" nunca tira a proteção.
-# Começo só em fronteira e quantificadores possessivos: custo linear.
-_PONTO = "[.\u3002\uff0e\uff61]"
-# rótulo: letras/dígitos Unicode separados por hífen — sem "_", que
-# encadearia rótulos pelo texto todo (custo quadrático)
-_ROTULO = r"[^\W_]++(?:-++[^\W_]++)*+"
-_NOME = rf"(?:{_ROTULO}{_PONTO})+[^\W\d_]{{2,24}}{_PONTO}?"
-_IPV6 = (r"\[(?=[0-9a-f.:]{0,45}::|(?:[0-9a-f.]{0,39}:){3})[0-9a-f:.]{2,45}"
-         r"(?:%[\w.~-]{1,32})?\]")
-_OCTETO = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
-_IPV4 = rf"(?:{_OCTETO}\.){{3}}{_OCTETO}"
-_HOST = rf"(?:{_NOME}|{_IPV6}|{_IPV4}|localhost)"
-_RESTO = rf"[/\\?#][^{_SEM_URL}]*"
-_CAUDA = rf"(?::\d{{0,5}})?(?:{_RESTO})?"                  # porta e resto, se houver
-_CAUDA_CERTA = rf"(?::\d{{1,5}}(?:{_RESTO})?|{_RESTO})"    # porta ou resto, obrigatório
-# usuário/senha: RFC 3986 sem ':' e sem a aspa, que aqui termina a URL
-_USUARIO = r"[\w\-.~%!$&()*+,;=]"
-_FORA_DE_NOME = r"(?<![.\u3002\uff0e\uff61-])"    # com a guarda: não começa no meio de um nome
-
-
-def _detector(com_usuario: bool) -> "re.Pattern":
-    """Token e esquema primeiro (primeiro caractere fixo); o resto só onde
-    não segue letra/dígito. Custo linear e baixo por posição."""
-    usuario = ([rf"(?<![\w\-.~%!$&()*+,;=:]){_USUARIO}*+"             # nunca depois de ':'
-                rf"(?:(?::{_USUARIO}*+)++@{_HOST}{_CAUDA}"              # usuário:senha@host
-                rf"|(?<={_USUARIO})@{_HOST}{_CAUDA_CERTA})"]            # usuário@host/…
-               if com_usuario else [])
-    return re.compile(
-        r"\u27e8url:[a-z0-9.?-]{1,253}:[0-9a-f]{12}\u27e9"             # token já aplicado: fica
-        rf"|https?://[^{_SEM_URL}]+"
-        r"|(?<![^\W_])(?:" + "|".join(usuario + [
-            # IPv4 e localhost soltos são número de versão e palavra: só com porta ou resto
-            rf"{_FORA_DE_NOME}(?=[\dl])(?:{_IPV4}|localhost)(?![\w.-]){_CAUDA_CERTA}",
-            rf"{_FORA_DE_NOME}{_IPV6}{_CAUDA}",
-            rf"{_FORA_DE_NOME}{_NOME}{_CAUDA}"]) + ")",
-        re.IGNORECASE)
-
-
-_RE_URL = _detector(True)
-_RE_URL_SEM_ARROBA = _detector(False)    # sem "@" no texto, usuário nunca casa
-# Onde partir um trecho que saiu LIMPO por inteiro: o que não é caractere
-# de URL (RFC 3986, letra/dígito Unicode de IRI, ponto ideográfico) e o
-# "](" do link markdown — o trecho pode ter engolido o que veio colado
-# depois da URL (emoji, aspas, [url](url)) e assim escondido o código curto.
-_RE_CORTE = re.compile(r"(\]\(|[^\w\-.~:/?#\[\]@!$&()*+,;=%\\\u3002\uff0e\uff61]+)")
-# O corte final de ingestao.ingerir, mais * e ~ (ênfase markdown em volta
-# do link) e : ("loja.com/AbC123: corre!") — senão a pontuação colada
-# esconderia o código curto do caminho.
-_FIM_URL = ".,;)>]}!?*~:"
+_MASCARA = chr(0x27E8) + chr(0x2026) + chr(0x27E9)           # ⟨…⟩
+# Abrem caminho, query, fragmento ou credencial — e "=" e "%", que levam
+# parâmetro e URL codificada mesmo sem "?".
+_SEPARADORES = "/?#@=%" + chr(0x5C)                         # e a barra invertida
+# Pontuação colada no fim do pedaço não conta ("Quer?", "50%", "oferta…").
+_PONTUACAO_FINAL = ('.,;:!?%)]}"' + "'" + chr(0x2026) + chr(0xBB)    # … »
+                    + chr(0x201D) + chr(0x2019))                      # ” ’
+# Barras de outros alfabetos: todo caractere não-ASCII com SOLIDUS ou
+# SLASH no nome Unicode (tirado do banco do Python; o teste confere). As
+# formas de largura total e as pequenas também viram ASCII pelo NFKC.
+_BARRAS_UNICODE = frozenset(map(chr, (
+    0x0337, 0x0338, 0x2044, 0x20E0, 0x20E5, 0x20EB, 0x2215, 0x2298, 0x233F,
+    0x2340, 0x2341, 0x2342, 0x2349, 0x244A, 0x27C8, 0x27C9, 0x29B8, 0x29C4,
+    0x29C5, 0x29F5, 0x29F6, 0x29F7, 0x29F8, 0x29F9, 0x2A0F, 0x2AEE, 0x2AFB,
+    0x2AFD, 0x2E4A, 0x2F03, 0xA718, 0xFE68, 0xFF0F, 0xFF3C, 0x1D194, 0x1D195,
+    0x1D199, 0x1D1A9, 0x1F10D, 0x1F10F, 0x1F16E, 0x1F67C, 0x1F67D, 0xE002F,
+    0xE005C)))
+_RE_ESPACOS = re.compile(r"(\s+)")
+_RE_PLATAFORMA = re.compile(r"[a-z0-9_-]{1,32}")
+_LIMITE_PREVIA = 200                 # só da prévia; identificador estrutural não
 _PONTOS_IDNA = str.maketrans({"\u3002": ".", "\uff0e": ".", "\uff61": "."})
 _RE_IP = re.compile(r"[\d.]+")
 _RE_HOST = re.compile(r"[a-z0-9.-]{1,253}")
@@ -205,8 +189,17 @@ _SEGMENTOS_SENSIVEIS = frozenset({
 
 
 def h12(valor: str) -> str:
-    """Pseudônimo estável de 12 hexadecimais (sha256 truncado, sem sal).
-    Serve para IGUALDADE entre eventos; não é segredo nem proteção."""
+    """IMPRESSÃO DIGITAL de 12 hexadecimais: os 12 primeiros do SHA-256
+    dos bytes UTF-8 (surrogatepass) da string EXATA, sem normalização
+    nenhuma (caixa, espaço e forma Unicode contam). Entrada: para URL, a
+    URL original sem os espaços das pontas; para texto, o texto exato.
+
+    É identificador PROBABILÍSTICO (48 bits): h12 igual indica, com alta
+    probabilidade, a mesma entrada — é o que a chave plataforma|url|h12 e
+    a igualdade entre eventos usam. Colisão é possível: com n entradas
+    distintas, a chance de alguma colisão é ~n^2/2^49 (~0,2% com um
+    milhão). NÃO é segredo nem mecanismo de segurança: quem tem uma URL
+    candidata confirma se ela bate."""
     return hashlib.sha256(valor.encode("utf-8", "surrogatepass")).hexdigest()[:12]
 
 
@@ -270,75 +263,84 @@ def _host_seguro(host: str) -> str:
     return host if _RE_HOST.fullmatch(host or "") else "?"
 
 
-@functools.lru_cache(maxsize=2048)
-def _token(u: str) -> Optional[str]:
-    """\u27e8url:host:h12\u27e9 quando u n\u00e3o pode ir em claro; None quando pode.
-    Fun\u00e7\u00e3o pura: o cache (limitado) s\u00f3 evita reclassificar a mesma URL,
-    que se repete entre os eventos de uma mesma oferta."""
-    motivo, host = _classificar(u)
-    if motivo is None:
-        return None
-    return f"\u27e8url:{_host_seguro(host)}:{h12(u)}\u27e9"
-
-
-def _substituto(bruto: str) -> Optional[str]:
-    """Token no lugar do trecho; None quando ele pode ficar em claro."""
-    u = bruto.rstrip(_FIM_URL)
-    if u.count("[") > u.count("]"):      # o corte final não leva o ] do [IPv6]
-        j = bruto.find("]", len(u))
-        if j != -1:
-            u = bruto[:j + 1]
-    tok = _token(u) if u else None
-    if tok is None:
-        return None
-    _C["urls_protegidas"] += 1
-    return tok + bruto[len(u):]
-
-
-def _trocar_pedaco(m: "re.Match") -> str:
-    bruto = m.group(0)
-    if bruto[0] == "\u27e8":
-        return bruto                     # token já aplicado: idempotente
-    novo = _substituto(bruto)
-    return bruto if novo is None else novo
-
-
-def _trocar(m: "re.Match") -> str:
-    bruto = m.group(0)
-    if bruto[0] == "\u27e8":
-        return bruto                     # token já aplicado: idempotente
-    novo = _substituto(bruto)
-    if novo is not None:
-        return novo                      # sensível por inteiro: sai inteiro
-    if _RE_CORTE.search(bruto) is None:
-        return bruto
-    # Limpo por inteiro, com algo colado que não é URL: cada pedaço vale
-    # sozinho, lido como texto novo — o que uma segunda passada veria.
-    partes = _RE_CORTE.split(bruto)
-    for i in range(0, len(partes), 2):
-        partes[i] = _RE_URL.sub(_trocar_pedaco, partes[i])
-    return "".join(partes)
+def _sem_separador(s: str) -> bool:
+    """s não tem caractere que abra caminho, query, fragmento ou credencial
+    de URL — nem na forma Unicode equivalente (NFKC), nem barra de outro
+    alfabeto."""
+    if not s.isascii():
+        if not _BARRAS_UNICODE.isdisjoint(s):
+            return False
+        s = unicodedata.normalize("NFKC", s)
+    for c in _SEPARADORES:
+        if c in s:
+            return False
+    return True
 
 
 def mascarar_urls(texto: str) -> str:
-    """Troca cada URL que não pode ir em claro por ⟨url:host:h12⟩; a
-    pontuação final fica. Idempotente."""
-    if ("." not in texto and "[" not in texto and "://" not in texto
-            and texto.isascii() and "localhost" not in texto.lower()):
-        return texto                     # nada com forma de URL (ponto Unicode: não ASCII)
-    return (_RE_URL if "@" in texto else _RE_URL_SEM_ARROBA).sub(_trocar, texto)
+    """A BARREIRA (fail-closed). Cada pedaço de texto entre espaços que
+    tenha / ? # @ = % ou barra invertida — também na forma NFKC ou como
+    barra de outro alfabeto — vira ⟨…⟩, mantida a pontuação final. Não
+    reconhece URL nem domínio: o erro possível é mascarar demais, nunca
+    de menos. Host sozinho passa. Idempotente."""
+    if _sem_separador(texto):
+        return texto
+    partes = _RE_ESPACOS.split(texto)
+    for i in range(0, len(partes), 2):
+        p = partes[i]
+        nucleo = p.rstrip(_PONTUACAO_FINAL)
+        if nucleo and not _sem_separador(nucleo):
+            partes[i] = _MASCARA + p[len(nucleo):]
+            _C["urls_protegidas"] += 1
+    return "".join(partes)
 
 
-def representar_url(url) -> dict:
-    """Forma segura de UMA URL para campo estruturado: {"url"} só quando
-    ela pode ir em claro; senão {"h12", "host", "motivo"}, sem a URL."""
+def _chave_url(s: str) -> Optional[str]:
+    """Chave de identidade do worker plataforma|url|<url> →
+    plataforma|url|h12, com o h12 da URL ORIGINAL: roda na captura, antes
+    do corte e da barreira (URL original → h12 → chave → barreira). None
+    quando s não é essa chave ou a parte da URL já passa na barreira."""
+    plat, sep, url = s.partition("|url|")
+    if not sep or not url or not _RE_PLATAFORMA.fullmatch(plat) or _sem_separador(url):
+        return None
+    _C["urls_protegidas"] += 1
+    return f"{plat}|url|{h12(url)}"
+
+
+def representar_url(url, plataforma=None) -> dict:
+    """Referência segura de UMA URL para campo estruturado — NUNCA a URL:
+    {host, h12, motivo, plataforma}. host e motivo vêm do classificador,
+    só como metadado (errar não expõe nada); h12 é o da URL original, sem
+    os espaços das pontas; plataforma vem de quem chama (o registry), sem
+    acoplar as plataformas a este pacote. Nunca levanta."""
+    plat = (plataforma if type(plataforma) is str
+            and _RE_PLATAFORMA.fullmatch(plataforma) else None)
     if type(url) is not str:
-        return {"motivo": "INVALIDA"}
+        return {"host": None, "h12": None, "motivo": "INVALIDA", "plataforma": plat}
     u = url.strip()
-    motivo, host = _classificar(u)
-    if motivo is None:
-        return {"url": u}
-    return {"h12": h12(u), "host": _host_seguro(host), "motivo": motivo}
+    try:
+        motivo, host = _classificar(u)
+    except Exception:                                  # noqa: BLE001
+        motivo, host = "INVALIDA", ""
+    return {"host": _host_seguro(host), "h12": h12(u), "motivo": motivo,
+            "plataforma": plat}
+
+
+def previa(texto) -> str:
+    """Prévia CURTA e segura de um texto — conveniência de observabilidade:
+    espaços colapsados, a barreira aplicada e corte em 200 caracteres (o
+    texto inteiro se recupera pela fonte, por (chat, msg)). Lê no máximo
+    os primeiros 800 caracteres. Não texto → "". Nunca levanta.
+
+    origem.recebida leva previa, texto_h12 (h12 do texto original),
+    texto_len, links ([representar_url(url, plataforma=...)]) e os
+    metadados da mensagem — nunca o texto integral."""
+    if not isinstance(texto, str):
+        return ""
+    t = mascarar_urls(" ".join(str.__str__(texto)[:_LIMITE_PREVIA * 4].split()))
+    if len(t) > _LIMITE_PREVIA:
+        t = t[:_LIMITE_PREVIA - 1] + _MARCA
+    return t
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -366,6 +368,9 @@ def _cortar_bytes(s: str, n: int) -> str:
 
 
 def _texto(s: str, orc: _Orc) -> str:
+    chave = _chave_url(s)            # h12 da URL original, antes do corte
+    if chave is not None:
+        s = chave
     teto = min(_MAX_CHARS_TEXTO, orc.chars)
     if len(s) > teto:
         s = s[:teto - 1] + _MARCA if teto > 1 else _MARCA
@@ -400,6 +405,9 @@ def _chave(k, orc: _Orc) -> str:
         c = str(_inteiro(int.__int__(k)))
     else:
         c = f"<chave:{_nome(t)}>"
+    u = _chave_url(c)                # h12 da URL original, antes do corte
+    if u is not None:
+        c = u
     if len(c) > _MAX_CHAVE:
         c = c[:_MAX_CHAVE - 1] + _MARCA
         orc.cortado = True
@@ -708,6 +716,7 @@ def _despachar(item: tuple) -> None:
     try:
         marca_d, marca_c = [cortado_d], [cortado_c]
         corr, dados = _proteger(corr, marca_c), _proteger(dados, marca_d)
+        tipo = mascarar_urls(tipo)
         # Relógio e marca ficam FORA da medida e voltam depois, na folga:
         # a mesma carga corta sempre igual.
         ts = dados.pop("ts_fato", None)
@@ -735,8 +744,10 @@ def _ultimo_recurso(tipo, local) -> None:
     try:
         reg = getattr(_pacote, "_registro", None)
         if reg is not None:
-            reg.emitir(_rotulo(tipo), {"degradado": True, "erro_tipo": "INTERNO",
-                                       "local": _rotulo(local)}, {})
+            tipo, local = _rotulo(tipo), _rotulo(local)
+            reg.emitir(tipo if _sem_separador(tipo) else _MASCARA,
+                       {"degradado": True, "erro_tipo": "INTERNO",
+                        "local": local if _sem_separador(local) else _MASCARA}, {})
     except _PASSAM:
         raise
     except BaseException:                              # noqa: BLE001

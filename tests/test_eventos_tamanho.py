@@ -5,7 +5,7 @@ corte do anel e com `excedidos` = 0).
 
   01  texto único de 4096 emojis (16 KiB) → cortado em bytes, ≤ 12 KiB
   02  muitos textos grandes → os maiores são cortados até caber
-  03  escapes JSON (controle vale 6 bytes, aspas e barra 2) → mede o
+  03  escapes JSON (controle vale 6 bytes, aspas 2) → mede o
       JSON real, não os caracteres
   04  50 links de ~500 bytes, profundidade, itens, nós e chaves longas
   05  carga que nem cortada cabe → último recurso: degradado TAMANHO com
@@ -88,8 +88,9 @@ def test_03_escapes_json(r):
     for nome, texto in (("controle", "\x01" * 4000), ("misto", "\x02é\"" * 1300)):
         ev = _confere(r, f"03.{nome}", reg, _emitir(reg, {"t": texto}), cortado=True)
         r.check(isinstance(ev.get("dados", {}).get("t"), str), f"03.{nome}.texto")
-    # aspas e barras dobram no JSON, mas 4000 delas ainda cabem: intactas
-    texto = '"\\' * 2000
+    # aspas dobram no JSON, mas 4000 delas ainda cabem: intactas (a barra
+    # invertida ficou de fora: é separador de URL, a barreira a mascara)
+    texto = '"' * 4000
     ev = _confere(r, "03.aspas", reg, _emitir(reg, {"t": texto}), cortado=False)
     r.check(ev.get("dados", {}).get("t") == texto, "03.aspas.intactas")
 

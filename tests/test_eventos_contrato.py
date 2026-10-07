@@ -10,7 +10,9 @@ F1.2-A1 — CONTRATO verificado no CÓDIGO (AST) e catálogo.
       registro direto, tipo/local não literal ou fora do catálogo, local
       repetido, coletor que não é lambda/função, coletor assíncrono,
       coletor com banco/log/Telegram/I/O/mutação, mínimo ruim,
-      argumentos extras ou desempacotados — e aceita o exemplo válido
+      argumentos extras ou desempacotados — e aceita o exemplo válido,
+      inclusive o coletor canônico de origem.recebida (só as funções
+      puras de proteção previa, h12 e representar_url são permitidas)
   04  árvore REAL: nenhuma violação; emitir direto só em main.py e só
       processo.* do catálogo
   05  fronteiras: coleta.py e catalogo.py só stdlib + eventos; banco,
@@ -50,6 +52,9 @@ _PROIBIDAS = {
 _RAIZES_PROIBIDAS = {"client", "_db", "db", "requests", "aiohttp", "socket",
                      "subprocess", "os", "asyncio", "sqlite3", "eventos", "config",
                      "g", "logging", "threading"}
+# Exceção FECHADA: as funções puras de proteção da coleta, que o coletor
+# chama para montar a referência segura (origem.recebida: previa, links).
+_PURAS_PERMITIDAS = {"eventos.previa", "eventos.representar_url", "eventos.h12"}
 
 
 def _arquivos():
@@ -101,6 +106,8 @@ def _impureza(corpo_no, funcoes: dict, vistos: set) -> list:
             erros.append("walrus")
         elif isinstance(n, ast.Call):
             final, raiz = _nome_final(n.func), _raiz_de(n.func)
+            if ast.unparse(n.func) in _PURAS_PERMITIDAS:
+                continue                 # os argumentos seguem verificados
             if (final in _PROIBIDAS or final.startswith("db_") or raiz.startswith("log")
                     or final.startswith("log") or raiz in _RAIZES_PROIBIDAS):
                 erros.append(f"chamada:{ast.unparse(n.func)}")
@@ -308,6 +315,11 @@ _BOM = (
     "eventos.emitir_de('origem.recebida', lambda: (_ids(m), {'t': m.text}), local='a.b',\n"
     "                  minimo=lambda: _ids(m))\n"
     "eventos.emitir_de('post.publicado', _col_pub, local='a.c')\n"
+    "eventos.emitir_de('origem.recebida', lambda: (_ids(m), {\n"
+    "    'previa': eventos.previa(m.raw_text), 'texto_h12': eventos.h12(m.raw_text),\n"
+    "    'texto_len': len(m.raw_text),\n"
+    "    'links': [eventos.representar_url(u, plataforma='amazon') for u in urls]}),\n"
+    "    local='a.d')\n"
 )
 
 
@@ -371,7 +383,7 @@ def test_05_fronteiras(r):
     permitidos = {
         "eventos/coleta.py": {"__future__", "asyncio", "contextvars", "functools",
                               "hashlib", "itertools", "json", "math", "re", "time",
-                              "typing", "urllib", "eventos"},
+                              "typing", "unicodedata", "urllib", "eventos"},
         "eventos/catalogo.py": {"__future__", "hashlib", "json", "typing"},
     }
     for rel, ok in permitidos.items():

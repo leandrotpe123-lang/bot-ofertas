@@ -746,6 +746,9 @@ def test_14_fachada_e_import_sem_rede(r):
             and eventos.inicio_na_fila is coleta.inicio_na_fila
             and eventos.marcar_desfecho is coleta.marcar_desfecho
             and eventos.saude_coleta is coleta.saude_coleta
+            and eventos.previa is coleta.previa
+            and eventos.representar_url is coleta.representar_url
+            and eventos.h12 is coleta.h12
             and eventos.catalogo is catalogo
             and not hasattr(eventos, "coleta_disponivel"), "14.exportacoes_reais")
     s = eventos.saude_coleta()
