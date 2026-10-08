@@ -30,6 +30,17 @@ a exclusão.
 
 NÃO faz: desligar origem nem remover post (pipeline.origem_apagada),
 esquecer memória (pipeline.esquecimento), decidir o texto (decisao).
+
+PROVENIÊNCIA [F1.2-A2-R] — só observação, nunca regra. A rodada não abre
+execução; os eventos saem logo depois do log de sempre, fora do lock do
+post (A.8): post.sucessao_pendente quando a sucessão fica pendente
+(CICLO_FECHADO; BUSCA_FALHOU, com a exceção só pela classe, em
+`excecao`) e post.lideranca_transferida depois do COMMIT confirmado
+(db_transferir_lideranca devolve True só depois do COMMIT: prova do
+banco `confirmado`), antes da reentrada — que abre, no `processar`, a
+única execução da mensagem (via SUCESSAO). A task da rodada nasce em
+`agendar`, chamado da task do aviso de exclusão: o contexto que ela
+copia não tem execução. Desligada, a proveniência não roda nada daqui.
 """
 from __future__ import annotations
 
@@ -37,6 +48,7 @@ import asyncio
 import time
 from typing import Callable
 
+import eventos
 import globals as g
 from database import db_get_post, db_origens_do_post, db_transferir_lideranca
 from logger import log_out
@@ -132,6 +144,9 @@ async def _suceder(dest: int) -> None:
         log_out.info(
             f"👑 [SUCESSAO] post:{dest} — a chefe apagou, mas o ciclo do "
             f"post já fechou: segue congelado até a última fonte apagar")
+        eventos.emitir_de("post.sucessao_pendente", lambda: (
+            {"post": dest}, {"motivo": "CICLO_FECHADO"}),
+            local="sucessao.suceder.ciclo_fechado")
         return
     for chat, msg_id in origens:
         try:
@@ -142,6 +157,10 @@ async def _suceder(dest: int) -> None:
             log_out.warning(
                 f"⚠️ [SUCESSAO] post:{dest} — busca de {_nome(chat)} "
                 f"id={msg_id} falhou ({type(e).__name__}: {e}); nada muda")
+            eventos.emitir_de("post.sucessao_pendente", lambda: (
+                {"post": dest, "chat": chat, "msg": msg_id},
+                {"motivo": "BUSCA_FALHOU", "excecao": type(e).__name__}),
+                local="sucessao.suceder.busca_falhou")
             return
         if m is None:
             log_out.info(
@@ -156,5 +175,13 @@ async def _suceder(dest: int) -> None:
         log_out.info(
             f"👑 [SUCESSAO] post:{dest} — a chefe apagou; {_nome(chat)} "
             f"id={msg_id} assume e o post passa a espelhar a mensagem dela")
+        # lider_anterior: a chefe que ESTA rodada leu ausente (o COMMIT só
+        # transfere se a líder atual continua fora das origens).
+        eventos.emitir_de("post.lideranca_transferida", lambda: (
+            {"post": dest, "chat": chat, "msg": msg_id},
+            {"lider_anterior": {"chat": estado.get("lider") or "",
+                                "msg": estado.get("lider_msg")},
+             "prova": {"telegram": "nao_tocado", "banco": "confirmado"}}),
+            local="sucessao.suceder.lideranca_transferida")
         await _estado["despachar"](EventoRecuperado(m, via="SUCESSAO"), is_edit=True)
         return

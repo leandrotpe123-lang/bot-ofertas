@@ -8,8 +8,9 @@ test_vida_uma_hora) e as camadas do _pipeline trocadas por falsas
 controláveis: o que se prova é o funil e a instrumentação, não as camadas.
 
   Contrato
-    C01  cada LOCAL do funil ↔ um (tipo, motivo), um a um; o catálogo tem
-         exatamente esses 16 + o fim de execução; nenhum outro emissor
+    C01  cada LOCAL do funil ↔ um (tipo, motivo), um a um; os 16 estão no
+         catálogo e só o funil os emite (escopo da A2-E: o catálogo
+         inteiro não é conferido aqui)
     C02  origem.recebida: forma exata; sem texto integral; links como
          referências; encaminhada só de canal; grouped_id como texto
     C03  origem.descartada: forma, enums e efeitos_parciais dos 15 motivos;
@@ -554,9 +555,10 @@ def test_c01_locais_um_a_um_e_catalogo(r):
             str(sorted(set(locais) ^ set(LOCAIS_A2E))))
     errados = [(t, loc, m) for t, loc, m in achados if LOCAIS_A2E.get(loc) != (t, m)]
     r.check(errados == [], "C01.local_tipo_motivo_um_a_um", str(errados))
-    r.check(catalogo.LOCAIS == {"eventos.execucao.fim"} | set(LOCAIS_A2E),
-            "C01.catalogo_tem_exatamente_estes_locais",
-            str(sorted(catalogo.LOCAIS ^ ({"eventos.execucao.fim"} | set(LOCAIS_A2E)))))
+    # Só o escopo da A2-E, nunca uma lista global que cresce a cada frente:
+    # os 16 estão no catálogo e nenhum é emitido fora do funil.
+    r.check(set(LOCAIS_A2E) <= catalogo.LOCAIS, "C01.catalogo_tem_os_dezesseis",
+            str(sorted(set(LOCAIS_A2E) - catalogo.LOCAIS)))
     motivos = {m for _, _, m in achados if m}
     r.check(motivos == catalogo.ENUMS["motivo_descarte"] - {"REDIRECIONAMENTO_ESGOTADO"},
             "C01.quinze_motivos_fora_do_nucleo", str(sorted(motivos)))
@@ -566,9 +568,9 @@ def test_c01_locais_um_a_um_e_catalogo(r):
     for rel in regua._arquivos():
         if rel.split(os.sep)[0] == "eventos" or rel in _ARQ_FUNIL:
             continue
-        if _emissoes(rel):
+        if {loc for _, loc, _ in _emissoes(rel)} & set(LOCAIS_A2E):
             fora.append(rel)
-    r.check(fora == [], "C01.nenhum_outro_emissor", str(fora))
+    r.check(fora == [], "C01.dezesseis_so_no_funil", str(fora))
 
 
 def test_c05_estrutura_do_funil(r):

@@ -53,6 +53,17 @@ a idempotência do pipeline (chat:msg_id) o descarta como
 JA_PROCESSADO. Um id buscado é marcado como visto e nunca é buscado de
 novo.
 
+PROVENIÊNCIA [F1.2-A2-R] — só observação, nunca regra. Cada fato daqui
+sai também como evento, logo depois do log de sempre e FORA de qualquer
+execução: a completude não abre execução, e a recuperada ganha a dela
+no `processar` (via RECUPERACAO). origem.buraco é o buraco detectado;
+origem.recuperada, a busca que devolveu a mensagem (antes da entrega);
+origem.recuperacao_falhou, o resto (ERRO_BUSCA, AUSENTE, SERVICO,
+ENTREGA_FALHOU, ABORTADA), com a exceção só pela classe, em `excecao`.
+A task de recuperação nasce no `observar`, que o handler chama antes do
+`processar`: o contexto que ela copia não tem execução. Desligada, a
+proveniência não roda nada daqui.
+
 Dependências INJETADAS em `instalar` (cliente, fontes, ponto de
 entrada): este módulo não importa o orquestrador nem o cliente.
 """
@@ -61,8 +72,9 @@ from __future__ import annotations
 import asyncio
 from typing import Callable, Dict, Optional, Set
 
+import eventos
 import globals as g
-from logger import log_ing, _idade_str
+from logger import log_ing, _idade_seg, _idade_str
 from pipeline.identidade import username_de
 
 __all__ = ["instalar", "observar", "EventoRecuperado"]
@@ -180,6 +192,14 @@ def _observar(chat_id: int, msg_id: int) -> None:
         log_ing.warning(
             f"🧩 [BURACO_GRANDE] {_nome(chat_id)} {buraco} ids entre "
             f"{anterior} e {msg_id} — não recupera (reconexão ou atraso longo)")
+        # [F1.2-A2-R] Os valores vão como padrão do lambda, nunca como
+        # closure: _observar roda a CADA mensagem, e uma closure faria dos
+        # locais dela células — custo em toda chamada, com ou sem buraco.
+        eventos.emitir_de("origem.buraco", lambda chat=chat_id, de=anterior, ate=msg_id,
+                          tamanho=buraco: (
+            {"chat": str(chat)},
+            {"de": de, "ate": ate, "tamanho": tamanho, "faltam": None, "recupera": False}),
+            local="completude.observar.buraco_grande")
     elif buraco > 0:
         faltam = [i for i in range(anterior + 1, msg_id) if i not in canal.vistos]
         if faltam:
@@ -187,6 +207,12 @@ def _observar(chat_id: int, msg_id: int) -> None:
             log_ing.info(
                 f"🧩 [BURACO] {_nome(chat_id)} ids={faltam} entre {anterior} "
                 f"e {msg_id} — confere em {_ESPERA_S:g}s")
+            eventos.emitir_de("origem.buraco", lambda chat=chat_id, de=anterior, ate=msg_id,
+                              tamanho=buraco, faltam=faltam: (
+                {"chat": str(chat)},
+                {"de": de, "ate": ate, "tamanho": tamanho, "faltam": faltam,
+                 "recupera": True}),
+                local="completude.observar.buraco")
             _agendar(chat_id, canal)
 
     _podar(canal)
@@ -209,7 +235,11 @@ def _agendar(chat_id: int, canal: _Canal) -> None:
 
 
 async def _recuperar(chat_id: int) -> None:
+    """[F1.2-A2-R] A rodada abortada sai como origem.recuperacao_falhou
+    ABORTADA com os ids dela (os já tratados têm o seu evento): `faltam`
+    nasce antes do try, porque o coletor o lê."""
     canal = _canais.get(chat_id)
+    faltam: list = []
     try:
         while canal is not None and canal.pendentes:
             await asyncio.sleep(_ESPERA_S)
@@ -224,9 +254,17 @@ async def _recuperar(chat_id: int) -> None:
     except Exception as e:
         log_ing.error(f"🧩 completude: recuperação abortada ({type(e).__name__})",
                       exc_info=True)
+        eventos.emitir_de("origem.recuperacao_falhou", lambda: (
+            {"chat": str(chat_id)},
+            {"motivo": "ABORTADA", "ids": faltam, "excecao": type(e).__name__}),
+            local="completude.recuperar.abortada")
 
 
 async def _buscar_e_entregar(chat_id: int, canal: _Canal, faltam: list) -> None:
+    """[F1.2-A2-R] Cada desfecho sai como evento, logo depois do log, fora
+    de execução: a busca que falhou, o id ausente ou de serviço, a
+    recuperada (ANTES do processar, que abre a execução dela) e a entrega
+    que falhou (DEPOIS do execucao.fim dela)."""
     nome = _nome(chat_id)
     # Marcados ANTES da busca: sucesso ou falha, nenhum id é buscado
     # duas vezes.
@@ -238,6 +276,10 @@ async def _buscar_e_entregar(chat_id: int, canal: _Canal, faltam: list) -> None:
         log_ing.warning(
             f"🧩 [RECUPERACAO_FALHOU] {nome} ids={faltam} "
             f"erro={type(e).__name__} — sem nova tentativa")
+        eventos.emitir_de("origem.recuperacao_falhou", lambda: (
+            {"chat": str(chat_id)},
+            {"motivo": "ERRO_BUSCA", "ids": faltam, "excecao": type(e).__name__}),
+            local="completude.buscar_e_entregar.erro_busca")
         return
 
     # Casamento por id, nunca por posição: o servidor pode omitir ids
@@ -247,15 +289,32 @@ async def _buscar_e_entregar(chat_id: int, canal: _Canal, faltam: list) -> None:
         m = achadas.get(mid)
         if m is None:
             log_ing.info(f"🧩 [AUSENTE_NO_CANAL] {nome} id={mid} — apagada ou inexistente")
+            eventos.emitir_de("origem.recuperacao_falhou", lambda: (
+                {"chat": str(chat_id), "msg": mid},
+                {"motivo": "AUSENTE", "ids": [mid]}),
+                local="completude.buscar_e_entregar.ausente")
             continue
         if getattr(m, "action", None) is not None:
             log_ing.debug(f"🧩 [SERVICO] {nome} id={mid} — mensagem de serviço, ignorada")
+            eventos.emitir_de("origem.recuperacao_falhou", lambda: (
+                {"chat": str(chat_id), "msg": mid},
+                {"motivo": "SERVICO", "ids": [mid]}),
+                local="completude.buscar_e_entregar.servico")
             continue
         log_ing.warning(
             f"🧩 [RECUPERADA] {nome} id={mid} idade={_idade_str(m.date)} — "
             f"o Telegram não entregou; entra no pipeline como nova")
+        eventos.emitir_de("origem.recuperada", lambda: (
+            {"chat": str(chat_id), "msg": mid},
+            {"idade_s": round(_idade_seg(m.date), 1)}),
+            local="completude.buscar_e_entregar.recuperada",
+            minimo=lambda: {"chat": str(chat_id), "msg": mid})
         try:
             await _estado["despachar"](EventoRecuperado(m), is_edit=False)
         except Exception as e:
             log_ing.error(
                 f"🧩 entrega da recuperada falhou: {type(e).__name__}", exc_info=True)
+            eventos.emitir_de("origem.recuperacao_falhou", lambda: (
+                {"chat": str(chat_id), "msg": mid},
+                {"motivo": "ENTREGA_FALHOU", "ids": [mid], "excecao": type(e).__name__}),
+                local="completude.buscar_e_entregar.entrega_falhou")
