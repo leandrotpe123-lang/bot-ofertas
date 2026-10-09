@@ -151,7 +151,8 @@ ENUMS: Dict[str, FrozenSet[str]] = {
 # liga o ponto. A1: o fim de execução, emitido pela própria coleta. A2-E:
 # o funil de entrada (pipeline/orchestrator*.py), até a chamada a enviar.
 # A2-R: a completude e a sucessão (pipeline/completude.py e
-# pipeline/sucessao.py), que não abrem execução.
+# pipeline/sucessao.py), que não abrem execução. Exclusão: origem.apagada
+# (pipeline/origem_apagada.py), na raiz EXCLUSAO de cada id apagado.
 LOCAIS: FrozenSet[str] = frozenset({
     "eventos.execucao.fim",
     # A2-E — origem.recebida e os descartes antes da fila
@@ -185,6 +186,8 @@ LOCAIS: FrozenSet[str] = frozenset({
     "sucessao.suceder.ciclo_fechado",
     "sucessao.suceder.busca_falhou",
     "sucessao.suceder.lideranca_transferida",
+    # Exclusão — a origem apagada, depois de _uma
+    "origem_apagada.apagadas.apagada",
 })
 
 # Chaves que a coleta preenche: o que o coletor puser nelas é sobrescrito.

@@ -20,8 +20,9 @@ temporário do harness) e lock_post real na sucessão. Só a rede do Telegram
 
   Contrato
     C01  os 11 locais ↔ (tipo, motivo) um a um, só em completude.py e
-         sucessao.py; o catálogo global é A1 + A2-E + A2-R; nenhum outro
-         emissor; VERSAO 1 com o hash recalculado
+         sucessao.py, no catálogo e disjuntos dos da A1 e da A2-E; VERSAO 1
+         com o hash recalculado (o catálogo global e "nenhum outro emissor"
+         ficam com a frente mais nova: tests/test_eventos_exclusao.py)
     C02  forma exata de cada evento; sem exec nem exec_pai; exceção só pela
          classe; erro_tipo nunca vem do coletor; os 11 pontos exercitados
     C03  estrutura (AST): emissão logo depois do log; nada emitido sob o
@@ -647,26 +648,20 @@ def test_c01_onze_locais_e_catalogo_global(r):
             motivos.setdefault(_ENUM_MOTIVO[t], set()).add(m)
     r.check(all(motivos.get(enum) == catalogo.ENUMS[enum] for enum in _ENUM_MOTIVO.values()),
             "C01.motivos_do_catalogo_todos_ligados", str(motivos))
-    # O catálogo global é a composição das frentes — A1 + A2-E + A2-R —, sem
-    # sobra nem falta. Cada frente confere o próprio escopo no próprio teste.
-    frentes = {"A1": {LOCAL_A1}, "A2-E": set(a2e.LOCAIS_A2E), "A2-R": set(LOCAIS_A2R)}
-    uniao = set().union(*frentes.values())
-    r.check(sum(len(v) for v in frentes.values()) == len(uniao) == 28, "C01.frentes_disjuntas",
-            str(len(uniao)))
-    r.check(catalogo.LOCAIS == uniao, "C01.catalogo_global_A1_A2E_A2R",
-            str(sorted(catalogo.LOCAIS ^ uniao)))
+    # Só o escopo da A2-R, nunca uma lista global que cresce a cada frente:
+    # os 11 são disjuntos dos da A1 e da A2-E e nenhum é emitido fora de
+    # completude.py e sucessao.py. O catálogo global (a composição das
+    # frentes) e "nenhum outro emissor" ficam com a frente mais nova
+    # (tests/test_eventos_exclusao.py, C01).
+    r.check(set(LOCAIS_A2R).isdisjoint(set(a2e.LOCAIS_A2E) | {LOCAL_A1}),
+            "C01.frentes_disjuntas")
     fora = []
     for rel in regua._arquivos():
-        if rel.split(os.sep)[0] == "eventos":
+        if rel.split(os.sep)[0] == "eventos" or rel in _ARQ_A2R:
             continue
-        locs = {loc for _, loc, _ in a2e._emissoes(rel)}
-        if not locs:
-            continue
-        dono = (set(a2e.LOCAIS_A2E) if rel in a2e._ARQ_FUNIL
-                else set(LOCAIS_A2R) if rel in _ARQ_A2R else set())
-        if not locs <= dono:
-            fora.append((rel, sorted(locs - dono)))
-    r.check(fora == [], "C01.nenhum_outro_emissor", str(fora))
+        if {loc for _, loc, _ in a2e._emissoes(rel)} & set(LOCAIS_A2R):
+            fora.append(rel)
+    r.check(fora == [], "C01.onze_so_em_completude_e_sucessao", str(fora))
     rc = catalogo.resumo()
     r.check(catalogo.VERSAO == 1 and rc["versao"] == 1
             and rc["hash"] == catalogo._hash(catalogo.TIPOS, catalogo.ENUMS, catalogo.LOCAIS)

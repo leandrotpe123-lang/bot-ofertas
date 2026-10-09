@@ -262,8 +262,11 @@ def test_01_main_liga_sucessao_com_o_ponto_de_entrada(r):
                 if isinstance(n, ast.AsyncFunctionDef) and n.name == "_preparar_processo")
     corpo = [ast.unparse(n) for n in prep.body]
     i = corpo.index("origem_apagada.instalar(client, fontes)")
+    # [F1.2, B5] a origem sumida chega a apagadas com via SUCESSAO (só
+    # proveniência): o mesmo tratamento, rotulado.
     r.check(corpo[i + 1] == "sucessao.instalar(client, fontes, processar, "
-                           "origem_apagada.apagadas)", "01.logo_depois", corpo[i + 1])
+                           "functools.partial(origem_apagada.apagadas, via='SUCESSAO'))",
+            "01.logo_depois", corpo[i + 1])
     r.check(sum(1 for n in ast.walk(arv) if isinstance(n, ast.Call)
                 and ast.unparse(n.func) == "sucessao.instalar") == 1, "01.uma_vez")
 
