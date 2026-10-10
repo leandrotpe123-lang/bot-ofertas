@@ -45,12 +45,23 @@ CORRIDAS:
 LIMITES (do Telegram, não deste módulo):
   · o aviso de exclusão não é 100% garantido (documentação do Telethon);
   · exclusão feita com o bot fora do ar (deploy, restart) não chega.
+
+PROVENIÊNCIA [F1.2, fatia da exclusão] — só observação, nunca regra. Cada id
+apagado é a RAIZ de uma execução EXCLUSAO, aberta em `apagadas` antes de
+`_uma`, nas duas vias (`via`: TELEGRAM, o aviso; SUCESSAO, a origem que a
+sucessão achou sumida — main.py injeta). origem.apagada sai logo depois de
+`_uma`, fora de todo lock e depois do log de sempre, com a situação e a
+prova do banco. A remoção física nasce dentro da execução e herda o exec;
+`sucessao.agendar` fica fora dela, e a task da sucessão nasce sem exec.
+Exceção inesperada em `_uma`: nenhum origem.apagada, a execução fecha em
+ERRO. Desligada, a proveniência não roda nada daqui.
 """
 from __future__ import annotations
 
 import asyncio
 import time
 
+import eventos
 import globals as g
 from database import db_desvincular_origem
 from logger import log_out
@@ -72,6 +83,14 @@ _MAX_REFAZER = 3
 
 # Tasks em voo (referência forte).
 _TAREFAS: set = set()
+
+# Prova do banco em origem.apagada, por situação (B.2): `confirmado` só onde
+# db_desvincular_origem gravou com COMMIT; sem gravação prevista,
+# `nao_aplicavel`.
+_PROVA_BANCO = {"morto": "confirmado", "mantido": "confirmado",
+                "sem_post": "confirmado", "ja_removido": "confirmado",
+                "erro": "falhou_sem_escrita", "sem_vinculo": "nao_aplicavel",
+                "mudou": "nao_aplicavel"}
 
 
 def _chave(chat, msg_id) -> str:
@@ -126,42 +145,54 @@ def agendar(chat_id, ids) -> None:
     t.add_done_callback(_TAREFAS.discard)
 
 
-async def apagadas(chat: str, ids) -> list:
+async def apagadas(chat: str, ids, via: str = "TELEGRAM") -> list:
     """Trata cada id apagado na fonte `chat`. Fora de todos os locks:
     post encerrado → esquece a oferta e agenda a remoção física na hora;
     post mantido → confere a sucessão da chefe. Devolve os posts
-    encerrados."""
+    encerrados. `via` só rotula a proveniência."""
     encerrados = []
     for msg_id in ids:
-        try:
-            situacao, dest = await _uma(chat, int(msg_id))
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:                      # noqa: BLE001
-            log_out.error(f"❌ origem apagada {_nome(chat)} id={msg_id}: {e}",
-                          exc_info=True)
-            continue
-        if situacao in ("morto", "mantido"):
-            esquecimento.origem_saiu(chat, int(msg_id), dest)
-        if situacao == "morto":
-            await esquecimento.post_saiu(dest)
-            convergencia.agendar_remocao(dest, "ORIGEM_APAGADA")
-            encerrados.append(dest)
-        elif situacao == "mantido":
+        with eventos.execucao(lambda c=chat, m=msg_id: {"chat": c, "msg": int(m)},
+                              tipo="EXCLUSAO"):
+            try:
+                situacao, dest, restam = await _uma(chat, int(msg_id))
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:                      # noqa: BLE001
+                log_out.error(f"❌ origem apagada {_nome(chat)} id={msg_id}: {e}",
+                              exc_info=True)
+                eventos.marcar_desfecho("ERRO", e)
+                continue
+            eventos.emitir_de("origem.apagada", lambda: (
+                {"chat": chat, "msg": int(msg_id)} if dest is None
+                else {"chat": chat, "msg": int(msg_id), "post": dest},
+                {"situacao": situacao.upper(),
+                 "restam": restam if situacao in ("mantido", "morto") else None,
+                 "via": via,
+                 "prova": {"telegram": "nao_tocado", "banco": _PROVA_BANCO[situacao]}}),
+                local="origem_apagada.apagadas.apagada")
+            if situacao in ("morto", "mantido"):
+                esquecimento.origem_saiu(chat, int(msg_id), dest)
+            if situacao == "morto":
+                await esquecimento.post_saiu(dest)
+                convergencia.agendar_remocao(dest, "ORIGEM_APAGADA")
+                encerrados.append(dest)
+        if situacao == "mantido":     # fora da execução: a sucessão nasce sem exec
             sucessao.agendar(dest)
     return encerrados
 
 
 async def _uma(chat: str, msg_id: int) -> tuple:
-    """Uma origem apagada. Devolve (situação, post) — situação de
-    database.db_desvincular_origem."""
+    """Uma origem apagada. Devolve (situação, post, n) — situação e n de
+    database.db_desvincular_origem (n: as origens que restam, no
+    "mantido")."""
     async with await origem.lock_origem(chat, msg_id):
         _lembrar(chat, msg_id)
         dest = origem.consultar(chat, msg_id)
         situacao, n = "sem_vinculo", 0
         for _ in range(_MAX_REFAZER + 1):
             if not dest:
-                return "sem_vinculo", None
+                return "sem_vinculo", None, None
             async with await exclusao.lock_post(dest):
                 situacao, n = db_desvincular_origem(chat, msg_id, dest,
                                                     time.time())
@@ -172,7 +203,7 @@ async def _uma(chat: str, msg_id: int) -> tuple:
             log_out.warning(
                 f"⚠️ [ORIGEM_APAGADA] {_nome(chat)} id={msg_id} — vínculo "
                 f"mudou {_MAX_REFAZER + 1}x sob o lock; nada removido")
-            return "mudou", None
+            return "mudou", None, None
     if situacao == "morto":
         log_out.info(
             f"🗑 [ORIGEM_APAGADA] {_nome(chat)} id={msg_id} → post:{dest} "
@@ -189,4 +220,4 @@ async def _uma(chat: str, msg_id: int) -> tuple:
         log_out.warning(
             f"⚠️ [ORIGEM_APAGADA] {_nome(chat)} id={msg_id} → post:{dest} "
             f"falha no banco — nada removido")
-    return situacao, dest
+    return situacao, dest, n

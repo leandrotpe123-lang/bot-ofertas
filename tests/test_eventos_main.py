@@ -21,8 +21,10 @@ variáveis válidas, nada liga:
   07  fronteiras: eventos/ não importa banco, sqlite3, telethon, globals,
       client, pipeline nem config; quem importa eventos é uma lista
       FECHADA: main.py, o funil de entrada (pipeline/orchestrator*.py,
-      F1.2-A2-E) e a completude e a sucessão (pipeline/completude.py e
-      pipeline/sucessao.py, F1.2-A2-R) — importador novo quebra este teste
+      F1.2-A2-E), a completude e a sucessão (pipeline/completude.py e
+      pipeline/sucessao.py, F1.2-A2-R) e a origem apagada
+      (pipeline/origem_apagada.py, fatia da exclusão) — importador novo
+      quebra este teste
   08  a API só tem GET /v1/saude e GET /v1/eventos; o app PÚBLICO
       (web/redirect.py, porta PORT) não tem nada de /v1 nem importa eventos
   09  o segredo nunca entra em log: nenhuma chamada de log recebe o segredo
@@ -363,11 +365,13 @@ def test_07_fronteiras(r):
                     importadores.append(rel)
     # [F1.2-A2-E] Lista FECHADA e exata (decisão D2 do dono): main.py e os
     # três módulos do funil de entrada; [F1.2-A2-R] mais a completude e a
-    # sucessão. Qualquer outro importador quebra.
+    # sucessão; [F1.2, exclusão] mais a origem apagada. Qualquer outro
+    # importador quebra.
     r.check(sorted(set(importadores)) == ["main.py", "pipeline/completude.py",
                                           "pipeline/orchestrator.py",
                                           "pipeline/orchestrator_fila.py",
                                           "pipeline/orchestrator_pipeline.py",
+                                          "pipeline/origem_apagada.py",
                                           "pipeline/sucessao.py"],
             "07.importadores_lista_fechada", str(sorted(set(importadores))))
 

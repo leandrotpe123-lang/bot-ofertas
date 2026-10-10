@@ -1267,8 +1267,13 @@ def test_r05_interfaces_preservadas(r):
                 str([ast.unparse(c) for c in chamadas]))
     fonte_main = regua._arvore("main.py")
     r.check(not any(isinstance(n, ast.Call) and regua._nome_final(n.func) in
-                    ("emitir_de", "execucao", "transferir_execucao")
+                    ("emitir_de", "transferir_execucao")
                     for n in ast.walk(fonte_main)), "R05.main_intocado_pela_a2e")
+    # A única execução de main.py é a raiz MANUTENCAO da fatia da exclusão
+    # (tests/test_eventos_exclusao.py, C04): nenhuma de MENSAGEM.
+    r.check([ast.unparse(n) for n in ast.walk(fonte_main) if isinstance(n, ast.Call)
+             and regua._nome_final(n.func) == "execucao"]
+            == ["eventos.execucao(tipo='MANUTENCAO')"], "R05.main_so_a_raiz_manutencao")
 
 
 # ─────────────────────────────────────────────────────────────────
