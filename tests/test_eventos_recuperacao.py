@@ -151,10 +151,12 @@ class Fonte:
         self.segura = asyncio.Event() if segura else None
         self.antes = antes                    # gancho antes de devolver
         self.chamadas = []
+        self.entrou = asyncio.Event()         # sinal: a busca COMEÇOU
 
     async def get_messages(self, ent, ids):
         chat = str(utils.get_peer_id(ent))
         self.chamadas.append((chat, list(ids)))
+        self.entrou.set()
         if self.segura is not None:
             await self.segura.wait()
         await asyncio.sleep(0)                # rede: a busca sempre cede o laço
@@ -367,7 +369,26 @@ async def _completude(cen, texto=TEXTO, **extra):
                     await asyncio.sleep(0)
                     tarefa.cancel()
                 if cen == "CANCELA_BUSCA":
-                    await _ate(lambda: bool(fonte.chamadas))
+                    # Cancela DENTRO da busca: espera o sinal da Fonte, não
+                    # voltas do laço (a busca só sai depois do relógio de
+                    # _ESPERA_S). O teto é só segurança: se a busca não
+                    # começar, a recuperação é cancelada e aguardada antes de
+                    # a falha subir. asyncio.wait limita a espera mesmo se a
+                    # task recusar o cancelamento (wait_for, e com ele o
+                    # _esperar, esperaria para sempre): task viva vira erro
+                    # explícito, com a falha original como causa.
+                    try:
+                        await asyncio.wait_for(fonte.entrou.wait(), _LIMITE_S)
+                    except BaseException as erro:
+                        tarefa.cancel()
+                        await asyncio.wait({tarefa}, timeout=_LIMITE_S)
+                        if not tarefa.done():
+                            raise RuntimeError(
+                                f"limpeza da recuperação falhou: a task não terminou "
+                                f"em {_LIMITE_S}s depois do cancelamento") from erro
+                        if not tarefa.cancelled():
+                            tarefa.exception()     # recolhida: nenhum aviso de órfã
+                        raise
                     tarefa.cancel()
                 cena.resultado = await _esperar(tarefa)
             cena.drenou = await _drenar() and drenou
