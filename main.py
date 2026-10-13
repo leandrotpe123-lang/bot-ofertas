@@ -33,6 +33,8 @@ Mudanças v80.2 (em relação a v80.0):
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import functools
 import os
 import signal
 
@@ -397,11 +399,18 @@ async def _preparar_processo() -> bool:
 
     # [Frente 8] Remoções de posts FUNDIDOS que ficaram pendentes antes
     # do restart: UMA consulta local, agora, sem varredura periódica.
-    # Só agenda tasks (não bloqueia o boot).
-    try:
-        convergencia.retomar_remocoes()
-    except Exception as e:
-        log_sys.error(f"❌ retomar_remocoes: {e}")
+    # Só agenda tasks (não bloqueia o boot). [F1.2] Raiz MANUTENCAO: cobre
+    # este passo (a consulta e o agendamento) e o desfecho dele. As remoções
+    # retomadas são tasks próprias, que vivem mais que o passo: nascem no
+    # contexto de FORA da execução, copiado antes de abri-la — sem exec,
+    # nunca penduradas numa execução já encerrada.
+    fora = contextvars.copy_context()
+    with eventos.execucao(tipo="MANUTENCAO"):
+        try:
+            fora.run(convergencia.retomar_remocoes)
+        except Exception as e:
+            log_sys.error(f"❌ retomar_remocoes: {e}")
+            eventos.marcar_desfecho("ERRO", e)
 
     # 5. Handlers — UMA vez. A completude da entrada é ligada antes:
     # os handlers a alimentam desde o primeiro update, e ela devolve ao
@@ -411,9 +420,11 @@ async def _preparar_processo() -> bool:
     # [Origem apagada] A fonte apagou → o post sai do canal quando
     # nenhuma origem dele ficou no ar. O handler só agenda. Se quem
     # apagou era a CHEFE e outra fonte segura o post, ela assume
-    # (sucessão), entrando pelo MESMO ponto de entrada.
+    # (sucessão), entrando pelo MESMO ponto de entrada. [F1.2, B5] A origem
+    # que a sucessão acha sumida chega à exclusão com via SUCESSAO.
     origem_apagada.instalar(client, fontes)
-    sucessao.instalar(client, fontes, processar, origem_apagada.apagadas)
+    sucessao.instalar(client, fontes, processar,
+                      functools.partial(origem_apagada.apagadas, via="SUCESSAO"))
 
     # 6. Tarefas de fundo — UMA instância de cada por processo.
     # _iniciar_orchestrator é aguardado, não posto em task: ele apenas
