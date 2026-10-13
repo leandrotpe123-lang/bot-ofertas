@@ -26,8 +26,9 @@ dono, 08/10):
     sucessao.py não muda;
   · raiz MANUTENCAO: main.py, em volta de convergencia.retomar_remocoes
     (o passo do boot: consulta e agendamento); no except de sempre, ERRO.
-    As remoções retomadas nascem no contexto de FORA da execução (copiado
-    antes de abri-la) e não levam exec.
+    As remoções retomadas são agendadas no contexto de FORA da execução
+    (copiado antes de abri-la) e não levam exec; desde a F1.2-A2-O a task
+    da remoção nasce num contexto VAZIO (convergencia.agendar_remocao).
 
 Pelo caminho REAL: origem_apagada.agendar (o que o on_delete faz) →
 apagadas → _uma (lock_origem, lock_post e SQLite reais, o banco temporário
@@ -78,7 +79,8 @@ extraído pela AST. Toda espera tem teto de TEMPO: a bancada nunca trava.
          origem sumida e mata o post): uma sonda DENTRO da task _remover
          lê o _EXEC real e emite pela coleta — sem exec nem exec_pai, depois
          do fim do pai; cada execução com exatamente um fim; nenhum evento
-         de X depois do fim de X
+         de X depois do fim de X; a remoção nasce num contexto vazio
+         (F1.2-A2-O) — o criador tinha a marca, a task não
     L02  MANUTENCAO com duas remoções retomadas: o mesmo, e as tasks nascem
          com a MANUTENCAO ainda aberta mas no contexto de fora dela
   Regressão
@@ -174,8 +176,9 @@ class Destino:
         return True
 
 
-# Marca só da bancada, posta no contexto de quem dispara o cenário: a task
-# que a carrega herdou ESSE contexto (o de fora das execuções).
+# Marca só da bancada, posta no contexto de quem dispara o cenário (o de fora
+# das execuções). [F1.2-A2-O] A task da remoção NÃO a herda — nasce num
+# contexto vazio —; o nascimento prova que o criador a tinha.
 _MARCA = contextvars.ContextVar("bancada_exclusao_marca", default=None)
 _SONDA = "teste.sonda_remocao"
 
@@ -245,17 +248,23 @@ def _banco(dests, links):
 class Nascimentos:
     """Fábrica de tasks do laço: no INSTANTE do create_task registra o exec
     de quem cria e o que a task levou no contexto dela, antes de rodar.
-    `com_seq` (linhagem): anota também o último seq do anel no instante."""
+    `com_seq` (linhagem): anota também o último seq do anel no instante.
+    `ctxs` (paralela a `lista`): se a marca estava no contexto de QUEM CRIA e
+    os nomes das ContextVar do contexto que a task REALMENTE recebeu
+    (task.get_context()) — [F1.2-A2-O] a remoção nasce num contexto vazio."""
 
     def __init__(self, com_seq=False):
         self.lista = []
         self.com_seq, self.seqs = com_seq, []
+        self.ctxs = []
 
     def __call__(self, loop, coro, **kw):
         cria = coleta._EXEC.get()
+        marca_no_criador = _MARCA in contextvars.copy_context()
         t = asyncio.Task(coro, loop=loop, **kw)
         leva = t.get_context().get(coleta._EXEC)
         self.lista.append((getattr(getattr(coro, "cr_code", None), "co_name", "?"), cria, leva))
+        self.ctxs.append((marca_no_criador, tuple(sorted(v.name for v in t.get_context()))))
         if self.com_seq:
             self.seqs.append(a2e._seq_atual()[1])
         return t
@@ -518,6 +527,7 @@ async def _exclusao(cen, sonda=False):
     cena.camadas = tuple(cam.chamadas)
     cena.lider = a2r._lider(dest)
     cena.nasc = list(nasc.lista)
+    cena.ctxs = list(nasc.ctxs)
     cena.nascidas = tuple(n for n, _, _ in nasc.lista)
     cena.sondas, cena.seqs = list(getattr(destino, "sondas", ())), list(nasc.seqs)
     cena.eventos = a2e._eventos_desde(reg, seq0)
@@ -573,6 +583,7 @@ async def _manutencao(cen, sonda=False):
     cena.banco = _banco(dests, [])
     cena.deletes, cena.log = tuple(sorted(destino.deletes)), tuple(sorted(log.linhas))
     cena.nasc = list(nasc.lista)
+    cena.ctxs = list(nasc.ctxs)
     cena.nascidas = tuple(n for n, _, _ in nasc.lista)
     cena.sondas, cena.seqs = list(getattr(destino, "sondas", ())), list(nasc.seqs)
     cena.fora = ns.get("fora")              # o contexto copiado pelo main.py, se houver
@@ -1203,10 +1214,16 @@ def test_l01_linhagem_exclusao(r):
         r.check(depois == [], f"L01.{cen}.nada_depois_do_fim_da_propria_execucao", str(depois[:4]))
         r.check(len(c.sondas) == len(sondas) == len(c.deletes),
                 f"L01.{cen}.uma_sonda_por_remocao", f"{len(c.sondas)} {len(sondas)} {c.deletes}")
-        r.check(all(est is None and co == "_remover" and marca == cen
+        # [F1.2-A2-O] A task da remoção nasce num contexto VAZIO: a sonda, DENTRO
+        # dela, não vê exec nem a marca; o controle positivo é de quem CRIA (a
+        # marca estava lá) e o contexto entregue não tem nenhuma ContextVar.
+        r.check(all(est is None and co == "_remover" and marca is None
                     for _, est, co, marca in c.sondas)
                 and all("exec" not in e["corr"] and "exec_pai" not in e["corr"] for e in sondas),
                 f"L01.{cen}.remocao_sem_exec", _retrato_sondas(c))
+        ctx_rem = [x for (co, _, _), x in zip(c.nasc, c.ctxs) if co == "_remover"]
+        r.check(all(marca_criador and entregue == () for marca_criador, entregue in ctx_rem),
+                f"L01.{cen}.remocao_nasce_isolada_do_contexto_de_quem_cria", str(ctx_rem))
         # O tratamento que matou o post fecha ANTES: a remoção nasce e roda
         # depois do execucao.fim dele.
         mortos = [(e["corr"].get("post"), fins.get(e["corr"].get("exec"), [float("inf")])[0],
@@ -1246,10 +1263,14 @@ def test_l02_linhagem_manutencao(r):
         sondas = _sondas(c)
         r.check(len(c.sondas) == len(sondas) == 2 and sorted(m for m, *_ in c.sondas) == c.dests,
                 "L02.duas_remocoes_retomadas", _retrato_sondas(c))
-        r.check(all(est is None and co == "_remover" and marca == cen
+        r.check(all(est is None and co == "_remover" and marca is None
                     for _, est, co, marca in c.sondas)
                 and all("exec" not in e["corr"] and "exec_pai" not in e["corr"] for e in sondas),
                 "L02.remocao_sem_exec", _retrato_sondas(c))
+        ctx_rem = [x for (co, _, _), x in zip(c.nasc, c.ctxs) if co == "_remover"]
+        r.check(len(ctx_rem) == 2
+                and all(marca_criador and entregue == () for marca_criador, entregue in ctx_rem),
+                "L02.remocao_nasce_isolada_do_contexto_de_quem_cria", str(ctx_rem))
         r.check(fim_m and all(e["seq"] > fim_m[0]["seq"] for e in sondas),
                 "L02.remocao_roda_depois_do_fim", str([e["seq"] for e in sondas]))
         # Nascem com a MANUTENCAO ainda aberta (antes do fim dela), mas no

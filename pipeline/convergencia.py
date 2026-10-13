@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import time
 from dataclasses import dataclass, field
 
@@ -275,11 +276,17 @@ def _avisar_pendentes(escrito, plano) -> None:
 def agendar_remocao(msg_id_dest: int, motivo: str = "FUSAO") -> None:
     """Agenda a remoção física do post encerrado numa task PRÓPRIA —
     nunca aguardada por quem o encerrou. Idempotente por post.
-    `motivo` só rotula o log: FUSAO ou ORIGEM_APAGADA (a fonte apagou)."""
+    `motivo` só rotula o log: FUSAO ou ORIGEM_APAGADA (a fonte apagou).
+
+    [F1.2-A2-O] A task nasce num contexto VAZIO: ela vive mais que quem a
+    pediu (a publicação que fundiu, a exclusão, a retomada no boot) e não
+    pode levar a execução dele — que encerra antes — no contexto. ContextVar
+    nova no processo obriga a reavaliar isto (tests/test_eventos_tarefas.py)."""
     t = _EM_CURSO.get(msg_id_dest)
     if t is not None and not t.done():
         return
-    t = asyncio.get_running_loop().create_task(_remover(msg_id_dest, motivo))
+    t = asyncio.get_running_loop().create_task(_remover(msg_id_dest, motivo),
+                                               context=contextvars.Context())
     _EM_CURSO[msg_id_dest] = t
     t.add_done_callback(lambda _t, m=msg_id_dest: _EM_CURSO.pop(m, None)
                         if _EM_CURSO.get(m) is _t else None)

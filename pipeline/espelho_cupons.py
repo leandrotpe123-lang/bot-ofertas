@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import io
 import os
 from typing import Optional
@@ -245,7 +246,11 @@ def removido(msg_id_dest: int) -> None:
 
 # ── Fila por post ─────────────────────────────────────────────────
 def _tarefa(coro) -> asyncio.Task:
-    t = asyncio.get_running_loop().create_task(_protegido(coro))
+    # [F1.2-A2-O] Contexto VAZIO: o principal nunca aguarda a operação, que
+    # vive mais que a execução de quem a pediu — não leva a execução dele.
+    # ContextVar nova no processo obriga a reavaliar isto (test_eventos_tarefas).
+    t = asyncio.get_running_loop().create_task(_protegido(coro),
+                                               context=contextvars.Context())
     _tarefas.add(t)
     t.add_done_callback(_tarefas.discard)
     return t
