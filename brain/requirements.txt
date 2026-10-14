@@ -1,0 +1,4 @@
+# Dependências do serviço Brain (Railway, Root Directory = /brain).
+# O worker NÃO usa este arquivo (o dele é o requirements.txt da raiz).
+# Versão exata e com mais de duas semanas de publicada.
+anthropic==1.9.0

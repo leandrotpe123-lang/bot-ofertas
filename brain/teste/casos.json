@@ -1,0 +1,2809 @@
+{
+ "versao": 1,
+ "gerado_em": "2026-10-14T20:53Z",
+ "fonte": "prévias públicas t.me (texto fiel do embed, atual), logs do worker 07–14/10; links trocados por [link-N]",
+ "rotulos": {
+  "dono": "marcação S/N do dono (14/10), casos base e armadilhas que ele citou",
+  "claude": "julgamento do Claude pelo texto público — o dono pode corrigir"
+ },
+ "casos": [
+  {
+   "id": "F01",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:26300",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "Shopee Figurinhas, ganhe cupons de até R$ 100 OFF",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:26295",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -3.4,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "SN01",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:26629",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Cupom 25% OFF Mercado Livre Full\n\nResgate agora e use 00h\n\n🚨🚨 TUTORIAL:\n1. Entre no APP 👇\n\n2. Clique em \"Mais\" no canto inferior direito\n3. Entre em “Cupons relâmpago do 10.10\"\n4. Resgate o cupom",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:26623",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -3.3,
+     "plataforma": "mercadolivre",
+     "texto": "Próximo Cupom 25% OFF Mercado Livre\n\n•Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "F03",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:26737",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨 Cupom Shopee 20/69 exclusivo Nubank\n\nℹ️ Resgate agora e use meia-noite!",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:26695",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -53.5,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "SN10",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:27028",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "Próximo Cupom 30% OFF Mercado Livre\n\n•Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27017",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -23.3,
+     "plataforma": "mercadolivre",
+     "texto": "🚨🚨 5 Cupons 30% OFF para o 10.10 Mercado Livre\n\nℹ️ Resgate às 19h, 20h, 21h, 22h e 23h para usar a partir de meia-noite!\n\n✅ Siga o tutorial:\n\n1️⃣ Entre no app do Meli aqui 👇  \n\n2️⃣ Clique em \"Mais\" no rodapé do app\n3️⃣ Depois \"Cupons relâmpago do 10.10\"\n4️⃣ Resgate os cupons de 30%",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "SN02",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:27031",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27028",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -3.5,
+     "plataforma": "mercadolivre",
+     "texto": "Próximo Cupom 30% OFF Mercado Livre\n\n•Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "SN11",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:27035",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨 Cupons liberados para quem é VIP Shopee!\n\n✅ Resgate aqui:\n\n📵 VIP 1 mês grátis:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27030",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -9.9,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee VIP, resgate agora e use meia-noite!\n\n-Resgate aqui:\n\nShopee VIP 1 mês grátis:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "F08",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27045",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨 CUPOM DE FRETE GRÁTIS \n\n👇 RESGATE AQUI:\n\nVálido das 00h às 02h\n\nRoleta com cupons de até 1000 moedas:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27030",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -57.4,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee VIP, resgate agora e use meia-noite!\n\n-Resgate aqui:\n\nShopee VIP 1 mês grátis:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F09",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27045",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨 CUPOM DE FRETE GRÁTIS \n\n👇 RESGATE AQUI:\n\nVálido das 00h às 02h\n\nRoleta com cupons de até 1000 moedas:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27035",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -47.5,
+     "plataforma": "shopee",
+     "texto": "🚨 Cupons liberados para quem é VIP Shopee!\n\n✅ Resgate aqui:\n\n📵 VIP 1 mês grátis:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F10",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27049",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨 Cupom Shopee 20/69 exclusivo Nubank\n\nℹ️ Resgate agora e use meia-noite!",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27045",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -15.8,
+     "plataforma": "shopee",
+     "texto": "🚨 CUPOM DE FRETE GRÁTIS \n\n👇 RESGATE AQUI:\n\nVálido das 00h às 02h\n\nRoleta com cupons de até 1000 moedas:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "SN03",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:27055",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27046",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -0.3,
+     "plataforma": "mercadolivre",
+     "texto": "Cupons Mercado Livre e Shopee, resgate agora e use meia-noite!\n\n•+1 30% OFF Mercado Livre\n-Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom\n\n•Frete Grátis Shopee\n-Resgate aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "SN04",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:27128",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27126",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -1.5,
+     "plataforma": "mercadolivre",
+     "texto": "Cupons Mercado Livre e Shopee, resgate agora e use meia-noite!\n\n•+1 30% OFF Mercado Livre\n-Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom\n\n•60% Cashback Shopee\n-Resgate aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "F13",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27133",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🚨🚨 Resgatem todos! 5 Cupons 30% OFF para o 10.10 Mercado Livre\n\n✅ Siga o tutorial:\n\n1️⃣ Entre no app do Meli aqui 👇\n\n2️⃣ Clique em \"Mais\" no rodapé do app\n3️⃣ Depois \"Cupons relâmpago do 10.10\"\n4️⃣ Resgate os cupons de 30%",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27128",
+     "origem": "canal",
+     "grupo": "samuel",
+     "delta_min": -59.1,
+     "plataforma": "mercadolivre",
+     "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "SN05",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:27134",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27133",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -1.3,
+     "plataforma": "mercadolivre",
+     "texto": "🚨🚨 Resgatem todos! 5 Cupons 30% OFF para o 10.10 Mercado Livre\n\n✅ Siga o tutorial:\n\n1️⃣ Entre no app do Meli aqui 👇\n\n2️⃣ Clique em \"Mais\" no rodapé do app\n3️⃣ Depois \"Cupons relâmpago do 10.10\"\n4️⃣ Resgate os cupons de 30%",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "SN06",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:27133",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🚨🚨 Resgatem todos! 5 Cupons 30% OFF para o 10.10 Mercado Livre\n\n✅ Siga o tutorial:\n\n1️⃣ Entre no app do Meli aqui 👇\n\n2️⃣ Clique em \"Mais\" no rodapé do app\n3️⃣ Depois \"Cupons relâmpago do 10.10\"\n4️⃣ Resgate os cupons de 30%",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27138",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -0.6,
+     "plataforma": "mercadolivre",
+     "texto": "Cupons Mercado Livre e Shopee, resgate agora e use meia-noite!\n\n•+1 30% OFF Mercado Livre\n-Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom\n\n•70% Cashback Shopee\n-Resgate aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "SN07",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:27134",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27138",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -1.9,
+     "plataforma": "mercadolivre",
+     "texto": "Cupons Mercado Livre e Shopee, resgate agora e use meia-noite!\n\n•+1 30% OFF Mercado Livre\n-Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom\n\n•70% Cashback Shopee\n-Resgate aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "SN12",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:27143",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨 Novo Cupom Shopee VIP\n\n✅ Resgate aqui:\n\n🔝 Assine aqui (1 Mês Grátis):",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27140",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -0.4,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1\n2",
+     "nota": ""
+    }
+   ],
+   "inspirou_prompt": true
+  },
+  {
+   "id": "SN17",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:27220",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Novos Cupons Shopee Tech\n\n🎟 R$100 OFF em R$850\n\n🎟 R$60 OFF em R$450",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27140",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -20.2,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1\n2",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F19",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27220",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Novos Cupons Shopee Tech\n\n🎟 R$100 OFF em R$850\n\n🎟 R$60 OFF em R$450",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27143",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -19.8,
+     "plataforma": "shopee",
+     "texto": "🚨 Novo Cupom Shopee VIP\n\n✅ Resgate aqui:\n\n🔝 Assine aqui (1 Mês Grátis):",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F20",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27386",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "Cupons Shopee\n\nShopee Vip\n-Resgate aqui:\n\n-Teste Grátis:\n\nOutros Cupons\n-Resgate aqui:\n1\n2",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27384",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -2.5,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee Contas Selecionadas - 40% OFF Sem Mínimo!\n\n-Veja se recebeu aqui:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F21",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27395",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupom 50% OFF Shopee VIP\n\n👉 Resgate aqui:\n\n⭐️ Teste 30 dias Grátis:\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27384",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -5.2,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee Contas Selecionadas - 40% OFF Sem Mínimo!\n\n-Veja se recebeu aqui:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F22",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27395",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupom 50% OFF Shopee VIP\n\n👉 Resgate aqui:\n\n⭐️ Teste 30 dias Grátis:\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27386",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -2.7,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\nShopee Vip\n-Resgate aqui:\n\n-Teste Grátis:\n\nOutros Cupons\n-Resgate aqui:\n1\n2",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "SN18",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:27440",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE\n\n✅ Resgate todos os cupons aqui:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27438",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -0.7,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\nShopee Vip\n-Resgate aqui:\n\n-Teste Grátis:\n\nOutros Cupons\n-Resgate aqui:\n1\n2",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "SN23",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:27463",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥Ainda ativo! Cupom Shopee VIP\n\n🎟 50% OFF. limite R$20\n\n✅ Resgate aqui:\n\n🎁 Ganhe de 1 a 3 meses grátis do VIP:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27438",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -16.0,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\nShopee Vip\n-Resgate aqui:\n\n-Teste Grátis:\n\nOutros Cupons\n-Resgate aqui:\n1\n2",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "MESMA_CAMPANHA",
+    "LIBERACAO_NOVA"
+   ],
+   "inspirou_prompt": true,
+   "lembrete_esperado": true
+  },
+  {
+   "id": "F25",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27469",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupom 50% OFF Shopee VIP ainda Ativo!!\n\n👉 Resgate aqui:\n\n⭐️ Assine o VIP (Ganhe de 1 a 3 meses Grátis):\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27438",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -20.2,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\nShopee Vip\n-Resgate aqui:\n\n-Teste Grátis:\n\nOutros Cupons\n-Resgate aqui:\n1\n2",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "F26",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27526",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨🚨 Vai sair cupom Shopee\n\n🛒 Prepara:\n\nSem info de valores",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27438",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -57.3,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\nShopee Vip\n-Resgate aqui:\n\n-Teste Grátis:\n\nOutros Cupons\n-Resgate aqui:\n1\n2",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F27",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27463",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥Ainda ativo! Cupom Shopee VIP\n\n🎟 50% OFF. limite R$20\n\n✅ Resgate aqui:\n\n🎁 Ganhe de 1 a 3 meses grátis do VIP:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27440",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -15.3,
+     "plataforma": "shopee",
+     "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE\n\n✅ Resgate todos os cupons aqui:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F28",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27469",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupom 50% OFF Shopee VIP ainda Ativo!!\n\n👉 Resgate aqui:\n\n⭐️ Assine o VIP (Ganhe de 1 a 3 meses Grátis):\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27440",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -19.5,
+     "plataforma": "shopee",
+     "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE\n\n✅ Resgate todos os cupons aqui:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F29",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27526",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨🚨 Vai sair cupom Shopee\n\n🛒 Prepara:\n\nSem info de valores",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27440",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -56.6,
+     "plataforma": "shopee",
+     "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE\n\n✅ Resgate todos os cupons aqui:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "SN08",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:27469",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupom 50% OFF Shopee VIP ainda Ativo!!\n\n👉 Resgate aqui:\n\n⭐️ Assine o VIP (Ganhe de 1 a 3 meses Grátis):\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27463",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -4.2,
+     "plataforma": "shopee",
+     "texto": "🔥Ainda ativo! Cupom Shopee VIP\n\n🎟 50% OFF. limite R$20\n\n✅ Resgate aqui:\n\n🎁 Ganhe de 1 a 3 meses grátis do VIP:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "F31",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27526",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨🚨 Vai sair cupom Shopee\n\n🛒 Prepara:\n\nSem info de valores",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27463",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -41.3,
+     "plataforma": "shopee",
+     "texto": "🔥Ainda ativo! Cupom Shopee VIP\n\n🎟 50% OFF. limite R$20\n\n✅ Resgate aqui:\n\n🎁 Ganhe de 1 a 3 meses grátis do VIP:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F32",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27526",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨🚨 Vai sair cupom Shopee\n\n🛒 Prepara:\n\nSem info de valores",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27469",
+     "origem": "canal",
+     "grupo": "samuel",
+     "delta_min": -37.0,
+     "plataforma": "shopee",
+     "texto": "🔥 Cupom 50% OFF Shopee VIP ainda Ativo!!\n\n👉 Resgate aqui:\n\n⭐️ Assine o VIP (Ganhe de 1 a 3 meses Grátis):\n\nanúncio",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F34",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27694",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨🚨 Vai sair cupom Shopee\n\n🛒 Prepara: \n\nSem info de valores",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27616",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -51.7,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\nShopee Vip\n-Resgate aqui: \n\n-Teste Grátis:\n\nOutros Cupons\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F35",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27694",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨🚨 Vai sair cupom Shopee\n\n🛒 Prepara: \n\nSem info de valores",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27617",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -51.5,
+     "plataforma": "shopee",
+     "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE\n\n✅ Resgate todos os cupons aqui:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F37",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27871",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "Cupom R$ 10 OFF em R$ 50 - Shopee\n\n-Resgate o cupom na Live shopee_br (sacola laranja) no APP aqui:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27835",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -32.6,
+     "plataforma": "shopee",
+     "texto": "🚨🚨 Vai sair cupom Shopee\n\n🛒 Prepara: \n\nSem info de valores",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F38",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27888",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "Cupom Mercado Livre\n\n20% OFF, Limite de R$ 60 OFF em ITENS BEBÊS E PETS: BEBES1010\n\n-Resgate o cupom aqui:\n\n-Anúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27841",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -60.0,
+     "plataforma": "mercadolivre",
+     "texto": "Cupom Mercado Livre\n\n15% OFF, Limite de R$ 60 OFF: OFERTAMELI\n15% OFF, Limite de R$ 40 OFF em DECORAÇÃO E ELETROS: DECOR1010\n\n-Resgate o cupom aqui:\n\n-Anúncio",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F39",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27887",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE\n\n✅ Resgate todos os cupons aqui:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27871",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -36.3,
+     "plataforma": "shopee",
+     "texto": "Cupom R$ 10 OFF em R$ 50 - Shopee\n\n-Resgate o cupom na Live shopee_br (sacola laranja) no APP aqui:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F40",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27891",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "Cupons Shopee\n\nShopee Vip\n-Resgate aqui: \n\n-Teste Grátis:\n\nOutros Cupons\n-Resgate aqui:\n1 \n2",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27871",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -36.8,
+     "plataforma": "shopee",
+     "texto": "Cupom R$ 10 OFF em R$ 50 - Shopee\n\n-Resgate o cupom na Live shopee_br (sacola laranja) no APP aqui:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F43",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27982",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "Cupom Mercado Livre\n\n15% OFF, Limite de R$ 40 OFF em LOJAS OFICIAIS: LOJAS1010\n\n-Resgate o cupom aqui:\n\n-Anúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27964",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -60.0,
+     "plataforma": "mercadolivre",
+     "texto": "Cupom Mercado Livre\n\n20% OFF, Limite de R$ 40 OFF em MODA E BELEZA: MODA1010\n\n-Resgate o cupom aqui:\n\n-Anúncio",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F44",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:27982",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "Cupom Mercado Livre\n\n15% OFF, Limite de R$ 40 OFF em LOJAS OFICIAIS: LOJAS1010\n\n-Resgate o cupom aqui:\n\n-Anúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27967",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -59.6,
+     "plataforma": "mercadolivre",
+     "texto": "🔥 Cupom Mercado Livre em Moda\n\n🎟 20% OFF acima de R$89, limite R$40: MODA1010\n\n✅ Lista de produtos:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "SN22",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:28003",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Próximo Cupom 25% OFF em Entregas Full Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago 10.10\"\n4. Resgate o cupom 25% OFF\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27996",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -10.8,
+     "plataforma": "mercadolivre",
+     "texto": "Próximo Cupom 25% OFF Mercado Livre\n\n•Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "F46",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:28008",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "Cupom Mercado Livre\n\nR$ 150 OFF em R$ 1.099 em MÓVEIS: MOVEIS1010\n\n-Resgate o cupom aqui: \n\n-Anúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:27996",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -60.0,
+     "plataforma": "mercadolivre",
+     "texto": "Próximo Cupom 25% OFF Mercado Livre\n\n•Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F47",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:28008",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "Cupom Mercado Livre\n\nR$ 150 OFF em R$ 1.099 em MÓVEIS: MOVEIS1010\n\n-Resgate o cupom aqui: \n\n-Anúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28003",
+     "origem": "canal",
+     "grupo": "samuel",
+     "delta_min": -49.2,
+     "plataforma": "mercadolivre",
+     "texto": "🔥 Próximo Cupom 25% OFF em Entregas Full Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago 10.10\"\n4. Resgate o cupom 25% OFF\n\nanúncio",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F48",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:28010",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Cupom Mercado Livre em Móveis\n\n🎟 R$150 OFF acima de R$1099: MOVEIS1010\n\n✅ Lista de produtos:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28003",
+     "origem": "canal",
+     "grupo": "samuel",
+     "delta_min": -49.5,
+     "plataforma": "mercadolivre",
+     "texto": "🔥 Próximo Cupom 25% OFF em Entregas Full Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago 10.10\"\n4. Resgate o cupom 25% OFF\n\nanúncio",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F50",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:28021",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE  ✅ Resgate todos os cupons aqui: [link-1]",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28007",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -6.7,
+     "plataforma": "shopee",
+     "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE\n\n✅ Resgate todos os cupons aqui:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F52",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:28054",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "Cupom Mercado Livre\n\n20% OFF, Limite de R$ 60 OFF em AUTO E FERRAMENTAS: AUTOS1010\n\n-Resgate o cupom aqui: \n\n-Anúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28010",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -59.7,
+     "plataforma": "mercadolivre",
+     "texto": "🔥 Cupom Mercado Livre em Móveis\n\n🎟 R$150 OFF acima de R$1099: MOVEIS1010\n\n✅ Lista de produtos:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "F53",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "canal:28056",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Cupom Mercado Livre em Selecionados\n\n🎟 20% OFF acima de R$ 249, limite R$ 60: AUTOS1010\n\n⭐️ Válido na lista ↓ clique em \"Mostrar mais\":\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28010",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -59.9,
+     "plataforma": "mercadolivre",
+     "texto": "🔥 Cupom Mercado Livre em Móveis\n\n🎟 R$150 OFF acima de R$1099: MOVEIS1010\n\n✅ Lista de produtos:",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "SN13",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:28111",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Novos Cupons Shopee Tech\n\n🎟 R$100 OFF em R$999\n\n🎟 R$50 OFF em R$450",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28103",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -4.9,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ],
+   "inspirou_prompt": true
+  },
+  {
+   "id": "SN09",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:28392",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Cupom 20% OFF Mercado Livre para Lojas Oficiais\n\nResgate agora e use 00h\n\n🚨🚨 TUTORIAL:\n1. Entre no APP 👇\n\n2. Clique em \"Mais\" no canto inferior direito\n3. Entre em “Cupons relâmpago do 10.10\"\n4. Resgate o cupom",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28391",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -1.1,
+     "plataforma": "mercadolivre",
+     "texto": "Próximo Cupom 20% OFF Mercado Livre\n\n•Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "SN14",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:28424",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Novos Cupons Shopee Tech\n\n🎟 R$100 OFF em R$999\n\n🎟 R$50 OFF em R$450",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28422",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -0.6,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ],
+   "inspirou_prompt": true
+  },
+  {
+   "id": "SN15",
+   "tipo": "par_canal",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:28629",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupom Shopee Tecnologia Esgotando!\n\n⭐️ Resgate aqui:\n\n🛒 Link carrinho:\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28618",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -27.6,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ],
+   "aceitos": [
+    "LIBERACAO_NOVA",
+    "PRODUTOS_DIFERENTES"
+   ]
+  },
+  {
+   "id": "SN16",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:28774",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨🚨 Começou! Dia de Cupons Shopee\n\n👇 Resgate todos os cupons aqui:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28773",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -0.9,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ],
+   "inspirou_prompt": true
+  },
+  {
+   "id": "E01",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/119773",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Próximo Cupom 25% OFF Mercado Livre\n\n👉 Resgate agora e use meia-noite\n\n•Tutorial para resgate:\n1 Entre no APP do Meli aqui: \n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom\n\nanúncio",
+    "nota": "absorvido no post canal:26182 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:26182",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -2.3,
+     "plataforma": "mercadolivre",
+     "texto": "Próximo Cupom 25% OFF Mercado Livre\n\n•Tutorial para resgate:\n1 Entre no APP do Meli aqui: \n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E02",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:fadadoscupons/17612",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨 Novos Cupons Shopee\n\n🎟 R$30 OFF em R$299\n🎟 R$90 OFF em R$899\n\n✅ Resgate aqui:",
+    "nota": "absorvido no post canal:26295 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:26295",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -0.7,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E03",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/119836",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Novos Cupons Shopee\n\n🎟 R$ 30 OFF em R$ 299\n🎟 R$ 90 OFF em R$ 899\n\n⭐️ Resgate aqui:\n\nanúncio",
+    "nota": "absorvido no post canal:26295 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:26295",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -1.0,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E04",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120024",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Próximo Cupom 25% OFF Mercado Livre\n\n⚠️ Resgate agora e use 00h\n\n⭐️ Tutorial para resgate:\n1 Entre no APP do Meli aqui: \n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom\n\nanúncio",
+    "nota": "absorvido no post canal:26623 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:26623",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -0.6,
+     "plataforma": "mercadolivre",
+     "texto": "Próximo Cupom 25% OFF Mercado Livre\n\n•Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "SN19",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "fonte:promotom/111009",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "Próximo Cupom 25% OFF Mercado Livre\n\n•Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom",
+    "nota": "absorvido no post canal:26691 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:26691",
+     "origem": "canal",
+     "grupo": "samuel",
+     "delta_min": -21.2,
+     "plataforma": "mercadolivre",
+     "texto": "🔥 Próximo Cupom 25% OFF Mercado Livre\n\n⚠️ Resgate agora e use 00h\n\n⭐️ Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom\n\nanúncio",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E06",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120118",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupom Shopee 20/69 exclusivo Nubank\n\n⭐️ Resgate aqui:\n\nanúncio",
+    "nota": "absorvido no post canal:26737 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:26737",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -0.2,
+     "plataforma": "shopee",
+     "texto": "🚨 Cupom Shopee 20/69 exclusivo Nubank\n\nℹ️ Resgate agora e use meia-noite!",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E07",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120231",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupom Shopee 20/69 Exclusivo Nubank\n\n-Resgate aqui:\n\nanúncio",
+    "nota": "absorvido no post canal:26960 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:26960",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -0.6,
+     "plataforma": "shopee",
+     "texto": "Cupom Shopee 20/69 Exclusivo Nubank\n\n-Resgate aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E08",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120256",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Usuários VIP da Shopee poderão resgatar todos os cupons de cashback e frete a partir das 19h\n\n👉 Resgate aqui:\n\n⭐️ Assine o VIP (1 mês Grátis):\n\nanúncio",
+    "nota": "absorvido no post canal:27006 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27006",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -2.8,
+     "plataforma": "shopee",
+     "texto": "ℹ️ Usuários VIP da Shopee poderão resgatar todos os cupons de cashback e frete a partir das 19h!\n\n✅ Resgate aqui:\n\n📵 VIP 1 mês grátis:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E09",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120264",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 5 Cupons 30% OFF para o 10.10 Mercado Livre\n\n👉 Resgate às 19h, 20h, 21h, 22h e 23h para usar a partir de meia-noite!\n\n1️⃣ Entre no app do Meli aqui 👇\n\n2️⃣ Clique em \"Mais\" no rodapé do app\n3️⃣ Depois \"Cupons relâmpago do 10.10\"\n4️⃣ Resgate os cupons de 30%\n\nanúncio",
+    "nota": "absorvido no post canal:27017 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27017",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -0.7,
+     "plataforma": "mercadolivre",
+     "texto": "🚨🚨 5 Cupons 30% OFF para o 10.10 Mercado Livre\n\nℹ️ Resgate às 19h, 20h, 21h, 22h e 23h para usar a partir de meia-noite!\n\n✅ Siga o tutorial:\n\n1️⃣ Entre no app do Meli aqui 👇  \n\n2️⃣ Clique em \"Mais\" no rodapé do app\n3️⃣ Depois \"Cupons relâmpago do 10.10\"\n4️⃣ Resgate os cupons de 30%",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E10",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120277",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupons Shopee VIP, resgate agora e use meia-noite!\n\n👉 Resgate aqui:\n\n⭐️ Shopee VIP 1 mês grátis:\n\nanúncio",
+    "nota": "absorvido no post canal:27030 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27030",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -2.4,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee VIP, resgate agora e use meia-noite!\n\n-Resgate aqui:\n\nShopee VIP 1 mês grátis:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E11",
+   "tipo": "absorvido",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:promotom/111088",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "Cupons Mercado Livre e Shopee, resgate agora e use meia-noite!\n\n•+1 30% OFF Mercado Livre\n-Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom\n\n•Frete Grátis Shopee\n-Resgate aqui:",
+    "nota": "absorvido no post canal:27031 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27031",
+     "origem": "canal",
+     "grupo": "samuel",
+     "delta_min": -56.1,
+     "plataforma": "mercadolivre",
+     "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E12",
+   "tipo": "absorvido",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120285",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+    "nota": "absorvido no post canal:27031 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27031",
+     "origem": "canal",
+     "grupo": "samuel",
+     "delta_min": -56.4,
+     "plataforma": "mercadolivre",
+     "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E13",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120286",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupom DE FRETE GRÁTIS\n\n⭐️ Resgate aqui:\n\nanúncio",
+    "nota": "absorvido no post canal:27045 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27045",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -0.4,
+     "plataforma": "shopee",
+     "texto": "🚨 CUPOM DE FRETE GRÁTIS \n\n👇 RESGATE AQUI:\n\nVálido das 00h às 02h\n\nRoleta com cupons de até 1000 moedas:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E14",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120289",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupom Shopee 20/69 exclusivo Nubank\n\n⭐️ Resgate aqui:\n\nanúncio",
+    "nota": "absorvido no post canal:27049 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27049",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -0.1,
+     "plataforma": "shopee",
+     "texto": "🚨 Cupom Shopee 20/69 exclusivo Nubank\n\nℹ️ Resgate agora e use meia-noite!",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "FP_111092_27046",
+   "tipo": "absorvido",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "fonte:promotom/111092",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "Cupons Mercado Livre e Shopee, resgate agora e use meia-noite!\n\n•+1 30% OFF Mercado Livre\n-Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom\n\n•Frete Grátis Shopee\n-Resgate aqui:",
+    "nota": "absorvido no post canal:27046 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27046",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -55.1,
+     "plataforma": "mercadolivre",
+     "texto": "Cupons Mercado Livre e Shopee, resgate agora e use meia-noite!\n\n•+1 30% OFF Mercado Livre\n-Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom\n\n•Frete Grátis Shopee\n-Resgate aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "FP_120304_27055",
+   "tipo": "absorvido",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120304",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+    "nota": "absorvido no post canal:27055 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27055",
+     "origem": "canal",
+     "grupo": "samuel",
+     "delta_min": -25.5,
+     "plataforma": "mercadolivre",
+     "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "FP_111103_27126",
+   "tipo": "absorvido",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "fonte:promotom/111103",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "Cupons Mercado Livre e Shopee, resgate agora e use meia-noite!\n\n•+1 30% OFF Mercado Livre\n-Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom\n\n•70% Cashback Shopee\n-Resgate aqui:",
+    "nota": "absorvido no post canal:27126 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27126",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -59.7,
+     "plataforma": "mercadolivre",
+     "texto": "Cupons Mercado Livre e Shopee, resgate agora e use meia-noite!\n\n•+1 30% OFF Mercado Livre\n-Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom\n\n•60% Cashback Shopee\n-Resgate aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E18",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120349",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Novo Cupom 50% OFF Shopee VIP\n\n👉 Resgate aqui:\n\n⭐️ Teste 30 dias Grátis:\n\nanúncio",
+    "nota": "absorvido no post canal:27143 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27143",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -0.2,
+     "plataforma": "shopee",
+     "texto": "🚨 Novo Cupom Shopee VIP\n\n✅ Resgate aqui:\n\n🔝 Assine aqui (1 Mês Grátis):",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "SN20",
+   "tipo": "absorvido",
+   "rotulo": "LIBERACAO_NOVA",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "fonte:fadadoscupons/17695",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupom 40% OFF para Contas Selecionadas\n\n✅ Veja se recebeu:",
+    "nota": "absorvido no post canal:27140 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27140",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -19.4,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1\n2",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E21",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120392",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Novos Cupons Shopee Tech\n\n🎟 R$ 100 OFF em R$ 850\n\n🎟 R$60 OFF em R$450\n\nanúncio",
+    "nota": "absorvido no post canal:27220 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27220",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -0.7,
+     "plataforma": "shopee",
+     "texto": "🔥 Novos Cupons Shopee Tech\n\n🎟 R$100 OFF em R$850\n\n🎟 R$60 OFF em R$450",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E22",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120479",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupons Shopee Contas Selecionados\n\n👉 Veja se recebeu aqui:\n\nanúncio",
+    "nota": "absorvido no post canal:27384 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27384",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -1.4,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee Contas Selecionadas - 40% OFF Sem Mínimo!\n\n-Veja se recebeu aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E23",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120514",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupons Renovados! 10.10 SHOPEE\n\n⭐️ Resgate todos os cupons aqui:\n\nanúncio",
+    "nota": "absorvido no post canal:27440 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27440",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -0.3,
+     "plataforma": "shopee",
+     "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE\n\n✅ Resgate todos os cupons aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E24",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:fadadoscupons/17707",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Cupons Mercado Livre\n\n🎟 R$150 OFF acima de R$999: SITE150\n🎟 R$40 OFF acima de R$399: SITE40\n🎟 R$15 OFF acima de R$99: SITE10\n🎟 R$20 OFF acima de R$149: SITE301010\n🎟 10% OFF acima de R$79, limite R$60: ANACASTELA10\n\n✅ Resgate aqui:",
+    "nota": "absorvido no post canal:27441 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27441",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -2.3,
+     "plataforma": "mercadolivre",
+     "texto": "Cupom Mercado Livre\n\nR$ 15 OFF em R$ 99: SITE10\nR$ 20 OFF em R$ 149: SITE301010\nR$ 40 OFF em R$ 399: SITE40\nR$ 150 OFF em R$ 999: SITE150\n\n-Resgate o cupom aqui: \n\n-Anúncio",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E25",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120515",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Cupons Mercado Livre\n\n🎟 R$ 150 OFF acima de R$ 999: SITE150\n\n🎟 R$ 40 OFF acima de R$ 399: SITE40\n\n🎟 R$ 15,00 OFF acima de R$ 99: SITE10\n\n🎟 R$ 20,00 OFF acima de R$ 149: SITE301010\n\n⭐️ Ative por aqui para ajudar o grupo:\n\nanúncio",
+    "nota": "absorvido no post canal:27441 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27441",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -5.6,
+     "plataforma": "mercadolivre",
+     "texto": "Cupom Mercado Livre\n\nR$ 15 OFF em R$ 99: SITE10\nR$ 20 OFF em R$ 149: SITE301010\nR$ 40 OFF em R$ 399: SITE40\nR$ 150 OFF em R$ 999: SITE150\n\n-Resgate o cupom aqui: \n\n-Anúncio",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E26",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120607",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupons Renovados! 10.10 SHOPEE\n\n⭐️ Resgate todos os cupons aqui:\n\nanúncio",
+    "nota": "absorvido no post canal:27617 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27617",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -0.3,
+     "plataforma": "shopee",
+     "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE\n\n✅ Resgate todos os cupons aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E30",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120757",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupons Renovados! 10.10 SHOPEE\n\n⭐️ Resgate todos os cupons aqui:\n\nanúncio",
+    "nota": "absorvido no post canal:27887 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27887",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -0.1,
+     "plataforma": "shopee",
+     "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE\n\n✅ Resgate todos os cupons aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E32",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120793",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Cupom Mercado Livre\n\n🎟 15% OFF, Limite de R$ 40 OFF em LOJAS OFICIAIS: LOJAS1010\n\n⭐️ Ative por aqui para ajudar o grupo:\n\nanúncio",
+    "nota": "absorvido no post canal:27982 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27982",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -0.2,
+     "plataforma": "mercadolivre",
+     "texto": "Cupom Mercado Livre\n\n15% OFF, Limite de R$ 40 OFF em LOJAS OFICIAIS: LOJAS1010\n\n-Resgate o cupom aqui:\n\n-Anúncio",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E33",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:fadadoscupons/17771",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Cupom Mercado Livre Lojas Oficiais\n\n🎟 15% OFF acima de R$89, limite R$40: LOJAS1010\n\n✅ Resgate aqui:",
+    "nota": "absorvido no post canal:27982 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:27982",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -5.0,
+     "plataforma": "mercadolivre",
+     "texto": "Cupom Mercado Livre\n\n15% OFF, Limite de R$ 40 OFF em LOJAS OFICIAIS: LOJAS1010\n\n-Resgate o cupom aqui:\n\n-Anúncio",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E35",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120809",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupons Renovados! 10.10 SHOPEE\n\n⭐️ Resgate todos os cupons aqui:\n\nanúncio",
+    "nota": "absorvido no post canal:28007 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:28007",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -0.8,
+     "plataforma": "shopee",
+     "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE\n\n✅ Resgate todos os cupons aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E36",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120812",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Cupom 50% OFF Shopee VIP ainda Ativo!!\n\n👉 Resgate aqui:\n\n⭐️ Assine o VIP (Ganhe de 1 a 3 meses Grátis):\n\nanúncio",
+    "nota": "absorvido no post canal:28015 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:28015",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -1.1,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\nShopee Vip\n-Resgate aqui: \n\n-Teste Grátis:\n\nOutros Cupons\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E39",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/120883",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Novos Cupons Shopee Tech\n\n🎟 R$ 100 OFF em R$ 999\n\n🎟 R$ 50 OFF em R$ 450\n\nanúncio",
+    "nota": "absorvido no post canal:28111 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:28111",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -0.0,
+     "plataforma": "shopee",
+     "texto": "🔥 Novos Cupons Shopee Tech\n\n🎟 R$100 OFF em R$999\n\n🎟 R$50 OFF em R$450",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E41",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/121007",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Próximo Cupom 20% OFF em Lojas Oficiais Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+    "nota": "absorvido no post canal:28391 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:28391",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -1.1,
+     "plataforma": "mercadolivre",
+     "texto": "Próximo Cupom 20% OFF Mercado Livre\n\n•Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E42",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/121022",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Novos Cupons Shopee Tech\n\n🎟 R$ 100 OFF em R$ 999\n\n🎟 R$ 50 OFF em R$ 450\n\nanúncio",
+    "nota": "absorvido no post canal:28424 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:28424",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -0.3,
+     "plataforma": "shopee",
+     "texto": "🔥 Novos Cupons Shopee Tech\n\n🎟 R$100 OFF em R$999\n\n🎟 R$50 OFF em R$450",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E43",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:fadadoscupons/17811",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨 Novos Cupons Shopee\n\n🎟 R$30 OFF em R$299\n🎟 R$90 OFF em R$899\n\n✅ Resgate aqui:",
+    "nota": "absorvido no post canal:28618 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:28618",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -0.6,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E44",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/121147",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Novos Cupons Shopee\n\n🎟 R$ 30 OFF em R$ 299\n🎟 R$ 90 OFF em R$ 899\n\n⭐️ Resgate aqui:\n\nanúncio",
+    "nota": "absorvido no post canal:28618 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:28618",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -0.8,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "SN21",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/121241",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Dia de Cupons na Shopee, Começa Meia Noite!\n\n⭐️ Página do Evento:\n\n👉 Assine o VIP (1 a 3 meses Grátis):\n\nℹ️ Clique em \"Confira seu nível\" no APP\n\nanúncio",
+    "nota": "absorvido no post canal:28763 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:28763",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -14.9,
+     "plataforma": "shopee",
+     "texto": "🚨 Amanhã é Dia de Cupons na Shopee\n\n👇 Página do evento:\n\n🎁 Resgate cupons de frete:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E46",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/121251",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Começou! Dia de Cupons Shopee\n\n⭐️ Resgate todos os cupons aqui:\n\nanúncio",
+    "nota": "absorvido no post canal:28774 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:28774",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -0.4,
+     "plataforma": "shopee",
+     "texto": "🚨🚨 Começou! Dia de Cupons Shopee\n\n👇 Resgate todos os cupons aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E47",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:fadadoscupons/17823",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Novo Cupom Shope Full 25/100",
+    "nota": "absorvido no post canal:28773 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:28773",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -1.9,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "E48",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/121252",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Novo Cupom Shope Full 25/100\n\n⭐️ Resgate aqui:\n\nanúncio",
+    "nota": "absorvido no post canal:28773 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:28773",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -2.2,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee\n\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "BASE_29047_29048",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:29048",
+    "origem": "fonte",
+    "grupo": "fadadoscupons",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🚨🚨 Renovados! Dia de Cupons Shopee\n\n👇 Resgate todos os cupons aqui:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:29047",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -0.3,
+     "plataforma": "shopee",
+     "texto": "Cupons Shopee Renovados\n\n-Resgate aqui:\n1 \n2",
+     "nota": ""
+    }
+   ],
+   "inspirou_prompt": true
+  },
+  {
+   "id": "CASO1_28391_28392",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:28392",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Próximo Cupom 20% OFF em Lojas Oficiais Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28391",
+     "origem": "canal",
+     "grupo": "promotom",
+     "delta_min": -1.1,
+     "plataforma": "mercadolivre",
+     "texto": "Próximo Cupom 20% OFF Mercado Livre\n\n•Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em \"Mais\" no rodapé do APP\n3 Depois clique em \"Cupons relâmpago\"\n4 Resgate o cupom",
+     "nota": ""
+    }
+   ],
+   "inspirou_prompt": true
+  },
+  {
+   "id": "LIVE_28742",
+   "tipo": "par_canal",
+   "rotulo": "PRODUTOS_DIFERENTES",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "contexto": {
+    "so_container_live": true
+   },
+   "alvo": {
+    "id": "canal:28742",
+    "origem": "canal",
+    "grupo": "canal",
+    "plataforma": "shopee",
+    "delta_min": 0.0,
+    "texto": "🔥 Caixa de Som Portátil BT Aiwa Boombox BBS-01LB 9531-01\n\n✅ R$ 974\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28741",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -1.0,
+     "texto": "🔥 Controle para Xbox Sem Fio\n\n✅ R$ 259\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "LIVE_28743",
+   "tipo": "par_canal",
+   "rotulo": "PRODUTOS_DIFERENTES",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "contexto": {
+    "so_container_live": true
+   },
+   "alvo": {
+    "id": "canal:28743",
+    "origem": "canal",
+    "grupo": "canal",
+    "plataforma": "shopee",
+    "delta_min": 0.0,
+    "texto": "🔥 Caixa de Som AIWA AWS-SP-07-B Bluetooth 7W RMS IPX5\n\n✅ R$ 112\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28741",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -1.4,
+     "texto": "🔥 Controle para Xbox Sem Fio\n\n✅ R$ 259\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+     "nota": ""
+    },
+    {
+     "id": "canal:28742",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -0.4,
+     "texto": "🔥 Caixa de Som Portátil BT Aiwa Boombox BBS-01LB 9531-01\n\n✅ R$ 974\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "LIVE_28744",
+   "tipo": "par_canal",
+   "rotulo": "PRODUTOS_DIFERENTES",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "contexto": {
+    "so_container_live": true
+   },
+   "alvo": {
+    "id": "canal:28744",
+    "origem": "canal",
+    "grupo": "canal",
+    "plataforma": "shopee",
+    "delta_min": 0.0,
+    "texto": "🔥 Caixa de Som Aiwa Speaker 15w Ipx4 - Aws-sp-03-b Preto\n\n✅ R$ 116\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28741",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -3.0,
+     "texto": "🔥 Controle para Xbox Sem Fio\n\n✅ R$ 259\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+     "nota": ""
+    },
+    {
+     "id": "canal:28742",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -2.0,
+     "texto": "🔥 Caixa de Som Portátil BT Aiwa Boombox BBS-01LB 9531-01\n\n✅ R$ 974\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+     "nota": ""
+    },
+    {
+     "id": "canal:28743",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -1.6,
+     "texto": "🔥 Caixa de Som AIWA AWS-SP-07-B Bluetooth 7W RMS IPX5\n\n✅ R$ 112\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "LIVE_28745",
+   "tipo": "par_canal",
+   "rotulo": "PRODUTOS_DIFERENTES",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "contexto": {
+    "so_container_live": true
+   },
+   "alvo": {
+    "id": "canal:28745",
+    "origem": "canal",
+    "grupo": "canal",
+    "plataforma": "shopee",
+    "delta_min": 0.0,
+    "texto": "🔥 Samsung Smart TV 43 Polegadas FHD Modelo Ls43f6000fgxzd Xbox Cloud Gaming Com Canais Gratuitos\n\n✅ R$ 1269\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:28741",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -6.6,
+     "texto": "🔥 Controle para Xbox Sem Fio\n\n✅ R$ 259\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+     "nota": ""
+    },
+    {
+     "id": "canal:28742",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -5.6,
+     "texto": "🔥 Caixa de Som Portátil BT Aiwa Boombox BBS-01LB 9531-01\n\n✅ R$ 974\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+     "nota": ""
+    },
+    {
+     "id": "canal:28743",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -5.2,
+     "texto": "🔥 Caixa de Som AIWA AWS-SP-07-B Bluetooth 7W RMS IPX5\n\n✅ R$ 112\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+     "nota": ""
+    },
+    {
+     "id": "canal:28744",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -3.6,
+     "texto": "🔥 Caixa de Som Aiwa Speaker 15w Ipx4 - Aws-sp-03-b Preto\n\n✅ R$ 116\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+     "nota": ""
+    }
+   ]
+  }
+ ]
+}
