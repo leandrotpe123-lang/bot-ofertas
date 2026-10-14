@@ -28,24 +28,30 @@ Contrato público:
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
+from typing import Optional
 
+import config
 from database import (db_absorver_ofertas, db_exibida, db_get_post,
-                      db_ofertas_de_post, db_overlap_posts,
-                      db_posts_vivos_com_prefixo)
+                      db_ofertas_de_post, db_origens_do_post,
+                      db_overlap_posts, db_posts_vivos_com_prefixo)
 from logger import log_out
 from plataformas import registry
+from pipeline import cupom_lancamento
 from pipeline.resolucao_identidade import (chave_cupom_geral,
                                            eh_chave_assinatura,
                                            eh_chave_destino, eh_chave_forte,
+                                           eh_chave_produto,
                                            prefixo_cupom_sem_codigo)
+from pipeline.vida_oferta import VIDA_OFERTA_S
 from utils.textos import _RE_EMJ_NORM, _RUIDO_NORM, _rm_acentos
 from utils.urls import _netloc
 
 __all__ = ["post_da_familia", "eh_chave_container", "mesmo_titulo",
            "so_container", "adocao_obsoleta", "mutexes_de_adocao",
            "unir", "absorver", "compartilhadas", "tem_destino", "fortes", "estrutura", "relacao_composicao",
-           "plano_fusao", "Plano"]
+           "plano_fusao", "Plano", "lancamento_cupom"]
 
 
 def _escolher_post(candidatos: list) -> int:
@@ -509,6 +515,13 @@ def mutexes_de_adocao(ofertas, destinos: tuple = (), container: str = "") -> lis
         plat = next(iter(ofs)).split("|", 1)[0]
         if _so_cupom_sem_nome(ofs, plat) is not None:
             mutexes.add(f"{prefixo_cupom_sem_codigo(plat)}*")
+        elif (config.CUPOM_MODO == "ATIVO"
+              and cupom_lancamento.candidato(ofs) == plat):
+            # [Lançamento × liberação, só ATIVO] todo candidato só-`cupb`
+            # pode juntar-se a outro post `cupb` da plataforma sem chave em
+            # comum (familia.lancamento_cupom): a mesma serialização da
+            # adoção. Em SOMBRA nada muda — nem os locks.
+            mutexes.add(f"{prefixo_cupom_sem_codigo(plat)}*")
     for chave in ofs | {container}:
         if chave and eh_chave_container(chave):
             plat, _url, live = chave.split("|", 2)
@@ -559,6 +572,114 @@ def post_da_familia(ofertas: list, dest_fix=None, destinos: tuple = (),
     msg_id_rel = _escolher_post(candidatos)
     log_out.info(f"🔎 [OVERLAP_MATCH] post:{msg_id_rel} casou por ofertas_compartilhadas={compartilhadas(msg_id_rel, ofertas)} | candidato={sorted(ofertas)} | candidatos={[c[0] for c in candidatos]} fix={dest_fix or '-'} post_ofertas={db_ofertas_de_post(msg_id_rel)}")
     return msg_id_rel
+
+
+# ─────────────────────────────────────────────────────────────────
+# CUPOM SEM CÓDIGO — LANÇAMENTO × LIBERAÇÃO (frente CUPOM-SEM-CÓDIGO)
+#
+# A regra é pura (pipeline.cupom_lancamento); aqui moram as leituras do
+# banco e o registro. Só MENSAGEM NOVA entra (nunca edição, nunca origem já
+# vinculada). Em SOMBRA (padrão, config.CUPOM_MODO) a família devolvida é
+# SEMPRE a de hoje: só a linha de log é nova. Em ATIVO, JUNTA troca a
+# família pelo post do mesmo lançamento e NOVA a anula (post novo).
+# ─────────────────────────────────────────────────────────────────
+def _tem_produto(mid) -> bool:
+    """Âncora de produto no post (ex.: post 27031). Só para a linha de
+    registro: lida apenas do post envolvido, nunca de todos os vivos."""
+    if mid is None:
+        return False
+    return any(eh_chave_produto(k)
+               for k in set(db_ofertas_de_post(mid)) | db_exibida(mid))
+
+
+def lancamento_cupom(ofertas: list, texto: str, chat, msg_id,
+                     familia_hoje, agora: Optional[float] = None,
+                     destinos: tuple = (), container: str = ""):
+    """(família a usar, veio_da_regra_nova). Fora da regra ou em SOMBRA:
+    (familia_hoje, False). Nunca levanta: erro = comportamento de hoje.
+
+    Escopo = o da adoção (post_da_familia, mutexes_de_adocao): com destino
+    declarado (FAMILIA_OUTRO_DESTINO) ou container de live (Frente LIVE),
+    a autoridade é outra e a regra nem olha."""
+    if destinos or container:
+        return familia_hoje, False
+    plat = cupom_lancamento.candidato(ofertas)
+    rajada = config.CUPOM_RAJADA_S.get(plat) if plat else None
+    if rajada is None:
+        return familia_hoje, False
+    ativo = config.CUPOM_MODO == "ATIVO"
+    try:
+        agora = time.time() if agora is None else agora
+        superior = float(config.CUPOM_LIMITE_SUPERIOR_S)
+        chat = str(chat)
+        # Vivos = a régua de db_overlap_posts (janela aberta, não fundido).
+        # A família de hoje de um candidato só-`cupb` está sempre aqui
+        # (casou por âncora `cupb` ou foi adotada desta lista); se não
+        # estiver, a decisão é MANTER (familia_fora_da_regra).
+        ids = db_posts_vivos_com_prefixo(prefixo_cupom_sem_codigo(plat))
+        if familia_hoje is not None:
+            # Com família, classificar só julga o post da família.
+            ids = [familia_hoje] if familia_hoje in ids else []
+        vivos = []
+        for mid in ids:
+            est = db_get_post(mid)
+            if not est:
+                continue
+            nascimento = float(est.get("janela_fim") or 0.0) - VIDA_OFERTA_S
+            fontes = frozenset(str(o) for o, _m in db_origens_do_post(mid))
+            if familia_hoje is None and not cupom_lancamento.pode_mudar(
+                    chat, agora, nascimento, fontes, superior):
+                continue
+            vivos.append(cupom_lancamento.PostVivo(
+                mid, cupom_lancamento.perfil(est.get("texto") or "", plat),
+                nascimento, fontes))
+        if not vivos:
+            # Nenhum post que possa mudar a decisão (ex.: a 1ª mensagem de
+            # todo lançamento): MANTER, sem calcular perfil nenhum.
+            return familia_hoje, False
+        c = cupom_lancamento.perfil(texto, plat)
+        d = cupom_lancamento.classificar(
+            c, chat, agora, vivos, familia_hoje, float(rajada), superior)
+        if d.acao == cupom_lancamento.MANTER:
+            return familia_hoje, False
+        # O registro fica DENTRO da guarda: em SOMBRA, nem uma falha ao
+        # escrever a linha pode mudar a publicação.
+        _registrar_lancamento(d, ativo, chat, msg_id, ofertas, familia_hoje,
+                              vivos, c)
+    except Exception as e:
+        log_out.error(f"❌ [CUPOM_LANCAMENTO] {type(e).__name__}")
+        return familia_hoje, False
+    if not ativo:
+        return familia_hoje, False
+    if d.acao == cupom_lancamento.JUNTA:
+        return d.post, True
+    if d.acao == cupom_lancamento.NOVA:
+        return None, True
+    return familia_hoje, False
+
+
+def _registrar_lancamento(d, ativo: bool, chat, msg_id, ofertas,
+                          familia_hoje, vivos, c) -> None:
+    """Uma linha estável por desvio ou dúvida. Sem URL e sem texto: só
+    ids, Δ, fontes, nomes e benefícios."""
+    sufixo = "" if ativo else "_SOMBRA"
+    marca = {cupom_lancamento.JUNTA: f"CUPOM_ENCONTRO{sufixo}",
+             cupom_lancamento.NOVA: f"CUPOM_LIBERACAO{sufixo}",
+             cupom_lancamento.INCERTO: "CUPOM_INCERTO"}[d.acao]
+    p = next((v for v in vivos if v.msg_id == d.post), None)
+    delta = f"{d.delta_s / 60:.1f}min" if d.delta_s is not None else "-"
+    hoje = f"post:{familia_hoje}" if familia_hoje is not None else "post_novo"
+    log_out.info(
+        f"🎟 [{marca}] msg=({chat},{msg_id}) post:{d.post} motivo={d.motivo}"
+        f" Δ={delta} mesma_fonte={'sim' if d.mesma_fonte else 'nao'}"
+        f" hoje={hoje} chaves={sorted(ofertas)}"
+        f" nome=({c.nome or '-'}|{p.perfil.nome if p and p.perfil.nome else '-'})"
+        f" pct=({c.pct or '-'}|{p.perfil.pct if p and p.perfil.pct else '-'})"
+        f" valores=({','.join(sorted(c.valores)) or '-'}"
+        f"|{','.join(sorted(p.perfil.valores)) if p and p.perfil.valores else '-'})"
+        f" lembrete={'sim' if c.lembrete else 'nao'}"
+        f" fontes_post={sorted(p.fontes) if p else []}"
+        f" produto_no_post={'sim' if _tem_produto(d.post) else 'nao'}")
 
 
 # ─────────────────────────────────────────────────────────────────

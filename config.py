@@ -142,3 +142,28 @@ API_PRIVADA_SEGREDO    = os.environ.get("API_PRIVADA_SEGREDO", "")
 EVENTOS_ANEL_MAX       = _int_env("EVENTOS_ANEL_MAX", 20_000, 1_000, 100_000)
 EVENTOS_ANEL_MAX_BYTES = _int_env("EVENTOS_ANEL_MAX_BYTES", 32 << 20,
                                   1 << 20, 256 << 20)
+
+# ── CUPOM SEM CÓDIGO: lançamento × liberação (pipeline/cupom_lancamento) ──
+# Constantes de CÓDIGO, de propósito sem variável de ambiente: mudar qualquer
+# uma é PR aprovado pelo dono (recalibrar = PR com dados novos). Nada se
+# ajusta sozinho em produção.
+#
+# "SOMBRA": a regra nova só registra o que faria (CUPOM_ENCONTRO_SOMBRA,
+# CUPOM_LIBERACAO_SOMBRA, CUPOM_INCERTO); o comportamento é o de sempre.
+# "ATIVO": a regra nova decide a família. Ligar exige PR do dono depois dos
+# critérios escritos no PR da frente (≥ 5 dias de sombra revisada, zero erro).
+CUPOM_MODO = "SOMBRA"
+# Fonte: todo o log disponível na Railway, 07/10 09:07 → 14/10 09:08 UTC
+# (medição de 14/10/2026). Δ = da estampa do post vivo até a mensagem nova.
+#   Mesmo lançamento, fontes diferentes — ML: n=18, 16 casos ≤ 5,6 min (+10,8
+#   e 21,2); Shopee: n=29, 25 casos ≤ 4,4 min (+9,8, 14,9, 15,8, 20,2).
+#   Lançamento diferente, fontes diferentes: ML 56,1; Shopee 19,4 e 20,1.
+#   Mesma fonte, mensagem nova (liberação): ML 25,5; 55,1; 56,4; 59,7.
+# RAJADA: cobre os dois aglomerados densos (41 de 47) com 2,4 min de folga e
+# fica 11 min abaixo do 1º lançamento diferente (19,4). Plataforma sem
+# medição fica fora da regra.
+CUPOM_RAJADA_S = {"mercadolivre": 8 * 60, "shopee": 8 * 60}
+# SUPERIOR: maior Δ de mesmo lançamento (21,2) + folga; metade do ciclo da
+# série horária (próximas liberações chegaram a 55–60 min). Entre a RAJADA e
+# o SUPERIOR o tempo sozinho não decide: zona cinzenta (CUPOM_INCERTO).
+CUPOM_LIMITE_SUPERIOR_S = 30 * 60
