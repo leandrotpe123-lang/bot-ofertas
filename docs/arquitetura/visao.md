@@ -42,6 +42,39 @@ velocidade**, porque o dono não consegue ficar olhando o canal.
 É assim que o sistema se aperfeiçoa: cada duplicata que escapa vira teste e
 regra nova, com aprovação do dono. **Nada se altera sozinho em produção.**
 
+## Inteligência do Brain (decisão do dono, 14/10/2026)
+
+**Por quê.** Só regra não segura o caso principal: a mesma campanha chega
+escrita de jeitos diferentes. No caso de 11/10, a mesma campanha de cupom do
+Mercado Livre recebeu três nomes em 1 minuto ("proximo", "lojas-oficiais" e
+"proximo-lojas-oficiais") e virou dois posts (28391 e 28392).
+
+**Arquitetura híbrida:**
+- **Worker = reflexo rápido por regra**, sem IA no caminho da publicação. Na
+  dúvida, não funde.
+- **Brain = IA que compara** cada post novo com os posts recentes do canal:
+  "mesma campanha? qual a certeza? por quê?". A IA **só recomenda**.
+- **Política determinística decide** sobre a recomendação: certeza alta +
+  checagens objetivas (mesma plataforma, mesmo desconto, dentro da janela) +
+  lista fechada de ações + limite por hora. O worker executa pelo caminho
+  normal, com os locks (`CLAUDE.md` §2).
+
+**Ligação em 3 estágios:**
+1. **SOMBRA:** só observa e mede, sem agir.
+2. **ALERTA:** avisa o dono no Telegram, por bot próprio — **nunca** a sessão
+   do userbot.
+3. **AUTOMÁTICO com limites:** só depois de provado.
+
+**Aprendizado:** cada caso confirmado vira teste e proposta de regra (PR do
+Claude Code, merge do dono).
+
+**Janela de 1 h:** fica como está. O dono volta a decidir com os dados do
+modo SOMBRA.
+
+**Ponto aberto (para o projeto do Brain, não agora):** como a IA lê o texto.
+Os eventos da F1 não levam texto integral, de propósito. Opções: a prévia
+pública dos canais, ou um pedido ao worker por canal privado.
+
 ## Limites que não mudam
 
 - `CLAUDE.md` §2: o Brain não usa a sessão do Telegram, não escreve no banco
