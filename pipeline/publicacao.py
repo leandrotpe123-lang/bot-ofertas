@@ -241,6 +241,16 @@ async def _enviar_inner(montada: MensagemMontada,
         msg_id_rel = familia.post_da_familia(ofertas, dest_fix, destinos,
                                              titulo=montada.texto,
                                              container=container)
+        # [CUPOM SEM CÓDIGO] lançamento × liberação — só mensagem NOVA de
+        # cupom sem código. Em SOMBRA (padrão) a família é a mesma de
+        # sempre: só registra. Em ATIVO, a família escolhida pela regra
+        # nova não passa pela revalidação da ADOÇÃO (que a recusaria e
+        # refaria a busca em laço).
+        via_lancamento = False
+        if not dest_fix and not is_edit:
+            msg_id_rel, via_lancamento = familia.lancamento_cupom(
+                ofertas, norm.texto_analise, norm.chat, norm.msg_id,
+                msg_id_rel, destinos=destinos, container=container)
         if msg_id_rel is not None:
             alvo_existente = True
             post_lock = await exclusao.lock_post(msg_id_rel)
@@ -251,7 +261,8 @@ async def _enviar_inner(montada: MensagemMontada,
                     # o fallback "PUBLICAR" (ciclo morto → post novo).
                     raise _PostFundido(msg_id_rel, estado["fused_into"],
                                        estado.get("delete_status") or "")
-                if not dest_fix and familia.adocao_obsoleta(msg_id_rel, ofertas):
+                if (not dest_fix and not via_lancamento
+                        and familia.adocao_obsoleta(msg_id_rel, ofertas)):
                     # [Cupom sem nome] adoção revalidada sob o lock: o
                     # alvo deixou de ser complementar → nova busca.
                     raise _AdocaoObsoleta()
