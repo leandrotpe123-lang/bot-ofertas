@@ -2,7 +2,7 @@
 
 > **Status:** fase 0. Nada roda em produção: não há serviço Brain, chave de
 > produção nem bot. O protótipo está na branch `brain-v0-prototipo` (commit
-> `585f039`), sem PR. Este documento é o relatório A–L pedido pelo dono em
+> `faa2645`), sem PR. Este documento é o relatório A–L pedido pelo dono em
 > 14/10/2026.
 >
 > **Fontes:**
@@ -123,36 +123,69 @@ Há duas formas:
 
 **Medição**, coletor próprio com ≥10 s por página e jitter:
 
-| | run1 | run2 |
-|---|---|---|
-| janela (UTC) | 18:21–18:51 | 20:35–… (em curso; o PR é atualizado ao fim) |
-| requisições | 530 (~1.060/h) | 348 nos primeiros 21 min (~1.000/h) |
-| HTTP p50 / p95 | 808 / 1.031 ms | 769 / 1.040 ms |
-| 429 | 0 | 0 |
-| erro de transporte | 3,4% | 6% |
-| atraso p50 do canal | 8,5 s | — |
-| atraso máximo do canal | 56,9 s | 56,7 e 58,9 s |
+| | run1 | run2 | total |
+|---|---|---|---|
+| janela (UTC) | 18:21–18:51 | 20:35–21:09 | **64 min** |
+| requisições | 530 (~1.060/h) | 556 (~990/h) | 1.086 |
+| HTTP p50 / p95 | 808 / 1.031 ms | 768 / 1.026 ms | — |
+| 429 | 0 | 0 | **0** |
+| erro de transporte | 3,4% | 5,9% | — |
+
+**Atraso até ficar visível** (data do post até o coletor vê-lo):
+
+| | n | p50 | p75 | p90 | máximo |
+|---|---|---|---|---|---|
+| canal (`fullpromotion`) | 16 | 13 s | 57 s | 59 s | 67 s |
+| todos os canais | 48 | 13 s | 30 s | 50 s | 67 s |
+
+**Ficou abaixo das ≥2 h pedidas.** As duas runs morreram quando o contêiner
+da sessão de medição foi reciclado: na primeira vez por reinício, na segunda
+por inatividade. Medição longa em segundo plano não sobrevive aqui. Os 2 h
+completos, com a rodada Shopee das 03 h UTC, ficam para:
+- uma sessão ativa;
+- ou o próprio serviço SOMBRA, que registra o atraso de cada post de forma
+  contínua (recomendado).
 
 Notas:
-- a run1 foi cortada porque a sessão de medição reiniciou; a run2 roda até
-  ~23:05 UTC;
 - os erros de transporte vêm do proxy do contêiner de medição (`URLError`),
   não do Telegram. É hipótese: todos foram sem resposta HTTP;
-- o atraso é a data do post até o coletor vê-lo; a cadência do canal é de
-  10–14 s.
+- a cadência do canal é de 10–14 s, então até ~14 s do atraso é o próprio
+  ciclo de leitura.
 
-**Achado — cache da página:**
-- o post 29138 (20:45:10) só apareceu às 20:46:06;
-- no meio houve três respostas 200 sem ele (20:45:27, :40, :55);
-- ou seja, a `t.me/s` às vezes vem de cache por ~1 min.
+**Achado — a prévia pública do Telegram atrasa até ~1 min, e não é só cache
+da página:**
+- o post 29138 (20:45:10) só apareceu às 20:46:06, com três respostas 200
+  sem ele no meio;
+- a **sonda do próximo id pelo embed** (20:57–21:09) não furou o atraso. O
+  worker publicou 29140, 29141 e 29142 às 21:07:34, 21:08:05 e 21:08:28
+  (`🚀 [OK]`). Os três ficaram públicos juntos:
 
-Em teste agora: uma **sonda do próximo id pelo embed**. O resultado entra na
-atualização deste PR.
+| post | publicado (worker) | embed viu | `t.me/s` viu |
+|---|---|---|---|
+| 29140 | 21:07:34 | 21:08:34 (+61 s) | 21:08:41 (+67 s) |
+| 29141 | 21:08:05 | 21:08:35 (+30 s) | 21:08:41 (+36 s) |
+| 29142 | 21:08:28 | 21:08:35 (+8 s) | 21:08:41 (+13 s) |
+
+- Conclusão: a prévia pública (embed e página) é atualizada em lotes, do
+  lado do Telegram. **Nenhuma forma de ler a prévia garante menos de ~1
+  min.** É o limite do v0 (G).
 
 **Edições ficam visíveis** (marca "edited"):
 - o worker registrou `✏️ Editado | dest_id=29112` às 18:31:36;
 - a prévia mostrou a marca às 18:31:46;
-- foram 8 edições vistas em 30 min (7 no canal).
+- foram 13 edições nas duas runs (7 no canal).
+
+**Edição na fonte × decisão do worker** (conferido nos logs):
+- a Promotom 111394 e a Samuel 121476 (20:56) foram editadas várias vezes;
+  na prévia, o texto cresceu de 126 para 321 caracteres;
+- o worker descartou cada versão com `DESCARTE motivo=NORMALIZACAO_VAZIA`;
+- é o certo: são kits da Terabyte (links cutt.ly/tidd.ly), loja fora das
+  plataformas do worker (`plataformas/`).
+- **Regra para o Brain:** descarte de plataforma não suportada nunca é
+  "liberação perdida".
+- No mesmo intervalo, o worker publicou 29140–29145 da **mesma live** Shopee
+  7496585. É outra armadilha "live, produtos diferentes" para o conjunto de
+  casos.
 
 **Exclusões** aparecem como buraco na numeração. Conferido nos logs:
 
@@ -419,7 +452,7 @@ variável. O worker não depende do Brain para nada.
 | Segmento | v0 (prévia) | fonte |
 |---|---|---|
 | fonte → post no canal (worker) | 1–4 s, mediana 2 s (n=11) | run1 |
-| post → visível na prévia + ciclo de leitura | p50 8,5 s; até ~59 s (cache da `t.me/s`) | run1, run2 |
+| post → visível na prévia + ciclo de leitura | canal: p50 13 s, p90 59 s, máx. 67 s (n=16) | run1 + run2 |
 | pré-filtro | milissegundos (Python puro) | hipótese; medir no serviço |
 | IA | **medida no teste** (p50/p95 por config) | E |
 | política | microssegundos | código puro |
@@ -427,8 +460,11 @@ variável. O worker não depende do Brain para nada.
 
 **v0 ≤ 60 s:**
 - a mediana cabe com folga;
-- o **p95 está em risco** só pelo cache da prévia;
-- mitigação em teste: sonda do próximo id pelo embed.
+- o **p95 não cabe**: a prévia pública sozinha já chega a 59–67 s, e a sonda
+  pelo embed não ajuda (B);
+- proposta: v0 com meta **p50 ≤ 60 s e p95 ≤ ~90 s**;
+- quem leva a ≤ 15 s é o v1 (eventos do worker). É mais um motivo para a C1
+  vir cedo (J).
 
 **v1 ≤ 15 s:**
 - eventos pela API privada da F1.1 (espera longa, < 1 s);
@@ -573,7 +609,7 @@ Já a ligação mensagem → post não aparece em prévia nenhuma: só o worker 
 | 1 | Fusão errada apaga post bom | lista do que nunca age; portão de zero falso destrutivo; AÇÃO só por PR; worker revalida sob locks; fusão com união de links, nunca apagando conteúdo exclusivo; limite por hora |
 | 2 | Injeção pelo texto do grupo | sem ferramentas; schema fechado; delimitador; ids validados; a política ignora a ação da IA |
 | 3 | Sessão do Telegram derrubada | o Brain nunca usa sessão (prévia pública e bot de DM); teste de isolamento trava import de telethon, sqlite3 e worker |
-| 4 | Prévia muda de formato, entra em cache ou dá 429 | cadência educada, backoff e disjuntor; sonda do próximo id; v1 por eventos; Brain fora não afeta o worker |
+| 4 | Prévia muda de formato, atrasa (até ~67 s medido) ou dá 429 | cadência educada, backoff e disjuntor; meta do v0 em p50/p95 realista; v1 por eventos; Brain fora não afeta o worker |
 | 5 | Custo dispara no BF | tetos diários e limite na chave; pré-filtro (3–14% dos posts); cascata só quando precisa; tetos refeitos com o medido |
 | 6 | Modelo ou API mudam | modelo e effort no log; `CONFIGS_VALIDADAS`; recusa vira INCERTO; SDK fixado; bancada a cada mudança |
 | 7 | IA lenta | a IA nunca está no caminho da publicação; timeout de 30 s; fora da janela não age; meta medida por segmento |
