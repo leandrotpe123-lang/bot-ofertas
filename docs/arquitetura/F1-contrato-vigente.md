@@ -5,9 +5,11 @@ Ponto de partida de toda sessão que for trabalhar na F1 (proveniência).
 > **Regra confirmada pelo dono (14/10/2026):** toda fatia que muda o contrato
 > atualiza este arquivo **no mesmo PR** da fatia.
 
-> Situação em 14/10/2026, com a `main` em `e5b939d` (merge do PR #14). O CI do
-> push nesse commit passou (run 38516089844) e o deploy do worker saiu com
-> SUCCESS (Railway, deploy de 14/10 05:20 UTC, commit `e5b939d`).
+> Situação em 14/10/2026, com a `main` em `fbe7b87` (merge do PR #15). O CI do
+> push nesse commit passou (run 38528703277). O deploy desse commit foi pulado
+> pelo Watch Paths (só documentação: "no changes detected in watch paths"); no
+> ar segue o worker do commit `e5b939d` (Railway, deploy de 14/10 07:27 UTC,
+> SUCCESS).
 >
 > **Como ler este documento.** A fonte de verdade, nesta ordem:
 > 1. **código e testes da `main`**;
@@ -123,9 +125,9 @@ O nome "A2-O" foi usado para duas coisas diferentes. Decisão do dono
 (14/10/2026):
 
 1. **A2-OFERTA** é a fatia original do plano (D1): `oferta.normalizada` e
-   `oferta.identificada`, junto com a B3 ou depois dela. Em 08/10 o dono fixou
-   a ordem **1. EXCLUSÃO → 2. B3 → 3. A2-OFERTA** e manteve a A2-OFERTA
-   bloqueada até a B3.
+   `oferta.identificada`. Em 08/10 o dono fixou a ordem **1. EXCLUSÃO → 2. B3
+   → 3. A2-OFERTA**. Em 14/10 o dono **substituiu** essa ordem (§6): a
+   A2-OFERTA passa a ser **só `oferta.identificada`** e vem **antes** da B3.
 2. **"Linhagem das tasks"** é o PR #13 (título "F1.2-A2-O", branch
    `f1.2-a2-o`): uma frente aberta pelo dono em 13/10 sobre a linhagem das
    tasks de fundo. Não emite `oferta.*` nem toca a B3.
@@ -134,18 +136,33 @@ O nome "A2-O" foi usado para duas coisas diferentes. Decisão do dono
 "A2-O" que aparece no título, na branch e no commit `06e860b` do PR #13 se lê
 como "linhagem das tasks".
 
-## 6. Próxima fatia registrada
-**B3: normalização e desfecho por link.** É mudança de contrato sem mudança de comportamento.
-- O catálogo já tem os enums `desfecho_link` (CONVERTIDO, PRESERVADO,
+## 6. Ordem registrada (decisão do dono, 14/10/2026)
+**Antes da F1:** a próxima frente é **CUPOM-SEM-CÓDIGO**, de prevenção no
+worker (núcleo, fora da F1). Motivo: duplicata provada no caso de 11/10 (posts
+28391 e 28392) e reproduzida pelo dono em 14/10 (posts 28913 e 28914), sem
+evento envolvido. Ela vem antes da B3.
+
+**Ordem dos eventos da F1 ("olhos do Brain"):**
+1. **A2-OFERTA: só `oferta.identificada`.** É o evento que mostra a âncora de
+   cada mensagem; sem ele, o Brain não enxerga duas chaves diferentes para a
+   mesma campanha.
+2. **C1:** `decisao.*` e `post.*` (liga a mensagem ao post: novo, evolução,
+   descarte).
+3. **B3: normalização e desfecho por link.** Serve para "link sem afiliado";
+   não ajuda a enxergar duplicata.
+
+Substitui a ordem de 08/10 (B3 → A2-OFERTA). `oferta.normalizada` sai da
+A2-OFERTA; **onde ela entra é decisão pendente do dono**.
+
+Vale para todas as fatias acima:
+- **campos, LOCAIS, prova e ponto de emissão não estão registrados** (nem a
+  B.1 de `oferta.*`, nem os campos da B3). Antes de qualquer código, propor o
+  contrato e o dono aprovar;
+- o catálogo já tem os enums `desfecho_link` (CONVERTIDO, PRESERVADO,
   SEM_CONVERSAO, BLOQUEADO, EXPANSAO_FALHOU, SEM_PLATAFORMA, AUSENTE, EXCECAO)
-  e `motivo_url_protegida`.
-- **Os campos exatos da B3** e as linhas B.1 de `oferta.*` **não estão
-  registrados**. Antes de qualquer código, propor o contrato (eventos, campos,
-  LOCAIS, prova e ponto de emissão) e o dono aprovar.
-- Normalização, identidade e afiliação são **núcleo** (CLAUDE.md §5): só em
+  e `motivo_url_protegida`;
+- normalização, identidade e afiliação são **núcleo** (CLAUDE.md §5): só em
   frente própria, com teste de reprodução.
-- Depois da B3 vem a **A2-OFERTA** (`oferta.normalizada` e
-  `oferta.identificada`). C1 e os demais grupos ainda não têm ordem definida.
 
 ## 7. Invariantes da F1.2 (quebrar = PARAR)
 - **Execuções:**
@@ -205,7 +222,8 @@ como "linhagem das tasks".
 ## 9. Pendências e esclarecimentos (14/10/2026)
 - **Texto original do contrato F1.2:** não está no repositório. Este documento
   é a reconstrução; o texto verbatim não está disponível.
-- **Próxima fatia:** B3 → A2-OFERTA (§5 e §6).
+- **Próxima frente:** CUPOM-SEM-CÓDIGO (prevenção). Na F1: A2-OFERTA (só
+  `oferta.identificada`) → C1 → B3 (§6).
 - **PR #10:** **fechado sem merge** em 14/10/2026, 05:48 UTC. Foi substituído
   pelo #12 e carrega a linhagem antiga; não vale como referência de regra.
 - **CI do push em `e5b939d`:** **success** (run 38516089844, 14/10 05:21 UTC).
