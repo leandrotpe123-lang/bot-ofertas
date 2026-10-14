@@ -49,6 +49,13 @@ o `chamadas.jsonl`. Compare `tokens_out_med` com o presumido
 com o real. Se a projeção passar do teto aprovado, **PARE e avise o dono**
 antes do passo 6.
 
+**Rodadas longas** (`dev` e `final`): rode em segundo plano. O `final` tem
+~1.800 chamadas; com `--paralelo 4`, que é o padrão, leva da ordem de horas.
+O contêiner pode reciclar no meio. A bancada grava cada chamada na hora e é
+retomável: repita o mesmo comando com `--retomar <pasta da rodada>`, e o que
+já foi feito (e pago) não se repete. Se aparecer 429 em sequência, baixe para
+`--paralelo 2`.
+
 ```bash
 # 6) iteração: Haiku high, só DEV, 3x por caso (até 3 rodadas no orçamento)
 /tmp/vb/bin/python -m brain.avaliar dev --confirmar --cambio <R$ por US$>
@@ -56,6 +63,10 @@ antes do passo 6.
 # 7) medição final: Haiku e Sonnet x {high, medium, low}, todos os casos 3x;
 #    depois, Opus high só no subconjunto difícil, se sobrar teto
 /tmp/vb/bin/python -m brain.avaliar final --confirmar --cambio <R$ por US$>
+
+# se a rodada foi interrompida: retoma a MESMA pasta (não repete o que já foi pago)
+/tmp/vb/bin/python -m brain.avaliar final --confirmar --cambio <R$ por US$> \
+    --retomar teste/resultados/<carimbo>_final
 ```
 
 ## O que entregar ao dono

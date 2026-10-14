@@ -27,8 +27,10 @@ import json
 import os
 import statistics
 import sys
+import threading
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 
 from brain import config, juiz, politica, precos
 
@@ -257,31 +259,74 @@ def cascata_offline(chamadas, principal, referencia, certeza_min=config.CASCATA_
     return out
 
 
-def rodar(casos, fases, teto_usd: float, saida: str, cliente=None, dormir=time.sleep):
+def rodar(casos, fases, teto_usd: float, saida: str, cliente=None, dormir=time.sleep,
+          paralelo: int = 1) -> float:
+    """Roda as fases e grava cada chamada (uma linha, gravada na hora) em
+    <saida>/chamadas.jsonl. RETOMÁVEL: o que já está gravado nessa pasta
+    (fase, caso, repetição) não é refeito — o contêiner pode reciclar no
+    meio de uma rodada longa. Com `paralelo` > 1, o teto continua valendo:
+    cada chamada RESERVA o custo presumido antes de sair."""
     from brain.cliente import ClienteAnthropic, Juiz, Tetos
-    j = Juiz(cliente or ClienteAnthropic(), tetos=Tetos(chamadas_dia=10**9, usd_dia=teto_usd),
-             dormir=dormir)
     os.makedirs(saida, exist_ok=True)
-    gasto = 0.0
-    with open(os.path.join(saida, "chamadas.jsonl"), "a", encoding="utf-8") as f:
-        for nome, modelo, effort, lista, reps in fases:
-            for rep in range(reps):
-                for caso in lista:
-                    est = precos.estimar_usd(modelo, tokens_entrada(caso), SAIDA_PRESUMIDA[effort])
-                    if gasto + est > teto_usd:
-                        print(f"PARADA: teto de US$ {teto_usd:.2f} (gasto {gasto:.4f})")
-                        return gasto
-                    v = j.julgar(caso, modelo, effort)
-                    gasto += v.custo_usd
-                    f.write(json.dumps({
-                        "fase": nome, "caso": caso.id, "rep": rep, "modelo": v.modelo,
-                        "effort": v.effort, "veredito": v.veredito, "certeza": v.certeza,
-                        "ids": list(v.ids), "acao_sugerida": v.acao_sugerida,
-                        "lembrete": v.lembrete, "motivo": v.motivo,
-                        "stop_reason": v.stop_reason, "latencia_ms": v.latencia_ms,
-                        "usage": v.usage, "custo_usd": v.custo_usd,
-                        "versao_prompt": v.versao_prompt}, ensure_ascii=False) + "\n")
-    return gasto
+    arq = os.path.join(saida, "chamadas.jsonl")
+    feitos = set()
+    if os.path.exists(arq):
+        with open(arq, encoding="utf-8") as f:
+            for l in f:
+                if l.strip():
+                    d = json.loads(l)
+                    feitos.add((d["fase"], d["caso"], d["rep"]))
+    tarefas = [(nome, modelo, effort, rep, caso)
+               for nome, modelo, effort, lista, reps in fases
+               for rep in range(reps) for caso in lista
+               if (nome, caso.id, rep) not in feitos]
+    cli = cliente or ClienteAnthropic()
+    trava = threading.Lock()
+    estado = {"gasto": 0.0, "reservado": 0.0, "parou": False}
+    local = threading.local()
+
+    def juiz():
+        if not hasattr(local, "j"):
+            local.j = Juiz(cli, tetos=Tetos(chamadas_dia=10**9, usd_dia=teto_usd), dormir=dormir)
+        return local.j
+
+    with open(arq, "a", encoding="utf-8", buffering=1) as f:
+        def uma(t):
+            nome, modelo, effort, rep, caso = t
+            est = precos.estimar_usd(modelo, tokens_entrada(caso), SAIDA_PRESUMIDA[effort])
+            with trava:
+                if estado["parou"] or estado["gasto"] + estado["reservado"] + est > teto_usd:
+                    estado["parou"] = True
+                    return
+                estado["reservado"] += est
+            try:
+                v = juiz().julgar(caso, modelo, effort)
+            finally:
+                with trava:
+                    estado["reservado"] -= est
+            with trava:
+                estado["gasto"] += v.custo_usd
+                f.write(json.dumps({
+                    "fase": nome, "caso": caso.id, "rep": rep, "modelo": v.modelo,
+                    "effort": v.effort, "veredito": v.veredito, "certeza": v.certeza,
+                    "ids": list(v.ids), "acao_sugerida": v.acao_sugerida,
+                    "lembrete": v.lembrete, "motivo": v.motivo,
+                    "stop_reason": v.stop_reason, "latencia_ms": v.latencia_ms,
+                    "usage": v.usage, "custo_usd": v.custo_usd,
+                    "versao_prompt": v.versao_prompt}, ensure_ascii=False) + "\n")
+                f.flush()
+
+        if paralelo <= 1:
+            for t in tarefas:
+                if estado["parou"]:
+                    break
+                uma(t)
+        else:
+            with ThreadPoolExecutor(max_workers=paralelo) as ex:
+                list(ex.map(uma, tarefas))
+    if estado["parou"]:
+        print(f"PARADA: teto de US$ {teto_usd:.2f} (gasto {estado['gasto']:.4f})")
+    return estado["gasto"]
 
 
 def escrever_tabela(saida: str, meta: dict, cambio: float) -> dict:
@@ -323,6 +368,10 @@ def main(argv=None) -> int:
     ap.add_argument("--cambio", type=float, default=0.0,
                     help="R$ por US$ (informar com a data e a fonte)")
     ap.add_argument("--confirmar", action="store_true")
+    ap.add_argument("--paralelo", type=int, default=4,
+                    help="chamadas simultâneas (padrão 4)")
+    ap.add_argument("--retomar", default=None,
+                    help="pasta de uma rodada interrompida DESTE comando: continua de onde parou")
     ap.add_argument("--resultados", default=os.path.join(AQUI, "teste", "resultados"),
                     help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
@@ -352,8 +401,14 @@ def main(argv=None) -> int:
     if teto <= 0:
         print(f"PARADA: teto total de US$ {a.teto_total_usd:.2f} já atingido (gasto US$ {ja:.4f}).")
         return 3
-    saida = os.path.join(pasta, time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "_" + a.comando)
-    gasto = rodar(casos, fases_por_comando(casos)[a.comando], teto, saida)
+    if a.retomar:
+        saida = os.path.abspath(a.retomar)
+        if not os.path.basename(saida).endswith("_" + a.comando) or not os.path.isdir(saida):
+            print(f"Recusado: --retomar precisa ser uma pasta existente de '{a.comando}'.")
+            return 2
+    else:
+        saida = os.path.join(pasta, time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "_" + a.comando)
+    gasto = rodar(casos, fases_por_comando(casos)[a.comando], teto, saida, paralelo=a.paralelo)
     meta = {c.id: d for c, d in casos}
     if a.comando == "final" and gasto < teto:
         feitas = [json.loads(l) for l in open(os.path.join(saida, "chamadas.jsonl"), encoding="utf-8")]
@@ -361,7 +416,7 @@ def main(argv=None) -> int:
         lista = [c for c, _ in casos if c.id in duros]
         if lista:
             gasto += rodar(casos, [("final_opus_high_dificil", OPUS, "high", lista, REPETICOES)],
-                           teto - gasto, saida)
+                           teto - gasto, saida, paralelo=a.paralelo)
     if os.path.exists(os.path.join(saida, "chamadas.jsonl")):
         escrever_tabela(saida, meta, a.cambio)
     print(f"gasto medido nesta rodada: US$ {gasto:.4f}; acumulado: US$ {ja + gasto:.4f} → {saida}")

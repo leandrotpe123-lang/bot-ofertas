@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import random
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -38,12 +39,14 @@ class ClienteAnthropic:
     def __init__(self, timeout_s: float = config.TIMEOUT_S):
         self._timeout = timeout_s
         self._sdk = None
+        self._trava = threading.Lock()            # a bancada chama em paralelo
 
     def _cliente(self):
-        if self._sdk is None:
-            import anthropic                      # só aqui: CI não instala
-            self._mod = anthropic
-            self._sdk = anthropic.Anthropic(timeout=self._timeout, max_retries=0)
+        with self._trava:
+            if self._sdk is None:
+                import anthropic                  # só aqui: CI não instala
+                self._mod = anthropic
+                self._sdk = anthropic.Anthropic(timeout=self._timeout, max_retries=0)
         return self._sdk
 
     def enviar(self, params: dict) -> dict:

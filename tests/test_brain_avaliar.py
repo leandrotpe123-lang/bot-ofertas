@@ -122,6 +122,49 @@ def test_05_rodar_para_antes_do_teto(r):
     r.check(all(json.loads(l)["modelo"] == "claude-sonnet-5-5" for l in linhas), "05.registra_modelo")
 
 
+def _falso_incerto(out_tokens=1500):
+    ok = {"veredito": "INCERTO", "certeza": 0.1, "ids_relacionados": [], "evidencias": [],
+          "acao_sugerida": "NADA", "lembrete": False}
+    return CL.ClienteFalso(lambda p: {"stop_reason": "end_turn",
+                                      "content": [{"type": "text", "text": json.dumps(ok)}],
+                                      "usage": {"input_tokens": 3000, "output_tokens": out_tokens}})
+
+
+def test_09_retoma_sem_refazer_e_paralelo_sem_duplicar(r):
+    # o contêiner pode reciclar no meio de uma rodada longa: retomar a mesma
+    # pasta não refaz (nem paga de novo) o que já está gravado
+    casos = A.carregar()
+    lista = [c for c, _ in casos][:6]
+    fases = [("t", "claude-haiku-5-5", "high", lista, 2)]
+    with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
+        f1 = _falso_incerto()
+        A.rodar(casos, [("t", "claude-haiku-5-5", "high", lista[:3], 1)], 5.0, d,
+                cliente=f1, dormir=lambda s: None)
+        f2 = _falso_incerto()
+        A.rodar(casos, fases, 5.0, d, cliente=f2, dormir=lambda s: None, paralelo=4)
+        linhas = [json.loads(l) for l in open(os.path.join(d, "chamadas.jsonl"))]
+    chaves = [(l["fase"], l["caso"], l["rep"]) for l in linhas]
+    r.check(len(f1.chamadas) == 3 and len(f2.chamadas) == 9, "09.retomou_so_o_que_faltava",
+            f"{len(f1.chamadas)} {len(f2.chamadas)}")
+    r.check(len(chaves) == len(set(chaves)) == 12, "09.sem_duplicata", len(chaves))
+    # em paralelo, o teto continua valendo (reserva antes de chamar)
+    with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
+        f3 = _falso_incerto()
+        gasto = A.rodar(casos, [("t", "claude-sonnet-5-5", "high", [c for c, _ in casos][:20], 3)],
+                        0.10, d, cliente=f3, dormir=lambda s: None, paralelo=8)
+    r.check(gasto <= 0.10 + 1e-9 and 0 < len(f3.chamadas) < 60, "09.teto_em_paralelo",
+            f"{gasto} {len(f3.chamadas)}")
+
+
+def test_12_retomar_exige_pasta_do_mesmo_comando(r):
+    with tempfile.TemporaryDirectory() as d:
+        outra = os.path.join(d, "20261015T000000Z_dev")
+        os.makedirs(outra)
+        with _chave("chave-falsa-do-teste"), contextlib.redirect_stdout(io.StringIO()):
+            rc = A.main(["final", "--confirmar", "--retomar", outra, "--resultados", d])
+        r.check(rc == 2 and "anthropic" not in sys.modules, "12.recusa_pasta_de_outro_comando", rc)
+
+
 @contextlib.contextmanager
 def _chave(valor):
     """Troca a variável só durante o bloco; o valor original nunca é lido
