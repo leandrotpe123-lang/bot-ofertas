@@ -186,6 +186,12 @@ def test_10_marcador_renovado_sem_beneficio(r):
         pf = CL.perfil(T.TEXTO[k], SHP)
         r.check(pf.renovado and not pf.tem_beneficio, f"10.{k.split('/')[1]}", (pf.renovado, pf.tem_beneficio))
     r.check(not CL.perfil(T.TEXTO["promotom/111105"], SHP).renovado, "10.cupons_shopee_seco_nao")
+    # só "renovad…" conta: palavra parecida não é o marcador
+    for t in ("Cupons Shopee VIP — renovação automática\n\n-Resgate aqui:",
+              "Renove seu VIP e ganhe cupons\n\n-Resgate aqui:"):
+        r.check(not CL.perfil(t, SHP).renovado, f"10.nao_e_marcador.{t[:14]}")
+    for t in ("Cupom Shopee Renovado!", "Cupons renovadas", "🔥CUPONS RENOVADOS"):
+        r.check(CL.perfil(t, SHP).renovado, f"10.marcador.{t[:14]}")
 
 
 def test_11_reproduz_29047_29048(r):
@@ -221,8 +227,10 @@ def test_14_guardas_da_regra_estreita(r):
     casos = {
         # Δ acima da RAJADA: o tempo sozinho não decide (zona cinzenta)
         "acima_da_rajada": (("promotom/111375", T.PROMOTOM, post, None, 9 * 60), "INCERTO", "faixa_cinzenta"),
-        # um lado sem "renovad": fica como hoje
+        # um lado sem "renovad": fica como hoje (candidato seco e post seco)
         "um_lado_seco": (("promotom/111105", T.PROMOTOM, post, None, 30), "INCERTO", "sem_beneficio"),
+        "post_seco": (("fadadoscupons/17831", T.FADA, [(1, "promotom/111105", {T.PROMOTOM})], None, 30),
+                      "INCERTO", "sem_beneficio"),
         # um lado com benefício declarado: não é a regra RENOVADOS
         "um_lado_com_valor": (("sintetico/renovados_com_valor", T.PROMOTOM, post, None, 30),
                               "INCERTO", "sem_beneficio"),
