@@ -14,6 +14,16 @@ Casos reais (logs da Railway + prévia pública; marcação do dono em 15/10):
       mínimo declarado = compatível; mínimos declarados diferentes =
       diferente; o resto não muda.
 
+  (b) RENOVADOS. Fontes diferentes anunciam "cupons renovados" no mesmo
+      instante, sem benefício dos dois lados: 14/10 14:59 UTC Promotom
+      111375 "Cupons Shopee Renovados" (post 29047) × Fada 17831 "Renovados!
+      Dia de Cupons Shopee" (post 29048, Δ 18 s); 14/10 23:00 Fada 17838
+      (29160; Samuel 121488 absorvida) × Promotom 111400 (29161, Δ 75 s,
+      duplicata apagada à mão). A sombra disse INCERTO sem_beneficio; o dono
+      quer UM post e aprovou regra estreita: fontes diferentes, mesma
+      plataforma, Δ ≤ RAJADA, os dois sem benefício e os dois com
+      "renovad" → JUNTA (motivo `renovados`).
+
     python tests/test_cupom_correcao.py
 """
 import os
@@ -31,6 +41,13 @@ T.TEXTO.update({
     "promotom/111397": 'Próximo Cupom R$ 60 OFF em R$ 499 Mercado Livre, resgate agora e use meia-noite \n\n•Tutorial para resgate: \n1 Entre no APP do Meli aqui:  \n2 Clique em "Início" no rodapé do APP \n3 Depois no carrossel no canto superior esquerdo clique em "CUPONS RELÂMPAGO TODOS OS DIAS" \n4 Resgate o cupom',
     # versão FINAL da Samuel (editada 4×), com o mínimo
     "SamuelF3lipePromo/121483": '🔥 Próximo Cupom R$ 60 OFF em R$ 499 Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui: \n2. Clique em "Início" no rodapé do APP \n3. Depois no carrossel no canto superior esquerdo clique em "CUPONS RELÂMPAGO TODOS OS DIAS" \n4. Resgate o cupom\n\nanúncio',
+})
+T.TEXTO.update({
+    "promotom/111375": 'Cupons Shopee Renovados\n\n-Resgate aqui:\n1 \n2',
+    "fadadoscupons/17831": '🚨🚨 Renovados! Dia de Cupons Shopee\n\n👇 Resgate todos os cupons aqui:',
+    "fadadoscupons/17838": '🚨🚨 Renovados! Dia de Cupons Shopee\n\n👇 Resgate todos os cupons aqui:',
+    "SamuelF3lipePromo/121488": '🔥 Renovados! Dia de Cupons Shopee\n\n⭐️ Resgate todos os cupons aqui:\n\n\nanúncio',
+    "promotom/111400": 'Cupons Shopee Renovados\n\n-Resgate aqui:\n1 \n2',
 })
 # 1ª versão da Samuel, a que o worker leu às 22:04:15 (a linha da sombra
 # mostra valores=(v:60|v:60)): o mesmo texto sem " em R$ 499". DERIVADA do
@@ -142,6 +159,82 @@ def test_06_ativo_minimos_declarados_diferentes_seguem_dois_posts(r):
     passos = [("sintetico/fada_60_299", ML, 0), ("promotom/111397", ML, 69)]
     a = T._cena(passos, "ATIVO")["foto"]
     r.check(a["novos"] == 2, "06.dois_posts", a["novos"])
+
+
+# ══════════════════════════════════════════════════════════════════
+# (b) RENOVADOS
+# ══════════════════════════════════════════════════════════════════
+# Δ reais (data da prévia): 14:59:24 → 14:59:42; 22:59:56 → 23:00:03 → 23:01:11
+PAR_29047 = [("promotom/111375", SHP, 0), ("fadadoscupons/17831", SHP, 18)]
+TRIO_29160 = [("fadadoscupons/17838", SHP, 0), ("SamuelF3lipePromo/121488", SHP, 7),
+              ("promotom/111400", SHP, 68)]
+
+
+def _decide_shp(cand, chat, vivos, familia_hoje, delta_s):
+    import config
+    CL = T._CL()
+    t0 = 1_792_000_000.0
+    posts = [CL.PostVivo(mid, CL.perfil(T.TEXTO[k], SHP), t0, frozenset(f)) for mid, k, f in vivos]
+    return CL.classificar(CL.perfil(T.TEXTO[cand], SHP), chat, t0 + delta_s, posts, familia_hoje,
+                          config.CUPOM_RAJADA_S[SHP], config.CUPOM_LIMITE_SUPERIOR_S)
+
+
+def test_10_marcador_renovado_sem_beneficio(r):
+    CL = T._CL()
+    for k in ("promotom/111375", "fadadoscupons/17831", "fadadoscupons/17838",
+              "SamuelF3lipePromo/121488", "promotom/111400"):
+        pf = CL.perfil(T.TEXTO[k], SHP)
+        r.check(pf.renovado and not pf.tem_beneficio, f"10.{k.split('/')[1]}", (pf.renovado, pf.tem_beneficio))
+    r.check(not CL.perfil(T.TEXTO["promotom/111105"], SHP).renovado, "10.cupons_shopee_seco_nao")
+
+
+def test_11_reproduz_29047_29048(r):
+    # 14/10 14:59: a Fada 17831 virou o post 29048 ao lado do 29047 (Promotom)
+    d = _decide_shp("fadadoscupons/17831", T.FADA, [(29047, "promotom/111375", {T.PROMOTOM})], None, 18)
+    r.check(d.acao == "JUNTA" and d.post == 29047 and d.motivo == "renovados", "11.junta", (d.acao, d.motivo))
+
+
+def test_12_reproduz_a_linha_3_da_sombra_29160_29161(r):
+    # log 14/10 23:01:11: [CUPOM_INCERTO] msg=(promotom,111400) post:29160
+    # motivo=sem_beneficio Δ=1.1min hoje=post_novo fontes_post=[samuel, fada]
+    d = _decide_shp("promotom/111400", T.PROMOTOM,
+                    [(29160, "fadadoscupons/17838", {T.FADA, T.SAMUEL})], None, 75)
+    r.check(d.acao == "JUNTA" and d.post == 29160 and d.motivo == "renovados", "12.junta", (d.acao, d.motivo))
+
+
+def test_13_cenas_sombra_e_ativo(r):
+    for nome, passos in (("29047", PAR_29047), ("29160", TRIO_29160)):
+        s = T._cena(passos, "SOMBRA")
+        r.check(T._marcas(s["linhas"]) == [("CUPOM_ENCONTRO_SOMBRA", "renovados")],
+                f"13.sombra_{nome}", T._marcas(s["linhas"]))
+        d = T._cena(passos, "SOMBRA", T._desligado())
+        r.check(s["foto"] == d["foto"], f"13.sombra_nao_muda_nada_{nome}")
+        a = T._cena(passos, "ATIVO")["foto"]
+        r.check(a["novos"] == 1, f"13.ativo_um_post_{nome}", (a["novos"], a["posts"]))
+
+
+def test_14_guardas_da_regra_estreita(r):
+    T.TEXTO["sintetico/renovados_com_valor"] = "Cupons Shopee Renovados\n\nR$ 10 OFF em R$ 50\n-Resgate aqui:"
+    T.TEXTO["sintetico/vip_renovados"] = "Cupons Shopee VIP Renovados\n\n-Resgate aqui:"
+    T.TEXTO["sintetico/tech_renovados"] = "Cupons Shopee Tech Renovados\n\n-Resgate aqui:"
+    post = [(1, "fadadoscupons/17831", {T.FADA})]
+    casos = {
+        # Δ acima da RAJADA: o tempo sozinho não decide (zona cinzenta)
+        "acima_da_rajada": (("promotom/111375", T.PROMOTOM, post, None, 9 * 60), "INCERTO", "faixa_cinzenta"),
+        # um lado sem "renovad": fica como hoje
+        "um_lado_seco": (("promotom/111105", T.PROMOTOM, post, None, 30), "INCERTO", "sem_beneficio"),
+        # um lado com benefício declarado: não é a regra RENOVADOS
+        "um_lado_com_valor": (("sintetico/renovados_com_valor", T.PROMOTOM, post, None, 30),
+                              "INCERTO", "sem_beneficio"),
+        # a MESMA fonte repete "renovados": mesma fonte decide antes (F50)
+        "mesma_fonte": (("fadadoscupons/17838", T.FADA, post, 1, 6.7 * 60), "INCERTO", "lembrete_mesma_fonte"),
+        # nomes em conflito continuam campanhas diferentes
+        "nomes_em_conflito": (("sintetico/tech_renovados", T.PROMOTOM,
+                               [(1, "sintetico/vip_renovados", {T.FADA})], 1, 30), "NOVA", "nome_conflitante"),
+    }
+    for nome, (args, acao, motivo) in casos.items():
+        d = _decide_shp(*args)
+        r.check((d.acao, d.motivo) == (acao, motivo), f"14.{nome}", (d.acao, d.motivo))
 
 
 if __name__ == "__main__":

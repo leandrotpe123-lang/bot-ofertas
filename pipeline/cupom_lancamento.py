@@ -112,6 +112,19 @@ _RE_LEMBRETE = re.compile(
     r")\b")
 _ESCOPO_LEMBRETE = 200
 
+# ─────────────────────────────────────────────────────────────────
+# RENOVADOS — o anúncio "cupons renovados" de fontes diferentes, sem
+# benefício declarado dos dois lados, no mesmo instante, é UM lançamento
+# (regra determinística estreita aprovada pelo dono em 15/10). Casos:
+# 14/10 14:59 UTC Promotom 111375 "Cupons Shopee Renovados" × Fada 17831
+# "Renovados! Dia de Cupons Shopee" (posts 29047 × 29048) e 14/10 23:00
+# Fada 17838 × Promotom 111400 (29160 × 29161, duplicata apagada à mão).
+# Medido em 07–15/10: só esses dois mudam; os demais pares já estavam
+# juntos e a repetição da MESMA fonte (Fada 17778 → 17781, 6,7 min) não
+# entra (mesma fonte decide antes).
+# ─────────────────────────────────────────────────────────────────
+_RE_RENOVADO = re.compile(r"\brenovad[oa]s?\b")
+
 
 _RE_NAO_ASCII = re.compile(r"[^\x00-\x7f]")
 
@@ -201,12 +214,18 @@ def _lembrete_de(texto: str, plat: str) -> bool:
         _sem_acento(texto[:_ESCOPO_LEMBRETE].lower())))
 
 
+def _renovado_de(texto: str, plat: str) -> bool:
+    return bool(_RE_RENOVADO.search(
+        _sem_acento(texto[:_ESCOPO_LEMBRETE].lower())))
+
+
 class Perfil:
     """O que a regra compara de uma mensagem ou post:
       nome      nome declarado, sem tempo/chamada, radical ("" = sem nome)
       pct       percentual do benefício ("" = sem %)
       valores   assinaturas de valor ("v:30-299")
       lembrete  vocabulário de lembrete no começo do texto
+      renovado  marcador "renovad…" no começo do texto (regra RENOVADOS)
 
     Vem dos valores (Perfil(nome, pct, valores, lembrete)) ou do texto
     (perfil()). Do texto, cada campo é calculado só quando a decisão o lê
@@ -214,13 +233,14 @@ class Perfil:
     percentuais, o valor nem é calculado. O resultado é o mesmo."""
     __slots__ = ("_texto", "_plat", "_campos")
     _CALCULO = {"nome": _nome_de, "pct": _pct_de, "valores": _valores_de,
-                "lembrete": _lembrete_de}
+                "lembrete": _lembrete_de, "renovado": _renovado_de}
 
     def __init__(self, nome=_FALTA, pct=_FALTA, valores=_FALTA,
-                 lembrete=_FALTA, *, texto: str = "", plat: str = ""):
+                 lembrete=_FALTA, renovado=_FALTA, *, texto: str = "",
+                 plat: str = ""):
         self._texto, self._plat = texto, plat
         self._campos = {"nome": nome, "pct": pct, "valores": valores,
-                        "lembrete": lembrete}
+                        "lembrete": lembrete, "renovado": renovado}
 
     def _campo(self, nome):
         v = self._campos[nome]
@@ -233,6 +253,7 @@ class Perfil:
     pct = property(lambda self: self._campo("pct"))
     valores = property(lambda self: self._campo("valores"))
     lembrete = property(lambda self: self._campo("lembrete"))
+    renovado = property(lambda self: self._campo("renovado"))
 
     @property
     def tem_beneficio(self) -> bool:
@@ -359,6 +380,11 @@ def _relacao(c: Perfil, chat: str, p: PostVivo, agora: float,
         return INCERTO, "faixa_cinzenta", delta
     if b == "igual":
         return JUNTA, "mesmo_lancamento", delta
+    if (b == "sem_beneficio" and not c.tem_beneficio
+            and not p.perfil.tem_beneficio and c.renovado and p.perfil.renovado):
+        # fontes diferentes (mesma fonte decidiu acima), sem nome em
+        # conflito (idem), Δ ≤ RAJADA (idem) — ver RENOVADOS
+        return JUNTA, "renovados", delta
     return INCERTO, ("sem_beneficio" if b == "sem_beneficio" else
                      "valor_nome_x_sem_nome" if b == "valor_nome_x_sem_nome"
                      else "beneficio_incomparavel"), delta
@@ -399,15 +425,15 @@ def classificar(c: Perfil, chat: str, agora: float, vivos: list,
     for p in vivos:
         acao, motivo, delta = _relacao(c, chat, p, agora, rajada_s, superior_s)
         if acao == JUNTA:
-            juntas.append((delta, p.msg_id))
+            juntas.append((delta, p.msg_id, motivo))
         elif acao == INCERTO and motivo in _INCERTO_SEM_FAMILIA:
             # Δ ≤ SUPERIOR por construção: acima dele _relacao dá NOVA.
             incertos.append((delta, p.msg_id, motivo))
     if len(juntas) == 1:
-        delta, mid = juntas[0]
-        return Decisao(JUNTA, mid, "mesmo_lancamento", delta)
+        delta, mid, motivo = juntas[0]
+        return Decisao(JUNTA, mid, motivo, delta)
     if len(juntas) > 1:
-        delta, mid = min(juntas)
+        delta, mid, _motivo = min(juntas)
         return Decisao(INCERTO, mid, "ambiguo", delta)
     if incertos:
         delta, mid, motivo = min(incertos)
