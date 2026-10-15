@@ -4,11 +4,18 @@
     python -m brain.avaliar orcamento --cambio 5.04        # sem rede, sem chave
     python -m brain.avaliar piloto --confirmar             # 10 chamadas Haiku, <= US$ 0,50
     python -m brain.avaliar dev --confirmar                # iteração: Haiku high, só DEV x3
-    python -m brain.avaliar final --confirmar              # Haiku+Sonnet x3 efforts; Opus difícil
+    python -m brain.avaliar final --confirmar              # Haiku high, medium e low; todos x3
+    python -m brain.avaliar sonnet --confirmar             # Sonnet high; todos x3
+    python -m brain.avaliar tabela                         # consolida tudo (sem rede)
+    # só se o Haiku falhar no portão E o dono aprovar:
+    python -m brain.avaliar sonnet-extra --confirmar --aprovado-pelo-dono
+    python -m brain.avaliar opus --confirmar --aprovado-pelo-dono
 
 Regras:
-  · só roda chamada real com ANTHROPIC_API_KEY de TESTE no ambiente E com
-    --confirmar; a chave nunca é lida, impressa ou gravada aqui (o SDK lê);
+  · só roda chamada real com a chave de TESTE em BRAIN_TESTE_CHAVE E com
+    --confirmar. Nunca ANTHROPIC_API_KEY: no Claude Code é a credencial do
+    próprio Claude Code. A chave é passada explícita ao cliente e nunca
+    impressa; o endereço é fixo (config.API_BASE_URL);
   · teto de US$ medido pelo usage: a bancada PARA antes de passar dele; o
     teto TOTAL (--teto-total-usd, padrão 20) soma todas as rodadas gravadas;
   · cada caso 3× (o Haiku/Sonnet 5.5 não aceitam temperature: a
@@ -16,8 +23,8 @@ Regras:
   · HOLDOUT: metade dos casos, escolhida por hash do id; caso que inspirou
     exemplo do prompt fica sempre no DEV. A iteração (comando dev) só vê o
     DEV; o holdout só entra no final;
-  · resultado em brain/teste/resultados/<carimbo>_<comando>/
-    (chamadas.jsonl + tabela.md + tabela.json).
+  · resultado em brain/teste/resultados/<carimbo>_<comando>/ e a tabela
+    única em brain/teste/resultados/consolidado/.
 """
 from __future__ import annotations
 
@@ -74,18 +81,27 @@ RODADAS_DEV = 3                # rodadas de iteração do prompt previstas no or
 OPUS_DIFICIL_MAX = 30          # teto de casos do subconjunto difícil (Opus)
 HAIKU, SONNET, OPUS = "claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"
 
+# Plano em etapas (decisão do dono, 15/10): piloto → dev (Haiku) → final
+# Haiku (high, medium, low) → Sonnet só high. Sonnet medium/low e Opus só se
+# o Haiku falhar no portão E o dono aprovar (--aprovado-pelo-dono).
+COMANDOS = ("piloto", "dev", "final", "sonnet")
+COMANDOS_COM_APROVACAO = ("sonnet-extra", "opus")
 
-def fases_por_comando(casos) -> dict:
-    """Fases (decisão do dono, 14/10): iterar no Haiku só com o DEV; medir
-    Haiku e Sonnet em high/medium/low com todos os casos; Opus só no
-    subconjunto difícil, se sobrar orçamento."""
+
+def fases_por_comando(casos, duros=()) -> dict:
     dev = [c for c, d in casos if not em_holdout(d)]
     todos = [c for c, d in casos]
+    dificeis = [c for c in todos if c.id in set(duros)] if duros else \
+        sorted(todos, key=tokens_entrada, reverse=True)[:OPUS_DIFICIL_MAX]
     return {
         "piloto": [("piloto_haiku_high", HAIKU, "high", dev[:10], 1)],
         "dev": [("dev_haiku_high", HAIKU, "high", dev, REPETICOES)],
-        "final": [(f"final_{m}_{e}", m, e, todos, REPETICOES)
-                  for m in (HAIKU, SONNET) for e in ("high", "medium", "low")],
+        "final": [(f"final_haiku_{e}", HAIKU, e, todos, REPETICOES)
+                  for e in ("high", "medium", "low")],
+        "sonnet": [("sonnet_high", SONNET, "high", todos, REPETICOES)],
+        "sonnet-extra": [(f"sonnet_{e}", SONNET, e, todos, REPETICOES)
+                         for e in ("medium", "low")],
+        "opus": [("opus_high_dificil", OPUS, "high", dificeis, REPETICOES)],
     }
 
 
@@ -95,22 +111,22 @@ def _usd(modelo, effort, lista, reps) -> float:
 
 
 def orcamento(casos, cambio: float) -> list:
-    """(fase, modelo, effort, chamadas, US$, R$) — presumido, ANTES de gastar."""
+    """(fase, modelo, effort, chamadas, US$, R$) — presumido, ANTES de gastar.
+    Primeiro o plano aprovado (com o TOTAL dele); depois, à parte, o que só
+    roda se o Haiku falhar e o dono aprovar."""
     f = fases_por_comando(casos)
-    linhas = []
-    for nome, m, e, lista, reps in f["piloto"]:
-        linhas.append((nome, m, e, len(lista) * reps, _usd(m, e, lista, reps)))
-    for nome, m, e, lista, reps in f["dev"]:
-        linhas.append((f"{nome}_x{RODADAS_DEV}_rodadas", m, e, len(lista) * reps * RODADAS_DEV,
-                       _usd(m, e, lista, reps) * RODADAS_DEV))
-    for nome, m, e, lista, reps in f["final"]:
-        linhas.append((nome, m, e, len(lista) * reps, _usd(m, e, lista, reps)))
-    todos = [c for c, _ in casos]
-    caros = sorted(todos, key=tokens_entrada, reverse=True)[:OPUS_DIFICIL_MAX]
-    linhas.append((f"opus_dificil_ate_{OPUS_DIFICIL_MAX}_casos", OPUS, "high",
-                   len(caros) * REPETICOES, _usd(OPUS, "high", caros, REPETICOES)))
-    linhas.append(("TOTAL", "", "", sum(l[3] for l in linhas), sum(l[4] for l in linhas)))
-    return [(n, m, e, k, u, u * cambio) for n, m, e, k, u in linhas]
+    plano = []
+    for cmd in COMANDOS:
+        for nome, m, e, lista, reps in f[cmd]:
+            rod = RODADAS_DEV if cmd == "dev" else 1
+            plano.append((nome + (f"_x{rod}_rodadas" if rod > 1 else ""), m, e,
+                          len(lista) * reps * rod, _usd(m, e, lista, reps) * rod))
+    plano.append(("TOTAL_PLANO", "", "", sum(l[3] for l in plano), sum(l[4] for l in plano)))
+    extra = []
+    for cmd in COMANDOS_COM_APROVACAO:
+        for nome, m, e, lista, reps in f[cmd]:
+            extra.append(("SO_COM_APROVACAO:" + nome, m, e, len(lista) * reps, _usd(m, e, lista, reps)))
+    return [(n, m, e, k, u, u * cambio) for n, m, e, k, u in plano + extra]
 
 
 def gasto_acumulado(pasta: str) -> float:
@@ -121,14 +137,23 @@ def gasto_acumulado(pasta: str) -> float:
         return 0.0
     for sub in sorted(os.listdir(pasta)):
         arq = os.path.join(pasta, sub, "chamadas.jsonl")
-        if os.path.exists(arq):
+        if sub != "consolidado" and os.path.exists(arq):   # consolidado é cópia
             with open(arq, encoding="utf-8") as f:
                 total += sum(json.loads(l).get("custo_usd", 0.0) for l in f if l.strip())
     return total
 
 
-def _chave_presente() -> bool:
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+def chave_de_teste():
+    """A chave da bancada vem SÓ de BRAIN_TESTE_CHAVE (nunca de
+    ANTHROPIC_API_KEY, que no Claude Code é a credencial do próprio Claude
+    Code). Devolve o valor ou None; quem chama nunca o imprime."""
+    v = os.environ.get(config.VAR_CHAVE_TESTE, "")
+    return v.strip() or None
+
+
+def criar_cliente(chave):
+    from brain.cliente import ClienteAnthropic
+    return ClienteAnthropic(chave)
 
 
 def contexto_do_caso(d: dict) -> "politica.Contexto":
@@ -266,7 +291,7 @@ def rodar(casos, fases, teto_usd: float, saida: str, cliente=None, dormir=time.s
     (fase, caso, repetição) não é refeito — o contêiner pode reciclar no
     meio de uma rodada longa. Com `paralelo` > 1, o teto continua valendo:
     cada chamada RESERVA o custo presumido antes de sair."""
-    from brain.cliente import ClienteAnthropic, Juiz, Tetos
+    from brain.cliente import Juiz, Tetos
     os.makedirs(saida, exist_ok=True)
     arq = os.path.join(saida, "chamadas.jsonl")
     feitos = set()
@@ -280,7 +305,9 @@ def rodar(casos, fases, teto_usd: float, saida: str, cliente=None, dormir=time.s
                for nome, modelo, effort, lista, reps in fases
                for rep in range(reps) for caso in lista
                if (nome, caso.id, rep) not in feitos]
-    cli = cliente or ClienteAnthropic()
+    if cliente is None:                      # nunca deixar o SDK descobrir a chave
+        raise ValueError("rodar() exige o cliente explícito")
+    cli = cliente
     trava = threading.Lock()
     estado = {"gasto": 0.0, "reservado": 0.0, "parou": False}
     local = threading.local()
@@ -358,9 +385,9 @@ def escrever_tabela(saida: str, meta: dict, cambio: float) -> dict:
     return tab
 
 
-def main(argv=None) -> int:
+def main(argv=None, fabrica_cliente=None) -> int:
     ap = argparse.ArgumentParser(prog="cd brain && python -m brain.avaliar")
-    ap.add_argument("comando", choices=["orcamento", "piloto", "dev", "final"])
+    ap.add_argument("comando", choices=("orcamento", "tabela") + COMANDOS + COMANDOS_COM_APROVACAO)
     ap.add_argument("--teto-usd", type=float, default=None,
                     help="teto DESTE comando (piloto: no máximo 0,50)")
     ap.add_argument("--teto-total-usd", type=float, default=20.0,
@@ -368,6 +395,8 @@ def main(argv=None) -> int:
     ap.add_argument("--cambio", type=float, default=0.0,
                     help="R$ por US$ (informar com a data e a fonte)")
     ap.add_argument("--confirmar", action="store_true")
+    ap.add_argument("--aprovado-pelo-dono", action="store_true",
+                    help="exigido para sonnet-extra e opus (só se o Haiku falhar)")
     ap.add_argument("--paralelo", type=int, default=4,
                     help="chamadas simultâneas (padrão 4)")
     ap.add_argument("--retomar", default=None,
@@ -376,22 +405,32 @@ def main(argv=None) -> int:
                     help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
     casos = carregar()
+    meta = {c.id: d for c, d in casos}
     pasta = a.resultados
     if a.comando == "orcamento":
         print(f"{len(casos)} casos ({sum(em_holdout(d) for _, d in casos)} no holdout; "
               f"dev = {sum(not em_holdout(d) for _, d in casos)})")
         for n, m, e, k, u, brl in orcamento(casos, a.cambio or 0.0):
-            print(f"{n:40} {m:18} {e:6} chamadas={k:5}  US$ {u:7.2f}"
+            print(f"{n:44} {m:18} {e:6} chamadas={k:5}  US$ {u:7.2f}"
                   + (f"  R$ {brl:7.2f}" if a.cambio else ""))
         print(f"já gasto (medido, rodadas gravadas): US$ {gasto_acumulado(pasta):.4f}")
         return 0
-    if not _chave_presente():
-        print("ANTHROPIC_API_KEY ausente: configure a chave de TESTE no ambiente.")
+    if a.comando == "tabela":
+        return 0 if consolidar(pasta, meta, a.cambio) else 2
+    if a.comando in COMANDOS_COM_APROVACAO and not a.aprovado_pelo_dono:
+        print(f"Recusado: '{a.comando}' só roda se o Haiku falhar no portão e o dono "
+              "aprovar (--aprovado-pelo-dono).")
+        return 2
+    chave = chave_de_teste()
+    if chave is None:
+        print(f"{config.VAR_CHAVE_TESTE} ausente: configure a chave de TESTE no ambiente "
+              "(não use ANTHROPIC_API_KEY: é a credencial do Claude Code).")
         return 2
     if not a.confirmar:
         print("Recusado: chamada real exige --confirmar (o orçamento vem antes).")
         return 2
-    print("chave: presente (não exibida)")
+    print(f"chave de teste: presente em {config.VAR_CHAVE_TESTE} (não exibida); "
+          f"endereço fixo {config.API_BASE_URL}")
     ja = gasto_acumulado(pasta)
     teto = a.teto_total_usd - ja
     if a.teto_usd is not None:
@@ -408,19 +447,50 @@ def main(argv=None) -> int:
             return 2
     else:
         saida = os.path.join(pasta, time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "_" + a.comando)
-    gasto = rodar(casos, fases_por_comando(casos)[a.comando], teto, saida, paralelo=a.paralelo)
-    meta = {c.id: d for c, d in casos}
-    if a.comando == "final" and gasto < teto:
-        feitas = [json.loads(l) for l in open(os.path.join(saida, "chamadas.jsonl"), encoding="utf-8")]
-        duros = set(subconjunto_dificil(feitas, meta, OPUS_DIFICIL_MAX))
-        lista = [c for c, _ in casos if c.id in duros]
-        if lista:
-            gasto += rodar(casos, [("final_opus_high_dificil", OPUS, "high", lista, REPETICOES)],
-                           teto - gasto, saida, paralelo=a.paralelo)
+    duros = ()
+    if a.comando == "opus":
+        duros = subconjunto_dificil(todas_as_chamadas(pasta), meta, OPUS_DIFICIL_MAX)
+        if not duros:
+            print("Recusado: sem chamadas de Haiku/Sonnet high gravadas para escolher os casos difíceis.")
+            return 2
+    cliente = (fabrica_cliente or criar_cliente)(chave)
+    del chave
+    gasto = rodar(casos, fases_por_comando(casos, duros)[a.comando], teto, saida,
+                  cliente=cliente, paralelo=a.paralelo)
     if os.path.exists(os.path.join(saida, "chamadas.jsonl")):
         escrever_tabela(saida, meta, a.cambio)
+    consolidar(pasta, meta, a.cambio)
     print(f"gasto medido nesta rodada: US$ {gasto:.4f}; acumulado: US$ {ja + gasto:.4f} → {saida}")
     return 0
+
+
+def todas_as_chamadas(pasta: str) -> list:
+    out = []
+    if os.path.isdir(pasta):
+        for sub in sorted(os.listdir(pasta)):
+            arq = os.path.join(pasta, sub, "chamadas.jsonl")
+            if sub != "consolidado" and os.path.exists(arq):
+                with open(arq, encoding="utf-8") as f:
+                    out += [json.loads(l) for l in f if l.strip()]
+    return out
+
+
+def consolidar(pasta: str, meta: dict, cambio: float) -> bool:
+    """Tabela única com TODAS as rodadas gravadas (piloto e dev ficam fora:
+    medem iteração, não a config final) — inclui a cascata Haiku → Sonnet
+    calculada sem gastar de novo."""
+    feitas = [c for c in todas_as_chamadas(pasta)
+              if not str(c.get("fase", "")).startswith(("piloto", "dev"))]
+    if not feitas:
+        print("sem rodadas finais gravadas")
+        return False
+    saida = os.path.join(pasta, "consolidado")
+    os.makedirs(saida, exist_ok=True)
+    with open(os.path.join(saida, "chamadas.jsonl"), "w", encoding="utf-8") as f:
+        for c in feitas:
+            f.write(json.dumps(c, ensure_ascii=False) + "\n")
+    escrever_tabela(saida, meta, cambio)
+    return True
 
 
 if __name__ == "__main__":

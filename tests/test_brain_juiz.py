@@ -108,7 +108,7 @@ class _Relogio:
 
 
 def test_10_sdk_nao_e_importado_sem_uso(r):
-    CL.ClienteAnthropic()
+    CL.ClienteAnthropic("chave-falsa")
     r.check("anthropic" not in sys.modules, "10.sem_import_no_ci")
 
 

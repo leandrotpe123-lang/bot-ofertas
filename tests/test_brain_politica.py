@@ -160,6 +160,21 @@ def test_10_isolamento_do_brain(r):
                     for x in os.listdir(pasta)), "10.sem_subpacote_escondido")
 
 
+def test_11_servico_fase0_nao_faz_nada(r):
+    """`python -m brain` (start do serviço) existe, sai com 0 e não importa
+    SDK, rede nem worker; a versão do Python vem de brain/.python-version
+    (Railpack lê; o railway.toml não vale para serviço novo)."""
+    import subprocess
+    raiz_servico = os.path.join(RAIZ, "brain")
+    p = subprocess.run([sys.executable, "-I", "-c",
+                        "import runpy, sys; sys.path.insert(0, '.'); "
+                        "runpy.run_module('brain', run_name='__main__')"],
+                       cwd=raiz_servico, capture_output=True, text=True, timeout=60)
+    r.check(p.returncode == 0 and "fase 0" in p.stdout, "11.sai_com_zero", (p.returncode, p.stdout, p.stderr[-300:]))
+    versao = open(os.path.join(raiz_servico, ".python-version")).read().strip()
+    r.check(versao == "3.13", "11.python_3_13_como_producao_e_ci", versao)
+
+
 # ── pré-filtro (textos reais da prévia pública, links trocados) ──
 T0 = 1_792_000_000.0
 P29047 = F.PostPrevia("canal:29047", T0, "🔥 Cupons Shopee Renovados\n\n📌 Resgate aqui:\n1 x\n2 y",

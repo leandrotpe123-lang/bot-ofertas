@@ -22,6 +22,18 @@ CONFIGS_VALIDADAS: frozenset = frozenset()
 # INCERTO, recusa ou certeza abaixo deste limiar.
 CASCATA_CERTEZA_MIN = 0.80
 
+# ── Credencial e endereço da API (sempre EXPLÍCITOS) ─────────────────
+# O SDK, sozinho, lê ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN,
+# ANTHROPIC_BASE_URL e ANTHROPIC_CUSTOM_HEADERS do ambiente. No ambiente do
+# Claude Code essas variáveis pertencem ao próprio Claude Code, e
+# ANTHROPIC_BASE_URL está definida. Por isso o Brain nunca deixa o SDK
+# descobrir nada: lê a chave pelo nome abaixo, passa explícita, fixa o
+# endereço e monta o cliente sem nenhuma ANTHROPIC_* no ambiente
+# (brain/brain/cliente.py).
+VAR_CHAVE_PRODUCAO = "ANTHROPIC_API_KEY"  # serviço brain na Railway
+VAR_CHAVE_TESTE = "BRAIN_TESTE_CHAVE"     # bancada (sessão de teste do Claude Code)
+API_BASE_URL = "https://api.anthropic.com"
+
 # ── Resiliência da chamada ────────────────────────────────────────────
 TIMEOUT_S = 30.0
 TENTATIVAS = 3                            # 429 / 529 / 5xx / rede

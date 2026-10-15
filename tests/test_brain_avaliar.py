@@ -166,31 +166,47 @@ def test_12_retomar_exige_pasta_do_mesmo_comando(r):
 
 
 @contextlib.contextmanager
-def _chave(valor):
-    """Troca a variável só durante o bloco; o valor original nunca é lido
-    para exibição e volta intacto."""
-    havia = "ANTHROPIC_API_KEY" in os.environ
-    antigo = os.environ.get("ANTHROPIC_API_KEY")
+def _ambiente(**valores):
+    """Troca variáveis só durante o bloco (None = remove); os valores
+    originais nunca são exibidos e voltam intactos."""
+    antes = {k: os.environ.get(k) for k in valores}
     try:
-        if valor is None:
-            os.environ.pop("ANTHROPIC_API_KEY", None)
-        else:
-            os.environ["ANTHROPIC_API_KEY"] = valor
+        for k, v in valores.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
         yield
     finally:
-        if havia:
-            os.environ["ANTHROPIC_API_KEY"] = antigo
-        else:
-            os.environ.pop("ANTHROPIC_API_KEY", None)
+        for k, v in antes.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def _chave(valor):
+    return _ambiente(BRAIN_TESTE_CHAVE=valor)
 
 
 def test_06_chamada_real_exige_chave_e_confirmar(r):
     with _chave(None), contextlib.redirect_stdout(io.StringIO()) as out:
         r.check(A.main(["piloto", "--confirmar"]) == 2, "06.sem_chave_recusa")
+    r.check("BRAIN_TESTE_CHAVE ausente" in out.getvalue(), "06.diz_o_nome_da_variavel")
     with _chave("chave-falsa-do-teste"), contextlib.redirect_stdout(io.StringIO()) as out:
         r.check(A.main(["final"]) == 2, "06.sem_confirmar_recusa")
     r.check("chave-falsa-do-teste" not in out.getvalue(), "06.nunca_imprime_a_chave")
     r.check("anthropic" not in sys.modules, "06.sdk_nao_importado")
+
+
+def test_06b_anthropic_api_key_nunca_serve_de_chave_de_teste(r):
+    # no Claude Code, ANTHROPIC_API_KEY é a credencial do próprio Claude
+    # Code: com ela presente e BRAIN_TESTE_CHAVE ausente, a bancada recusa
+    with _ambiente(BRAIN_TESTE_CHAVE=None, ANTHROPIC_API_KEY="credencial-do-claude-code"), \
+            contextlib.redirect_stdout(io.StringIO()) as out:
+        rc = A.main(["piloto", "--confirmar"])
+    r.check(rc == 2 and A.chave_de_teste() is None, "06b.recusa", rc)
+    r.check("credencial-do-claude-code" not in out.getvalue(), "06b.nao_imprime")
 
 
 def test_08_teto_total_soma_as_rodadas_gravadas(r):
@@ -211,6 +227,96 @@ def test_07_orcamento_sem_rede(r):
         r.check(A.main(["orcamento", "--cambio", "5.0"]) == 0, "07.roda")
     txt = out.getvalue()
     r.check("TOTAL" in txt and "R$" in txt, "07.total_em_usd_e_brl", txt[-300:])
+
+
+def test_13_cliente_real_nasce_sem_nenhuma_variavel_anthropic(r):
+    # SDK FALSO no lugar do `anthropic`: registra os argumentos e o ambiente
+    # que o construtor viu. O SDK 1.9.0 lê ANTHROPIC_BASE_URL e
+    # ANTHROPIC_CUSTOM_HEADERS sozinho; no Claude Code elas existem.
+    visto = {}
+
+    class _Falso:
+        class Anthropic:
+            def __init__(self, **kw):
+                visto["kw"] = kw
+                visto["env"] = sorted(k for k in os.environ if k.startswith("ANTHROPIC_"))
+    sujo = dict(ANTHROPIC_BASE_URL="http://endereco-do-claude-code",
+                ANTHROPIC_CUSTOM_HEADERS="X-Do-Claude-Code: 1",
+                ANTHROPIC_API_KEY="credencial-do-claude-code",
+                ANTHROPIC_AUTH_TOKEN="token-do-claude-code")
+    sys.modules["anthropic"] = _Falso
+    try:
+        with _ambiente(**sujo):
+            cli = CL.ClienteAnthropic("chave-de-teste")
+            cli._cliente()
+            depois = {k: os.environ.get(k) for k in sujo}
+    finally:
+        del sys.modules["anthropic"]
+    kw = visto.get("kw", {})
+    r.check(kw.get("api_key") == "chave-de-teste", "13.chave_explicita")
+    r.check(kw.get("base_url") == "https://api.anthropic.com", "13.endereco_fixo", kw.get("base_url"))
+    r.check("auth_token" not in kw and kw.get("max_retries") == 0, "13.sem_token_sem_retry_do_sdk")
+    r.check(visto.get("env") == [], "13.construtor_sem_ANTHROPIC_no_ambiente", visto.get("env"))
+    r.check(depois == sujo, "13.ambiente_restaurado")
+    r.check("chave-de-teste" not in repr(cli), "13.repr_esconde_a_chave", repr(cli))
+    try:
+        CL.ClienteAnthropic("")
+        vazio = False
+    except ValueError:
+        vazio = True
+    r.check(vazio, "13.chave_vazia_recusa_sem_descoberta")
+
+
+def test_14_main_passa_a_chave_de_teste_ao_cliente(r):
+    recebida = []
+
+    def fabrica(chave):
+        recebida.append(chave)
+        return _falso_incerto()
+    with tempfile.TemporaryDirectory() as d, \
+            _ambiente(BRAIN_TESTE_CHAVE="  chave-de-teste  ", ANTHROPIC_API_KEY="credencial-do-claude-code"), \
+            contextlib.redirect_stdout(io.StringIO()) as out:
+        rc = A.main(["piloto", "--confirmar", "--resultados", d], fabrica_cliente=fabrica)
+        pastas = [p for p in os.listdir(d) if p.endswith("_piloto")]
+    r.check(rc == 0 and recebida == ["chave-de-teste"], "14.chave_de_teste_e_so_ela", recebida)
+    r.check("chave-de-teste" not in out.getvalue() and "credencial" not in out.getvalue(),
+            "14.nunca_imprime")
+    r.check(len(pastas) == 1, "14.grava_a_rodada")
+
+
+def test_15_extras_so_com_aprovacao_do_dono(r):
+    with tempfile.TemporaryDirectory() as d, _chave("chave-falsa-do-teste"), \
+            contextlib.redirect_stdout(io.StringIO()) as out:
+        sem = [A.main([c, "--confirmar", "--resultados", d]) for c in ("sonnet-extra", "opus")]
+        opus_sem_base = A.main(["opus", "--confirmar", "--aprovado-pelo-dono", "--resultados", d])
+    r.check(sem == [2, 2] and "aprovado-pelo-dono" in out.getvalue(), "15.recusa_sem_aprovacao")
+    r.check(opus_sem_base == 2, "15.opus_exige_rodadas_anteriores")
+    linhas = A.orcamento(A.carregar(), 5.0)
+    plano = [l for l in linhas if not l[0].startswith("SO_COM_APROVACAO")]
+    nomes = [l[0] for l in plano]
+    r.check(any(n.startswith("final_haiku_low") for n in nomes)
+            and "sonnet_high" in nomes and not any("opus" in n for n in nomes)
+            and not any(n in ("sonnet_medium", "sonnet_low") for n in nomes), "15.plano_em_etapas", nomes)
+    total = next(l for l in linhas if l[0] == "TOTAL_PLANO")
+    r.check(total[4] < 20.0, "15.plano_cabe_no_teto", total[4])
+
+
+def test_16_tabela_consolida_rodadas_finais(r):
+    meta = {d["id"]: d for d in json.load(open(A.CASOS, encoding="utf-8"))["casos"]}
+    cid = sorted(meta)[0]
+    with tempfile.TemporaryDirectory() as d:
+        for sub, fase, modelo in (("a_dev", "dev_haiku_high", "claude-haiku-5-5"),
+                                  ("b_final", "final_haiku_high", "claude-haiku-5-5"),
+                                  ("c_sonnet", "sonnet_high", "claude-sonnet-5-5")):
+            os.makedirs(os.path.join(d, sub))
+            with open(os.path.join(d, sub, "chamadas.jsonl"), "w") as f:
+                f.write(json.dumps(dict(ch(cid, "INCERTO", 0.0, modelo=modelo), fase=fase)) + "\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            ok = A.consolidar(d, meta, 5.0)
+        tab = json.load(open(os.path.join(d, "consolidado", "tabela.json")))
+        r.check(ok and set(tab) == {"claude-haiku-5-5|high", "claude-sonnet-5-5|high",
+                                    "cascata|claude-haiku-5-5→claude-sonnet-5-5"}, "16.sem_dev", sorted(tab))
+        r.check(abs(A.gasto_acumulado(d) - 3 * 0.00055) < 1e-12, "16.consolidado_nao_conta_gasto")
 
 
 _URL = re.compile(r"https?://|t\.me/|s\.shopee|meli\.la|amzn\.to")
@@ -244,7 +350,8 @@ def test_10_conjunto_de_casos_reais_bem_formado(r):
 
 def test_11_casos_do_dono_e_armadilhas_presentes(r):
     meta = {d["id"]: d for d in json.load(open(A.CASOS, encoding="utf-8"))["casos"]}
-    sn = "1S 2S 3S 4S 5S 6S 7S 8S 9S 10N 11S 12S 13S 14S 15N 16S 17N 18S 19S 20N 21S 22S 23N".split()
+    # marcação do dono de 14/10, item 10 corrigido em 15/10 (R1)
+    sn = "1S 2S 3S 4S 5S 6S 7S 8S 9S 10S 11S 12S 13S 14S 15N 16S 17N 18S 19S 20N 21S 22S 23N".split()
     for x in sn:
         k, v = int(x[:-1]), x[-1]
         d = meta.get(f"SN{k:02d}")
@@ -254,6 +361,12 @@ def test_11_casos_do_dono_e_armadilhas_presentes(r):
     armas = [d for d in meta.values() if d["id"].startswith("LIVE_2874")]
     r.check(len(armas) == 4 and all(d["deve"] == "DOIS_POSTS" and d["rotulo"] == "PRODUTOS_DIFERENTES"
                                     for d in armas), "11.armadilha_live", len(armas))
+    for k, deve in (("TRIO_ML_111397", "UM_POST"), ("TRIO_ML_29156", "UM_POST"), ("RENOV_29161", "UM_POST")):
+        r.check(meta.get(k, {}).get("deve") == deve and meta[k]["fonte_rotulo"] == "dono", f"11.{k}")
+    live2 = [d for d in meta.values() if d["id"].startswith("LIVE_2914")]
+    r.check(len(live2) == 5 and all(d["rotulo"] == "PRODUTOS_DIFERENTES" and d["contexto"]["so_container_live"]
+                                    for d in live2), "11.live_29140_29145", len(live2))
+    r.check(meta["F25"]["deve"] == "DOIS_POSTS" and meta["F25"].get("lembrete_esperado"), "11.F25_R2_lembrete")
     fps = [meta.get(k) for k in ("FP_111092_27046", "FP_111103_27126", "FP_120304_27055")]
     r.check(all(d and d["tipo"] == "absorvido" and d["deve"] == "DOIS_POSTS" for d in fps), "11.fps_do_dono")
     hold = sum(A.em_holdout(d) for d in meta.values())

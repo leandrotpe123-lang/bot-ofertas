@@ -2,8 +2,11 @@
 
   · O SDK `anthropic` só é importado por ClienteAnthropic, na primeira
     chamada real — os testes (CI) usam ClienteFalso e não instalam nada.
-  · A chave vem do ambiente (ANTHROPIC_API_KEY) e NUNCA é lida, impressa ou
-    registrada por este código: quem a resolve é o próprio SDK.
+  · A chave chega EXPLÍCITA (quem chama lê a variável pelo nome em
+    brain.config) e nunca é impressa nem registrada. O endereço é fixo
+    (config.API_BASE_URL) e o cliente do SDK é montado sem nenhuma variável
+    ANTHROPIC_* no ambiente: o SDK não descobre credencial, endereço nem
+    cabeçalho por conta própria (no Claude Code essas variáveis são dele).
   · Retry com backoff e jitter em 429/529/5xx/rede (respeita retry-after);
     4xx de pedido não é repetido. Timeout por chamada.
   · Disjuntor: N falhas seguidas → aberto por um tempo → meia-abertura.
@@ -12,6 +15,8 @@
     registra. Nada aqui toca o worker."""
 from __future__ import annotations
 
+import contextlib
+import os
 import random
 import threading
 import time
@@ -34,19 +39,30 @@ class ErroPermanente(Exception):
 
 class ClienteAnthropic:
     """Adaptador real. Converte a resposta do SDK em dict e os erros do SDK
-    nas duas exceções acima."""
+    nas duas exceções acima. `chave` é obrigatória e explícita."""
 
-    def __init__(self, timeout_s: float = config.TIMEOUT_S):
+    def __init__(self, chave: str, timeout_s: float = config.TIMEOUT_S,
+                 base_url: str = config.API_BASE_URL):
+        if not isinstance(chave, str) or not chave.strip():
+            raise ValueError("chave ausente")          # nunca cair na descoberta do SDK
+        self._chave = chave.strip()
         self._timeout = timeout_s
+        self._base_url = base_url
         self._sdk = None
         self._trava = threading.Lock()            # a bancada chama em paralelo
+
+    def __repr__(self) -> str:                    # nunca expõe a chave
+        return f"ClienteAnthropic(base_url={self._base_url!r}, chave=<oculta>)"
 
     def _cliente(self):
         with self._trava:
             if self._sdk is None:
-                import anthropic                  # só aqui: CI não instala
-                self._mod = anthropic
-                self._sdk = anthropic.Anthropic(timeout=self._timeout, max_retries=0)
+                with _sem_variaveis_anthropic():
+                    import anthropic              # só aqui: CI não instala
+                    self._mod = anthropic
+                    self._sdk = anthropic.Anthropic(
+                        api_key=self._chave, base_url=self._base_url,
+                        timeout=self._timeout, max_retries=0)
         return self._sdk
 
     def enviar(self, params: dict) -> dict:
@@ -62,6 +78,23 @@ class ClienteAnthropic:
             raise ErroPermanente(str(e.status_code)) from None
         except (a.APIConnectionError, a.APITimeoutError):
             raise ErroTransitorio("rede") from None
+
+
+_TRAVA_AMBIENTE = threading.Lock()
+
+
+@contextlib.contextmanager
+def _sem_variaveis_anthropic():
+    """Tira do ambiente, só enquanto o cliente do SDK nasce, toda variável
+    ANTHROPIC_* (credencial, endereço, cabeçalhos, log). O SDK 1.9.0 lê
+    essas variáveis no construtor e no import; depois disso não as consulta.
+    Proxy e certificado (HTTPS_PROXY, SSL_*) ficam: não são ANTHROPIC_*."""
+    with _TRAVA_AMBIENTE:
+        guardadas = {k: os.environ.pop(k) for k in list(os.environ) if k.startswith("ANTHROPIC_")}
+        try:
+            yield
+        finally:
+            os.environ.update(guardadas)
 
 
 def _retry_after(e) -> Optional[float]:

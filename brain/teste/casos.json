@@ -1,9 +1,9 @@
 {
- "versao": 1,
- "gerado_em": "2026-10-14T20:53Z",
+ "versao": 2,
+ "gerado_em": "2026-10-15T18:54Z",
  "fonte": "prévias públicas t.me (texto fiel do embed, atual), logs do worker 07–14/10; links trocados por [link-N]",
  "rotulos": {
-  "dono": "marcação S/N do dono (14/10), casos base e armadilhas que ele citou",
+  "dono": "marcação S/N do dono (14/10; item 10 corrigido em 15/10), casos base, armadilhas e casos de 14/10 noite que ele citou",
   "claude": "julgamento do Claude pelo texto público — o dono pode corrigir"
  },
  "casos": [
@@ -99,8 +99,8 @@
   {
    "id": "SN10",
    "tipo": "par_canal",
-   "rotulo": "LIBERACAO_NOVA",
-   "deve": "DOIS_POSTS",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
    "fonte_rotulo": "dono",
    "alvo": {
     "id": "canal:27028",
@@ -121,10 +121,6 @@
      "texto": "🚨🚨 5 Cupons 30% OFF para o 10.10 Mercado Livre\n\nℹ️ Resgate às 19h, 20h, 21h, 22h e 23h para usar a partir de meia-noite!\n\n✅ Siga o tutorial:\n\n1️⃣ Entre no app do Meli aqui 👇  \n\n2️⃣ Clique em \"Mais\" no rodapé do app\n3️⃣ Depois \"Cupons relâmpago do 10.10\"\n4️⃣ Resgate os cupons de 30%",
      "nota": ""
     }
-   ],
-   "aceitos": [
-    "LIBERACAO_NOVA",
-    "PRODUTOS_DIFERENTES"
    ]
   },
   {
@@ -139,7 +135,7 @@
     "grupo": "samuel",
     "delta_min": 0.0,
     "plataforma": "mercadolivre",
-    "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+    "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui: \n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
     "nota": ""
    },
    "candidatos": [
@@ -683,7 +679,7 @@
    "id": "F25",
    "tipo": "par_canal",
    "rotulo": "MESMA_CAMPANHA",
-   "deve": "UM_POST",
+   "deve": "DOIS_POSTS",
    "fonte_rotulo": "claude",
    "alvo": {
     "id": "canal:27469",
@@ -704,7 +700,12 @@
      "texto": "Cupons Shopee\n\nShopee Vip\n-Resgate aqui:\n\n-Teste Grátis:\n\nOutros Cupons\n-Resgate aqui:\n1\n2",
      "nota": ""
     }
-   ]
+   ],
+   "aceitos": [
+    "MESMA_CAMPANHA",
+    "LIBERACAO_NOVA"
+   ],
+   "lembrete_esperado": true
   },
   {
    "id": "F26",
@@ -1288,37 +1289,6 @@
    ]
   },
   {
-   "id": "F50",
-   "tipo": "par_canal",
-   "rotulo": "LIBERACAO_NOVA",
-   "deve": "DOIS_POSTS",
-   "fonte_rotulo": "claude",
-   "alvo": {
-    "id": "canal:28021",
-    "origem": "fonte",
-    "grupo": "fadadoscupons",
-    "delta_min": 0.0,
-    "plataforma": "shopee",
-    "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE  ✅ Resgate todos os cupons aqui: [link-1]",
-    "nota": ""
-   },
-   "candidatos": [
-    {
-     "id": "canal:28007",
-     "origem": "canal",
-     "grupo": "fadadoscupons",
-     "delta_min": -6.7,
-     "plataforma": "shopee",
-     "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE\n\n✅ Resgate todos os cupons aqui:",
-     "nota": ""
-    }
-   ],
-   "aceitos": [
-    "LIBERACAO_NOVA",
-    "PRODUTOS_DIFERENTES"
-   ]
-  },
-  {
    "id": "F52",
    "tipo": "par_canal",
    "rotulo": "LIBERACAO_NOVA",
@@ -1814,7 +1784,7 @@
      "grupo": "samuel",
      "delta_min": -56.1,
      "plataforma": "mercadolivre",
-     "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+     "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui: \n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
      "nota": ""
     }
    ]
@@ -1841,7 +1811,7 @@
      "grupo": "samuel",
      "delta_min": -56.4,
      "plataforma": "mercadolivre",
-     "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
+     "texto": "🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui: \n2. Clique em \"Mais\" no rodapé do APP\n3. Depois clique em \"Cupons relâmpago\"\n4. Resgate o cupom\n\nanúncio",
      "nota": ""
     }
    ]
@@ -2112,33 +2082,6 @@
      "delta_min": -0.3,
      "plataforma": "shopee",
      "texto": "🚨 CUPONS RENOVADOS! 10.10 SHOPEE\n\n✅ Resgate todos os cupons aqui:",
-     "nota": ""
-    }
-   ]
-  },
-  {
-   "id": "E24",
-   "tipo": "absorvido",
-   "rotulo": "MESMA_CAMPANHA",
-   "deve": "UM_POST",
-   "fonte_rotulo": "claude",
-   "alvo": {
-    "id": "fonte:fadadoscupons/17707",
-    "origem": "fonte",
-    "grupo": "fadadoscupons",
-    "delta_min": 0.0,
-    "plataforma": "mercadolivre",
-    "texto": "🔥 Cupons Mercado Livre\n\n🎟 R$150 OFF acima de R$999: SITE150\n🎟 R$40 OFF acima de R$399: SITE40\n🎟 R$15 OFF acima de R$99: SITE10\n🎟 R$20 OFF acima de R$149: SITE301010\n🎟 10% OFF acima de R$79, limite R$60: ANACASTELA10\n\n✅ Resgate aqui:",
-    "nota": "absorvido no post canal:27441 (não virou post próprio)"
-   },
-   "candidatos": [
-    {
-     "id": "canal:27441",
-     "origem": "canal",
-     "grupo": "promotom",
-     "delta_min": -2.3,
-     "plataforma": "mercadolivre",
-     "texto": "Cupom Mercado Livre\n\nR$ 15 OFF em R$ 99: SITE10\nR$ 20 OFF em R$ 149: SITE301010\nR$ 40 OFF em R$ 399: SITE40\nR$ 150 OFF em R$ 999: SITE150\n\n-Resgate o cupom aqui: \n\n-Anúncio",
      "nota": ""
     }
    ]
@@ -2801,6 +2744,354 @@
      "plataforma": "shopee",
      "delta_min": -3.6,
      "texto": "🔥 Caixa de Som Aiwa Speaker 15w Ipx4 - Aws-sp-03-b Preto\n\n✅ R$ 116\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:\n[link-1]",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "TRIO_ML_111397",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "fonte:promotom/111397",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "Próximo Cupom R$ 60 OFF em R$ 499 Mercado Livre, resgate agora e use meia-noite \n\n•Tutorial para resgate: \n1 Entre no APP do Meli aqui:  \n2 Clique em \"Início\" no rodapé do APP \n3 Depois no carrossel no canto superior esquerdo clique em \"CUPONS RELÂMPAGO TODOS OS DIAS\" \n4 Resgate o cupom",
+    "nota": "absorvido no post canal:29152 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:29152",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -1.1,
+     "plataforma": "mercadolivre",
+     "texto": "🔥 Cupom R$60 OFF Mercado Livre \n\nResgate agora e use 00h\n\n🚨🚨 LEIA PARA RESGATAR:\n1. Entre no APP 👇\n\n2. Clique em \"Início\" no rodapé do APP\n3. Depois, escolha o banner “Cupons Relâmpago”\n4. Resgate o cupom",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "TRIO_ML_29156",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:29156",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "mercadolivre",
+    "texto": "🔥 Próximo Cupom R$ 60 OFF em R$ 499 Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui: \n2. Clique em \"Início\" no rodapé do APP \n3. Depois no carrossel no canto superior esquerdo clique em \"CUPONS RELÂMPAGO TODOS OS DIAS\" \n4. Resgate o cupom\n\nanúncio",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:29152",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -4.2,
+     "plataforma": "mercadolivre",
+     "texto": "🔥 Cupom R$60 OFF Mercado Livre \n\nResgate agora e use 00h\n\n🚨🚨 LEIA PARA RESGATAR:\n1. Entre no APP 👇\n\n2. Clique em \"Início\" no rodapé do APP\n3. Depois, escolha o banner “Cupons Relâmpago”\n4. Resgate o cupom",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "RENOV_29161",
+   "tipo": "par_canal",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "dono",
+   "alvo": {
+    "id": "canal:29161",
+    "origem": "fonte",
+    "grupo": "promotom",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "Cupons Shopee Renovados\n\n-Resgate aqui:\n1 \n2",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:29160",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -1.2,
+     "plataforma": "shopee",
+     "texto": "🚨🚨 Renovados! Dia de Cupons Shopee\n\n👇 Resgate todos os cupons aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "RENOV_121488",
+   "tipo": "absorvido",
+   "rotulo": "MESMA_CAMPANHA",
+   "deve": "UM_POST",
+   "fonte_rotulo": "claude",
+   "alvo": {
+    "id": "fonte:SamuelF3lipePromo/121488",
+    "origem": "fonte",
+    "grupo": "samuel",
+    "delta_min": 0.0,
+    "plataforma": "shopee",
+    "texto": "🔥 Renovados! Dia de Cupons Shopee\n\n⭐️ Resgate todos os cupons aqui:\n\nanúncio",
+    "nota": "absorvido no post canal:29160 (não virou post próprio)"
+   },
+   "candidatos": [
+    {
+     "id": "canal:29160",
+     "origem": "canal",
+     "grupo": "fadadoscupons",
+     "delta_min": -0.1,
+     "plataforma": "shopee",
+     "texto": "🚨🚨 Renovados! Dia de Cupons Shopee\n\n👇 Resgate todos os cupons aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "LIVE_29141",
+   "tipo": "par_canal",
+   "rotulo": "PRODUTOS_DIFERENTES",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "contexto": {
+    "so_container_live": true
+   },
+   "alvo": {
+    "id": "canal:29141",
+    "origem": "canal",
+    "grupo": "canal",
+    "plataforma": "shopee",
+    "delta_min": 0.0,
+    "texto": "🔥 Smart TV 32 Polegadas Semp 32S42R Full HD LED Roku\n\n✅ R$ 739\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:29140",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -0.5,
+     "texto": "🔥 Controle para Xbox Sem Fio\n\n✅ R$ 265\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "LIVE_29142",
+   "tipo": "par_canal",
+   "rotulo": "PRODUTOS_DIFERENTES",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "contexto": {
+    "so_container_live": true
+   },
+   "alvo": {
+    "id": "canal:29142",
+    "origem": "canal",
+    "grupo": "canal",
+    "plataforma": "shopee",
+    "delta_min": 0.0,
+    "texto": "🔥 Bicicleta Bike Ergometrica Spinning Academia Fitness Profissional 120kg\n\n✅ R$ 325\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:29140",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -0.9,
+     "texto": "🔥 Controle para Xbox Sem Fio\n\n✅ R$ 265\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+     "nota": ""
+    },
+    {
+     "id": "canal:29141",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -0.4,
+     "texto": "🔥 Smart TV 32 Polegadas Semp 32S42R Full HD LED Roku\n\n✅ R$ 739\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "LIVE_29143",
+   "tipo": "par_canal",
+   "rotulo": "PRODUTOS_DIFERENTES",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "contexto": {
+    "so_container_live": true
+   },
+   "alvo": {
+    "id": "canal:29143",
+    "origem": "canal",
+    "grupo": "canal",
+    "plataforma": "shopee",
+    "delta_min": 0.0,
+    "texto": "🔥 Microfone Lapela Bluetooth sem fio Hollyland Lark M2\n\n✅ R$ 476\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:29140",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -3.0,
+     "texto": "🔥 Controle para Xbox Sem Fio\n\n✅ R$ 265\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+     "nota": ""
+    },
+    {
+     "id": "canal:29141",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -2.5,
+     "texto": "🔥 Smart TV 32 Polegadas Semp 32S42R Full HD LED Roku\n\n✅ R$ 739\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+     "nota": ""
+    },
+    {
+     "id": "canal:29142",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -2.1,
+     "texto": "🔥 Bicicleta Bike Ergometrica Spinning Academia Fitness Profissional 120kg\n\n✅ R$ 325\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "LIVE_29144",
+   "tipo": "par_canal",
+   "rotulo": "PRODUTOS_DIFERENTES",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "contexto": {
+    "so_container_live": true
+   },
+   "alvo": {
+    "id": "canal:29144",
+    "origem": "canal",
+    "grupo": "canal",
+    "plataforma": "shopee",
+    "delta_min": 0.0,
+    "texto": "🔥 Monitor Gamer Samsung Odyssey G5 27\", QHD, 165Hz, 1ms, Freesync, HDMI, DP\n\n✅ R$ 850\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:29140",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -3.9,
+     "texto": "🔥 Controle para Xbox Sem Fio\n\n✅ R$ 265\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+     "nota": ""
+    },
+    {
+     "id": "canal:29141",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -3.4,
+     "texto": "🔥 Smart TV 32 Polegadas Semp 32S42R Full HD LED Roku\n\n✅ R$ 739\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+     "nota": ""
+    },
+    {
+     "id": "canal:29142",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -3.0,
+     "texto": "🔥 Bicicleta Bike Ergometrica Spinning Academia Fitness Profissional 120kg\n\n✅ R$ 325\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+     "nota": ""
+    },
+    {
+     "id": "canal:29143",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -0.9,
+     "texto": "🔥 Microfone Lapela Bluetooth sem fio Hollyland Lark M2\n\n✅ R$ 476\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+     "nota": ""
+    }
+   ]
+  },
+  {
+   "id": "LIVE_29145",
+   "tipo": "par_canal",
+   "rotulo": "PRODUTOS_DIFERENTES",
+   "deve": "DOIS_POSTS",
+   "fonte_rotulo": "dono",
+   "contexto": {
+    "so_container_live": true
+   },
+   "alvo": {
+    "id": "canal:29145",
+    "origem": "canal",
+    "grupo": "canal",
+    "plataforma": "shopee",
+    "delta_min": 0.0,
+    "texto": "🔥 Celular Samsung Galaxy S25+ 5G, 256GB, 12GB RAM, Câmera Tripla de 50+12+10, Tela Grande de 6.7\"\n\n✅ R$ 3599\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+    "nota": ""
+   },
+   "candidatos": [
+    {
+     "id": "canal:29140",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -4.3,
+     "texto": "🔥 Controle para Xbox Sem Fio\n\n✅ R$ 265\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+     "nota": ""
+    },
+    {
+     "id": "canal:29141",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -3.8,
+     "texto": "🔥 Smart TV 32 Polegadas Semp 32S42R Full HD LED Roku\n\n✅ R$ 739\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+     "nota": ""
+    },
+    {
+     "id": "canal:29142",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -3.4,
+     "texto": "🔥 Bicicleta Bike Ergometrica Spinning Academia Fitness Profissional 120kg\n\n✅ R$ 325\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+     "nota": ""
+    },
+    {
+     "id": "canal:29143",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -1.3,
+     "texto": "🔥 Microfone Lapela Bluetooth sem fio Hollyland Lark M2\n\n✅ R$ 476\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
+     "nota": ""
+    },
+    {
+     "id": "canal:29144",
+     "origem": "canal",
+     "grupo": "canal",
+     "plataforma": "shopee",
+     "delta_min": -0.4,
+     "texto": "🔥 Monitor Gamer Samsung Odyssey G5 27\", QHD, 165Hz, 1ms, Freesync, HDMI, DP\n\n✅ R$ 850\n📌 Resgate todos os cupons na Live (sacola laranja) no APP e adicione pela sacola aqui:",
      "nota": ""
     }
    ]
