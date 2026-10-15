@@ -306,6 +306,19 @@ _INCERTO_SEM_FAMILIA = frozenset({
     "beneficio_incomparavel"})
 
 
+def _valor_compativel(x: str, y: str) -> bool:
+    """Duas assinaturas de valor (`v:<desconto>-<mínimo>` ou `v:<desconto>`)
+    são o mesmo benefício quando o desconto é o mesmo e o mínimo é o mesmo
+    ou só um lado o declara. Caso real (14/10 22:00 UTC, marcado errado
+    pelo dono): Fada 17836 "Cupom R$60 OFF" (v:60) × Promotom 111397
+    "R$ 60 OFF em R$ 499" (v:60-499), o mesmo relâmpago de meia-noite — a
+    Fada só não escreveu o mínimo. Mínimos declarados diferentes seguem
+    diferentes (regra do dono, 15/10)."""
+    dx, _, mx = x[2:].partition("-")
+    dy, _, my = y[2:].partition("-")
+    return dx == dy and (mx == my or not mx or not my)
+
+
 def _beneficio(a: Perfil, b: Perfil) -> str:
     """igual | diferente | sem_beneficio | valor_nome_x_sem_nome |
     incomparavel."""
@@ -314,7 +327,7 @@ def _beneficio(a: Perfil, b: Perfil) -> str:
     if a.pct and b.pct:
         return "igual" if a.pct == b.pct else "diferente"
     if a.valores and b.valores:
-        if not (a.valores & b.valores):
+        if not any(_valor_compativel(x, y) for x in a.valores for y in b.valores):
             return "diferente"
         if bool(a.nome) != bool(b.nome):
             # Nome × sem nome com o mesmo VALOR: tests/test_cupom_sem_codigo
