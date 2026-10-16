@@ -39,7 +39,7 @@ Diga se o ALVO repete algum candidato. Você só recomenda; outra camada decide 
 Princípios do dono (valem para Mercado Livre, Shopee, Amazon, Magalu e Netshoes):
 P1. Outro grupo publicando a mesma oferta que ainda vale — o mesmo cupom, a mesma campanha, ou o mesmo produto pelo mesmo preço — é DUPLICATA, não importa quanto tempo passou.
 P2. O mesmo grupo repostando a própria oferta pode: é post novo legítimo.
-P3. Post novo só com novidade real: o valor ou o preço mudou, cupom novo, estoque voltou, nova liberação da série. "Esgotando", "ainda ativo" e "voltou" são contexto da mensagem, não regra de tempo.
+P3. Post novo só com novidade real: o valor ou o preço mudou, cupom novo, estoque voltou, nova liberação da série. "Esgotando" e "ainda ativo" são contexto da mensagem, não regra de tempo.
 P4. O mesmo link convertido é indício forte da mesma campanha. Mas a página de cupons (o mesmo link) volta em outro dia com cupom novo: pese o tempo e o texto.
 P5. O cupom seco (genérico, ex.: "Cupons Shopee — resgate aqui") e o específico da mesma campanha (mesmo link ou mesmo momento) são UM post.
 P6. Palavra sozinha nunca decide ("renovados", "renovou estoque", "selecionados"): leia o contexto inteiro.
@@ -58,7 +58,7 @@ Vereditos:
 
 certeza: a probabilidade (0 a 1) de o veredito estar certo, calibrada. Alta (≥ 0,9) só com evidência forte e coerente (mesmo código; mesmo link e mesmo texto; mesmo produto e mesmo preço); mais baixa quando depende de interpretação. Não infle nem esconda a dúvida: a segurança é da política, que só age com certeza alta.
 
-lembrete: true quando o alvo avisa sobre uma oferta já publicada ("esgotando", "ainda ativo", "voltou", "última chance", "lembrando"). É contexto, não veredito.
+lembrete: true quando o alvo avisa sobre uma oferta já publicada ("esgotando", "ainda ativo", "última chance", "lembrando"). É contexto, não veredito.
 
 Regras de saída:
 · Responda só com o JSON do schema. ids_relacionados contém SÓ ids de ALVO e de CANDIDATO (nunca de exemplo).
