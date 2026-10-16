@@ -24,6 +24,15 @@ Casos reais (logs da Railway + prévia pública; marcação do dono em 15/10):
       plataforma, Δ ≤ RAJADA, os dois sem benefício e os dois com
       "renovad" → JUNTA (motivo `renovados`).
 
+  (c) "EM SELECIONADOS". Sombra retroativa de 07–15/10, linhas 13 e 16
+      (10/10): Samuel 120785 "Cupom Mercado Livre em Selecionados" × Fada
+      17767 "em Moda", os dois com MODA1010; Samuel 120841 "em Selecionados"
+      × Fada 17783 "em Auto e Moto", os dois com AUTOS1010. A regra dizia
+      NOVA nome_conflitante (`selecionad` × `mod` / `aut-mot`). Decisão do
+      dono (16/10): no Mercado Livre, "em selecionados" e "produtos
+      selecionados" são genéricos; nunca "Contas Selecionadas" (Shopee,
+      Promotom 111161) nem outra plataforma.
+
     python tests/test_cupom_correcao.py
 """
 import os
@@ -243,6 +252,93 @@ def test_14_guardas_da_regra_estreita(r):
     for nome, (args, acao, motivo) in casos.items():
         d = _decide_shp(*args)
         r.check((d.acao, d.motivo) == (acao, motivo), f"14.{nome}", (d.acao, d.motivo))
+
+
+# ══════════════════════════════════════════════════════════════════
+# (c) "EM SELECIONADOS" NO MERCADO LIVRE
+# ══════════════════════════════════════════════════════════════════
+# Prévia pública (embed), texto fiel sem os links — 10/10/2026.
+T.TEXTO.update({
+    "fadadoscupons/17767": '🔥 Cupom Mercado Livre em Moda\n\n🎟 20% OFF acima de R$89, limite R$40: MODA1010\n\n✅ Lista de produtos:',
+    "SamuelF3lipePromo/120785": '🔥 Cupom Mercado Livre em Selecionados\n\n🎟 20% OFF acima de R$ 89, limite R$ 40: MODA1010\n\n⭐️ Válido na lista ↓ clique em "Mostrar mais":\n\n\nanúncio',
+    "promotom/111265": 'Cupom Mercado Livre\n\n20% OFF, Limite de R$ 60 OFF em AUTO E FERRAMENTAS: AUTOS1010\n\n-Resgate o cupom aqui: \n\n-Anúncio',
+    "SamuelF3lipePromo/120841": '🔥 Cupom Mercado Livre em Selecionados\n\n🎟 20% OFF acima de R$ 249, limite R$ 60: AUTOS1010\n\n⭐️ Válido na lista ↓ clique em "Mostrar mais":\n\n\nanúncio',
+    "fadadoscupons/17783": '🔥 Cupom Mercado Livre em Auto e Moto\n\n🎟 20% OFF acima de R$249, limite R$60: AUTOS1010\n\n✅ Lista de produtos:',
+    "fadadoscupons/17733": '🔥 Cupons Mercado Livre em Selecionados\n\n🎟 50% OFF acima de R$39, limite R$25: JOGOS50\nLista: \n\n🎟 R$100 OFF acima de R$899: TECH100\nLista:',
+})
+
+
+def _decide_real(cand, chat, plat, t, vivos, familia_hoje):
+    """A decisão com as entradas da sombra retroativa: cada post vivo com o
+    seu nascimento real (segundos) e as fontes que tinha naquele instante."""
+    import config
+    CL = T._CL()
+    t0 = 1_792_000_000.0
+    posts = [CL.PostVivo(mid, CL.perfil(T.TEXTO[k], plat), t0 + nasc, frozenset(f))
+             for mid, k, nasc, f in vivos]
+    return CL.classificar(CL.perfil(T.TEXTO[cand], plat), chat, t0 + t, posts, familia_hoje,
+                          config.CUPOM_RAJADA_S[plat], config.CUPOM_LIMITE_SUPERIOR_S)
+
+
+def test_20_em_selecionados_no_ml_nao_e_nome(r):
+    CL = T._CL()
+    nome = lambda k_ou_texto, plat=ML: CL.perfil(T.TEXTO.get(k_ou_texto, k_ou_texto), plat).nome
+    for k in ("SamuelF3lipePromo/120785", "SamuelF3lipePromo/120841", "fadadoscupons/17733"):
+        r.check(nome(k) == "", f"20.sem_nome.{k.split('/')[1]}", nome(k))
+    # o nome de verdade da outra fonte continua
+    r.check(nome("fadadoscupons/17767") == "mod", "20.em_moda", nome("fadadoscupons/17767"))
+    r.check(nome("fadadoscupons/17783") == "aut-mot", "20.em_auto_e_moto", nome("fadadoscupons/17783"))
+    # "produtos selecionados" também é genérico, e o resto do título fica
+    r.check(nome("🔥 Cupom Mercado Livre Produtos Selecionados\n\n🎟 20% OFF") == "",
+            "20.produtos_selecionados")
+    r.check(nome("🔥 Cupom Mercado Livre em Produtos Selecionados de Beleza\n\n🎟 20% OFF") == "belez",
+            "20.resto_do_titulo_fica",
+            nome("🔥 Cupom Mercado Livre em Produtos Selecionados de Beleza\n\n🎟 20% OFF"))
+
+
+def test_21_reproduz_a_linha_13_da_sombra_retroativa(r):
+    # 10/10 20:00:02 Promotom 111252 → post 27964; 20:00:22 Fada 17767 "em
+    # Moda" → post 27967; 20:02:22 Samuel 120785 "em Selecionados", o mesmo
+    # MODA1010, absorvida no 27967. A regra dizia NOVA nome_conflitante.
+    d = _decide_real("SamuelF3lipePromo/120785", T.SAMUEL, ML, 140,
+                     [(27964, "promotom/111252", 0, {T.PROMOTOM}),
+                      (27967, "fadadoscupons/17767", 20, {T.FADA})], 27967)
+    r.check((d.acao, d.post, d.motivo) == ("MANTER", 27967, "mesmo_lancamento"),
+            "21.fica_no_mesmo_post", (d.acao, d.post, d.motivo))
+
+
+def test_22_reproduz_a_linha_16_da_sombra_retroativa(r):
+    # 10/10 23:59:57 Promotom 111265 → post 28054; 00:00:13 Samuel 120841 "em
+    # Selecionados" → post 28056; 00:00:14 Fada 17783 "em Auto e Moto", o
+    # mesmo AUTOS1010, absorvida no 28056. A regra dizia NOVA nome_conflitante.
+    d = _decide_real("fadadoscupons/17783", T.FADA, ML, 17,
+                     [(28054, "promotom/111265", 0, {T.PROMOTOM}),
+                      (28056, "SamuelF3lipePromo/120841", 16, {T.SAMUEL})], 28056)
+    r.check((d.acao, d.post, d.motivo) == ("MANTER", 28056, "mesmo_lancamento"),
+            "22.fica_no_mesmo_post", (d.acao, d.post, d.motivo))
+
+
+def test_23_guardas_do_generico(r):
+    CL = T._CL()
+    nome = lambda texto, plat: CL.perfil(T.TEXTO.get(texto, texto), plat).nome
+    # Shopee: "Contas Selecionadas" é campanha (Promotom 111161; Samuel 120479)
+    for k in ("promotom/111161", "SamuelF3lipePromo/120479"):
+        r.check(nome(k, SHP) == "cont-selecionad", f"23.contas_selecionadas_shopee.{k.split('/')[1]}",
+                nome(k, SHP))
+    # o genérico é só do ML: em outra plataforma, "em Selecionados" segue nome
+    r.check(nome("🔥 Cupons Shopee em Selecionados\n\n🎟 R$ 10 OFF", SHP) == "selecionad",
+            "23.outra_plataforma_nao", nome("🔥 Cupons Shopee em Selecionados\n\n🎟 R$ 10 OFF", SHP))
+    # no ML, só a expressão "em/produtos selecionados" sai; "Contas Selecionadas" fica
+    r.check(nome("Cupons Mercado Livre Contas Selecionadas\n\n20% OFF", ML) == "cont-selecionad",
+            "23.contas_selecionadas_ml", nome("Cupons Mercado Livre Contas Selecionadas\n\n20% OFF", ML))
+    # "em Moda" × "em Auto e Moto" no ML continua conflito: o mesmo benefício da
+    # Fada 17767, outra fonte, outro nome → campanha diferente
+    T.TEXTO["sintetico/auto_moto_mesmo_beneficio"] = T.TEXTO["fadadoscupons/17767"].replace(
+        "em Moda", "em Auto e Moto", 1)
+    d = _decide_real("sintetico/auto_moto_mesmo_beneficio", T.SAMUEL, ML, 30,
+                     [(1, "fadadoscupons/17767", 0, {T.FADA})], 1)
+    r.check((d.acao, d.motivo) == ("NOVA", "nome_conflitante"), "23.moda_x_auto_moto_conflito",
+            (d.acao, d.motivo))
 
 
 if __name__ == "__main__":
