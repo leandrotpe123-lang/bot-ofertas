@@ -39,7 +39,7 @@ import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-from brain import config, juiz, politica, precos
+from brain import config, divisao, juiz, politica, precos
 
 # brain/ é a raiz do serviço (Root Directory na Railway); o pacote é brain/brain/.
 AQUI = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -53,13 +53,8 @@ SAIDA_PRESUMIDA = {"low": 450, "medium": 1000, "high": 1800}
 CHARS_POR_TOKEN = 2.8          # PT-BR com emoji; conservador (tokenizador novo)
 
 
-def holdout(caso_id: str) -> bool:
-    return int(hashlib.sha1(caso_id.encode()).hexdigest(), 16) % 2 == 0
-
-
-def em_holdout(d: dict) -> bool:
-    """Caso que inspirou um exemplo do prompt nunca é holdout."""
-    return not d.get("inspirou_prompt") and holdout(d["id"])
+holdout = divisao.holdout          # a divisão mora em brain.divisao (os
+em_holdout = divisao.em_holdout    # exemplos do dono leem a mesma)
 
 
 def carregar(caminho: str = CASOS):
