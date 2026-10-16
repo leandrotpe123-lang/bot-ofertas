@@ -1,0 +1,74 @@
+{
+ "claude-haiku-5-5|high": {
+  "n_chamadas": 10,
+  "todos": {
+   "casos": 10,
+   "casos_estaveis": 10,
+   "chamadas": 10,
+   "n_DOIS_POSTS": 6,
+   "acerto_veredito": 6,
+   "incerto": 4,
+   "r_certo": 7,
+   "certo_DOIS_POSTS": 6,
+   "n_UM_POST": 4,
+   "r_perdeu": 3,
+   "certo_UM_POST": 1
+  },
+  "holdout": {},
+  "dono": {
+   "casos": 5,
+   "casos_estaveis": 5,
+   "chamadas": 5,
+   "n_UM_POST": 4,
+   "acerto_veredito": 3,
+   "incerto": 2,
+   "r_perdeu": 3,
+   "r_certo": 2,
+   "certo_UM_POST": 1,
+   "n_DOIS_POSTS": 1,
+   "certo_DOIS_POSTS": 1
+  },
+  "lat_p50_ms": 5342.820405960083,
+  "lat_p95_ms": 7545.8738803863525,
+  "usd_por_chamada": 0.00053878,
+  "tokens_in_med": 1924.8,
+  "tokens_out_med": 692.6,
+  "passa": true
+ },
+ "cascata|claude-haiku-5-5→claude-sonnet-5-5": {
+  "n_chamadas": 10,
+  "todos": {
+   "casos": 10,
+   "casos_estaveis": 10,
+   "chamadas": 10,
+   "n_DOIS_POSTS": 6,
+   "acerto_veredito": 6,
+   "incerto": 4,
+   "r_certo": 7,
+   "certo_DOIS_POSTS": 6,
+   "n_UM_POST": 4,
+   "r_perdeu": 3,
+   "certo_UM_POST": 1
+  },
+  "holdout": {},
+  "dono": {
+   "casos": 5,
+   "casos_estaveis": 5,
+   "chamadas": 5,
+   "n_UM_POST": 4,
+   "acerto_veredito": 3,
+   "incerto": 2,
+   "r_perdeu": 3,
+   "r_certo": 2,
+   "certo_UM_POST": 1,
+   "n_DOIS_POSTS": 1,
+   "certo_DOIS_POSTS": 1
+  },
+  "lat_p50_ms": 5342.820405960083,
+  "lat_p95_ms": 7545.8738803863525,
+  "usd_por_chamada": 0.00053878,
+  "tokens_in_med": 1924.8,
+  "tokens_out_med": 692.6,
+  "passa": true
+ }
+}
