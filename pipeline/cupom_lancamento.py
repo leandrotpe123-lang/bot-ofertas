@@ -74,18 +74,6 @@ _NOME_FORA = frozenset({
     "sem",
 })
 
-# Expressão que, NAQUELA plataforma, aponta a lista de produtos do cupom e
-# não é nome de campanha (decisão do dono, 16/10). Caso: no Mercado Livre,
-# "Cupom Mercado Livre em Selecionados" (Samuel 120785) virava `selecionad`
-# e separava o MESMO MODA1010 da Fada 17767 "em Moda"; idem Samuel 120841
-# × Fada 17783 "em Auto e Moto", AUTOS1010 (sombra retroativa de 07–15/10,
-# linhas 13 e 16). "produtos selecionados" também é genérico. Só no ML: na
-# Shopee, "Contas Selecionadas" (Promotom 111161) é campanha de verdade.
-_GENERICO_PLATAFORMA = {
-    "mercadolivre": re.compile(r"\s*\b(?:em|produtos)\s+selecionad[oa]s\b",
-                               re.IGNORECASE),
-}
-
 # Nome de OUTRA plataforma nunca é nome (decisão do dono, 14/10). Caso:
 # Promotom 111088, post de Mercado Livre que virou `shopee-use`.
 _PALAVRAS_PLATAFORMA = {
@@ -165,21 +153,16 @@ def _sem_palavras(w: str, fora: frozenset) -> str:
 
 
 def _titulo_limpo(texto: str, plat: str) -> str:
-    """O texto com as palavras de _NOME_FORA e de outras plataformas, e a
-    expressão genérica da própria plataforma (_GENERICO_PLATAFORMA),
+    """O texto com as palavras de _NOME_FORA e de outras plataformas
     retiradas da 1ª linha não vazia — a linha que nome_declarado lê. Tirar
     antes (e não da saída) evita que a sobra passe de 3 palavras e o nome
     suma. Nenhum espaço duplo novo nasce (ele encerra o título em
-    _linha_titulo): o pedaço que fica vazio sai inteiro, e a expressão sai
-    com o espaço que a antecede."""
+    _linha_titulo): o pedaço que fica vazio sai inteiro."""
     fora = _NOME_FORA | frozenset().union(
         *(v for k, v in _PALAVRAS_PLATAFORMA.items() if k != plat))
-    generico = _GENERICO_PLATAFORMA.get(plat)
     linhas = (texto or "").split("\n")
     for i, linha in enumerate(linhas):
         if linha.strip():
-            if generico is not None:
-                linha = generico.sub("", linha)
             pedacos = []
             for w in linha.split(" "):
                 limpo = _sem_palavras(w, fora)
