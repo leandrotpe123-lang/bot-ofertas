@@ -152,7 +152,7 @@ EVENTOS_ANEL_MAX_BYTES = _int_env("EVENTOS_ANEL_MAX_BYTES", 32 << 20,
 # CUPOM_LIBERACAO_SOMBRA, CUPOM_INCERTO); o comportamento é o de sempre.
 # "ATIVO": a regra nova decide a família. Ligar exige PR do dono depois dos
 # critérios escritos no PR da frente (≥ 5 dias de sombra revisada, zero erro).
-CUPOM_MODO = "ATIVO"
+CUPOM_MODO = "SOMBRA"
 # Fonte: todo o log disponível na Railway, 07/10 09:07 → 14/10 09:08 UTC
 # (medição de 14/10/2026). Δ = da estampa do post vivo até a mensagem nova.
 #   Mesmo lançamento, fontes diferentes — ML: n=18, 16 casos ≤ 5,6 min (+10,8
