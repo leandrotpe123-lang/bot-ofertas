@@ -124,7 +124,7 @@ marcado como código, que na prévia é o `<code>`. Nada é inferido do texto.
 
 **Existem e respondem sem login**, nos 7 canais medidos:
 - o canal: `fullpromotion`;
-- o canal de cupons: `FullPromotionCupons`;
+- o canal de cupons (`CANAL_CUPONS`);
 - as fontes: `promotom`, `fumotom`, `fadadoscupons`, `SamuelF3lipePromo` e
   `fadapromos`.
 
@@ -610,6 +610,9 @@ ML). A medição mais nova, de 5 dias sem o 10.10, está no PR #19: 22 h 3,8;
    - variável `BRAIN_DONO_CHAT_ID` no `brain`;
    - o código só responde a mensagens do `BRAIN_DONO_CHAT_ID`. Qualquer
      outro chat é ignorado sem resposta, e cada recusa conta no log.
+   - **Feito pelo dono em 16/10:** bot criado, grupos desligados e
+     `/start` feito. O token gerado na criação foi revogado; o novo só nasce
+     na configuração do ALERTA. Nenhum uso do bot até o ALERTA.
 
 **Para o v1 e a AÇÃO** (cada um no seu PR):
 8. Variáveis da F1.1 no worker (J) e da porta de pedidos (F). São mudanças de
@@ -681,7 +684,7 @@ Já a ligação mensagem → post não aparece em prévia nenhuma: só o worker 
 | 5 | Custo dispara no BF | tetos diários e limite na chave; pré-filtro (3–14% dos posts); cascata só quando precisa; tetos refeitos com o medido |
 | 6 | Modelo ou API mudam | modelo e effort no log; `CONFIGS_VALIDADAS`; recusa vira INCERTO; SDK fixado; bancada a cada mudança |
 | 7 | IA lenta | a IA nunca está no caminho da publicação; timeout de 30 s; fora da janela não age; meta medida por segmento |
-| 8 | Rótulos inconsistentes | dono e meu separados; itens 10, 15, 17 e 20 a confirmar (áudio × escrita); holdout; dono revisa os meus |
+| 8 | Rótulos inconsistentes | dono e meu separados; itens 10, 15, 17 e 20 resolvidos pela R1–R3 do dono (E); F05, F33, F41, F49, F50 e E24 fora do teste até a marcação do dono; holdout; dono revisa os meus |
 | 9 | Merge do Brain redeploya o worker | Watch Paths `!/brain/**` antes do primeiro merge; serviço com Root `/brain` |
 | 10 | Vazamento de chave ou abuso da porta de pedidos | chave só em variável, nunca impressa; nenhum token da Railway no Brain; bot só responde ao dono e não entra em grupo; porta só na rede privada, com HMAC, idempotência, limite e segredo próprio |
 
@@ -689,7 +692,7 @@ Já a ligação mensagem → post não aparece em prévia nenhuma: só o worker 
 
 **Fatos** (prévia de 15/10 e código da `main` em `670024a`):
 - 29156 e 29161 dão "Post not found": o dono os apagou à mão.
-- Os espelhos 381 e 384 do canal de cupons também dão "Post not found".
+- Os espelhos 381 e 384 no `CANAL_CUPONS` também dão "Post not found".
   Não conferi nos logs quem os apagou. Hipótese: o dono, à mão.
 - O worker só escuta exclusão nas **fontes**:
   `events.MessageDeleted(chats=fontes)` em `pipeline/origem_apagada.py:140`.
@@ -710,8 +713,14 @@ Já a ligação mensagem → post não aparece em prévia nenhuma: só o worker 
   oferta some do canal.
 - O espelho fica no ar sem o principal, salvo se o dono o apagar também.
 - O dono costuma apagar a **duplicata** (29156 do trio ML; 29161 dos
-  "Renovados"). Então a mensagem seguinte da mesma campanha deveria ir para
-  o post que ficou, e não abrir um post novo. **Decisão do dono.**
+  "Renovados").
+
+**Decisão do dono (16/10):**
+- Quando o dono apaga a duplicata, a mensagem seguinte da mesma campanha
+  vai para o **post que ficou**. Não abre post novo.
+- O espelho do post apagado no `CANAL_CUPONS` **sai junto**.
+- **Ordem:** a frente M (itens 1 e 2 abaixo) vem **depois do PR #19**, em
+  PR próprio, com teste de reprodução do 29156/29161.
 
 **Proposta, em ordem** (cada item é frente própria, com teste de reprodução
 do 29156/29161):
@@ -743,8 +752,9 @@ do 29156/29161):
    - no v1, no máximo um pedido de **conferência** ao worker, que
      revalida com `get_messages` sob os locks normais.
 
-**Recomendação:** 1 + 2 no worker, e o Brain só alertando. Até lá, o
-relatório diário lista os posts "Post not found" e os espelhos deles.
+**Recomendação:** 1 + 2 no worker, depois do PR #19, e o Brain só
+alertando. Até lá, o relatório diário lista os posts "Post not found" e os
+espelhos deles.
 
 ## Pendências do dono
 
@@ -753,8 +763,7 @@ relatório diário lista os posts "Post not found" e os espelhos deles.
    teste.
 3. ~~Aprovar o orçamento do teste.~~ Aprovado em etapas (E). Falta **criar
    a chave `BRAIN_TESTE_CHAVE`**.
-4. **Post apagado à mão (M):** decidir o que a mensagem seguinte da mesma
-   campanha faz (vai para o post que ficou, ou abre post novo) e se o
-   espelho sai junto.
+4. ~~Post apagado à mão (M): decidir o que a mensagem seguinte faz.~~
+   Decidido em 16/10: vai para o post que ficou, e o espelho sai junto (M).
 5. **Opcional:** revisar os 63 rótulos meus no `casos.json`
    (`fonte_rotulo: "claude"`).
