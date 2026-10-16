@@ -41,6 +41,8 @@ def test_01_prompt_tem_os_principios_do_dono(r):
     r.check("não importa quanto tempo passou" in J.SISTEMA, "01.P1_sem_tempo")
     r.check("entre crases" in J.SISTEMA, "01.P7_codigo_entre_crases")
     r.check("24 horas corridas" in J.SISTEMA, "01.janela_24h_corrida")
+    faltam = [m for m in C.MOTIVOS if m not in J.SISTEMA]
+    r.check(not faltam, "01.prompt_explica_todo_motivo_de_selecao", faltam)
 
 
 def test_02_prompt_sem_prefira_incerto_e_sem_renovado_como_lembrete(r):
