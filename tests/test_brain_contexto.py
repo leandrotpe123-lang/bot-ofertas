@@ -2,7 +2,7 @@
 Brain — contexto do dia em tempo real (decisão do dono, 16/10): janela de
 24 h CORRIDAS (nunca o dia do calendário), só em RAM, e a escolha dos
 candidatos pelo código (mesmo link → mesmo código → mesmo produto → texto
-parecido → mesma plataforma; no máximo N). Hermético.
+parecido → link de página → mesma plataforma; no máximo N). Hermético.
 
     python tests/test_brain_contexto.py
 """
@@ -103,6 +103,46 @@ def test_14_sinais_plataforma_link_produto(r):
             and C.link_normalizado("https://meli.la/1YWW8RC") != "meli.la/1yww8rC", "14.caminho_diferencia_caixa")
     r.check(C.eh_produto("🔥 Fone\n\n✅ R$ 64") and not C.eh_produto("🎟 20% OFF acima de R$89, limite R$40"),
             "14.produto_x_cupom")
+
+
+def test_15_link_de_pagina_mesmo_tipo_mesmo_segundo_e_plataforma_informada(r):
+    pagina = "https://s.shopee.com.br/AAHdNLxGSX"          # página de cupons (seco 29047 × 29397)
+    alvo = post(50, "2026-10-16T02:59:00", "🔥 Novo Cupom Shopee 20% OFF\n🎟 limite R$ 40", [pagina])
+    seco = post(1, "2026-10-15T03:00:00", "Cupons Shopee da semana", [pagina])
+    produtos = [post(10 + i, f"2026-10-16T0{i}:10:00", f"Produto {i} qualquer\n\n✅ R$ {50 + i}\nResgate os cupons",
+                     [pagina, f"https://s.shopee.com.br/P{i}"]) for i in range(5)]
+    res = C.candidatos(alvo, [seco] + produtos)
+    r.check([(c.post.id, c.motivo) for c in res] == [("canal:1", "link_de_pagina")],
+            "15.link_em_mais_de_3_posts_e_de_pagina_e_produto_nao_entra_no_cupom",
+            [(c.post.id, c.motivo) for c in res])
+    raro = C.candidatos(alvo, [seco] + produtos[:2])            # sinal forte vale entre tipos
+    r.check(sorted((c.post.id, c.motivo) for c in raro) == [("canal:1", "mesmo_link"), ("canal:10", "mesmo_link"),
+                                                            ("canal:11", "mesmo_link")],
+            "15.ate_3_posts_e_mesmo_link", [(c.post.id, c.motivo) for c in raro])
+    r.check(C.eh_produto("🔥 Cupom Magalu R$ 100 OFF em Bicicletas: CUPOMBIKE100\n\n🔹 Bicicleta Aro 12 = R$ 172")
+            is False and C.eh_produto(alvo.texto) is False, "15.titulo_com_cupom_e_cupom_26449")
+    prod_alvo = post(60, "2026-10-16T12:00:00", "Mouse Gamer Redragon\n\n✅ R$ 89", ["https://meli.la/M1"])
+    cupom_ml = post(2, "2026-10-16T11:00:00", "Cupom Mercado Livre 10% OFF", ["https://meli.la/C1"])
+    prod_ml = post(3, "2026-10-16T10:00:00", "Teclado Mecânico\n\n✅ R$ 199", ["https://meli.la/T1"])
+    r.check([c.post.id for c in C.candidatos(prod_alvo, [cupom_ml, prod_ml])] == ["canal:3"],
+            "15.mesma_plataforma_so_entre_mesmo_tipo")
+    mesmo_seg = post(4, "2026-10-16T02:59:00", "Novo Cupom Shopee 20% OFF limite R$ 40", [])
+    r.check([c.post.id for c in C.candidatos(alvo, [mesmo_seg])] == ["canal:4"], "15.mesmo_segundo_entra")
+    sem_link = C.Post("fonte:x/1", "fonte", ts("2026-10-16T01:00:00"), "Oferta relâmpago 20% OFF",
+                      plataforma="shopee")
+    r.check(C.plataforma(sem_link) == "shopee"
+            and [c.motivo for c in C.candidatos(alvo, [sem_link])] == ["mesma_plataforma"],
+            "15.plataforma_informada_vale_sem_link")
+
+
+def test_16_dentro_do_motivo_semelhanca_menos_tempo(r):
+    alvo = post(70, "2026-10-16T12:00:00", "Cupom Shopee 30% OFF VIP", ["https://s.shopee.com.br/V"])
+    longe_igual = post(1, "2026-10-15T13:00:00", "Cupom Shopee 30% OFF VIP", ["https://s.shopee.com.br/V"])
+    perto_parecido = post(2, "2026-10-16T11:50:00", "Cupom Shopee 30% OFF", ["https://s.shopee.com.br/V"])
+    res = C.candidatos(alvo, [longe_igual, perto_parecido])
+    r.check([c.post.id for c in res] == ["canal:2", "canal:1"], "16.perto_e_parecido_antes_de_igual_23h_antes",
+            [(c.post.id, c.semelhanca, round(c.delta_s / H, 1)) for c in res])
+    r.check(res[1].semelhanca == 1.0 and res[0].delta_s == 600.0, "16.campos_do_candidato")
 
 
 if __name__ == "__main__":
