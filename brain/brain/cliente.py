@@ -79,6 +79,41 @@ class ClienteAnthropic:
         except (a.APIConnectionError, a.APITimeoutError):
             raise ErroTransitorio("rede") from None
 
+    # ── Consultas que não geram cobrança de tokens ──────────────────────
+    # Models API (GET /v1/models/{id}) e contagem de tokens
+    # (POST /v1/messages/count_tokens): servem para confirmar capacidade
+    # (ex.: imagem) e medir o tamanho real do pedido ANTES de gastar.
+
+    def capacidades(self, modelo: str) -> dict:
+        """Capacidades do modelo pela Models API. Devolve só o que o Brain
+        usa: id, janela de entrada, saída máxima e se lê imagem."""
+        c = self._cliente()
+        a = self._mod
+        try:
+            d = c.models.retrieve(modelo).to_dict()
+        except a.APIStatusError as e:
+            raise ErroPermanente(str(e.status_code)) from None
+        except (a.APIConnectionError, a.APITimeoutError):
+            raise ErroTransitorio("rede") from None
+        caps = d.get("capabilities") or {}
+        return {"id": d.get("id"), "max_input_tokens": d.get("max_input_tokens"),
+                "max_tokens": d.get("max_tokens"),
+                "image_input": bool((caps.get("image_input") or {}).get("supported"))}
+
+    def contar_tokens(self, params: dict) -> int:
+        """Tokens de ENTRADA do pedido (sistema, mensagens, imagens, schema),
+        sem gerar resposta."""
+        c = self._cliente()
+        a = self._mod
+        p = {k: params[k] for k in ("model", "system", "messages", "thinking",
+                                    "output_config") if k in params}
+        try:
+            return int(c.messages.count_tokens(**p).input_tokens)
+        except a.APIStatusError as e:
+            raise ErroPermanente(str(e.status_code)) from None
+        except (a.APIConnectionError, a.APITimeoutError):
+            raise ErroTransitorio("rede") from None
+
 
 _TRAVA_AMBIENTE = threading.Lock()
 
