@@ -205,7 +205,8 @@ def test_06b_anthropic_api_key_nunca_serve_de_chave_de_teste(r):
     with _ambiente(BRAIN_TESTE_CHAVE=None, ANTHROPIC_API_KEY="credencial-do-claude-code"), \
             contextlib.redirect_stdout(io.StringIO()) as out:
         rc = A.main(["piloto", "--confirmar"])
-    r.check(rc == 2 and A.chave_de_teste() is None, "06b.recusa", rc)
+        sem_chave = A.chave_de_teste() is None   # dentro do bloco: fora, a variável já voltou
+    r.check(rc == 2 and sem_chave, "06b.recusa", rc)
     r.check("credencial-do-claude-code" not in out.getvalue(), "06b.nao_imprime")
 
 
