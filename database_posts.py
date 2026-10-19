@@ -118,7 +118,9 @@ def db_posts_vivos_com_prefixo(prefixo: str) -> list[int]:
     fundido) que possuem ou exibem alguma âncora começando por
     `prefixo`. Uso: adoção de cupom sem nome (familia), que precisa
     enxergar as famílias de assinatura de uma plataforma sem conhecer
-    os valores. Prefixo vazio → []."""
+    os valores. Prefixo vazio → [].
+    [Frente M] Sem o post que o DONO apagou (remoção marcada): ele só
+    absorve a própria identidade, nunca é escolhido por adoção ou regra."""
     if not prefixo:
         return []
     padrao = (prefixo.replace("\\", "\\\\").replace("%", "\\%")
@@ -133,7 +135,8 @@ def db_posts_vivos_com_prefixo(prefixo: str) -> list[int]:
                 "        SELECT identity, msg_id_dest FROM post_exibida"
                 "         WHERE identity LIKE ? ESCAPE '\\') x"
                 "  JOIN post_estado pe ON pe.msg_id_dest = x.msg_id_dest"
-                f" WHERE {_VIVO_PE} ORDER BY x.msg_id_dest",
+                f" WHERE {_VIVO_PE} AND pe.delete_status IS NULL"
+                " ORDER BY x.msg_id_dest",
                 (padrao, padrao, time.time())).fetchall()
         return [r[0] for r in rows]
     except Exception as e:
@@ -401,6 +404,75 @@ def db_desvincular_origem(chat: str, msg_id: int, dest: int,
     except Exception as e:
         log_db.error(f"❌ db_desvincular_origem: {e}")
         return ("erro", 0)
+
+
+def db_silenciar_post_apagado(dest: int, agora: float) -> str:
+    """[Frente M] O DONO apagou o post `dest` do canal e não há post vivo da
+    mesma campanha para recebê-lo (com post que ficou, o caminho é a fusão:
+    db_fundir_posts). Numa transação só, se o post está vivo e não foi
+    fundido nem encerrado: marca a remoção física 'pendente' (o espelho do
+    canal de cupons sai pelo caminho de sempre) e apaga a composição
+    EXIBIDA — nada dele está no ar, e a convergência só enxerga o que é
+    exibido. A vida, as âncoras (oferta_index) e o vínculo de origem NÃO
+    mudam: até o fim da vida ele segue dono da identidade, e a publicação
+    absorve o que chegar para ele sem tocar o canal (pipeline.publicacao).
+    Esquecer a identidade, como na exclusão pela FONTE, traria o post
+    apagado de volta na edição da própria fonte (NOVO ENVIO).
+    Devolve:
+      "silenciado"   apagado do ar, dono da identidade até o fim da vida;
+      "ja_removido"  fundido, encerrado ou com remoção já marcada;
+      "fora_da_vida" a vida já tinha acabado: só marca a remoção (espelho);
+      "sem_post"     o post não está no banco;
+      "erro"         nada mudou (rollback)."""
+    try:
+        with _db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                pe = db.execute(
+                    "SELECT fused_into, delete_status, janela_fim FROM post_estado"
+                    " WHERE msg_id_dest=?", (dest,)).fetchone()
+                if pe is None:
+                    res = "sem_post"
+                elif pe[0] is not None or pe[1] is not None:
+                    res = "ja_removido"
+                elif float(pe[2] or 0.0) <= agora:
+                    # vida já acabou: nada a esquecer, mas o espelho sai
+                    # junto (decisão do dono) — a remoção fica marcada.
+                    db.execute(
+                        "UPDATE post_estado SET delete_status='pendente'"
+                        " WHERE msg_id_dest=?", (dest,))
+                    res = "fora_da_vida"
+                else:
+                    db.execute(
+                        "UPDATE post_estado SET delete_status='pendente'"
+                        " WHERE msg_id_dest=?", (dest,))
+                    db.execute("DELETE FROM post_exibida WHERE msg_id_dest=?",
+                               (dest,))
+                    res = "silenciado"
+                db.execute("COMMIT")
+            except Exception:
+                db.execute("ROLLBACK")
+                raise
+        return res
+    except Exception as e:
+        log_db.error(f"❌ db_silenciar_post_apagado: {e}")
+        return "erro"
+
+
+def db_posts_vivos_recentes(agora: float, limite: int = 100) -> list[int]:
+    """[Frente M] Posts VIVOS (janela aberta, não fundidos, sem remoção
+    marcada), do mais novo para o mais antigo — o lote que a conferência
+    do destino pergunta ao Telegram (até 100 ids por chamada)."""
+    try:
+        with _db() as db:
+            return [int(r[0]) for r in db.execute(
+                f"SELECT msg_id_dest FROM post_estado WHERE {_VIVO_SQL}"
+                " AND delete_status IS NULL"
+                " ORDER BY msg_id_dest DESC LIMIT ?",
+                (agora, int(limite))).fetchall()]
+    except Exception as e:
+        log_db.error(f"❌ db_posts_vivos_recentes: {e}")
+        return []
 
 
 def db_origens_do_post(dest: int) -> list:

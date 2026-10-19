@@ -40,11 +40,13 @@ from database_posts import (
     db_origens_do_post,
     db_overlap_posts,
     db_posts_vivos_com_prefixo,
+    db_posts_vivos_recentes,
     db_registrar_conflito,
     db_registrar_post,
     db_remocoes_pendentes,
     db_remover_post,
     db_set_delete_status,
+    db_silenciar_post_apagado,
     db_transferir_lideranca,
     db_vizinhos,
 )

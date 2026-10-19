@@ -63,6 +63,7 @@ from telethon.errors import FloodWaitError, MessageNotModifiedError
 import config
 from config import GRUPO_DESTINO
 from logger import log_out
+from pipeline import apagados_pelo_worker
 from pipeline.montagem import MensagemMontada
 
 
@@ -288,7 +289,9 @@ async def _substituir_inner_no_sem(
     readquiri-la aqui seria aninhamento."""
     from client import client
     try:
-        # 1. Apaga a mensagem antiga
+        # 1. Apaga a mensagem antiga. [Frente M] Anotada ANTES: o aviso desta
+        # exclusão chega com o post ainda vivo no banco e não é do dono.
+        apagados_pelo_worker.marcar(msg_id_dest_antigo)
         try:
             await client.delete_messages(GRUPO_DESTINO, msg_id_dest_antigo)
         except FloodWaitError as e:
@@ -374,6 +377,7 @@ async def _substituir_post_com_midia(
 async def apagar_post(msg_id_dest: int) -> bool:
     """Apaga a mensagem do destino. True quando o Telegram aceitou."""
     from client import client
+    apagados_pelo_worker.marcar(msg_id_dest)     # [Frente M] não é do dono
     async with config._SEM_ENVIO:
         await client.delete_messages(GRUPO_DESTINO, msg_id_dest)
     return True

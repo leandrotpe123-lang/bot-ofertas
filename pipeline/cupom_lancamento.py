@@ -37,7 +37,8 @@ from pipeline.assunto import beneficio_do_cupom
 from pipeline.assunto_oferta import assinatura_do_beneficio, nome_declarado
 
 __all__ = ["Perfil", "PostVivo", "Decisao", "perfil", "candidato",
-           "pode_mudar", "classificar", "MANTER", "JUNTA", "NOVA", "INCERTO"]
+           "pode_mudar", "classificar", "compativeis", "MANTER", "JUNTA",
+           "NOVA", "INCERTO"]
 
 MANTER, JUNTA, NOVA, INCERTO = "MANTER", "JUNTA", "NOVA", "INCERTO"
 
@@ -439,3 +440,18 @@ def classificar(c: Perfil, chat: str, agora: float, vivos: list,
         delta, mid, motivo = min(incertos)
         return Decisao(INCERTO, mid, motivo, delta)
     return Decisao(MANTER, None, "sem_lancamento_vivo", None)
+
+
+def compativeis(a: Perfil, b: Perfil) -> str:
+    """[Frente M] Dois posts `cupb` da mesma plataforma podem ser o MESMO
+    lançamento? Puro; o tempo e as fontes são de quem chama.
+      "igual"      benefício igual e nenhum nome em conflito;
+      "compativel" nada os separa (benefício ausente de um lado ou não
+                   comparável, nome ausente de um lado);
+      "conflito"   nome ou benefício diferentes — nunca o mesmo post."""
+    if a.nome and b.nome and a.nome != b.nome:
+        return "conflito"
+    r = _beneficio(a, b)
+    if r == "diferente":
+        return "conflito"
+    return "igual" if r == "igual" else "compativel"

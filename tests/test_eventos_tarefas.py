@@ -797,7 +797,9 @@ def _create_tasks(no):
 
 def test_e01_fabricas_criam_em_contexto_vazio(r):
     for rel, fn, co in (("pipeline/convergencia.py", "agendar_remocao", "_remover"),
-                        ("pipeline/espelho_cupons.py", "_tarefa", "_protegido")):
+                        ("pipeline/espelho_cupons.py", "_tarefa", "_protegido"),
+                        ("pipeline/post_apagado.py", "agendar", "apagados"),
+                        ("pipeline/post_apagado.py", "iniciar_conferencia", "_laco")):
         cts = _create_tasks(_funcao(rel, fn))
         ok = (len(cts) == 1 and len(cts[0].args) == 1
               and regua._nome_final(cts[0].args[0].func) == co
@@ -866,6 +868,10 @@ _INVENTARIO = {
     ("pipeline/espelho_cupons.py", "_aguardar", "wait"): "AGUARDADA: a operação anterior do post",
     ("pipeline/espelho_cupons.py", "encerrar", "wait"): "shutdown: o que já está em curso (aguardado)",
     ("pipeline/espelho_cupons.py", "encerrar", "gather"): "shutdown: o que já está em curso (aguardado)",
+    # [Frente M] post apagado à mão pelo dono: handler do destino e conferência
+    ("pipeline/post_apagado.py", "agendar", "create_task"): "INDEPENDENTE: contexto vazio (handler do destino)",
+    ("pipeline/post_apagado.py", "agendar", "add_done_callback"): "CALLBACK: _TAREFAS.discard",
+    ("pipeline/post_apagado.py", "iniciar_conferencia", "create_task"): "INDEPENDENTE: contexto vazio (conferência)",
 }
 
 
@@ -961,7 +967,7 @@ def test_e03_as_unicas_contextvar_sao_as_da_coleta(r):
     r.check(citacoes == {"eventos/coleta.py"}, "E03.contextvar_so_citada_na_coleta",
             f"ContextVar citada fora da coleta: {_REAVALIAR} — {sorted(citacoes)}")
     r.check(importadores == {"eventos/coleta.py", "main.py", "pipeline/convergencia.py",
-                             "pipeline/espelho_cupons.py"},
+                             "pipeline/espelho_cupons.py", "pipeline/post_apagado.py"},
             "E03.importadores_de_contextvars_lista_fechada",
             f"importador novo de contextvars: {_REAVALIAR} — {sorted(importadores)}")
 
@@ -1010,7 +1016,7 @@ def test_e05_callbacks_de_termino_so_limpam_estrutura(r):
                 ok = _so_limpa_estrutura(arg)
             if not ok:
                 ruins.append((rel, dono, ast.unparse(arg)[:80] if arg is not None else "?"))
-    r.check(len(sitios) == 7 and ruins == [], "E05.callbacks_so_limpam_estrutura",
+    r.check(len(sitios) == 8 and ruins == [], "E05.callbacks_so_limpam_estrutura",
             f"sitios={len(sitios)} ruins={ruins}")
 
 
