@@ -70,6 +70,10 @@ VEICULO = {   # produto que o link de tutorial do ML resolve (logs de produção
 }
 
 TEXTO = {
+    # 18/10 22:00–22:37 UTC (prévia pública): o relâmpago ML de 20% em três fontes.
+    'promotom/111543': 'Próximo Cupom 20% OFF Mercado Livre\n\n•Tutorial para resgate: \n1 Entre no APP do Meli aqui: \n2 Clique em "Início" no rodapé do APP \n3 Depois no carrossel no canto superior esquerdo clique em "CUPONS RELÂMPAGO TODOS OS DIAS" \n4 Resgate o cupom',
+    'fadadoscupons/17883': '🔥 Cupom 20% OFF Mercado Livre Full\n\nResgate agora e use 00h\n\n🚨🚨 LEIA PARA RESGATAR:\n1. Entre no APP 👇\n2. Clique em "Início" no rodapé do APP\n3. Depois, escolha o banner “Cupons Relâmpago”\n4. Resgate o cupom',
+    'SamuelF3lipePromo/121892': '🔥 Próximo Cupom 20% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em "Início" no rodapé do APP\n3. Depois no carrossel no canto superior esquerdo clique em "CUPONS RELÂMPAGO TODOS OS DIAS"\n4. Resgate o cupom\n\nanúncio',
     'SamuelF3lipePromo/120080': '🔥 Próximo Cupom 25% OFF Mercado Livre\n\n⚠️ Resgate agora e use 00h\n\n⭐️ Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em "Mais" no rodapé do APP\n3 Depois clique em "Cupons relâmpago"\n4 Resgate o cupom\n\nanúncio',
     'SamuelF3lipePromo/120276': '🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em "Mais" no rodapé do APP\n3. Depois clique em "Cupons relâmpago"\n4. Resgate o cupom\n\nanúncio',
     'SamuelF3lipePromo/120285': '🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em "Mais" no rodapé do APP\n3. Depois clique em "Cupons relâmpago"\n4. Resgate o cupom\n\nanúncio',
@@ -146,6 +150,10 @@ F14_16 = [("promotom/111103", ML, 0), ("fadadoscupons/17687", ML, 48),
           ("SamuelF3lipePromo/120345", ML, 77)]              # série das 02h
 F30 = [("fadadoscupons/17712", SHP, 0), ("SamuelF3lipePromo/120532", SHP, 264)]
 F06 = [("promotom/111079", ML, 0), ("SamuelF3lipePromo/120276", ML, 210)]
+# 18/10: Promotom 22:00:35 (post 29716), Fada 22:02:42 (Δ 2,1 min, virou o
+# 29717) e Samuel 22:37:13 (Δ 36,6 min do 29716, entrou nele como DUP).
+P1_1810 = [("promotom/111543", ML, 0), ("fadadoscupons/17883", ML, 127),
+           ("SamuelF3lipePromo/121892", ML, 34 * 60 + 31)]
 JUNTAM = {"F02": F02, "F11": F11, "F12": F12, "F14_16": F14_16, "F30": F30}
 CINZA = {   # zona cinzenta / sem regra: comportamento de hoje
     "F07": [("promotom/111082", SHP, 0), ("fadadoscupons/17674", SHP, 588)],
@@ -407,7 +415,12 @@ def test_05_tabela_de_decisao(r):
         ("mesma_fonte_liberacao", dec(pct50, "A", [vivo(pct50, 1530)], 1), ("NOVA", "mesma_fonte")),
         ("mesma_fonte_na_rajada", dec(pct50, "A", [vivo(pct50, 180)], 1), ("INCERTO", "mesma_fonte_na_rajada")),
         ("lembrete_mesma_fonte", dec(lemb, "A", [vivo(pct50, 1200)], 1), ("INCERTO", "lembrete_mesma_fonte")),
-        ("acima_do_superior", dec(pct50, "B", [vivo(pct50, 3300)], 1), ("NOVA", "acima_do_superior")),
+        # P1 (16/10): fontes diferentes, mesmo benefício, Δ > SUPERIOR → o de hoje (caso 18/10, teste 33)
+        ("acima_do_superior", dec(pct50, "B", [vivo(pct50, 3300)], 1), ("INCERTO", "acima_do_superior")),
+        ("acima_do_superior_beneficio_diferente", dec(P("", "30", frozenset(), False), "B", [vivo(pct50, 3300)], 1),
+         ("NOVA", "beneficio_diferente")),
+        ("acima_do_superior_mesma_fonte", dec(pct50, "A", [vivo(pct50, 3300)], 1), ("NOVA", "mesma_fonte")),
+        ("acima_do_superior_sem_familia", dec(pct50, "B", [vivo(pct50, 3300)], None), ("MANTER", "sem_lancamento_vivo")),
         ("faixa_cinzenta_com_familia", dec(pct50, "B", [vivo(pct50, 900)], 1), ("INCERTO", "faixa_cinzenta")),
         ("junta_sem_familia", dec(pct50, "B", [vivo(vip50, 60)], None), ("JUNTA", "mesmo_lancamento")),
         ("ambiguo", dec(pct50, "B", [vivo(vip50, 60, mid=1), vivo(pct50, 30, mid=2)], None), ("INCERTO", "ambiguo")),
@@ -891,6 +904,24 @@ def test_32_edicao_nunca_entra_na_regra(r):
         r.check(foto == hoje, f"32.{modo}.igual_a_hoje",
                 f"{foto['novos']} × {hoje['novos']}")
         r.check(not linhas, f"32.{modo}.sem_linha", str(linhas))
+
+
+def test_33_p1_outro_grupo_acima_do_superior_nao_abre_post(r):
+    # Regra do dono (P1, 16/10): outro grupo publicando a mesma oferta que
+    # ainda vale é duplicata, não importa o tempo. Caso real de 18/10: a
+    # sombra registrou CUPOM_LIBERACAO_SOMBRA acima_do_superior para o
+    # Samuel 121892 contra o 29716 — em ATIVO, um post a mais com o mesmo
+    # cupom de 20%. Acima do SUPERIOR, entre fontes diferentes, sem benefício
+    # ou nome que separe, a decisão é a de hoje (INCERTO, registrado).
+    for modo, novos, posts in (("SOMBRA", 2, [0, 1, 0]), ("ATIVO", 1, [0, 0, 0])):
+        cena = _cena(P1_1810, modo)
+        f = cena["foto"]
+        r.check(f["novos"] == novos and f["posts"] == posts, f"33.{modo}.posts",
+                f"novos={f['novos']} posts={f['posts']}")
+        got = _marcas(cena["linhas"])
+        sufixo = "" if modo == "ATIVO" else "_SOMBRA"
+        r.check(got == [(f"CUPOM_ENCONTRO{sufixo}", "mesmo_lancamento"),
+                        ("CUPOM_INCERTO", "acima_do_superior")], f"33.{modo}.linhas", str(got))
 
 
 if __name__ == "__main__":

@@ -321,7 +321,8 @@ class Decisao:
 # INCERTO que merece registro (calibração da sombra). Os demais INCERTO
 # coincidem com o que hoje já acontece e não viram linha.
 _INCERTO_COM_FAMILIA = frozenset({
-    "faixa_cinzenta", "lembrete_mesma_fonte", "mesma_fonte_na_rajada"})
+    "faixa_cinzenta", "lembrete_mesma_fonte", "mesma_fonte_na_rajada",
+    "acima_do_superior"})
 _INCERTO_SEM_FAMILIA = frozenset({
     "faixa_cinzenta", "sem_beneficio", "valor_nome_x_sem_nome",
     "beneficio_incomparavel"})
@@ -375,7 +376,13 @@ def _relacao(c: Perfil, chat: str, p: PostVivo, agora: float,
     if b == "diferente":
         return NOVA, "beneficio_diferente", delta
     if delta > superior_s:
-        return NOVA, "acima_do_superior", delta
+        # P1 do dono (16/10): outro grupo publicando a mesma oferta que ainda
+        # vale é duplicata, não importa o tempo. Entre fontes diferentes o
+        # tempo sozinho nunca abre post novo — só benefício ou nome diferente
+        # (acima). Caso real, 18/10 22:37 UTC: Samuel 121892 "Próximo Cupom
+        # 20% OFF" × post 29716 (Promotom, 20%), Δ 36,6 min — NOVA aqui era
+        # um post a mais com o mesmo cupom. Fica o comportamento de hoje.
+        return INCERTO, "acima_do_superior", delta
     if delta > rajada_s:
         return INCERTO, "faixa_cinzenta", delta
     if b == "igual":
@@ -394,6 +401,7 @@ def pode_mudar(chat: str, agora: float, nascimento: float, fontes: frozenset,
                superior_s: float) -> bool:
     """SEM família, só um post de OUTRA fonte nascido há ≤ SUPERIOR pode
     virar JUNTA ou INCERTO registrável. Para os demais, _relacao dá NOVA
+    (benefício ou nome diferente), INCERTO não registrável sem família
     (acima do SUPERIOR) ou o desfecho de mesma fonte (NOVA ou INCERTO de
     mesma fonte) — e nada disso muda a decisão sem família. Quem lê o
     banco usa isto para nem calcular o perfil desses posts (D.5); o
@@ -427,7 +435,8 @@ def classificar(c: Perfil, chat: str, agora: float, vivos: list,
         if acao == JUNTA:
             juntas.append((delta, p.msg_id, motivo))
         elif acao == INCERTO and motivo in _INCERTO_SEM_FAMILIA:
-            # Δ ≤ SUPERIOR por construção: acima dele _relacao dá NOVA.
+            # Δ ≤ SUPERIOR: acima dele o INCERTO (acima_do_superior) não
+            # está em _INCERTO_SEM_FAMILIA e não muda a decisão sem família.
             incertos.append((delta, p.msg_id, motivo))
     if len(juntas) == 1:
         delta, mid, motivo = juntas[0]
