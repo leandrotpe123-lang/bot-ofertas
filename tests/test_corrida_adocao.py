@@ -43,6 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_cupom_sem_codigo import (                             # noqa: E402
     FADA, PROMOTOM, SAMUEL, _db, cenario, db_ofertas_de_post, msg, publicar)
 from _harness_e5 import rodar                                   # noqa: E402
+import config                                                   # noqa: E402
 from database import db_exibida, db_get_post                    # noqa: E402
 from pipeline import exclusao, familia, origem                  # noqa: E402
 from pipeline.normalizacao import MensagemNormalizada           # noqa: E402
@@ -277,7 +278,19 @@ def test_08_mutex_nunca_vira_ancora(r):
     r.check(m(["shopee|cupb|v:30-299", "shopee|cupb|v:90-899"]) == ["shopee|cupb|*"],
             "08.assinatura")
     r.check(m(["amazon|cupb|v:50-300"]) == ["amazon|cupb|*"], "08.idioma_da_plataforma")
-    r.check(m(["shopee|cupb|tech"]) == [], "08.nome_nao_adota_sem_mutex")
+    # Nome declarado não ADOTA (a adoção é só de genérico ou só de
+    # assinatura): em SOMBRA, sem mutex. Em ATIVO, todo candidato só-`cupb`
+    # entra no mutex da regra lançamento × liberação (contrato em
+    # tests/test_cupom_lancamento.py 12). O modo é fixado aqui: o teste não
+    # pode depender do valor padrão de config.CUPOM_MODO.
+    for modo, esperado in (("SOMBRA", []), ("ATIVO", ["shopee|cupb|*"])):
+        antes = config.CUPOM_MODO
+        config.CUPOM_MODO = modo
+        try:
+            got = m(["shopee|cupb|tech"])
+        finally:
+            config.CUPOM_MODO = antes
+        r.check(got == esperado, f"08.nome_nao_adota_sem_mutex.{modo}", str(got))
     r.check(m(["shopee|cup|V4M0S4PR0V3IT4R"]) == [], "08.codigo_sem_mutex")
     r.check(m(["shopee|cupb|geral"], destinos=("lista:x",)) == [], "08.destino_sem_mutex")
     r.check(m(["shopee|cupb|v:10-50"], container=CHAVE_LIVE) == [MUTEX_LIVE],
