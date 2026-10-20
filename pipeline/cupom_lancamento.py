@@ -37,7 +37,8 @@ from pipeline.assunto import beneficio_do_cupom
 from pipeline.assunto_oferta import assinatura_do_beneficio, nome_declarado
 
 __all__ = ["Perfil", "PostVivo", "Decisao", "perfil", "candidato",
-           "pode_mudar", "classificar", "MANTER", "JUNTA", "NOVA", "INCERTO"]
+           "pode_mudar", "classificar", "MANTER", "JUNTA", "NOVA", "INCERTO",
+           "FAIXA"]
 
 MANTER, JUNTA, NOVA, INCERTO = "MANTER", "JUNTA", "NOVA", "INCERTO"
 
@@ -318,6 +319,12 @@ class Decisao:
     mesma_fonte: bool = False
 
 
+# JUNTA da faixa (RAJADA < Δ ≤ SUPERIOR, fontes diferentes, benefício
+# igual). MONOTÔNICA em relação à regra sem ela: só transforma INCERTO em
+# JUNTA. Com família o resultado é o de antes (INCERTO faixa_cinzenta); sem
+# família ela só conta quando não há JUNTA da rajada.
+FAIXA = "mesmo_beneficio_na_faixa"
+
 # INCERTO que merece registro (calibração da sombra). Os demais INCERTO
 # coincidem com o que hoje já acontece e não viram linha.
 _INCERTO_COM_FAMILIA = frozenset({
@@ -384,6 +391,12 @@ def _relacao(c: Perfil, chat: str, p: PostVivo, agora: float,
         # um post a mais com o mesmo cupom. Fica o comportamento de hoje.
         return INCERTO, "acima_do_superior", delta
     if delta > rajada_s:
+        if b == "igual":
+            # P1 do dono (20/10): outro grupo, MESMO benefício, entre a
+            # RAJADA e o SUPERIOR é o mesmo cupom. Caso real, 19/10 22:14
+            # UTC: Samuel 122157 × post 30102 (Fada), Δ 13,1 min, virou o
+            # 3º post (30104). Só vale sem JUNTA da rajada (classificar).
+            return JUNTA, FAIXA, delta
         return INCERTO, "faixa_cinzenta", delta
     if b == "igual":
         return JUNTA, "mesmo_lancamento", delta
@@ -424,15 +437,20 @@ def classificar(c: Perfil, chat: str, agora: float, vivos: list,
             return Decisao(MANTER, familia_hoje, "familia_fora_da_regra", None)
         acao, motivo, delta = _relacao(c, chat, p, agora, rajada_s, superior_s)
         mesma = chat in p.fontes
+        if acao == JUNTA and motivo == FAIXA:
+            # Com família o post já é o dela: a faixa fica como era.
+            acao, motivo = INCERTO, "faixa_cinzenta"
         if acao == NOVA:
             return Decisao(NOVA, familia_hoje, motivo, delta, mesma)
         if acao == INCERTO and motivo in _INCERTO_COM_FAMILIA:
             return Decisao(INCERTO, familia_hoje, motivo, delta, mesma)
         return Decisao(MANTER, familia_hoje, motivo, delta, mesma)
-    juntas, incertos = [], []
+    juntas, faixa, incertos = [], [], []
     for p in vivos:
         acao, motivo, delta = _relacao(c, chat, p, agora, rajada_s, superior_s)
-        if acao == JUNTA:
+        if acao == JUNTA and motivo == FAIXA:
+            faixa.append((delta, p.msg_id, motivo))
+        elif acao == JUNTA:
             juntas.append((delta, p.msg_id, motivo))
         elif acao == INCERTO and motivo in _INCERTO_SEM_FAMILIA:
             # Δ ≤ SUPERIOR: acima dele o INCERTO (acima_do_superior) não
@@ -443,6 +461,14 @@ def classificar(c: Perfil, chat: str, agora: float, vivos: list,
         return Decisao(JUNTA, mid, motivo, delta)
     if len(juntas) > 1:
         delta, mid, _motivo = min(juntas)
+        return Decisao(INCERTO, mid, "ambiguo", delta)
+    # Só sem JUNTA da rajada (acima): a da faixa nunca desfaz nem troca uma
+    # JUNTA da rajada — ela só transforma o INCERTO de antes em JUNTA.
+    if len(faixa) == 1:
+        delta, mid, motivo = faixa[0]
+        return Decisao(JUNTA, mid, motivo, delta)
+    if len(faixa) > 1:
+        delta, mid, _motivo = min(faixa)
         return Decisao(INCERTO, mid, "ambiguo", delta)
     if incertos:
         delta, mid, motivo = min(incertos)
