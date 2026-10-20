@@ -53,7 +53,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_cupom_sem_codigo import (                             # noqa: E402
-    FADA, PROMOTOM, SAMUEL, _db, cenario, msg, publicar)
+    FADA, PROMOTOM, SAMUEL, _db, msg, publicar)
+from test_cupom_sem_codigo import cenario as _cenario_base       # noqa: E402
 from _harness_e5 import rodar                                   # noqa: E402
 from database import db_exibida, db_get_post, db_ofertas_de_post  # noqa: E402
 from pipeline import (apagados_pelo_worker, espelho_cupons,      # noqa: E402
@@ -97,6 +98,20 @@ class _Espelho:
 
     def __exit__(self, *_):
         espelho_cupons.removido = self._orig
+
+
+def cenario(corpo, modo="SOMBRA"):
+    """O modo da regra CUPOM-SEM-CÓDIGO fica FIXO no cenário: o teste não
+    depende do padrão do config (o #22 liga ATIVO). Os casos reais — duas
+    fontes, dois posts, o dono apaga um — aconteceram em SOMBRA; em ATIVO a
+    regra já junta parte deles (o 03b cobre os dois modos)."""
+    import config
+    antigo = config.CUPOM_MODO
+    config.CUPOM_MODO = modo
+    try:
+        return _cenario_base(corpo)
+    finally:
+        config.CUPOM_MODO = antigo
 
 
 class _M:
@@ -252,12 +267,7 @@ def test_03b_outra_versao_da_campanha_publica(r):
             b = msg(FADA, F_17883, urls_longas=TUTORIAL_F, plat=ML)
             await publicar(b)
             out["fada"] = (c.novos - n, _post_de(b) != pa)
-        antigo = config.CUPOM_MODO
-        config.CUPOM_MODO = modo
-        try:
-            cenario(corpo)
-        finally:
-            config.CUPOM_MODO = antigo
+        cenario(corpo, modo)
         r.check(out["fada"] == (1, True), f"03b.{modo}.fada_publica", str(out["fada"]))
 
 
