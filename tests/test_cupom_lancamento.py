@@ -974,6 +974,14 @@ def test_34_p1_faixa_mesmo_beneficio_outro_grupo_1910(r):
                 f"novos={f['novos']} posts={f['posts']}")
         got = _marcas(cena["linhas"])
         r.check(got == linhas, f"34.{modo}.linhas", str(got))
+    # Pipeline real (publicacao.enviar → familia.lancamento_cupom, banco da
+    # bancada) em ATIVO, contando os posts no destino: com a regra do (a) —
+    # a cópia congelada de classificar no lugar da atual — são 2; com o (b),
+    # 1. Em SOMBRA nada muda (3 posts nos dois).
+    com_a = _cena(P1_1910, "ATIVO", [(_CL(), "classificar", _classificar_a)])["foto"]
+    com_b = _cena(P1_1910, "ATIVO")["foto"]
+    r.check((com_a["novos"], com_b["novos"]) == (2, 1), "34.destino_a_2_ab_1",
+            f"(a)={com_a['novos']} (a+b)={com_b['novos']}")
 
 
 def test_35_rajada_e_faixa_junta_no_da_rajada(r):
@@ -1083,22 +1091,30 @@ def _classificar_a(c, chat, agora, vivos, familia_hoje, rajada_s, superior_s):
 
 
 _TEXTOS_DIF = {
+    # valores com e sem mínimo; nome e sem nome; lembrete e renovado (o
+    # vocabulário real de _RE_LEMBRETE: "Lembrete:" NÃO é lembrete; e todo
+    # "renovad…" também é lembrete, então renovado sem lembrete não existe).
     ML: ["Cupom 20% OFF Mercado Livre", "🔥 Próximo Cupom 20% OFF Mercado Livre",
          "Cupom 30% OFF Mercado Livre", "Cupom R$ 60 OFF em R$ 499 Mercado Livre",
          "Cupom R$60 OFF Mercado Livre", "Cupom R$ 60 OFF em R$ 299 Mercado Livre",
          "Cupom 20% OFF Lojas Oficiais Mercado Livre", "Cupom 20% OFF Mercado Livre Full",
-         "Cupons Mercado Livre — resgate aqui", "Lembrete: cupom 20% OFF Mercado Livre",
-         "Cupons renovados Mercado Livre"],
+         "Cupons Mercado Livre — resgate aqui", "Lembrando! Cupom 20% OFF Mercado Livre",
+         "Cupom R$ 60 OFF Mercado Livre voltando!", "Cupons renovados Mercado Livre",
+         "Renovados! Cupom 20% OFF Mercado Livre"],
     SHP: ["Cupons Shopee", "Novo Cupom Shopee VIP", "Cupom Shopee R$ 20 OFF em R$ 99",
           "Cupom Shopee R$20 OFF", "Cupons Shopee Tech R$ 100 OFF em R$ 999",
-          "Cupons Shopee renovados", "Lembrete: cupom Shopee R$ 20 OFF em R$ 99",
-          "Cupom Shopee 15% OFF", "Novos Cupons Shopee Fidelidade (APP)"],
+          "Cupons Shopee renovados", "Ainda ativo! Cupom Shopee VIP",
+          "Lembrando! Cupom Shopee R$ 20 OFF em R$ 99", "Cupom Shopee 15% OFF",
+          "Novos Cupons Shopee Fidelidade (APP)", "Renovados! Cupons Shopee R$ 20 OFF"],
 }
 
 
 def test_37_diferencial_b_contra_a_so_incerto_vira_junta(r):
-    """Semente fixa, sem rede: só pode haver resultado idêntico (ação, e o
-    post quando a ação é JUNTA ou NOVA) ou INCERTO/MANTER → JUNTA."""
+    """Semente fixa, sem rede. Sem família: só resultado idêntico (ação, e o
+    post quando a ação é JUNTA ou NOVA) ou INCERTO/MANTER → JUNTA. Com
+    família (um dos posts ou fora deles): idêntico em ação, post e motivo.
+    Cobertura exigida: família presente, lembrete e renovado ligados e
+    desligados, valores com e sem mínimo, post da mesma fonte (P2)."""
     import random
     rng = random.Random(20261020)
     perfis = {p: [CL.perfil(t, p) for t in ts] for p, ts in _TEXTOS_DIF.items()}
@@ -1109,7 +1125,10 @@ def test_37_diferencial_b_contra_a_so_incerto_vira_junta(r):
     bordas = [0, 1, 479, 480, 481, 1799, 1800, 1801, 3599]
     agora = 1_000_000.0
     proibidas, viradas, iguais, total = [], 0, 0, 0
-    for _ in range(6000):
+    cob = dict.fromkeys(("familia_presente", "familia_fora", "lembrete_on", "lembrete_off",
+                         "renovado_on", "renovado_off", "valor_com_minimo",
+                         "valor_sem_minimo", "post_mesma_fonte"), 0)
+    for _ in range(8000):
         plat = rng.choice((ML, SHP))
         cand = rng.choice(perfis[plat])
         chat = rng.choice(chats)
@@ -1119,22 +1138,39 @@ def test_37_diferencial_b_contra_a_so_incerto_vira_junta(r):
             fontes = frozenset(rng.sample(chats, rng.randint(1, 2)))
             vivos.append(CL.PostVivo(500 + i, rng.choice(perfis[plat]), agora - idade, fontes))
         sorteio = rng.random()
-        fam = (None if sorteio < 0.6 or not vivos else
+        fam = (None if sorteio < 0.5 or not vivos else
                rng.choice(vivos).msg_id if sorteio < 0.9 else 999)
         a = _classificar_a(cand, chat, agora, vivos, fam, 480.0, 1800.0)
         b = CL.classificar(cand, chat, agora, vivos, fam, 480.0, 1800.0)
         total += 1
+        todos = [cand] + [v.perfil for v in vivos]
+        cob["familia_presente"] += fam is not None and fam != 999
+        cob["familia_fora"] += fam == 999
+        cob["lembrete_on"] += any(x.lembrete for x in todos)
+        cob["lembrete_off"] += not cand.lembrete
+        cob["renovado_on"] += any(x.renovado for x in todos)
+        cob["renovado_off"] += not cand.renovado
+        cob["valor_com_minimo"] += any("-" in v for x in todos for v in x.valores)
+        cob["valor_sem_minimo"] += any(v.startswith("v:") and "-" not in v for x in todos for v in x.valores)
+        cob["post_mesma_fonte"] += any(chat in v.fontes for v in vivos)
+        if fam is not None:
+            ok = (a.acao, a.post, a.motivo) == (b.acao, b.post, b.motivo)
+            iguais += ok
+            if not ok:
+                proibidas.append(("familia", a, b))
+            continue
         mesmo = a.acao == b.acao and (a.acao not in ("JUNTA", "NOVA") or a.post == b.post)
         if mesmo:
             iguais += 1
         elif a.acao in ("INCERTO", "MANTER") and b.acao == "JUNTA":
             viradas += 1
         else:
-            proibidas.append((a, b))
-    r.check(not proibidas, "37.so_incerto_ou_manter_vira_junta",
+            proibidas.append(("sem_familia", a, b))
+    r.check(not proibidas, "37.so_incerto_ou_manter_vira_junta_e_familia_identica",
             f"{len(proibidas)} proibidas, ex.: {proibidas[:2]}")
     r.check(viradas > 0 and iguais > 0, "37.diferencial_nao_vazio",
             f"total={total} iguais={iguais} viradas={viradas}")
+    r.check(all(n > 0 for n in cob.values()), "37.cobertura", str(cob))
 
 
 if __name__ == "__main__":
