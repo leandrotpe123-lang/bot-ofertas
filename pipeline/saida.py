@@ -58,7 +58,8 @@ from __future__ import annotations
 import asyncio
 from typing import NamedTuple, Optional
 
-from telethon.errors import FloodWaitError, MessageNotModifiedError
+from telethon.errors import (FloodWaitError, MessageIdInvalidError,
+                             MessageNotModifiedError)
 
 import config
 from config import GRUPO_DESTINO
@@ -210,6 +211,8 @@ async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
                         parse_mode="md", file=midia,
                     )
                     midia_aplicada = True
+                except MessageIdInvalidError:
+                    raise                   # [Frente M] tratado abaixo (G3)
                 except Exception as e_img:
                     if exigir_imagem:
                         log.info(
@@ -239,6 +242,19 @@ async def _editar_inner_no_sem(msg_id_dest: int, texto_novo: str,
                 )
                 return ResultadoEdicao(False, False)
             await asyncio.sleep(e.seconds)
+        except MessageIdInvalidError as e:
+            # [Frente M] O Telegram não acha a mensagem. NÃO prova que o
+            # dono apagou: no canal principal, para as tentativas e pede a
+            # conferência por id (pipeline.post_apagado), que é quem decide.
+            # O canal de cupons segue o caminho de sempre (nunca suspeita).
+            if destino == GRUPO_DESTINO:
+                log.warning(f"⚠️ [EDIT_POST_SUMIU] dest_id={msg_id_dest} — "
+                            f"sem novas tentativas; conferência por id agendada")
+                apagados_pelo_worker.suspeitar(msg_id_dest, "EDICAO")
+                return ResultadoEdicao(False, False)
+            log.error(f"❌ edit t={t}: {e}")
+            if t < 3:
+                await asyncio.sleep(2 ** t)
         except Exception as e:
             log.error(f"❌ edit t={t}: {e}")
             if t < 3:
@@ -274,6 +290,34 @@ async def editar_por_id(msg_id_dest: int, texto_novo: str,
         )
 
 
+def _exclusao_provada(resultado) -> bool:
+    """[Frente M] Telethon 1.45.0, canal: delete_messages devolve
+    [AffectedMessages] (um por bloco de 100); pts_count = quantas o Telegram
+    apagou DE FATO. Só pts_count > 0 prova a exclusão. 0 (a mensagem já não
+    existia: o dono apagou), lista vazia ou formato desconhecido não provam
+    nada."""
+    if not isinstance(resultado, (list, tuple)) or not resultado:
+        return False
+    total = 0
+    for item in resultado:
+        n = getattr(item, "pts_count", None)
+        if not isinstance(n, int) or isinstance(n, bool):
+            return False
+        total += n
+    return total > 0
+
+
+def _abortar_substituicao(msg_id_dest: int, motivo: str) -> None:
+    """[Frente M] Todo aborto DEPOIS do marcar() termina igual: tira a
+    anotação (o worker não apagou — ou não há prova), pede a conferência
+    por id e não reenvia (o caller cai para a edição comum)."""
+    log_out.warning(f"⚠️ [SUBSTITUICAO_ABORTADA] post:{msg_id_dest} {motivo} — "
+                    f"não reenvia; conferência por id agendada")
+    apagados_pelo_worker.desmarcar(msg_id_dest)
+    apagados_pelo_worker.suspeitar(msg_id_dest, "SUBSTITUICAO")
+    return None
+
+
 # ─────────────────────────────────────────────────────────────────
 # Substituição com mídia (deletar + reenviar).
 # Se delete falha, ABORTA (retorna None). O caller cai pra edição comum
@@ -293,30 +337,30 @@ async def _substituir_inner_no_sem(
         # exclusão chega com o post ainda vivo no banco e não é do dono.
         apagados_pelo_worker.marcar(msg_id_dest_antigo)
         try:
-            await client.delete_messages(GRUPO_DESTINO, msg_id_dest_antigo)
+            apagou = await client.delete_messages(GRUPO_DESTINO, msg_id_dest_antigo)
         except FloodWaitError as e:
             if e.seconds <= 30:
                 await asyncio.sleep(e.seconds)
                 try:
-                    await client.delete_messages(
+                    apagou = await client.delete_messages(
                         GRUPO_DESTINO, msg_id_dest_antigo,
                     )
                 except Exception as e2:
-                    log_out.warning(
-                        f"⚠️ delete 2ª tentativa: {e2} — abortando substituição"
-                    )
-                    return None
+                    return _abortar_substituicao(
+                        msg_id_dest_antigo, f"delete 2ª tentativa: {e2}")
             else:
-                log_out.warning(
-                    f"⚠️ FloodWait {e.seconds}s no delete — abortando substituição"
-                )
-                return None
+                return _abortar_substituicao(
+                    msg_id_dest_antigo, f"FloodWait {e.seconds}s no delete")
         except Exception as e:
-            log_out.warning(
-                f"⚠️ delete_messages: {e} — abortando substituição "
-                f"(caller cai pra edição)"
-            )
-            return None
+            return _abortar_substituicao(
+                msg_id_dest_antigo, f"delete_messages: {e}")
+        # [Frente M] Reenvio só com a exclusão PROVADA. pts_count 0 = a
+        # mensagem já não existia (o dono apagou): reenviar ressuscitaria
+        # o post apagado.
+        if not _exclusao_provada(apagou):
+            return _abortar_substituicao(
+                msg_id_dest_antigo,
+                f"exclusão sem prova (retorno {type(apagou).__name__})")
 
         # 2. Reenvia com a imagem nova
         sent = None

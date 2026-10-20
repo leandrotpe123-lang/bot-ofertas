@@ -29,6 +29,21 @@ CASOS REAIS (prévia pública e logs da Railway):
       tratamento; o anotado pelo worker não entra
   07  post fora da vida: só o espelho sai
 
+  Endurecimento (revisão de 20/10):
+  08  G1 — conferência por ID (conjuntos), nunca por posição: id omitido
+      pelo Telegram é detectado; lista desalinhada, resposta malformada ou
+      exceção não provam ausência
+  09  G2 — a substituição só reenvia com a exclusão PROVADA (pts_count > 0);
+      pts_count 0, vazio, desconhecido, exceção, exceção na 2ª tentativa e
+      FloodWait longo terminam iguais: desmarca + conferência por id + None
+  10  G3 — MessageIdInvalid não prova exclusão: uma chamada só (sem retry),
+      com e sem mídia, exigindo ou não a imagem; quem decide é a
+      confirmação por id
+  11  _aplicar_evolucao → substituição sobre o post já apagado (aviso ainda
+      não chegou): nenhum post novo; confirmado → silenciado, espelho sai
+  12  falha no espelho (editar ou apagar no canal de cupons) nunca dispara a
+      verificação nem apagados() do principal
+
     python tests/test_post_apagado.py
 """
 import asyncio
@@ -82,6 +97,12 @@ class _Espelho:
 
     def __exit__(self, *_):
         espelho_cupons.removido = self._orig
+
+
+class _M:
+    """Message do Telethon: o que importa à conferência é o id."""
+    def __init__(self, i):
+        self.id = i
 
 
 def _post_de(n):
@@ -366,7 +387,7 @@ def test_06_conferencia_pega_o_aviso_perdido(r):
 
         async def get_messages(dest, ids=None):
             perguntados.append(list(ids))
-            return [None if i in sumidos else object() for i in ids]
+            return [None if i in sumidos else _M(i) for i in ids]
         c.get_messages = get_messages
         post_apagado._CONFIRMAR_S = 0.0
         with _Espelho():
@@ -378,10 +399,10 @@ def test_06_conferencia_pega_o_aviso_perdido(r):
         y = msg(FADA, "Cupom Shopee VIP 2\n\nResgate", plat=SHP)
         await publicar(y)
         py = _post_de(y)
-        respostas = iter([[None], [object()]])
+        respostas = iter([[None], [_M(py)]])
 
         async def soluco(dest, ids=None):
-            return next(respostas) if ids == [py] else [object() for _ in ids]
+            return next(respostas) if ids == [py] else [_M(i) for i in ids]
         c.get_messages = soluco
         post_apagado.db_posts_vivos_recentes = lambda agora, lim, _o=post_apagado.db_posts_vivos_recentes: [py]
         try:
@@ -416,6 +437,291 @@ def test_07_fora_da_vida_so_o_espelho(r):
     r.check(out["feitos"] == [(out["pa"], "fora_da_vida", None)], "07.fora_da_vida", str(out["feitos"]))
     r.check(out["espelho"] == [out["pa"]] and out["status"] == "ok", "07.espelho_sai",
             f"{out['espelho']} {out['status']}")
+
+
+# ══════════════════════════════════════════════════════════════════
+# Endurecimento (revisão de 20/10): G1 conferência por id; G2 reenvio só
+# com exclusão provada; G3 MessageIdInvalid não prova exclusão; espelho.
+# ══════════════════════════════════════════════════════════════════
+def _dois_posts(c_out):
+    """pa (Promotom) e pb (Fada, 127 s depois): o par de 18/10."""
+    async def montar_par():
+        a = msg(PROMOTOM, P_111543, urls_longas=TUTORIAL_P, plat=ML)
+        await publicar(a)
+        _recuar(127)
+        b = msg(FADA, F_17883, urls_longas=TUTORIAL_F, plat=ML)
+        await publicar(b)
+        return _post_de(a), _post_de(b)
+    return montar_par
+
+
+async def _drenar():
+    """Espera as verificações agendadas pelo sinal de suspeita."""
+    for _ in range(50):
+        tarefas = [t for t in list(post_apagado._TAREFAS) if not t.done()]
+        if not tarefas:
+            return
+        await asyncio.gather(*tarefas, return_exceptions=True)
+
+
+def test_08_conferencia_por_id_nunca_por_posicao(r):
+    casos = {
+        # o Telegram OMITE o id apagado: a lista volta mais curta
+        "omite": lambda pa, pb: (lambda ids: [_M(i) for i in ids if i != pa]),
+        # desalinhada: um vazio de outro id na frente + os dois presentes
+        "desalinhada": lambda pa, pb: (lambda ids: [None] + [_M(i) for i in ids]),
+        # malformada: não é lista / item sem id — não prova ausência
+        "nao_lista": lambda pa, pb: (lambda ids: None),
+        "item_sem_id": lambda pa, pb: (lambda ids: [object() for _ in ids]),
+    }
+    esperado = {"omite": "fundido", "desalinhada": None, "nao_lista": None, "item_sem_id": None}
+    for nome, fabrica in casos.items():
+        out = {}
+
+        async def corpo(c, fabrica=fabrica):
+            pa, pb = await _dois_posts(out)()
+            resp = fabrica(pa, pb)
+
+            async def get_messages(dest, ids=None):
+                return resp(list(ids))
+            c.get_messages = get_messages
+            post_apagado._CONFIRMAR_S = 0.0
+            with _Espelho():
+                out["feitos"] = await post_apagado.conferir()
+            out["vivos"] = (_vivo(pa), _vivo(pb))
+            out["ids"] = (pa, pb)
+        cenario(corpo)
+        pa, pb = out["ids"]
+        if esperado[nome] == "fundido":
+            r.check(out["feitos"] == [(pa, "fundido", pb)], f"08.{nome}.detecta_por_id", str(out["feitos"]))
+        else:
+            r.check(out["feitos"] == [] and out["vivos"] == (True, True), f"08.{nome}.nao_mexe",
+                    f"{out['feitos']} vivos={out['vivos']}")
+    # exceção na pergunta: não prova ausência, nada muda
+    out = {}
+
+    async def corpo_exc(c):
+        pa, pb = await _dois_posts(out)()
+
+        async def explode(dest, ids=None):
+            raise RuntimeError("rede")
+        c.get_messages = explode
+        try:
+            await post_apagado.conferir()
+            out["subiu"] = False
+        except RuntimeError:
+            out["subiu"] = True
+        out["vivos"] = (_vivo(pa), _vivo(pb))
+    cenario(corpo_exc)
+    r.check(out["vivos"] == (True, True), "08.excecao.nao_mexe", str(out))
+
+
+def _substituicao(delete, presente):
+    """Roda a substituição de mídia do post pa com o `delete` dado. A
+    conferência por id responde `presente` para pa."""
+    from telethon.errors import FloodWaitError
+    out = {}
+
+    async def corpo(c):
+        a = msg(PROMOTOM, P_111543, urls_longas=TUTORIAL_P, plat=ML)
+        await publicar(a)
+        pa = _post_de(a)
+        perguntas = []
+        chamadas = {"n": 0}
+
+        async def delete_messages(dest, ids):
+            chamadas["n"] += 1
+            return delete(chamadas["n"], ids, FloodWaitError)
+
+        async def get_messages(dest, ids=None):
+            perguntas.append(list(ids))
+            return [_M(i) for i in ids if presente]
+        c.delete_messages = delete_messages
+        c.get_messages = get_messages
+        post_apagado._CONFIRMAR_S = 0.0
+        post_apagado.registrar_suspeita()
+        n0 = c.novos
+        montada = await montar(a)
+        with _Espelho() as esp:
+            out["sent"] = await saida._substituir_post_com_midia(pa, montada)
+            out["anotado"] = apagados_pelo_worker.foi_o_worker(pa)
+            await _drenar()
+            out["espelho"] = list(esp.removidos)
+        out["novos"] = c.novos - n0
+        out["perguntas"] = perguntas
+        e = db_get_post(pa) or {}
+        out["status"] = e.get("delete_status")
+        out["pa"] = pa
+    cenario(corpo)
+    return out
+
+
+def test_09_substituicao_so_reenvia_com_exclusao_provada(r):
+    from _telethon_fakes import afetadas
+
+    def _flood(seg):
+        def f(n, ids, FW):
+            if n == 1:
+                try:
+                    erro = FW(request=None, capture=seg)     # Telethon
+                except TypeError:
+                    erro = FW(seg)                           # bancada
+                raise erro
+            raise RuntimeError("delete recusado")
+        return f
+    casos = {
+        # (delete, a mensagem ainda está no canal?)
+        "pts_zero": (lambda n, ids, FW: afetadas(ids, 0), False),
+        "vazio": (lambda n, ids, FW: [], True),
+        "desconhecido": (lambda n, ids, FW: True, True),
+        "excecao": (lambda n, ids, FW: (_ for _ in ()).throw(RuntimeError("rede")), True),
+        "flood_e_excecao": (_flood(0), True),
+        "flood_longo": (_flood(40), True),
+    }
+    for nome, (delete, presente) in casos.items():
+        out = _substituicao(delete, presente)
+        pa = out["pa"]
+        r.check(out["sent"] is None and out["novos"] == 0, f"09.{nome}.nao_reenvia",
+                f"sent={out['sent']} novos={out['novos']}")
+        r.check(not out["anotado"], f"09.{nome}.desmarcado")
+        r.check([pa] in out["perguntas"], f"09.{nome}.conferencia_por_id", str(out["perguntas"]))
+        if presente:
+            r.check(out["status"] is None and out["espelho"] == [], f"09.{nome}.no_ar_nada_muda",
+                    f"status={out['status']} espelho={out['espelho']}")
+        else:
+            r.check(out["status"] == "ok" and out["espelho"] == [pa], f"09.{nome}.sumiu_silenciado",
+                    f"status={out['status']} espelho={out['espelho']}")
+    out = _substituicao(lambda n, ids, FW: afetadas(ids, 1), False)
+    r.check(out["sent"] is not None and out["novos"] == 1 and out["anotado"],
+            "09.confirmada.reenvia", f"sent={out['sent']} novos={out['novos']}")
+
+
+def test_10_message_id_invalid_nao_prova_exclusao(r):
+    from telethon.errors import MessageIdInvalidError
+    casos = {"sem_midia": (None, False, True), "midia_sem_exigir": (b"img", False, True),
+             "midia_exigindo": (b"img", True, True)}
+    for nome, (imagem, exigir, trocar) in casos.items():
+        for presente in (True, False):
+            out = {}
+
+            async def corpo(c, imagem=imagem, exigir=exigir, trocar=trocar, presente=presente):
+                a = msg(PROMOTOM, P_111543, urls_longas=TUTORIAL_P, plat=ML)
+                await publicar(a)
+                pa = _post_de(a)
+                edits = {"n": 0}
+
+                async def edit_message(dest, msg_id, texto, parse_mode=None, file=None):
+                    edits["n"] += 1
+                    raise MessageIdInvalidError(request=None)
+
+                async def get_messages(dest, ids=None):
+                    return [_M(i) for i in ids if presente]
+                c.edit_message = edit_message
+                c.get_messages = get_messages
+                post_apagado._CONFIRMAR_S = 0.0
+                post_apagado.registrar_suspeita()
+                with _Espelho():
+                    res = await saida.editar_msg(pa, "texto novo", imagem,
+                                                 exigir_imagem=exigir, trocar_midia=trocar)
+                    out["vivo_logo_apos"] = _vivo(pa)
+                    await _drenar()
+                out["res"] = (res.ok, res.midia_aplicada)
+                out["edits"] = edits["n"]
+                out["vivo"] = _vivo(pa)
+            cenario(corpo)
+            tag = f"10.{nome}.{'no_ar' if presente else 'sumiu'}"
+            r.check(out["edits"] == 1 and out["res"] == (False, False), f"{tag}.uma_chamada_sem_retry",
+                    f"edits={out['edits']} res={out['res']}")
+            r.check(out["vivo_logo_apos"], f"{tag}.sumiu_so_depois_de_confirmar")
+            r.check(out["vivo"] == presente, f"{tag}.confirmacao_decide", f"vivo={out['vivo']}")
+
+
+def test_11_evolucao_com_substituicao_nao_ressuscita_o_apagado(r):
+    """O dono apagou o post e o aviso ainda não chegou: a evolução tenta
+    editar (MessageIdInvalid) e cai na substituição — que não reenvia."""
+    from types import SimpleNamespace
+    from dataclasses import replace
+    from telethon.errors import MessageIdInvalidError
+    from _telethon_fakes import afetadas
+    from pipeline import publicacao_aplicadores as ap
+    for exigir in (True, False):
+        out = {}
+
+        async def corpo(c, exigir=exigir):
+            a = msg(PROMOTOM, P_111543, urls_longas=TUTORIAL_P, plat=ML)
+            await publicar(a)
+            pa = _post_de(a)
+            apagados = {pa}                       # o dono apagou no Telegram
+
+            async def edit_message(dest, msg_id, texto, parse_mode=None, file=None):
+                if msg_id in apagados:
+                    raise MessageIdInvalidError(request=None)
+                return _M(msg_id)
+
+            async def delete_messages(dest, ids):
+                lista = ids if isinstance(ids, list) else [ids]
+                return afetadas(lista, sum(i not in apagados for i in lista))
+
+            async def get_messages(dest, ids=None):
+                return [_M(i) for i in ids if i not in apagados]
+            c.edit_message, c.delete_messages, c.get_messages = edit_message, delete_messages, get_messages
+            post_apagado._CONFIRMAR_S = 0.0
+            post_apagado.registrar_suspeita()
+            s = msg(SAMUEL, S_121892, urls_longas=TUTORIAL_P, plat=ML)
+            montada = replace(await montar(s), imagem=b"img")
+            d = SimpleNamespace(trocar_midia=True, exigir_imagem=exigir, permite_substituir=True,
+                                novo_score=9, motivo="EVOLUI", motivo_midia="TROCA/upgrade",
+                                score_atual=6, na_janela=True)
+            estado = db_get_post(pa)
+            n0 = c.novos
+            with _Espelho() as esp:
+                await ap._aplicar_evolucao(montada, s, d, estado, pa, 0,
+                                           list(db_ofertas_de_post(pa)), "teste", exibidas=None)
+                await _drenar()
+                out["espelho"] = list(esp.removidos)
+            out["novos"] = c.novos - n0
+            out["status"] = (db_get_post(pa) or {}).get("delete_status")
+            out["pa"] = pa
+        cenario(corpo)
+        tag = f"11.exigir_{exigir}"
+        r.check(out["novos"] == 0, f"{tag}.nenhum_post_novo", f"novos={out['novos']}")
+        r.check(out["status"] == "ok" and out["espelho"] == [out["pa"]], f"{tag}.confirmado_e_silenciado",
+                f"status={out['status']} espelho={out['espelho']}")
+
+
+def test_12_espelho_nunca_dispara_o_principal(r):
+    from telethon.errors import MessageIdInvalidError
+    out = {}
+
+    async def corpo(c):
+        a = msg(PROMOTOM, P_111543, urls_longas=TUTORIAL_P, plat=ML)
+        await publicar(a)
+        pa = _post_de(a)
+        perguntas, edits = [], {"n": 0}
+
+        async def edit_message(dest, msg_id, texto, parse_mode=None, file=None, **_k):
+            edits["n"] += 1
+            raise MessageIdInvalidError(request=None)
+
+        async def delete_messages(dest, ids):
+            raise MessageIdInvalidError(request=None)
+
+        async def get_messages(dest, ids=None):
+            perguntas.append(ids)
+            return []
+        c.edit_message, c.delete_messages, c.get_messages = edit_message, delete_messages, get_messages
+        post_apagado.registrar_suspeita()
+        # edição no canal de cupons (o espelho do pa) com o mesmo id do principal
+        res = await saida._editar_inner_no_sem(pa, "t", None, destino="canal_cupons_teste")
+        # apagar o espelho falha: engolido pelo próprio espelho
+        await espelho_cupons._apagar_mensagem(pa)
+        await _drenar()
+        out.update(res=(res.ok, res.midia_aplicada), edits=edits["n"], perguntas=perguntas,
+                   vivo=_vivo(pa), em_voo=len(post_apagado._TAREFAS))
+    cenario(corpo)
+    r.check(out["res"] == (False, False), "12.edicao_do_espelho_falha", str(out["res"]))
+    r.check(out["perguntas"] == [] and out["vivo"], "12.principal_intocado",
+            f"perguntas={out['perguntas']} vivo={out['vivo']}")
 
 
 if __name__ == "__main__":

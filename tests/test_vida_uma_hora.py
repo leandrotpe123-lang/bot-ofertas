@@ -24,6 +24,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _telethon_fakes import afetadas                        # noqa: E402
 
 import telethon  # noqa: E402  — REAL, antes do harness
 from telethon import TelegramClient, utils  # noqa: E402
@@ -94,7 +95,7 @@ class Cliente:
 
     async def delete_messages(self, dest, msg_id):
         self.deletes.append(msg_id)
-        return True
+        return afetadas(msg_id)
 
 
 def cenario(corpo):

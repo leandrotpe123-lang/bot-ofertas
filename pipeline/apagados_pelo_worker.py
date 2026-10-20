@@ -13,6 +13,13 @@ _LEMBRAR_S. Só memória do processo: um restart perde a anotação, mas o post
 apagado pelo worker já está encerrado ou fundido no banco (o handler também
 ignora post que não está vivo).
 
+SUSPEITA (revisão de 20/10): o I/O do principal às vezes diz que a
+mensagem não está lá (MessageIdInvalid na edição; delete com pts_count 0 ou
+sem prova). Isso NÃO prova que o dono apagou. Quem viu chama
+`suspeitar(id, via)`; quem decide é a conferência por id
+(pipeline.post_apagado), registrada aqui por `ao_suspeitar` — o que evita
+o ciclo pipeline.saida → post_apagado → espelho_cupons → saida.
+
 Folha do grafo de imports (só stdlib): pipeline.saida importa daqui sem
 ciclo.
 """
@@ -20,11 +27,12 @@ from __future__ import annotations
 
 import time
 
-__all__ = ["marcar", "foi_o_worker"]
+__all__ = ["marcar", "desmarcar", "foi_o_worker", "ao_suspeitar", "suspeitar"]
 
 _LEMBRAR_S = 15 * 60
 _TETO = 2000
 _ANOTADOS: dict = {}
+_AO_SUSPEITAR: list = []      # [callback(msg_id, via)] — no máximo um
 
 
 def marcar(msg_id_dest) -> None:
@@ -41,6 +49,30 @@ def marcar(msg_id_dest) -> None:
             del _ANOTADOS[k]
         while len(_ANOTADOS) > _TETO:
             del _ANOTADOS[next(iter(_ANOTADOS))]
+
+
+def desmarcar(msg_id_dest) -> None:
+    """O worker NÃO apagou `msg_id_dest` (a substituição abortou): tira a
+    anotação para que uma exclusão do dono não seja ignorada."""
+    try:
+        _ANOTADOS.pop(int(msg_id_dest), None)
+    except (TypeError, ValueError):
+        return
+
+
+def ao_suspeitar(callback) -> None:
+    """Registra quem confere as suspeitas (uma vez por processo)."""
+    _AO_SUSPEITAR[:] = [callback]
+
+
+def suspeitar(msg_id_dest, via: str) -> None:
+    """O I/O viu a mensagem do principal sumida — sem prova. Só AGENDA a
+    conferência por id; nunca decide nem levanta."""
+    for cb in list(_AO_SUSPEITAR):
+        try:
+            cb(msg_id_dest, via)
+        except Exception:                               # noqa: BLE001
+            pass
 
 
 def foi_o_worker(msg_id_dest) -> bool:

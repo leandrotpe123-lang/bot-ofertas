@@ -61,6 +61,12 @@ def _instalar_telethon() -> None:
     class MessageNotModifiedError(RPCError):
         pass
 
+    class MessageIdInvalidError(RPCError):
+        # [Frente M] saida.py separa este erro (a mensagem não está no
+        # canal) dos demais; a assinatura aceita a do Telethon (request=).
+        def __init__(self, request=None, *a, **k):
+            super().__init__("MESSAGE_ID_INVALID")
+
     class AuthKeyUnregisteredError(RPCError):
         pass
 
@@ -70,6 +76,7 @@ def _instalar_telethon() -> None:
     for _n, _c in (("RPCError", RPCError),
                    ("FloodWaitError", FloodWaitError),
                    ("MessageNotModifiedError", MessageNotModifiedError),
+                   ("MessageIdInvalidError", MessageIdInvalidError),
                    ("AuthKeyUnregisteredError", AuthKeyUnregisteredError),
                    ("SessionPasswordNeededError", SessionPasswordNeededError)):
         setattr(errors, _n, _c)
@@ -98,6 +105,17 @@ def _instalar_telethon() -> None:
     class MessageEntityPre:
         def __init__(self, offset=0, length=0, language=""):
             self.offset, self.length = offset, length
+
+    # [Frente M] o retorno de delete_messages num canal: AffectedMessages
+    # (pts, pts_count) — pts_count é o que saida.py lê como prova.
+    class AffectedMessages:
+        def __init__(self, pts=0, pts_count=0):
+            self.pts, self.pts_count = pts, pts_count
+
+        def __repr__(self):
+            return f"AffectedMessages(pts={self.pts}, pts_count={self.pts_count})"
+
+    tl_types.messages = types.SimpleNamespace(AffectedMessages=AffectedMessages)
 
     for _n, _c in (("MessageMediaWebPage", MessageMediaWebPage),
                    ("MessageMediaPhoto", MessageMediaPhoto),

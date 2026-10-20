@@ -36,6 +36,7 @@ import types
 from dataclasses import replace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _telethon_fakes import afetadas                        # noqa: E402
 from _harness_e5 import preparar, rodar  # noqa: E402
 
 preparar()
@@ -119,7 +120,7 @@ class Cliente:
 
     async def delete_messages(self, dest, msg_id):
         self.deletes.append(msg_id)
-        return True
+        return afetadas(msg_id)
 
     async def download_media(self, media, file=None):
         return None

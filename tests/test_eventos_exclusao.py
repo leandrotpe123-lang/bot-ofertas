@@ -112,6 +112,7 @@ import timeit
 import types as _pytypes
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _telethon_fakes import afetadas                        # noqa: E402
 
 import telethon  # noqa: E402  — REAL, antes do harness
 
@@ -173,7 +174,7 @@ class Destino:
     async def delete_messages(self, dest, msg_id):
         await asyncio.sleep(0)                # rede: cede o laço
         self.deletes.append(msg_id)
-        return True
+        return afetadas(msg_id)
 
 
 # Marca só da bancada, posta no contexto de quem dispara o cenário (o de fora

@@ -20,9 +20,16 @@ COMO (nenhum caminho de escrita novo):
        · TELEGRAM — handler MessageDeleted só sobre o canal de destino; só
          AGENDA uma task (o despacho do Telethon nunca espera lock/banco);
        · CONFERENCIA — de tempos em tempos, um get_messages em lote sobre
-         os posts vivos (até 100 ids, uma chamada): o que volta vazio DUAS
-         vezes seguidas (a 2ª só pelos sumidos) foi apagado. Cobre o aviso
+         os posts vivos (até 100 ids, uma chamada): o que falta DUAS vezes
+         seguidas (a 2ª só pelos sumidos) foi apagado. Cobre o aviso
          perdido (deploy, restart, rede).
+       · SUSPEITA — o I/O do principal viu a mensagem sumida
+         (MessageIdInvalid na edição; delete da substituição sem prova):
+         pipeline.apagados_pelo_worker.suspeitar agenda a MESMA conferência
+         por id, só daquele post. A suspeita nunca decide sozinha.
+     A conferência compara por ID (conjuntos), nunca por posição: o
+     Telethon 1.45.0 avisa que o Telegram pode omitir ids inválidos da
+     resposta. Exceção ou resposta malformada não prova ausência.
      O que o PRÓPRIO worker apagou (substituição, remoção da fusão) está
      anotado em pipeline.apagados_pelo_worker e é ignorado; post que não
      está vivo no banco (fundido, encerrado, remoção marcada) também.
@@ -76,7 +83,7 @@ from pipeline.resolucao_identidade import prefixo_cupom_sem_codigo
 from pipeline.vida_oferta import VIDA_OFERTA_S, viva
 
 __all__ = ["instalar", "agendar", "apagados", "sobrevivente", "conferir",
-           "iniciar_conferencia"]
+           "confirmar", "suspeito", "registrar_suspeita", "iniciar_conferencia"]
 
 # Conferência do destino: um get_messages a cada _CONFERIR_S, até _LOTE ids
 # (o teto da chamada). O 1º ciclo sai logo depois do boot (cobre o que se
@@ -90,6 +97,7 @@ _FLOOD_MAX_S = 30 * 60
 _CONFIRMAR_S = 2.0
 
 _TAREFAS: set = set()
+_EM_VOO: set = set()          # ids com verificação por suspeita em curso
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -238,26 +246,91 @@ async def _um(apagado: int) -> tuple:
 # ─────────────────────────────────────────────────────────────────
 # Conferência (cobre o aviso perdido)
 # ─────────────────────────────────────────────────────────────────
-async def conferir() -> list:
-    """Um ciclo: pergunta ao Telegram pelos posts vivos; os que voltam
-    vazios (e não foram apagados pelo worker) vão ao tratamento."""
-    ids = db_posts_vivos_recentes(time.time(), _LOTE)
+def _presentes(msgs) -> Optional[set]:
+    """Ids que o Telegram devolveu. None = resposta malformada (não lista,
+    ou item sem id inteiro): não prova nada. `None` na lista é o
+    MessageEmpty do Telethon — o id simplesmente não entra."""
+    if not isinstance(msgs, (list, tuple)):
+        return None
+    ids = set()
+    for m in msgs:
+        if m is None:
+            continue
+        i = getattr(m, "id", None)
+        if not isinstance(i, int) or isinstance(i, bool):
+            return None
+        ids.add(i)
+    return ids
+
+
+async def confirmar(ids, via: str) -> list:
+    """Pergunta ao Telegram por `ids` e só trata o que FALTA duas vezes
+    seguidas (a 2ª pergunta só pelos que faltaram). Exceção sobe a quem
+    chamou e nada muda; resposta malformada não muda nada."""
+    ids = [int(i) for i in ids]
     if not ids:
         return []
     from client import client
-    msgs = await client.get_messages(config.GRUPO_DESTINO, ids=ids)
-    sumidos = [mid for mid, m in zip(ids, msgs or []) if m is None]
+    presentes = _presentes(await client.get_messages(config.GRUPO_DESTINO, ids=ids))
+    if presentes is None:
+        log_out.warning(f"⚠️ [CONFERENCIA_DESTINO] resposta malformada via={via} — nada muda")
+        return []
+    sumidos = [i for i in ids if i not in presentes]
     if not sumidos:
         return []
-    # Confirmação: um vazio isolado (rede, Telegram) fundiria um post que
-    # está no ar. Só age no que continua vazio na 2ª pergunta. O que o
-    # worker apagou é filtrado no tratamento (_um), sob o lock.
+    # Um "falta" isolado (rede, Telegram) fundiria um post que está no ar.
+    # O que o worker apagou é filtrado no tratamento (_um), sob o lock.
     await asyncio.sleep(_CONFIRMAR_S)
-    de_novo = await client.get_messages(config.GRUPO_DESTINO, ids=sumidos)
-    confirmados = [mid for mid, m in zip(sumidos, de_novo or []) if m is None]
+    de_novo = _presentes(await client.get_messages(config.GRUPO_DESTINO, ids=sumidos))
+    if de_novo is None:
+        log_out.warning(f"⚠️ [CONFERENCIA_DESTINO] resposta malformada via={via} — nada muda")
+        return []
+    confirmados = [i for i in sumidos if i not in de_novo]
     if not confirmados:
         return []
-    return await apagados(confirmados, "CONFERENCIA")
+    return await apagados(confirmados, via)
+
+
+async def conferir() -> list:
+    """Um ciclo: confere por id os posts vivos mais recentes."""
+    ids = db_posts_vivos_recentes(time.time(), _LOTE)
+    if not ids:
+        return []
+    return await confirmar(ids, "CONFERENCIA")
+
+
+def suspeito(msg_id_dest, via: str) -> None:
+    """Sinal do I/O (apagados_pelo_worker.suspeitar): agenda a conferência
+    por id SÓ deste post, numa task própria (contexto vazio), sem repetir
+    o mesmo id em voo. Nunca decide nem levanta."""
+    try:
+        mid = int(msg_id_dest)
+    except (TypeError, ValueError):
+        return
+    if g._encerrando or mid in _EM_VOO:
+        return
+    _EM_VOO.add(mid)
+    t = asyncio.get_running_loop().create_task(
+        _verificar(mid, via), context=contextvars.Context())
+    _TAREFAS.add(t)
+    t.add_done_callback(_TAREFAS.discard)
+
+
+async def _verificar(mid: int, via: str) -> None:
+    try:
+        await confirmar([mid], via)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:                              # noqa: BLE001
+        log_out.warning(f"⚠️ [CONFERENCIA_DESTINO] post:{mid} via={via} "
+                        f"{type(e).__name__}: {e} — nada muda")
+    finally:
+        _EM_VOO.discard(mid)
+
+
+def registrar_suspeita() -> None:
+    """Liga o sinal de suspeita do I/O à conferência por id."""
+    apagados_pelo_worker.ao_suspeitar(suspeito)
 
 
 async def _laco() -> None:
@@ -278,6 +351,9 @@ async def _laco() -> None:
 
 def iniciar_conferencia() -> Optional[asyncio.Task]:
     """A task da conferência — UMA por processo (main._preparar_processo).
-    Nasce em contexto vazio (vive mais que quem a criou)."""
+    Nasce em contexto vazio (vive mais que quem a criou). Liga também o
+    sinal de suspeita do I/O (roda sempre no boot, mesmo se o handler do
+    destino não instalar)."""
+    registrar_suspeita()
     return asyncio.get_running_loop().create_task(_laco(),
                                                   context=contextvars.Context())

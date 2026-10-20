@@ -113,6 +113,7 @@ import time
 import types as _pytypes
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _telethon_fakes import afetadas                        # noqa: E402
 
 import telethon  # noqa: E402  — REAL, antes do harness
 from telethon import utils  # noqa: E402
@@ -345,10 +346,11 @@ class Telegram:
             self.falha_delete -= 1
             self.ops.append((dest, "delete_falhou", lista[0]))
             raise RuntimeError("delete recusado")
+        n = 0
         for i in lista:
-            self.msgs.pop((dest, i), None)
+            n += self.msgs.pop((dest, i), None) is not None
             self.ops.append((dest, "delete", i))
-        return True
+        return afetadas(lista, n)
 
     async def get_messages(self, dest, ids=None):
         await self._sonda("get_messages", dest, ids)
@@ -799,7 +801,8 @@ def test_e01_fabricas_criam_em_contexto_vazio(r):
     for rel, fn, co in (("pipeline/convergencia.py", "agendar_remocao", "_remover"),
                         ("pipeline/espelho_cupons.py", "_tarefa", "_protegido"),
                         ("pipeline/post_apagado.py", "agendar", "apagados"),
-                        ("pipeline/post_apagado.py", "iniciar_conferencia", "_laco")):
+                        ("pipeline/post_apagado.py", "iniciar_conferencia", "_laco"),
+                        ("pipeline/post_apagado.py", "suspeito", "_verificar")):
         cts = _create_tasks(_funcao(rel, fn))
         ok = (len(cts) == 1 and len(cts[0].args) == 1
               and regua._nome_final(cts[0].args[0].func) == co
@@ -872,6 +875,8 @@ _INVENTARIO = {
     ("pipeline/post_apagado.py", "agendar", "create_task"): "INDEPENDENTE: contexto vazio (handler do destino)",
     ("pipeline/post_apagado.py", "agendar", "add_done_callback"): "CALLBACK: _TAREFAS.discard",
     ("pipeline/post_apagado.py", "iniciar_conferencia", "create_task"): "INDEPENDENTE: contexto vazio (conferência)",
+    ("pipeline/post_apagado.py", "suspeito", "create_task"): "INDEPENDENTE: contexto vazio (verificação por suspeita do I/O)",
+    ("pipeline/post_apagado.py", "suspeito", "add_done_callback"): "CALLBACK: _TAREFAS.discard",
 }
 
 
@@ -1016,7 +1021,7 @@ def test_e05_callbacks_de_termino_so_limpam_estrutura(r):
                 ok = _so_limpa_estrutura(arg)
             if not ok:
                 ruins.append((rel, dono, ast.unparse(arg)[:80] if arg is not None else "?"))
-    r.check(len(sitios) == 8 and ruins == [], "E05.callbacks_so_limpam_estrutura",
+    r.check(len(sitios) == 9 and ruins == [], "E05.callbacks_so_limpam_estrutura",
             f"sitios={len(sitios)} ruins={ruins}")
 
 

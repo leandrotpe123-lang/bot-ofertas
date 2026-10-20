@@ -45,6 +45,7 @@ import types
 from dataclasses import replace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _telethon_fakes import afetadas                        # noqa: E402
 from test_destino_exibido import (                              # noqa: E402
     C_110373, C_118773, C_AMPLIA, L_118773, SEC_110373, T_110373, T_118773,
     T_AMPLIA, _zerar_banco)
@@ -194,7 +195,7 @@ class Cliente:
         return _Msg(msg_id, com_midia=file is not None)
 
     async def delete_messages(self, dest, msg_id):
-        return True
+        return afetadas(msg_id)
 
     async def download_media(self, media, file=None):
         if file is not None:

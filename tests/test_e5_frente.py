@@ -26,6 +26,7 @@ import time
 import types
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _telethon_fakes import afetadas                        # noqa: E402
 from _harness_e5 import preparar, rodar, Resultado  # noqa: E402
 
 preparar()
@@ -124,7 +125,7 @@ class ClienteFake:
 
     async def delete_messages(self, dest, msg_id):
         self.deletes.append(msg_id)
-        return True
+        return afetadas(msg_id)
 
 
 def instalar(cliente: ClienteFake) -> None:
