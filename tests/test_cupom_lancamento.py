@@ -43,6 +43,10 @@ independente é a marcação S/N do dono mais a sombra em produção.
          negativos, zona cinzenta = hoje, distintos, lembrete, mesma fonte
          na rajada, testes fechados, corrida, revalidação da adoção
   32     edição nunca entra na regra (nos dois modos)
+  33     P1: outro grupo acima do SUPERIOR não abre post (INCERTO)
+  34–37  (b) P1: faixa com o mesmo benefício, outro grupo → JUNTA, só sem
+         JUNTA da rajada (19/10 real; rajada + faixa; SN22; dois na faixa =
+         ambiguo; diferencial com a cópia congelada do (a))
 
     python tests/test_cupom_lancamento.py
 """
@@ -70,6 +74,10 @@ VEICULO = {   # produto que o link de tutorial do ML resolve (logs de produção
 }
 
 TEXTO = {
+    # 18/10 22:00–22:37 UTC (prévia pública): o relâmpago ML de 20% em três fontes.
+    'promotom/111543': 'Próximo Cupom 20% OFF Mercado Livre\n\n•Tutorial para resgate: \n1 Entre no APP do Meli aqui: \n2 Clique em "Início" no rodapé do APP \n3 Depois no carrossel no canto superior esquerdo clique em "CUPONS RELÂMPAGO TODOS OS DIAS" \n4 Resgate o cupom',
+    'fadadoscupons/17883': '🔥 Cupom 20% OFF Mercado Livre Full\n\nResgate agora e use 00h\n\n🚨🚨 LEIA PARA RESGATAR:\n1. Entre no APP 👇\n2. Clique em "Início" no rodapé do APP\n3. Depois, escolha o banner “Cupons Relâmpago”\n4. Resgate o cupom',
+    'SamuelF3lipePromo/121892': '🔥 Próximo Cupom 20% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em "Início" no rodapé do APP\n3. Depois no carrossel no canto superior esquerdo clique em "CUPONS RELÂMPAGO TODOS OS DIAS"\n4. Resgate o cupom\n\nanúncio',
     'SamuelF3lipePromo/120080': '🔥 Próximo Cupom 25% OFF Mercado Livre\n\n⚠️ Resgate agora e use 00h\n\n⭐️ Tutorial para resgate:\n1 Entre no APP do Meli aqui:\n2 Clique em "Mais" no rodapé do APP\n3 Depois clique em "Cupons relâmpago"\n4 Resgate o cupom\n\nanúncio',
     'SamuelF3lipePromo/120276': '🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em "Mais" no rodapé do APP\n3. Depois clique em "Cupons relâmpago"\n4. Resgate o cupom\n\nanúncio',
     'SamuelF3lipePromo/120285': '🔥 Próximo Cupom 30% OFF Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em "Mais" no rodapé do APP\n3. Depois clique em "Cupons relâmpago"\n4. Resgate o cupom\n\nanúncio',
@@ -146,15 +154,23 @@ F14_16 = [("promotom/111103", ML, 0), ("fadadoscupons/17687", ML, 48),
           ("SamuelF3lipePromo/120345", ML, 77)]              # série das 02h
 F30 = [("fadadoscupons/17712", SHP, 0), ("SamuelF3lipePromo/120532", SHP, 264)]
 F06 = [("promotom/111079", ML, 0), ("SamuelF3lipePromo/120276", ML, 210)]
+# 18/10: Promotom 22:00:35 (post 29716), Fada 22:02:42 (Δ 2,1 min, virou o
+# 29717) e Samuel 22:37:13 (Δ 36,6 min do 29716, entrou nele como DUP).
+P1_1810 = [("promotom/111543", ML, 0), ("fadadoscupons/17883", ML, 127),
+           ("SamuelF3lipePromo/121892", ML, 34 * 60 + 31)]
 JUNTAM = {"F02": F02, "F11": F11, "F12": F12, "F14_16": F14_16, "F30": F30}
 CINZA = {   # zona cinzenta / sem regra: comportamento de hoje
     "F07": [("promotom/111082", SHP, 0), ("fadadoscupons/17674", SHP, 588)],
-    "F45": [("promotom/111257", ML, 0), ("SamuelF3lipePromo/120804", ML, 648)],
     "F24": [("promotom/111169", SHP, 0), ("fadadoscupons/17712", SHP, 948)],
     "E05": [("SamuelF3lipePromo/120080", ML, 0), ("promotom/111009", ML, 1272)],
     "E19": [("promotom/111105", SHP, 0), ("fadadoscupons/17695", SHP, 1164)],
     "E45": [("fadadoscupons/17819", SHP, 0), ("SamuelF3lipePromo/121241", SHP, 894)],
     "F22": [("promotom/111162", SHP, 0), ("SamuelF3lipePromo/120480", SHP, 162)],
+}
+# (b) — faixa com o MESMO benefício, outro grupo: o dono marcou UM_POST
+# (SN22, P1 de 20/10). No (a) era INCERTO faixa_cinzenta (2 posts em ATIVO).
+FAIXA_IGUAL = {
+    "F45": [("promotom/111257", ML, 0), ("SamuelF3lipePromo/120804", ML, 648)],
 }
 DISTINTOS = {   # campanhas diferentes: nunca juntam
     "F13": [("SamuelF3lipePromo/120342", ML, 0), ("fadadoscupons/17687", ML, 3552)],
@@ -173,7 +189,8 @@ LEMB_SAM = [("SamuelF3lipePromo/120344", SHP, 0),
 RAJADA_MESMA = [("promotom/111088", ML, 0), ("promotom/111088", ML, 180)]
 TODOS = dict({"CASO1": CASO1, "SERIE": SERIE, "E16": E16, "F06": F06,
               "LEMBRETE": LEMBRETE, "LEMB_SAM": LEMB_SAM,
-              "RAJADA_MESMA": RAJADA_MESMA}, **JUNTAM, **CINZA, **DISTINTOS)
+              "RAJADA_MESMA": RAJADA_MESMA}, **JUNTAM, **CINZA, **FAIXA_IGUAL,
+             **DISTINTOS)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -407,7 +424,12 @@ def test_05_tabela_de_decisao(r):
         ("mesma_fonte_liberacao", dec(pct50, "A", [vivo(pct50, 1530)], 1), ("NOVA", "mesma_fonte")),
         ("mesma_fonte_na_rajada", dec(pct50, "A", [vivo(pct50, 180)], 1), ("INCERTO", "mesma_fonte_na_rajada")),
         ("lembrete_mesma_fonte", dec(lemb, "A", [vivo(pct50, 1200)], 1), ("INCERTO", "lembrete_mesma_fonte")),
-        ("acima_do_superior", dec(pct50, "B", [vivo(pct50, 3300)], 1), ("NOVA", "acima_do_superior")),
+        # P1 (16/10): fontes diferentes, mesmo benefício, Δ > SUPERIOR → o de hoje (caso 18/10, teste 33)
+        ("acima_do_superior", dec(pct50, "B", [vivo(pct50, 3300)], 1), ("INCERTO", "acima_do_superior")),
+        ("acima_do_superior_beneficio_diferente", dec(P("", "30", frozenset(), False), "B", [vivo(pct50, 3300)], 1),
+         ("NOVA", "beneficio_diferente")),
+        ("acima_do_superior_mesma_fonte", dec(pct50, "A", [vivo(pct50, 3300)], 1), ("NOVA", "mesma_fonte")),
+        ("acima_do_superior_sem_familia", dec(pct50, "B", [vivo(pct50, 3300)], None), ("MANTER", "sem_lancamento_vivo")),
         ("faixa_cinzenta_com_familia", dec(pct50, "B", [vivo(pct50, 900)], 1), ("INCERTO", "faixa_cinzenta")),
         ("junta_sem_familia", dec(pct50, "B", [vivo(vip50, 60)], None), ("JUNTA", "mesmo_lancamento")),
         ("ambiguo", dec(pct50, "B", [vivo(vip50, 60, mid=1), vivo(pct50, 30, mid=2)], None), ("INCERTO", "ambiguo")),
@@ -561,7 +583,7 @@ def test_11_sombra_registra_a_decisao(r):
                   ("CUPOM_LIBERACAO_SOMBRA", "mesma_fonte")],
         "E16": [("CUPOM_LIBERACAO_SOMBRA", "mesma_fonte")],
         "F07": [("CUPOM_INCERTO", "faixa_cinzenta")],
-        "F45": [("CUPOM_INCERTO", "faixa_cinzenta")],
+        "F45": [("CUPOM_ENCONTRO_SOMBRA", "mesmo_beneficio_na_faixa")],
         "E05": [("CUPOM_INCERTO", "faixa_cinzenta")],
         "E19": [("CUPOM_INCERTO", "faixa_cinzenta")],
         # A família de hoje já junta (mesma chave `vip`) e a regra não se
@@ -891,6 +913,264 @@ def test_32_edicao_nunca_entra_na_regra(r):
         r.check(foto == hoje, f"32.{modo}.igual_a_hoje",
                 f"{foto['novos']} × {hoje['novos']}")
         r.check(not linhas, f"32.{modo}.sem_linha", str(linhas))
+
+
+def test_33_p1_outro_grupo_acima_do_superior_nao_abre_post(r):
+    # Regra do dono (P1, 16/10): outro grupo publicando a mesma oferta que
+    # ainda vale é duplicata, não importa o tempo. Caso real de 18/10: a
+    # sombra registrou CUPOM_LIBERACAO_SOMBRA acima_do_superior para o
+    # Samuel 121892 contra o 29716 — em ATIVO, um post a mais com o mesmo
+    # cupom de 20%. Acima do SUPERIOR, entre fontes diferentes, sem benefício
+    # ou nome que separe, a decisão é a de hoje (INCERTO, registrado).
+    for modo, novos, posts in (("SOMBRA", 2, [0, 1, 0]), ("ATIVO", 1, [0, 0, 0])):
+        cena = _cena(P1_1810, modo)
+        f = cena["foto"]
+        r.check(f["novos"] == novos and f["posts"] == posts, f"33.{modo}.posts",
+                f"novos={f['novos']} posts={f['posts']}")
+        got = _marcas(cena["linhas"])
+        sufixo = "" if modo == "ATIVO" else "_SOMBRA"
+        r.check(got == [(f"CUPOM_ENCONTRO{sufixo}", "mesmo_lancamento"),
+                        ("CUPOM_INCERTO", "acima_do_superior")], f"33.{modo}.linhas", str(got))
+
+
+# ─────────────────────────────────────────────────────────────────
+# (b) — JUNTA na faixa: fontes diferentes, benefício igual, RAJADA < Δ ≤
+# SUPERIOR (P1 do dono, 20/10). Monotônica em relação ao (a): só transforma
+# INCERTO/MANTER em JUNTA; nunca desfaz, troca ou cria NOVA.
+# ─────────────────────────────────────────────────────────────────
+# 19/10 22:00–22:14 UTC (logs da Railway + prévia pública). Promotom 111619
+# → post 30101 (R$60 OFF em R$499); Fada 17900, Δ 55 s → post 30102
+# (CUPOM_ENCONTRO_SOMBRA mesmo_lancamento); Samuel 122157, Δ 13,1 min do
+# 30102 e 14,0 min do 30101 → CUPOM_INCERTO faixa_cinzenta, 3º post (30104).
+# A Fada editou o 17900 às 22:05 (a prévia traz a versão editada); o
+# benefício que a regra lê (R$60 OFF, v:60) é o mesmo da linha das 22:01:30.
+TEXTO.update({
+    'promotom/111619': 'Próximo Cupom R$ 60 OFF em R$ 499 Mercado Livre, resgate agora e use meia-noite \n\n•Tutorial para resgate: \n1 Entre no APP do Meli aqui: \n2 Clique em "Início" no rodapé do APP \n3 Depois no carrossel no canto superior esquerdo clique em "CUPONS RELÂMPAGO TODOS OS DIAS" \n4 Resgate o cupom',
+    'fadadoscupons/17900': '🔥 Cupom R$60 OFF Mercado Livre \n\nResgate agora e use 00h\n\n🚨🚨 LEIA PARA RESGATAR:\n1. Entre no APP 👇\n2. Clique em "Início" no rodapé do APP\n3. Depois, escolha o banner “21x sem juros”\n4. Resgate o cupom',
+    'SamuelF3lipePromo/122157': '🔥 Cupom R$ 60 OFF em R$ 499 Mercado Livre\n\n⚠️ Resgate agora e use MEIA-NOITE\n\n⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui:\n2. Clique em "Início" no rodapé do APP \n3. Depois clique no Banner da Anitta\n4. Resgate o cupom\n\nanúncio',
+})
+P1_1910 = [("promotom/111619", ML, 0), ("fadadoscupons/17900", ML, 55),
+           ("SamuelF3lipePromo/122157", ML, 787)]
+# Δ SINTÉTICO (P2: o mesmo grupo reposta): Fada 22:00 (A), Fada 22:12 (B),
+# Samuel 22:14 — B na rajada, A na faixa.
+REPOSTA_FAIXA = [("fadadoscupons/17883", ML, 0), ("fadadoscupons/17883", ML, 720),
+                 ("SamuelF3lipePromo/121892", ML, 120)]
+
+
+def test_34_p1_faixa_mesmo_beneficio_outro_grupo_1910(r):
+    # SOMBRA: os dois posts da noite (30101 e 30102) estão na faixa com o
+    # mesmo benefício → INCERTO ambiguo (decisão de hoje, nada muda). ATIVO:
+    # a Fada já entrou no 30101 pela rajada; sobra um post na faixa → JUNTA.
+    esperado = {
+        "SOMBRA": (3, [0, 1, 2], [("CUPOM_ENCONTRO_SOMBRA", "mesmo_lancamento"),
+                                   ("CUPOM_INCERTO", "ambiguo")]),
+        "ATIVO": (1, [0, 0, 0], [("CUPOM_ENCONTRO", "mesmo_lancamento"),
+                                  ("CUPOM_ENCONTRO", "mesmo_beneficio_na_faixa")]),
+    }
+    for modo, (novos, posts, linhas) in esperado.items():
+        cena = _cena(P1_1910, modo)
+        f = cena["foto"]
+        r.check(f["novos"] == novos and f["posts"] == posts, f"34.{modo}.posts",
+                f"novos={f['novos']} posts={f['posts']}")
+        got = _marcas(cena["linhas"])
+        r.check(got == linhas, f"34.{modo}.linhas", str(got))
+    # Pipeline real (publicacao.enviar → familia.lancamento_cupom, banco da
+    # bancada) em ATIVO, contando os posts no destino: com a regra do (a) —
+    # a cópia congelada de classificar no lugar da atual — são 2; com o (b),
+    # 1. Em SOMBRA nada muda (3 posts nos dois).
+    com_a = _cena(P1_1910, "ATIVO", [(_CL(), "classificar", _classificar_a)])["foto"]
+    com_b = _cena(P1_1910, "ATIVO")["foto"]
+    r.check((com_a["novos"], com_b["novos"]) == (2, 1), "34.destino_a_2_ab_1",
+            f"(a)={com_a['novos']} (a+b)={com_b['novos']}")
+
+
+def test_35_rajada_e_faixa_junta_no_da_rajada(r):
+    import time as _t
+    agora = _t.time()
+    vinte = _CL().perfil("Cupom 20% OFF Mercado Livre", ML)
+    cand = _CL().perfil("🔥 Próximo Cupom 20% OFF Mercado Livre", ML)
+    for nome, fonte15, fonte4 in (("outras_fontes", PROMOTOM, FADA),
+                                  ("mesmo_grupo_reposta", FADA, FADA)):
+        vivos = [_CL().PostVivo(101, vinte, agora - 15 * 60, frozenset({str(fonte15)})),
+                 _CL().PostVivo(102, vinte, agora - 4 * 60, frozenset({str(fonte4)}))]
+        d = _CL().classificar(cand, str(SAMUEL), agora, vivos, None, 480.0, 1800.0)
+        r.check((d.acao, d.post, d.motivo) == ("JUNTA", 102, "mesmo_lancamento"),
+                f"35.{nome}.junta_no_da_rajada", str(d))
+    # pela bancada (P2: o mesmo grupo reposta): A e B da Fada, o Samuel vai
+    # para o B (rajada), nunca para um 3º post.
+    f = _cena(REPOSTA_FAIXA, "ATIVO")["foto"]
+    r.check(f["novos"] == 2 and f["posts"] == [0, 1, 1], "35.bancada_ativo",
+            f"novos={f['novos']} posts={f['posts']}")
+
+
+def test_35b_faixa_igual_sn22_um_post_em_ativo(r):
+    for nome, passos in FAIXA_IGUAL.items():
+        hoje = _cena(passos, "SOMBRA", _desligado())["foto"]
+        ativo = _cena(passos, "ATIVO")["foto"]
+        r.check(hoje["novos"] == 2 and ativo["novos"] == 1 and ativo["posts"] == [0, 0],
+                f"35b.{nome}.um_post", f"hoje={hoje['novos']} ativo={ativo['novos']}")
+
+
+def test_36_dois_so_na_faixa_mesmo_beneficio_ambiguo(r):
+    import time as _t
+    agora = _t.time()
+    vinte = _CL().perfil("Cupom 20% OFF Mercado Livre", ML)
+    vivos = [_CL().PostVivo(201, vinte, agora - 10 * 60, frozenset({str(PROMOTOM)})),
+             _CL().PostVivo(202, vinte, agora - 15 * 60, frozenset({str(FADA)}))]
+    d = _CL().classificar(vinte, str(SAMUEL), agora, vivos, None, 480.0, 1800.0)
+    r.check((d.acao, d.motivo) == ("INCERTO", "ambiguo"), "36.ambiguo", str(d))
+    # com família, a faixa fica como era no (a): INCERTO faixa_cinzenta
+    d = _CL().classificar(vinte, str(SAMUEL), agora, vivos[:1], 201, 480.0, 1800.0)
+    r.check((d.acao, d.post, d.motivo) == ("INCERTO", 201, "faixa_cinzenta"),
+            "36.com_familia_igual_ao_a", str(d))
+
+
+# Cópia CONGELADA da regra do #24(a) (9b1cb9d: _relacao e classificar), para
+# o diferencial (b) × (a). Hermética: só usa o módulo atual nas peças que o
+# (b) não tocou (perfil, _beneficio, Decisao, constantes).
+CL = _CL()
+
+
+def _relacao_a(c, chat, p, agora, rajada_s, superior_s):
+    delta = agora - p.nascimento
+    if chat in p.fontes:
+        if c.lembrete:
+            return CL.INCERTO, "lembrete_mesma_fonte", delta
+        if delta < rajada_s:
+            return CL.INCERTO, "mesma_fonte_na_rajada", delta
+        return CL.NOVA, "mesma_fonte", delta
+    if c.nome and p.perfil.nome and c.nome != p.perfil.nome:
+        return CL.NOVA, "nome_conflitante", delta
+    b = CL._beneficio(c, p.perfil)
+    if b == "diferente":
+        return CL.NOVA, "beneficio_diferente", delta
+    if delta > superior_s:
+        return CL.INCERTO, "acima_do_superior", delta
+    if delta > rajada_s:
+        return CL.INCERTO, "faixa_cinzenta", delta
+    if b == "igual":
+        return CL.JUNTA, "mesmo_lancamento", delta
+    if (b == "sem_beneficio" and not c.tem_beneficio
+            and not p.perfil.tem_beneficio and c.renovado and p.perfil.renovado):
+        return CL.JUNTA, "renovados", delta
+    return CL.INCERTO, ("sem_beneficio" if b == "sem_beneficio" else
+                     "valor_nome_x_sem_nome" if b == "valor_nome_x_sem_nome"
+                     else "beneficio_incomparavel"), delta
+
+
+def _classificar_a(c, chat, agora, vivos, familia_hoje, rajada_s, superior_s):
+    por_id = {p.msg_id: p for p in vivos}
+    if familia_hoje is not None:
+        p = por_id.get(familia_hoje)
+        if p is None:
+            return CL.Decisao(CL.MANTER, familia_hoje, "familia_fora_da_regra", None)
+        acao, motivo, delta = _relacao_a(c, chat, p, agora, rajada_s, superior_s)
+        mesma = chat in p.fontes
+        if acao == CL.NOVA:
+            return CL.Decisao(CL.NOVA, familia_hoje, motivo, delta, mesma)
+        if acao == CL.INCERTO and motivo in CL._INCERTO_COM_FAMILIA:
+            return CL.Decisao(CL.INCERTO, familia_hoje, motivo, delta, mesma)
+        return CL.Decisao(CL.MANTER, familia_hoje, motivo, delta, mesma)
+    juntas, incertos = [], []
+    for p in vivos:
+        acao, motivo, delta = _relacao_a(c, chat, p, agora, rajada_s, superior_s)
+        if acao == CL.JUNTA:
+            juntas.append((delta, p.msg_id, motivo))
+        elif acao == CL.INCERTO and motivo in CL._INCERTO_SEM_FAMILIA:
+            incertos.append((delta, p.msg_id, motivo))
+    if len(juntas) == 1:
+        delta, mid, motivo = juntas[0]
+        return CL.Decisao(CL.JUNTA, mid, motivo, delta)
+    if len(juntas) > 1:
+        delta, mid, _motivo = min(juntas)
+        return CL.Decisao(CL.INCERTO, mid, "ambiguo", delta)
+    if incertos:
+        delta, mid, motivo = min(incertos)
+        return CL.Decisao(CL.INCERTO, mid, motivo, delta)
+    return CL.Decisao(CL.MANTER, None, "sem_lancamento_vivo", None)
+
+
+_TEXTOS_DIF = {
+    # valores com e sem mínimo; nome e sem nome; lembrete e renovado (o
+    # vocabulário real de _RE_LEMBRETE: "Lembrete:" NÃO é lembrete; e todo
+    # "renovad…" também é lembrete, então renovado sem lembrete não existe).
+    ML: ["Cupom 20% OFF Mercado Livre", "🔥 Próximo Cupom 20% OFF Mercado Livre",
+         "Cupom 30% OFF Mercado Livre", "Cupom R$ 60 OFF em R$ 499 Mercado Livre",
+         "Cupom R$60 OFF Mercado Livre", "Cupom R$ 60 OFF em R$ 299 Mercado Livre",
+         "Cupom 20% OFF Lojas Oficiais Mercado Livre", "Cupom 20% OFF Mercado Livre Full",
+         "Cupons Mercado Livre — resgate aqui", "Lembrando! Cupom 20% OFF Mercado Livre",
+         "Cupom R$ 60 OFF Mercado Livre voltando!", "Cupons renovados Mercado Livre",
+         "Renovados! Cupom 20% OFF Mercado Livre"],
+    SHP: ["Cupons Shopee", "Novo Cupom Shopee VIP", "Cupom Shopee R$ 20 OFF em R$ 99",
+          "Cupom Shopee R$20 OFF", "Cupons Shopee Tech R$ 100 OFF em R$ 999",
+          "Cupons Shopee renovados", "Ainda ativo! Cupom Shopee VIP",
+          "Lembrando! Cupom Shopee R$ 20 OFF em R$ 99", "Cupom Shopee 15% OFF",
+          "Novos Cupons Shopee Fidelidade (APP)", "Renovados! Cupons Shopee R$ 20 OFF"],
+}
+
+
+def test_37_diferencial_b_contra_a_so_incerto_vira_junta(r):
+    """Semente fixa, sem rede. Sem família: só resultado idêntico (ação, e o
+    post quando a ação é JUNTA ou NOVA) ou INCERTO/MANTER → JUNTA. Com
+    família (um dos posts ou fora deles): idêntico em ação, post e motivo.
+    Cobertura exigida: família presente, lembrete e renovado ligados e
+    desligados, valores com e sem mínimo, post da mesma fonte (P2)."""
+    import random
+    rng = random.Random(20261020)
+    perfis = {p: [CL.perfil(t, p) for t in ts] for p, ts in _TEXTOS_DIF.items()}
+    for chave, texto in TEXTO.items():            # os textos reais do corpus
+        for p in (ML, SHP):
+            perfis[p].append(CL.perfil(texto, p))
+    chats = ["c1", "c2", "c3", "c4"]
+    bordas = [0, 1, 479, 480, 481, 1799, 1800, 1801, 3599]
+    agora = 1_000_000.0
+    proibidas, viradas, iguais, total = [], 0, 0, 0
+    cob = dict.fromkeys(("familia_presente", "familia_fora", "lembrete_on", "lembrete_off",
+                         "renovado_on", "renovado_off", "valor_com_minimo",
+                         "valor_sem_minimo", "post_mesma_fonte"), 0)
+    for _ in range(8000):
+        plat = rng.choice((ML, SHP))
+        cand = rng.choice(perfis[plat])
+        chat = rng.choice(chats)
+        vivos = []
+        for i in range(rng.randint(0, 4)):
+            idade = rng.choice(bordas) if rng.random() < 0.3 else rng.uniform(0, 3600)
+            fontes = frozenset(rng.sample(chats, rng.randint(1, 2)))
+            vivos.append(CL.PostVivo(500 + i, rng.choice(perfis[plat]), agora - idade, fontes))
+        sorteio = rng.random()
+        fam = (None if sorteio < 0.5 or not vivos else
+               rng.choice(vivos).msg_id if sorteio < 0.9 else 999)
+        a = _classificar_a(cand, chat, agora, vivos, fam, 480.0, 1800.0)
+        b = CL.classificar(cand, chat, agora, vivos, fam, 480.0, 1800.0)
+        total += 1
+        todos = [cand] + [v.perfil for v in vivos]
+        cob["familia_presente"] += fam is not None and fam != 999
+        cob["familia_fora"] += fam == 999
+        cob["lembrete_on"] += any(x.lembrete for x in todos)
+        cob["lembrete_off"] += not cand.lembrete
+        cob["renovado_on"] += any(x.renovado for x in todos)
+        cob["renovado_off"] += not cand.renovado
+        cob["valor_com_minimo"] += any("-" in v for x in todos for v in x.valores)
+        cob["valor_sem_minimo"] += any(v.startswith("v:") and "-" not in v for x in todos for v in x.valores)
+        cob["post_mesma_fonte"] += any(chat in v.fontes for v in vivos)
+        if fam is not None:
+            ok = (a.acao, a.post, a.motivo) == (b.acao, b.post, b.motivo)
+            iguais += ok
+            if not ok:
+                proibidas.append(("familia", a, b))
+            continue
+        mesmo = a.acao == b.acao and (a.acao not in ("JUNTA", "NOVA") or a.post == b.post)
+        if mesmo:
+            iguais += 1
+        elif a.acao in ("INCERTO", "MANTER") and b.acao == "JUNTA":
+            viradas += 1
+        else:
+            proibidas.append(("sem_familia", a, b))
+    r.check(not proibidas, "37.so_incerto_ou_manter_vira_junta_e_familia_identica",
+            f"{len(proibidas)} proibidas, ex.: {proibidas[:2]}")
+    r.check(viradas > 0 and iguais > 0, "37.diferencial_nao_vazio",
+            f"total={total} iguais={iguais} viradas={viradas}")
+    r.check(all(n > 0 for n in cob.values()), "37.cobertura", str(cob))
 
 
 if __name__ == "__main__":
