@@ -30,6 +30,15 @@ COMO (nenhum caminho de escrita novo):
      A conferência compara por ID (conjuntos), nunca por posição: o
      Telethon 1.45.0 avisa que o Telegram pode omitir ids inválidos da
      resposta. Exceção ou resposta malformada não prova ausência.
+     MASSA: lote que confirma mais de _LIMITE_EM_MASSA (5) sumidos não
+     muda NADA (nem parcial) — ❌ [CONFERENCIA_EM_MASSA] com ids e via, e
+     os ids vão para a QUARENTENA (fora do lote). Reavaliação a partir do
+     ciclo seguinte: um id por vez (a mesma resposta em lote nunca conta
+     de novo), só com controle positivo no ciclo (o lote achou post no
+     ar) e no máximo 5 mudanças por ciclo. Sem controle (canal ilegível,
+     id errado), espera; sai sozinha quando o post deixa de estar vivo. A
+     trava é da CONFERENCIA: o aviso do Telegram (exclusão explícita) e a
+     suspeita unitária seguem por id.
      O que o PRÓPRIO worker apagou (substituição, remoção da fusão) está
      anotado em pipeline.apagados_pelo_worker e é ignorado; post que não
      está vivo no banco (fundido, encerrado, remoção marcada) também.
@@ -100,9 +109,15 @@ _CONFIRMAR_S = 2.0
 # A escolha do post que ficou é refeita sob os locks; se apontar outro post
 # (cujo lock não temos), recomeça — no máximo isto, depois silencia.
 _TENTATIVAS = 3
+# Conferência em LOTE que confirma mais que isto de sumidos não muda nada:
+# quarentena (ver conferir/_reavaliar). Também o teto de mudanças por ciclo
+# da reavaliação. Aviso do Telegram e suspeita unitária não passam por ela.
+_LIMITE_EM_MASSA = 5
 
 _TAREFAS: set = set()
 _EM_VOO: set = set()          # ids com verificação por suspeita em curso
+_QUARENTENA: dict = {}        # id → ciclo da conferência em que entrou
+_CICLO = {"n": 0}             # ciclos de conferência deste processo
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -292,40 +307,113 @@ def _presentes(msgs) -> Optional[set]:
     return ids
 
 
-async def confirmar(ids, via: str) -> list:
-    """Pergunta ao Telegram por `ids` e só trata o que FALTA duas vezes
-    seguidas (a 2ª pergunta só pelos que faltaram). Exceção sobe a quem
-    chamou e nada muda; resposta malformada não muda nada."""
-    ids = [int(i) for i in ids]
-    if not ids:
-        return []
+async def _perguntar(ids: list, via: str) -> tuple:
+    """(confirmados, presentes). Confirmado = FALTA duas vezes seguidas (a
+    2ª pergunta só pelos que faltaram). confirmados None = resposta
+    malformada: não prova nada. Exceção sobe a quem chamou."""
     from client import client
     presentes = _presentes(await client.get_messages(config.GRUPO_DESTINO, ids=ids))
     if presentes is None:
         log_out.warning(f"⚠️ [CONFERENCIA_DESTINO] resposta malformada via={via} — nada muda")
-        return []
+        return None, set()
     sumidos = [i for i in ids if i not in presentes]
     if not sumidos:
-        return []
+        return [], presentes
     # Um "falta" isolado (rede, Telegram) fundiria um post que está no ar.
     # O que o worker apagou é filtrado no tratamento (_um), sob o lock.
     await asyncio.sleep(_CONFIRMAR_S)
     de_novo = _presentes(await client.get_messages(config.GRUPO_DESTINO, ids=sumidos))
     if de_novo is None:
         log_out.warning(f"⚠️ [CONFERENCIA_DESTINO] resposta malformada via={via} — nada muda")
+        return None, presentes
+    return [i for i in sumidos if i not in de_novo], presentes | de_novo
+
+
+async def confirmar(ids, via: str) -> list:
+    """Pergunta ao Telegram por `ids` e só trata o que FALTA duas vezes
+    seguidas. Exceção sobe a quem chamou e nada muda; resposta malformada
+    não muda nada. Caminho da SUSPEITA (um id): sem a trava de massa."""
+    ids = [int(i) for i in ids]
+    if not ids:
         return []
-    confirmados = [i for i in sumidos if i not in de_novo]
+    confirmados, _presentes_ = await _perguntar(ids, via)
     if not confirmados:
         return []
     return await apagados(confirmados, via)
 
 
-async def conferir() -> list:
-    """Um ciclo: confere por id os posts vivos mais recentes."""
-    ids = db_posts_vivos_recentes(time.time(), _LOTE)
-    if not ids:
+# ─────────────────────────────────────────────────────────────────
+# Conferência em lote: trava de MASSA e quarentena
+# ─────────────────────────────────────────────────────────────────
+def _quarentenar(ids: list, via: str) -> None:
+    for i in ids:
+        _QUARENTENA.setdefault(i, _CICLO["n"])
+    log_out.error(f"❌ [CONFERENCIA_EM_MASSA] {len(ids)} sumidos > {_LIMITE_EM_MASSA} "
+                  f"via={via} ids={sorted(ids)} — nada muda; quarentena "
+                  f"(reavaliação um id por vez, com controle positivo)")
+
+
+def _limpar_quarentena(agora: float) -> None:
+    """Sai da quarentena o que já não está vivo no banco (tratado por
+    outra via — aviso do Telegram, suspeita —, fundido ou fim da vida)."""
+    for mid in list(_QUARENTENA):
+        e = db_get_post(mid)
+        if (not e or e.get("fused_into") or e.get("delete_status")
+                or not viva(float(e.get("janela_fim") or 0.0), agora)):
+            _QUARENTENA.pop(mid, None)
+
+
+async def _reavaliar(controle_ok: bool) -> list:
+    """Quarentena. Cada id é perguntado SOZINHO (get_messages só dele, duas
+    vezes) — nunca pelo lote que o acusou —, a partir do ciclo seguinte ao
+    da quarentena, só com controle positivo neste ciclo (o lote achou ao
+    menos um post no ar: canal legível, ids certos) e no máximo
+    _LIMITE_EM_MASSA mudanças por ciclo. No ar → sai sem mudar nada."""
+    pendentes = sorted(i for i, c in _QUARENTENA.items() if c < _CICLO["n"])
+    if not pendentes:
         return []
-    return await confirmar(ids, "CONFERENCIA")
+    if not controle_ok:
+        log_out.warning(f"⚠️ [CONFERENCIA_EM_MASSA] quarentena={sorted(_QUARENTENA)} "
+                        f"sem controle positivo neste ciclo — nada muda")
+        return []
+    feitos, mudancas = [], 0
+    for mid in pendentes:
+        if mudancas >= _LIMITE_EM_MASSA:
+            break
+        confirmados, _p = await _perguntar([mid], "QUARENTENA")
+        if confirmados is None:
+            continue                                # malformada: fica para o próximo ciclo
+        _QUARENTENA.pop(mid, None)
+        if not confirmados:
+            log_out.info(f"🔎 [CONFERENCIA_EM_MASSA] post:{mid} está no ar — sai da quarentena")
+            continue
+        mudancas += 1
+        feitos += await apagados([mid], "QUARENTENA")
+    return feitos
+
+
+async def conferir() -> list:
+    """Um ciclo: confere por id, num lote, os posts vivos mais recentes
+    (fora da quarentena). Lote que CONFIRMA mais de _LIMITE_EM_MASSA
+    sumidos não muda nada — nem parcial: todos vão para a quarentena antes
+    de qualquer ação de banco ou espelho. Depois, a reavaliação."""
+    _CICLO["n"] += 1
+    agora = time.time()
+    _limpar_quarentena(agora)
+    lote = [i for i in db_posts_vivos_recentes(agora, _LOTE + len(_QUARENTENA))
+            if i not in _QUARENTENA][:_LOTE]
+    feitos, controle_ok = [], False
+    if lote:
+        confirmados, presentes = await _perguntar(lote, "CONFERENCIA")
+        if confirmados is not None and len(confirmados) > _LIMITE_EM_MASSA:
+            _quarentenar(confirmados, "CONFERENCIA")
+        elif confirmados is not None:
+            controle_ok = bool(presentes)
+            if confirmados:
+                feitos = await apagados(confirmados, "CONFERENCIA")
+    if _QUARENTENA:
+        feitos += await _reavaliar(controle_ok)
+    return feitos
 
 
 def suspeito(msg_id_dest, via: str) -> None:

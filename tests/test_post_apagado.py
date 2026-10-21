@@ -49,6 +49,11 @@ CASOS REAIS (prévia pública e logs da Railway):
       (benefício, fonte, rajada, deixa de ser cupb) ou surge outro → sob
       os locks a prova é refeita e NÃO funde; trocou para outro único →
       recomeça e funde nele
+  14  conferência em massa (> 5 confirmados no lote): nada muda, nem
+      parcial; quarentena + ❌ com ids e via; reavaliação um id por vez,
+      com controle positivo, ≤ 5 mudanças por ciclo — falsa persistente
+      (6), verdadeira (6), mista (7/3), sistêmica, limite exato (5);
+      aviso do Telegram não trava
 
     python tests/test_post_apagado.py
 """
@@ -114,6 +119,7 @@ def cenario(corpo, modo="SOMBRA"):
     import config
     antigo = config.CUPOM_MODO
     config.CUPOM_MODO = modo
+    post_apagado._QUARENTENA.clear()            # estado do processo: um cenário não vaza no outro
     try:
         return _cenario_base(corpo)
     finally:
@@ -841,6 +847,135 @@ def test_13_sobrevivente_revalidado_sob_os_locks(r):
                     str(out["feitos"]))
             r.check(out["ancoras_pa"] and out["vivos"] == (True, True), f"13.{nome}.outros_intocados",
                     f"ancoras_pa={out['ancoras_pa']} vivos={out['vivos']}")
+
+
+def _massa(n_posts, falta_lote, falta_unit, ciclos):
+    """n_posts posts vivos (cupom com código, um por post). O lote do
+    get_messages esconde `falta_lote(ids)`; a pergunta de UM id só esconde
+    `falta_unit(ids)`. Roda `ciclos` conferências e devolve, por ciclo, o
+    que mudou, a quarentena, as chamadas e os ❌ registrados."""
+    out = {"ciclos": []}
+
+    async def corpo(c):
+        post_apagado._QUARENTENA.clear()
+        posts = []
+        for k in range(n_posts):
+            cod = f"MASSA{k:02d}"
+            n = msg(FADA if k % 2 else PROMOTOM, f"Cupom {cod} na Shopee", cupons=[cod], plat=SHP)
+            await publicar(n)
+            posts.append(_post_de(n))
+        out["posts"] = posts
+        chamadas, erros = [], []
+
+        async def get_messages(dest, ids=None):
+            ids = list(ids)
+            chamadas.append(ids)
+            falta = falta_unit(posts) if len(ids) == 1 else falta_lote(posts)
+            return [None if i in falta else _M(i) for i in ids]
+        c.get_messages = get_messages
+        post_apagado._CONFIRMAR_S = 0.0
+        orig_err = post_apagado.log_out.error
+
+        def espia_err(m, *a, **k):
+            erros.append(str(m))
+            return orig_err(m, *a, **k)
+        post_apagado.log_out.error = espia_err
+        try:
+            with _Espelho() as esp:
+                for _ in range(ciclos):
+                    del chamadas[:]
+                    n_err = len(erros)
+                    feitos = await post_apagado.conferir()
+                    out["ciclos"].append({
+                        "feitos": feitos, "quarentena": set(post_apagado._QUARENTENA),
+                        "chamadas": [list(x) for x in chamadas], "erros": erros[n_err:],
+                        "espelho": list(esp.removidos)})
+        finally:
+            post_apagado.log_out.error = orig_err
+        out["vivos"] = {p: _vivo(p) for p in posts}
+    cenario(corpo)
+    return out
+
+
+def test_14_conferencia_em_massa_quarentena(r):
+    """Lote que CONFIRMA mais de 5 sumidos não muda NADA (nem parcial):
+    quarentena + ❌ [CONFERENCIA_EM_MASSA] com ids e via. Reavaliação: um
+    id por vez (nunca o mesmo lote de novo), a partir do ciclo seguinte, só
+    com controle positivo (o lote do ciclo achou post no ar), no máximo 5
+    mudanças por ciclo. Suspeita unitária e aviso do Telegram não travam."""
+    # (a) confirmação FALSA e persistente de 6 ids no lote; a pergunta
+    #     individual acha os 6 no ar
+    out = _massa(9, lambda ps: set(ps[:6]), lambda ps: set(), 3)
+    seis = set(out["posts"][:6])
+    c1, c2, c3 = out["ciclos"]
+    r.check(c1["feitos"] == [] and c1["espelho"] == [] and c1["quarentena"] == seis,
+            "14.falsa.c1_nada_muda_e_quarentena", f"feitos={c1['feitos']} q={sorted(c1['quarentena'])}")
+    r.check(len(c1["erros"]) == 1 and "[CONFERENCIA_EM_MASSA]" in c1["erros"][0]
+            and "via=CONFERENCIA" in c1["erros"][0] and all(str(i) in c1["erros"][0] for i in seis),
+            "14.falsa.c1_erro_com_ids_e_via", str(c1["erros"]))
+    lote_c2 = c2["chamadas"][0] if c2["chamadas"] else []
+    unit_c2 = [x for x in c2["chamadas"][1:] if len(x) == 1]
+    r.check(not (set(lote_c2) & seis) and sorted(x[0] for x in unit_c2) == sorted(seis),
+            "14.falsa.c2_lote_sem_a_quarentena_e_um_id_por_vez", str(c2["chamadas"]))
+    r.check(c2["feitos"] == [] and c2["quarentena"] == set(), "14.falsa.c2_liberados_sem_mudar",
+            f"feitos={c2['feitos']} q={sorted(c2['quarentena'])}")
+    r.check(c3["feitos"] == [] and all(out["vivos"].values()) and c3["espelho"] == [],
+            "14.falsa.tres_ciclos_zero_mudanca", f"vivos={out['vivos']}")
+
+    # (b) exclusão VERDADEIRA de 6 ids (lote e individual concordam)
+    out = _massa(8, lambda ps: set(ps[:6]), lambda ps: set(ps[:6]), 3)
+    seis = set(out["posts"][:6])
+    c1, c2, c3 = out["ciclos"]
+    r.check(c1["feitos"] == [] and c1["quarentena"] == seis, "14.verdadeira.c1_quarentena_sem_mudar",
+            f"feitos={c1['feitos']} q={sorted(c1['quarentena'])}")
+    r.check(len(c2["feitos"]) == 5 and all(s == "silenciado" for _p, s, _o in c2["feitos"])
+            and len(c2["quarentena"]) == 1, "14.verdadeira.c2_no_maximo_5_por_ciclo",
+            f"feitos={c2['feitos']} q={sorted(c2['quarentena'])}")
+    r.check(len(c3["feitos"]) == 1 and c3["quarentena"] == set(), "14.verdadeira.c3_resto",
+            f"feitos={c3['feitos']} q={sorted(c3['quarentena'])}")
+    r.check({p for p, v in out["vivos"].items() if not v} == seis, "14.verdadeira.so_os_6_sairam",
+            str(out["vivos"]))
+
+    # (c) lote MISTO: 7 acusados no lote, só 3 sumidos de verdade
+    out = _massa(10, lambda ps: set(ps[:7]), lambda ps: set(ps[:3]), 2)
+    tres = set(out["posts"][:3])
+    c1, c2 = out["ciclos"]
+    r.check(c1["feitos"] == [] and len(c1["quarentena"]) == 7, "14.misto.c1_nada_parcial",
+            f"feitos={c1['feitos']} q={sorted(c1['quarentena'])}")
+    r.check({p for p, _s, _o in c2["feitos"]} == tres and c2["quarentena"] == set(),
+            "14.misto.c2_so_os_verdadeiros", f"feitos={c2['feitos']} q={sorted(c2['quarentena'])}")
+    r.check({p for p, v in out["vivos"].items() if not v} == tres, "14.misto.falsos_intocados",
+            str(out["vivos"]))
+
+    # (d) falha SISTÊMICA: nada volta, nem lote nem individual — sem
+    #     controle positivo a quarentena espera; nada muda
+    out = _massa(8, lambda ps: set(ps), lambda ps: set(ps), 3)
+    r.check(all(c["feitos"] == [] for c in out["ciclos"]) and all(out["vivos"].values())
+            and out["ciclos"][-1]["quarentena"] == set(out["posts"]),
+            "14.sistemica.sem_controle_nada_muda",
+            str([(c["feitos"], len(c["quarentena"])) for c in out["ciclos"]]))
+
+    # (e) limite exato: 5 sumidos de verdade passam no mesmo ciclo
+    out = _massa(7, lambda ps: set(ps[:5]), lambda ps: set(ps[:5]), 1)
+    c1 = out["ciclos"][0]
+    r.check(len(c1["feitos"]) == 5 and c1["quarentena"] == set() and c1["erros"] == [],
+            "14.limite.cinco_passam", f"feitos={c1['feitos']} q={sorted(c1['quarentena'])}")
+
+    # (f) a trava é da CONFERÊNCIA: aviso do Telegram com 6 ids e a
+    #     suspeita unitária seguem tratando
+    out = {}
+
+    async def corpo(c):
+        post_apagado._QUARENTENA.clear()
+        posts = []
+        for k in range(6):
+            n = msg(FADA, f"Cupom AVISO{k} na Shopee", cupons=[f"AVISO{k}"], plat=SHP)
+            await publicar(n)
+            posts.append(_post_de(n))
+        with _Espelho():
+            out["telegram"] = await post_apagado.apagados(posts, "TELEGRAM")
+    cenario(corpo)
+    r.check(len(out["telegram"]) == 6, "14.telegram_nao_trava", str(out["telegram"]))
 
 
 if __name__ == "__main__":
