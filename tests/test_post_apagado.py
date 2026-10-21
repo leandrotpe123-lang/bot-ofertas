@@ -54,6 +54,10 @@ CASOS REAIS (prévia pública e logs da Railway):
       com controle positivo, ≤ 5 mudanças por ciclo — falsa persistente
       (6), verdadeira (6), mista (7/3), sistêmica, limite exato (5);
       aviso do Telegram não trava
+  15  encerramento: task do handler esperando o lock + suspeita presa na
+      confirmação + suspeita que termina no prazo → encerrar() fecha a
+      admissão, drena com prazo, cancela aguardando; nada vivo, nenhum uso
+      de Telegram/banco depois, nenhuma exceção solta
 
     python tests/test_post_apagado.py
 """
@@ -976,6 +980,75 @@ def test_14_conferencia_em_massa_quarentena(r):
             out["telegram"] = await post_apagado.apagados(posts, "TELEGRAM")
     cenario(corpo)
     r.check(len(out["telegram"]) == 6, "14.telegram_nao_trava", str(out["telegram"]))
+
+
+def test_15_encerramento_das_tasks_da_frente_m(r):
+    """Shutdown com uma task do handler ESPERANDO o lock do post e outra
+    (suspeita) EM CONFIRMAÇÃO no Telegram: post_apagado.encerrar() fecha
+    a admissão, dá o prazo e cancela o resto aguardando — nada fica vivo,
+    nenhuma exceção solta, nenhum uso do Telegram ou do banco depois, e o
+    banco fica como estava. Uma task que termina dentro do prazo termina."""
+    from pipeline import exclusao
+    out = {}
+
+    async def corpo(c):
+        pa, pb = await _dois_posts(out)()
+        a3 = msg(SAMUEL, "Cupom ENC1 na Shopee", cupons=["ENC1"], plat=SHP)
+        await publicar(a3)
+        p3 = _post_de(a3)
+        a4 = msg(FADA, "Cupom ENC2 na Shopee", cupons=["ENC2"], plat=SHP)
+        await publicar(a4)
+        p4 = _post_de(a4)
+        chamadas, liberar = [], asyncio.Event()
+
+        async def get_messages(dest, ids=None):
+            ids = list(ids)
+            chamadas.append(ids)
+            if ids == [p3]:
+                await liberar.wait()          # confirmação presa no Telegram
+            if ids == [p4]:
+                await asyncio.sleep(0.1)      # em curso, termina dentro do prazo (0,3 s)
+            return [None if i == p4 else _M(i) for i in ids]
+        c.get_messages = get_messages
+        post_apagado._CONFIRMAR_S = 0.0
+        post_apagado._DRENO_S = 0.3
+        loop = asyncio.get_running_loop()
+        excecoes = []
+        loop.set_exception_handler(lambda _l, ctx: excecoes.append(ctx.get("message")))
+        lk = await exclusao.lock_post(pa)
+        try:
+            await lk.acquire()                         # o handler vai esperar este lock
+            post_apagado.agendar([pa], "TELEGRAM")
+            post_apagado.suspeito(p3, "EDICAO")        # presa na confirmação
+            post_apagado.suspeito(p4, "EDICAO")        # termina dentro do prazo
+            await asyncio.sleep(0.05)
+            out["antes"] = len([t for t in post_apagado._TAREFAS if not t.done()])
+            with _Espelho():
+                await post_apagado.encerrar()
+                out["depois"] = (len(post_apagado._TAREFAS), sorted(post_apagado._EM_VOO))
+                n = len(chamadas)
+                post_apagado.agendar([pb], "TELEGRAM")     # admissão fechada
+                post_apagado.suspeito(pb, "EDICAO")
+                out["admissao"] = len(post_apagado._TAREFAS)
+                lk.release()
+                liberar.set()
+                await asyncio.sleep(0.1)
+                out["telegram_depois"] = chamadas[n:]
+        finally:
+            if lk.locked():
+                lk.release()
+            post_apagado._aberto = True
+            loop.set_exception_handler(None)
+        out["banco"] = (_vivo(pa), _vivo(pb), _vivo(p3), (db_get_post(p4) or {}).get("delete_status"))
+        out["excecoes"] = excecoes
+    cenario(corpo)
+    r.check(out["antes"] == 3, "15.tres_tasks_em_curso", str(out["antes"]))
+    r.check(out["depois"] == (0, []), "15.nada_vivo_depois_do_encerramento", str(out["depois"]))
+    r.check(out["admissao"] == 0, "15.admissao_fechada", str(out["admissao"]))
+    r.check(out["telegram_depois"] == [], "15.nenhum_uso_do_telegram_depois", str(out["telegram_depois"]))
+    r.check(out["banco"] == (True, True, True, "ok"), "15.banco_intacto_e_a_do_prazo_terminou",
+            str(out["banco"]))
+    r.check(out["excecoes"] == [], "15.nenhuma_excecao_solta", str(out["excecoes"]))
 
 
 if __name__ == "__main__":

@@ -877,6 +877,8 @@ _INVENTARIO = {
     ("pipeline/post_apagado.py", "iniciar_conferencia", "create_task"): "INDEPENDENTE: contexto vazio (conferência)",
     ("pipeline/post_apagado.py", "suspeito", "create_task"): "INDEPENDENTE: contexto vazio (verificação por suspeita do I/O)",
     ("pipeline/post_apagado.py", "suspeito", "add_done_callback"): "CALLBACK: _TAREFAS.discard",
+    ("pipeline/post_apagado.py", "encerrar", "wait"): "shutdown: tasks da frente M em curso (aguardado, com prazo)",
+    ("pipeline/post_apagado.py", "encerrar", "gather"): "shutdown: tasks da frente M canceladas (aguardado)",
 }
 
 
@@ -1002,6 +1004,45 @@ def _so_limpa_estrutura(no):
             regua._nome_final(c.func) in ("pop", "get", "discard")
             and regua._raiz_de(c.func) not in ("eventos", "coleta") for c in chamadas)
     return False
+
+
+def test_e06_encerramento_da_frente_m_antes_dos_recursos(r):
+    """As tasks independentes da frente M (handler do destino e suspeitas,
+    em post_apagado._TAREFAS) têm encerramento próprio: main._encerrar
+    chama post_apagado.encerrar() depois do drain e da conferência
+    cancelada e ANTES do canal de cupons, do HTTP, do Telegram e do banco
+    — nenhuma task da frente M usa recurso depois do teardown. E o
+    encerrar fecha a admissão, aguarda com prazo e cancela aguardando."""
+    corpo = _funcao("main.py", "_encerrar").body
+
+    def idx(pred):
+        for i, stmt in enumerate(corpo):
+            if any(pred(n) for n in ast.walk(stmt)):
+                return i
+        return -1
+
+    def chama(txt):
+        return lambda n: isinstance(n, ast.Call) and ast.unparse(n.func) == txt
+    i_aborta = idx(lambda n: isinstance(n, ast.If) and ast.unparse(n.test) == "g._buf"
+                   and any(isinstance(s, ast.Return) for s in n.body))
+    i_conf = idx(lambda n: isinstance(n, ast.Call)
+                 and ast.unparse(n) == "_TASKS_FUNDO.get('conferencia_destino')")
+    i_m = idx(chama("post_apagado.encerrar"))
+    i_esp = idx(chama("espelho_cupons.encerrar"))
+    i_http = idx(chama("g._http_session.close"))
+    i_tg = idx(chama("client.disconnect"))
+    i_db = idx(chama("_fechar_db"))
+    r.check(0 <= i_aborta < i_conf < i_m < i_esp < i_http < i_tg < i_db,
+            "E06.ordem_drain_conferencia_frente_m_espelho_http_telegram_banco",
+            str((i_aborta, i_conf, i_m, i_esp, i_http, i_tg, i_db)))
+    r.check(i_m >= 0 and isinstance(corpo[i_m], ast.Try), "E06.encerrar_frente_m_contido_em_try")
+    enc = _funcao("pipeline/post_apagado.py", "encerrar")
+    txt = ast.unparse(enc)
+    r.check("_aberto = False" in txt and ".cancel()" in txt and "return_exceptions=True" in txt
+            and "timeout=" in txt, "E06.admissao_prazo_cancela_aguarda", txt[:200])
+    for fab in ("agendar", "suspeito"):
+        r.check("_aberto" in ast.unparse(_funcao("pipeline/post_apagado.py", fab)),
+                f"E06.{fab}_recusa_depois_do_encerramento")
 
 
 def test_e05_callbacks_de_termino_so_limpam_estrutura(r):

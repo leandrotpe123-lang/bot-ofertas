@@ -279,6 +279,14 @@ async def _encerrar() -> None:
         t.cancel()
         await asyncio.gather(t, return_exceptions=True)
 
+    # [Frente M] tasks do handler do destino e das suspeitas — admissão
+    # fechada, prazo curto e cancelamento aguardado, ANTES do canal de
+    # cupons, do HTTP, do Telegram e do banco.
+    try:
+        await post_apagado.encerrar()
+    except Exception as e:
+        log_sys.error(f"❌ encerrar frente M: {e}")
+
     # [F1.1] sinal de vida dos eventos — cancela e aguarda. A porta da
     # API privada é solta adiante, depois do web e antes do banco.
     t = _TASKS_FUNDO.get("api_privada")

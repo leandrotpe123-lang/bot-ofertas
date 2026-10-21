@@ -94,7 +94,8 @@ from pipeline.resolucao_identidade import prefixo_cupom_sem_codigo
 from pipeline.vida_oferta import VIDA_OFERTA_S, viva
 
 __all__ = ["instalar", "agendar", "apagados", "sobrevivente", "conferir",
-           "confirmar", "suspeito", "registrar_suspeita", "iniciar_conferencia"]
+           "confirmar", "suspeito", "registrar_suspeita", "iniciar_conferencia",
+           "encerrar"]
 
 # Conferência do destino: um get_messages a cada _CONFERIR_S, até _LOTE ids
 # (o teto da chamada). O 1º ciclo sai logo depois do boot (cobre o que se
@@ -114,6 +115,11 @@ _TENTATIVAS = 3
 # da reavaliação. Aviso do Telegram e suspeita unitária não passam por ela.
 _LIMITE_EM_MASSA = 5
 
+# No shutdown (encerrar), o que está em curso tem até isto para terminar;
+# o resto é cancelado e aguardado.
+_DRENO_S = 2.0
+
+_aberto = True                # False depois do encerrar: agendar/suspeito recusam
 _TAREFAS: set = set()
 _EM_VOO: set = set()          # ids com verificação por suspeita em curso
 _QUARENTENA: dict = {}        # id → ciclo da conferência em que entrou
@@ -140,7 +146,7 @@ def instalar(cliente, destino) -> None:
 
 def agendar(ids, via: str) -> None:
     """Agenda o tratamento numa task própria (contexto vazio) e volta."""
-    if g._encerrando or not ids:
+    if g._encerrando or not _aberto or not ids:
         return
     t = asyncio.get_running_loop().create_task(
         apagados(list(ids), via), context=contextvars.Context())
@@ -208,18 +214,18 @@ async def apagados(ids, via: str = "TELEGRAM") -> list:
         try:
             mid = int(mid)
             situacao, sob, motivo = await _um(mid)
+            if situacao not in ("fundido", "silenciado", "fora_da_vida"):
+                log_out.debug(f"🗑 [APAGADO_IGNORADO] post:{mid} situacao={situacao} via={via}")
+                continue
+            # ── fora de todos os locks: a mensagem já não existe no canal ──
+            g.midia_aceita_drop(mid)
+            db_set_delete_status(mid, "ok")
+            espelho_cupons.removido(mid)
         except asyncio.CancelledError:
             raise
         except Exception as e:                          # noqa: BLE001
             log_out.error(f"❌ post apagado {mid}: {e}", exc_info=True)
             continue
-        if situacao not in ("fundido", "silenciado", "fora_da_vida"):
-            log_out.debug(f"🗑 [APAGADO_IGNORADO] post:{mid} situacao={situacao} via={via}")
-            continue
-        # ── fora de todos os locks: a mensagem já não existe no canal ──
-        g.midia_aceita_drop(mid)
-        db_set_delete_status(mid, "ok")
-        espelho_cupons.removido(mid)
         if situacao == "fundido":
             log_out.info(f"🗑 [APAGADO_DONO] post:{mid} → post:{sob} "
                          f"motivo={motivo} via={via} — a campanha segue no que ficou")
@@ -424,7 +430,7 @@ def suspeito(msg_id_dest, via: str) -> None:
         mid = int(msg_id_dest)
     except (TypeError, ValueError):
         return
-    if g._encerrando or mid in _EM_VOO:
+    if g._encerrando or not _aberto or mid in _EM_VOO:
         return
     _EM_VOO.add(mid)
     t = asyncio.get_running_loop().create_task(
@@ -464,6 +470,35 @@ async def _laco() -> None:
             log_out.warning(f"⚠️ [CONFERENCIA_DESTINO] FloodWait {e.seconds}s")
         except Exception as e:                          # noqa: BLE001
             log_out.warning(f"⚠️ [CONFERENCIA_DESTINO] {type(e).__name__}: {e}")
+
+
+async def encerrar() -> None:
+    """Shutdown (main._encerrar: depois do drain da fila e da conferência
+    cancelada, ANTES do canal de cupons, do HTTP, do Telegram e do banco).
+    Fecha a admissão (agendar/suspeito recusam), dá até _DRENO_S ao que
+    está em curso (inclusive o que nascer disso) e cancela o resto,
+    aguardando: nenhuma task da frente M sobrevive ao teardown e nenhuma
+    exceção fica solta. Cancelar é seguro: os únicos await são a espera
+    do lock e as perguntas ao Telegram; entre releitura e escrita no banco
+    não há await. O que não terminou volta pela conferência do próximo
+    boot."""
+    global _aberto
+    _aberto = False
+    loop = asyncio.get_running_loop()
+    prazo = loop.time() + _DRENO_S
+    while True:
+        pendentes = [t for t in _TAREFAS if not t.done()]
+        restante = prazo - loop.time()
+        if not pendentes or restante <= 0:
+            break
+        await asyncio.wait(pendentes, timeout=restante)
+    for t in pendentes:
+        t.cancel()
+    if pendentes:
+        await asyncio.gather(*pendentes, return_exceptions=True)
+        log_out.info(f"🧹 [FRENTE_M] {len(pendentes)} task(s) canceladas no encerramento "
+                     f"— a conferência do próximo boot retoma")
+    _EM_VOO.clear()
 
 
 def iniciar_conferencia() -> Optional[asyncio.Task]:
