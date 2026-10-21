@@ -60,6 +60,9 @@ CASOS REAIS (prévia pública e logs da Railway):
       de Telegram/banco depois, nenhuma exceção solta
   16  handler registrado por instalar() só agenda e chega à fusão;
       exceção depois dos locks (espelho) num id não derruba os outros
+  17  caso real 30466 (21/10, ATIVO): aviso chegou → silenciado e o Samuel
+      nunca vai para o apagado; aviso perdido → 1 chamada (antes 6) e a
+      confirmação silencia, sem post novo
 
     python tests/test_post_apagado.py
 """
@@ -1113,6 +1116,79 @@ def test_16_handler_ponta_a_ponta_e_falha_isolada(r):
     px, py, st = out["xy"]
     r.check([p for p, _s, _o in out["feitos"]] == [py] and st == "ok",
             "16.falha_num_id_nao_derruba_o_outro", str(out["feitos"]))
+
+
+# Caso real da 1ª noite ATIVA (21/10 UTC, prévia pública e logs da Railway):
+# Promotom 111714 (01:55:02) → post 30466, único post do lançamento; o dono
+# apagou o 30466 à mão; Samuel 122344 (02:17:46, Δ 22,7 min) → a regra (b)
+# juntou no 30466 APAGADO (CUPOM_ENCONTRO mesmo_beneficio_na_faixa) → 6 ×
+# "edit … message ID is invalid" (2 × UPGRADE_MIDIA_FALHOU, 3 tentativas cada).
+P_111714 = ('Próximo Cupom 20% OFF Mercado Livre\n\n•Tutorial para resgate: \n1 Entre no APP do Meli aqui: '
+            'https://meli.la/1M4yad2 \n2 Clique em "Início" no rodapé do APP \n3 Depois no carrossel no canto '
+            'superior esquerdo clique em "OFERTAS IMPERDÍVEIS COM ATÉ R$ 800 OFF" com a foto da Anitta \n'
+            '4 Resgate o cupom')
+S_122344 = ('🔥 Próximo Cupom 20% OFF Mercado Livre em Lojas Oficiais \n\n⚠️ Resgate agora e use MEIA-NOITE\n\n'
+            '⭐️ Tutorial para resgate:\n1. Entre no APP do Meli aqui: https://meli.la/2YF9dni\n2. Clique em '
+            '"Início" no rodapé do APP \n3. Depois clique no Banner da Anitta\n4. Resgate o cupom\n\nanúncio')
+
+
+def test_17_caso_real_30466_em_ativo(r):
+    """Replay do 30466 com CUPOM_MODO ATIVO. (a) o aviso de exclusão chegou:
+    o apagado é silenciado e a mensagem do Samuel nunca vai para ele —
+    nenhuma edição no post apagado. (b) o aviso se perdeu: a regra junta no
+    apagado (como em produção), mas a 1ª MessageIdInvalid é UMA chamada só
+    (antes: 3 × 2) e a confirmação por id silencia o post; nenhum post novo
+    é criado por substituição."""
+    from telethon.errors import MessageIdInvalidError
+    for aviso in ("chegou", "perdido"):
+        out = {}
+
+        async def corpo(c, aviso=aviso):
+            a = msg(PROMOTOM, P_111714, urls_longas=TUTORIAL_P, plat=ML)
+            await publicar(a)
+            pa = _post_de(a)
+            apagados_tg = {pa}                         # o dono apagou no Telegram
+            edits_pa = []
+            orig_edit = c.edit_message
+
+            async def edit_message(dest, msg_id, texto, parse_mode=None, file=None, **k):
+                if msg_id in apagados_tg:
+                    edits_pa.append(msg_id)
+                    raise MessageIdInvalidError(request=None)
+                return await orig_edit(dest, msg_id, texto, parse_mode=parse_mode, file=file)
+
+            async def get_messages(dest, ids=None):
+                return [_M(i) for i in ids if i not in apagados_tg]
+            c.edit_message, c.get_messages = edit_message, get_messages
+            post_apagado._CONFIRMAR_S = 0.0
+            post_apagado.registrar_suspeita()
+            with _Espelho() as esp:
+                if aviso == "chegou":
+                    out["feitos"] = await post_apagado.apagados([pa], "TELEGRAM")
+                _recuar(1362)                          # Δ 22,7 min
+                s = msg(SAMUEL, S_122344, urls_longas=TUTORIAL_F, plat=ML)
+                n0 = c.novos
+                # Em produção a edição foi de mídia (UPGRADE_MIDIA); na bancada
+                # a mensagem não traz mídia, então o score maior leva à EVOLUI
+                # — o mesmo saida._editar_inner_no_sem (o 10 cobre a mídia).
+                await publicar(s, score=12)
+                await _drenar()
+                out["espelho"] = list(esp.removidos)
+            out.update(pa=pa, edits_pa=len(edits_pa), samuel=_post_de(s), novos=c.novos - n0,
+                       status=(db_get_post(pa) or {}).get("delete_status"))
+        cenario(corpo, modo="ATIVO")
+        pa = out["pa"]
+        if aviso == "chegou":
+            r.check(out["feitos"] == [(pa, "silenciado", None)], "17.chegou.silenciado", str(out["feitos"]))
+            r.check(out["edits_pa"] == 0 and out["samuel"] != pa,
+                    "17.chegou.samuel_nunca_vai_para_o_apagado",
+                    f"edits_pa={out['edits_pa']} samuel={out['samuel']} pa={pa}")
+        else:
+            r.check(out["edits_pa"] <= 1, "17.perdido.uma_chamada_no_maximo_antes_6",
+                    f"edits_pa={out['edits_pa']}")
+            r.check(out["status"] == "ok" and out["espelho"] == [pa],
+                    "17.perdido.confirmado_e_silenciado", f"status={out['status']} espelho={out['espelho']}")
+            r.check(out["novos"] == 0, "17.perdido.nenhum_post_por_substituicao", f"novos={out['novos']}")
 
 
 if __name__ == "__main__":

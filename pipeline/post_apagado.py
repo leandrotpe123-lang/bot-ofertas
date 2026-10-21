@@ -69,7 +69,16 @@ COMO (nenhum caminho de escrita novo):
 LIMITES: o aviso de exclusão não é garantido (por isso a conferência); a
 exclusão de um post fora da vida só tira o espelho; a fonte que apaga e
 reposta a mesma oferta enquanto o post silenciado vive é absorvida (o dono
-já tinha apagado o post).
+já tinha apagado o post). Quarentena da conferência em massa sem controle
+positivo espera até o fim da vida do post (o aviso do Telegram e a
+suspeita unitária seguem valendo).
+NÃO RESOLVIDO AQUI (frentes próprias, ver o PR #25):
+  · janelas de queda da SUBSTITUIÇÃO (pipeline.saida): depois do delete e
+    antes do envio, e depois do envio e antes do banco. A anotação de
+    apagados_pelo_worker é em memória e não recupera esses casos sozinha;
+  · espelho: espelho_cupons._apagar engole a falha do delete e remove o
+    vínculo — a mensagem do canal de cupons pode ficar órfã. A exclusão
+    do espelho NÃO é garantida.
 """
 from __future__ import annotations
 
