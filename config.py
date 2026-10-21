@@ -148,6 +148,7 @@ EVENTOS_ANEL_MAX_BYTES = _int_env("EVENTOS_ANEL_MAX_BYTES", 32 << 20,
 # uma é PR aprovado pelo dono (recalibrar = PR com dados novos). Nada se
 # ajusta sozinho em produção.
 #
+# ATIVO desde o PR #22 (20/10/2026); regra (a+b) do PR #24; reversão = PR #23.
 # "SOMBRA": a regra nova só registra o que faria (CUPOM_ENCONTRO_SOMBRA,
 # CUPOM_LIBERACAO_SOMBRA, CUPOM_INCERTO); o comportamento é o de sempre.
 # "ATIVO": a regra nova decide a família. Ligar exige PR do dono depois dos
