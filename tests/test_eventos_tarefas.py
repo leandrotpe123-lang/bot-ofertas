@@ -113,6 +113,7 @@ import time
 import types as _pytypes
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _telethon_fakes import afetadas                        # noqa: E402
 
 import telethon  # noqa: E402  — REAL, antes do harness
 from telethon import utils  # noqa: E402
@@ -345,10 +346,11 @@ class Telegram:
             self.falha_delete -= 1
             self.ops.append((dest, "delete_falhou", lista[0]))
             raise RuntimeError("delete recusado")
+        n = 0
         for i in lista:
-            self.msgs.pop((dest, i), None)
+            n += self.msgs.pop((dest, i), None) is not None
             self.ops.append((dest, "delete", i))
-        return True
+        return afetadas(lista, n)
 
     async def get_messages(self, dest, ids=None):
         await self._sonda("get_messages", dest, ids)
@@ -797,7 +799,10 @@ def _create_tasks(no):
 
 def test_e01_fabricas_criam_em_contexto_vazio(r):
     for rel, fn, co in (("pipeline/convergencia.py", "agendar_remocao", "_remover"),
-                        ("pipeline/espelho_cupons.py", "_tarefa", "_protegido")):
+                        ("pipeline/espelho_cupons.py", "_tarefa", "_protegido"),
+                        ("pipeline/post_apagado.py", "agendar", "apagados"),
+                        ("pipeline/post_apagado.py", "iniciar_conferencia", "_laco"),
+                        ("pipeline/post_apagado.py", "suspeito", "_verificar")):
         cts = _create_tasks(_funcao(rel, fn))
         ok = (len(cts) == 1 and len(cts[0].args) == 1
               and regua._nome_final(cts[0].args[0].func) == co
@@ -866,6 +871,14 @@ _INVENTARIO = {
     ("pipeline/espelho_cupons.py", "_aguardar", "wait"): "AGUARDADA: a operação anterior do post",
     ("pipeline/espelho_cupons.py", "encerrar", "wait"): "shutdown: o que já está em curso (aguardado)",
     ("pipeline/espelho_cupons.py", "encerrar", "gather"): "shutdown: o que já está em curso (aguardado)",
+    # [Frente M] post apagado à mão pelo dono: handler do destino e conferência
+    ("pipeline/post_apagado.py", "agendar", "create_task"): "INDEPENDENTE: contexto vazio (handler do destino)",
+    ("pipeline/post_apagado.py", "agendar", "add_done_callback"): "CALLBACK: _TAREFAS.discard",
+    ("pipeline/post_apagado.py", "iniciar_conferencia", "create_task"): "INDEPENDENTE: contexto vazio (conferência)",
+    ("pipeline/post_apagado.py", "suspeito", "create_task"): "INDEPENDENTE: contexto vazio (verificação por suspeita do I/O)",
+    ("pipeline/post_apagado.py", "suspeito", "add_done_callback"): "CALLBACK: _TAREFAS.discard",
+    ("pipeline/post_apagado.py", "encerrar", "wait"): "shutdown: tasks da frente M em curso (aguardado, com prazo)",
+    ("pipeline/post_apagado.py", "encerrar", "gather"): "shutdown: tasks da frente M canceladas (aguardado)",
 }
 
 
@@ -961,7 +974,7 @@ def test_e03_as_unicas_contextvar_sao_as_da_coleta(r):
     r.check(citacoes == {"eventos/coleta.py"}, "E03.contextvar_so_citada_na_coleta",
             f"ContextVar citada fora da coleta: {_REAVALIAR} — {sorted(citacoes)}")
     r.check(importadores == {"eventos/coleta.py", "main.py", "pipeline/convergencia.py",
-                             "pipeline/espelho_cupons.py"},
+                             "pipeline/espelho_cupons.py", "pipeline/post_apagado.py"},
             "E03.importadores_de_contextvars_lista_fechada",
             f"importador novo de contextvars: {_REAVALIAR} — {sorted(importadores)}")
 
@@ -993,6 +1006,45 @@ def _so_limpa_estrutura(no):
     return False
 
 
+def test_e06_encerramento_da_frente_m_antes_dos_recursos(r):
+    """As tasks independentes da frente M (handler do destino e suspeitas,
+    em post_apagado._TAREFAS) têm encerramento próprio: main._encerrar
+    chama post_apagado.encerrar() depois do drain e da conferência
+    cancelada e ANTES do canal de cupons, do HTTP, do Telegram e do banco
+    — nenhuma task da frente M usa recurso depois do teardown. E o
+    encerrar fecha a admissão, aguarda com prazo e cancela aguardando."""
+    corpo = _funcao("main.py", "_encerrar").body
+
+    def idx(pred):
+        for i, stmt in enumerate(corpo):
+            if any(pred(n) for n in ast.walk(stmt)):
+                return i
+        return -1
+
+    def chama(txt):
+        return lambda n: isinstance(n, ast.Call) and ast.unparse(n.func) == txt
+    i_aborta = idx(lambda n: isinstance(n, ast.If) and ast.unparse(n.test) == "g._buf"
+                   and any(isinstance(s, ast.Return) for s in n.body))
+    i_conf = idx(lambda n: isinstance(n, ast.Call)
+                 and ast.unparse(n) == "_TASKS_FUNDO.get('conferencia_destino')")
+    i_m = idx(chama("post_apagado.encerrar"))
+    i_esp = idx(chama("espelho_cupons.encerrar"))
+    i_http = idx(chama("g._http_session.close"))
+    i_tg = idx(chama("client.disconnect"))
+    i_db = idx(chama("_fechar_db"))
+    r.check(0 <= i_aborta < i_conf < i_m < i_esp < i_http < i_tg < i_db,
+            "E06.ordem_drain_conferencia_frente_m_espelho_http_telegram_banco",
+            str((i_aborta, i_conf, i_m, i_esp, i_http, i_tg, i_db)))
+    r.check(i_m >= 0 and isinstance(corpo[i_m], ast.Try), "E06.encerrar_frente_m_contido_em_try")
+    enc = _funcao("pipeline/post_apagado.py", "encerrar")
+    txt = ast.unparse(enc)
+    r.check("_aberto = False" in txt and ".cancel()" in txt and "return_exceptions=True" in txt
+            and "timeout=" in txt, "E06.admissao_prazo_cancela_aguarda", txt[:200])
+    for fab in ("agendar", "suspeito"):
+        r.check("_aberto" in ast.unparse(_funcao("pipeline/post_apagado.py", fab)),
+                f"E06.{fab}_recusa_depois_do_encerramento")
+
+
 def test_e05_callbacks_de_termino_so_limpam_estrutura(r):
     """add_done_callback roda o callback numa cópia do contexto de QUEM O
     REGISTROU — o contexto vazio da task não vale para ele. Os de hoje só
@@ -1010,7 +1062,7 @@ def test_e05_callbacks_de_termino_so_limpam_estrutura(r):
                 ok = _so_limpa_estrutura(arg)
             if not ok:
                 ruins.append((rel, dono, ast.unparse(arg)[:80] if arg is not None else "?"))
-    r.check(len(sitios) == 7 and ruins == [], "E05.callbacks_so_limpam_estrutura",
+    r.check(len(sitios) == 9 and ruins == [], "E05.callbacks_so_limpam_estrutura",
             f"sitios={len(sitios)} ruins={ruins}")
 
 

@@ -34,6 +34,7 @@ import time
 from dataclasses import replace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _telethon_fakes import afetadas                        # noqa: E402
 
 import telethon  # noqa: E402  — REAL, antes do harness
 from telethon import TelegramClient, errors, utils  # noqa: E402
@@ -155,7 +156,7 @@ class Cliente:
             self.falhas_delete -= 1
             raise RuntimeError("delete recusado")
         self.deletes.append(msg_id)
-        return True
+        return afetadas(msg_id)
 
     async def download_media(self, media, file=None):
         if file is not None:
