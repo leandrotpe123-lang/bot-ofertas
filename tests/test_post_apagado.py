@@ -63,6 +63,9 @@ CASOS REAIS (prévia pública e logs da Railway):
   17  caso real 30466 (21/10, ATIVO): aviso chegou → silenciado e o Samuel
       nunca vai para o apagado; aviso perdido → 1 chamada (antes 6) e a
       confirmação silencia, sem post novo
+  18  resposta com id NÃO PEDIDO é malformada — no lote, na confirmação, no
+      caminho unitário (quarentena e suspeita): nada funde, nada silencia,
+      não é controle positivo; resposta válida segue fundindo
 
     python tests/test_post_apagado.py
 """
@@ -858,7 +861,7 @@ def test_13_sobrevivente_revalidado_sob_os_locks(r):
                     f"ancoras_pa={out['ancoras_pa']} vivos={out['vivos']}")
 
 
-def _massa(n_posts, falta_lote, falta_unit, ciclos, entre=None):
+def _massa(n_posts, falta_lote, falta_unit, ciclos, entre=None, resposta=None):
     """n_posts posts vivos (cupom com código, um por post). O lote do
     get_messages esconde `falta_lote(ids)`; a pergunta de UM id só esconde
     `falta_unit(ids)`. Roda `ciclos` conferências e devolve, por ciclo, o
@@ -874,11 +877,15 @@ def _massa(n_posts, falta_lote, falta_unit, ciclos, entre=None):
             await publicar(n)
             posts.append(_post_de(n))
         out["posts"] = posts
-        chamadas, erros = [], []
+        chamadas, erros, ciclo = [], [], {"k": 0}
 
         async def get_messages(dest, ids=None):
             ids = list(ids)
             chamadas.append(ids)
+            if resposta is not None:
+                r = resposta(posts, ids, ciclo["k"])
+                if r is not None:
+                    return r
             falta = falta_unit(posts) if len(ids) == 1 else falta_lote(posts)
             return [None if i in falta else _M(i) for i in ids]
         c.get_messages = get_messages
@@ -894,6 +901,7 @@ def _massa(n_posts, falta_lote, falta_unit, ciclos, entre=None):
                 for k in range(ciclos):
                     if entre and k:
                         await entre(posts, k)
+                    ciclo["k"] = k
                     del chamadas[:]
                     n_err = len(erros)
                     feitos = await post_apagado.conferir()
@@ -1189,6 +1197,114 @@ def test_17_caso_real_30466_em_ativo(r):
             r.check(out["status"] == "ok" and out["espelho"] == [pa],
                     "17.perdido.confirmado_e_silenciado", f"status={out['status']} espelho={out['espelho']}")
             r.check(out["novos"] == 0, "17.perdido.nenhum_post_por_substituicao", f"novos={out['novos']}")
+
+
+ESTRANHO = 987654321          # id inteiro que ninguém pediu
+
+
+def test_18_resposta_com_id_nao_pedido_e_malformada(r):
+    """A resposta do get_messages é validada contra os ids PEDIDOS, nos dois
+    estágios de _perguntar (lote e confirmação) e no caminho unitário (um
+    id: suspeita e quarentena). Item com id inteiro que não foi pedido →
+    resposta malformada: não prova ausência nem serve de controle positivo
+    — nada funde, nada silencia, a quarentena não é reavaliada."""
+    def _conferir_par(resp):
+        out = {}
+
+        async def corpo(c):
+            pa, pb = await _dois_posts(out)()
+            chamadas = []
+
+            async def get_messages(dest, ids=None):
+                ids = list(ids)
+                chamadas.append(ids)
+                return resp(pa, pb, ids, len(chamadas))
+            c.get_messages = get_messages
+            post_apagado._CONFIRMAR_S = 0.0
+            with _Espelho() as esp:
+                out["feitos"] = await post_apagado.conferir()
+                out["espelho"] = list(esp.removidos)
+            out["vivos"] = (_vivo(pa), _vivo(pb))
+            out["chamadas"] = chamadas
+            out["ids"] = (pa, pb)
+        cenario(corpo)
+        return out
+
+    # (a) id estranho na consulta INICIAL (lote): pa "falta" e vem um id não pedido
+    out = _conferir_par(lambda pa, pb, ids, n: ([_M(i) for i in ids if i != pa] + [_M(ESTRANHO)]
+                                                if n == 1 else []))
+    r.check(out["feitos"] == [] and out["vivos"] == (True, True) and out["espelho"] == []
+            and len(out["chamadas"]) == 1, "18.estranho_no_lote.nada_muda",
+            f"feitos={out['feitos']} vivos={out['vivos']} chamadas={out['chamadas']}")
+    # (b) id estranho na CONFIRMAÇÃO: o lote é válido (pa falta), a 2ª pergunta traz um id não pedido
+    out = _conferir_par(lambda pa, pb, ids, n: ([_M(i) for i in ids if i != pa] if n == 1
+                                                else [_M(ESTRANHO)]))
+    pa, pb = out["ids"]
+    r.check(out["feitos"] == [] and out["vivos"] == (True, True) and out["espelho"] == []
+            and out["chamadas"][1:] == [[pa]], "18.estranho_na_confirmacao.nada_muda",
+            f"feitos={out['feitos']} vivos={out['vivos']} chamadas={out['chamadas']}")
+    # (b2) na confirmação o PEDIDO é só [pa]: devolver pb (que era do lote,
+    #      mas não foi perguntado de novo) também é resposta malformada
+    out = _conferir_par(lambda pa, pb, ids, n: ([_M(i) for i in ids if i != pa] if n == 1
+                                                else [_M(pb)]))
+    r.check(out["feitos"] == [] and out["vivos"] == (True, True),
+            "18.id_do_lote_nao_pedido_na_confirmacao.nada_muda",
+            f"feitos={out['feitos']} vivos={out['vivos']} chamadas={out['chamadas']}")
+    # (c) controle: resposta VÁLIDA com os ids esperados (pa falta nas duas) → funde
+    out = _conferir_par(lambda pa, pb, ids, n: [_M(i) for i in ids if i != pa])
+    pa, pb = out["ids"]
+    r.check(out["feitos"] == [(pa, "fundido", pb)], "18.valida.funde", str(out["feitos"]))
+
+    # (d) id estranho no lote NÃO é controle positivo: 6 em quarentena (exclusão
+    #     real); no ciclo 2 o canal some, mas o Telegram devolve um id não
+    #     pedido — antes ele contava como "achou post no ar"
+    def sem_canal_com_estranho(posts, ids, k):
+        if k >= 1 and len(ids) > 1:
+            return [_M(ESTRANHO)]            # ciclo 2: lote volta só com um id não pedido
+        if k >= 1:
+            return []                        # ciclo 2: a pergunta individual diz "falta"
+        return None                          # ciclo 1: as faltas de sempre (6 reais)
+    out = _massa(8, lambda ps: set(ps[:6]), lambda ps: set(ps[:6]), 2, resposta=sem_canal_com_estranho)
+    seis = set(out["posts"][:6])
+    c1, c2 = out["ciclos"]
+    r.check(c1["quarentena"] == seis and c1["feitos"] == [], "18.quarentena.c1_quarentena",
+            f"q={sorted(c1['quarentena'])}")
+    r.check(c2["feitos"] == [] and c2["quarentena"] == seis and len(c2["chamadas"]) == 1,
+            "18.quarentena.estranho_nao_e_controle_positivo",
+            f"feitos={c2['feitos']} q={sorted(c2['quarentena'])} chamadas={c2['chamadas']}")
+    r.check(all(out["vivos"][p] for p in out["posts"][6:]), "18.quarentena.controles_intocados",
+            str(out["vivos"]))
+
+    # (e) caminho UNITÁRIO da quarentena: controle válido no ciclo 2, mas a
+    #     pergunta de UM id traz um id não pedido → fica na quarentena, nada muda
+    def unitario_estranho(posts, ids, k):
+        if k >= 1 and len(ids) == 1:
+            return [_M(ESTRANHO)]            # ciclo 2: a pergunta de UM id traz um id não pedido
+        return None
+    out = _massa(8, lambda ps: set(ps[:6]), lambda ps: set(ps[:6]), 2, resposta=unitario_estranho)
+    seis = set(out["posts"][:6])
+    c2 = out["ciclos"][1]
+    unit = [x for x in c2["chamadas"] if len(x) == 1]
+    r.check(c2["feitos"] == [] and c2["quarentena"] == seis and len(unit) == 6,
+            "18.quarentena_unitaria.estranho_fica_na_quarentena",
+            f"feitos={c2['feitos']} q={sorted(c2['quarentena'])} unit={unit}")
+
+    # (f) suspeita unitária (EDICAO) com id não pedido → nada muda
+    out = {}
+
+    async def corpo_susp(c):
+        pa, pb = await _dois_posts(out)()
+
+        async def get_messages(dest, ids=None):
+            return [_M(ESTRANHO)]
+        c.get_messages = get_messages
+        post_apagado._CONFIRMAR_S = 0.0
+        with _Espelho():
+            out["feitos"] = await post_apagado.confirmar([pa], "EDICAO")
+        out["vivo"] = _vivo(pa)
+    cenario(corpo_susp)
+    r.check(out["feitos"] == [] and out["vivo"], "18.suspeita_unitaria.nada_muda",
+            f"feitos={out['feitos']} vivo={out['vivo']}")
 
 
 if __name__ == "__main__":

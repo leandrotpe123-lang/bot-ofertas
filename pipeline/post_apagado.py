@@ -305,18 +305,21 @@ async def _um(apagado: int) -> tuple:
 # ─────────────────────────────────────────────────────────────────
 # Conferência (cobre o aviso perdido)
 # ─────────────────────────────────────────────────────────────────
-def _presentes(msgs) -> Optional[set]:
-    """Ids que o Telegram devolveu. None = resposta malformada (não lista,
-    ou item sem id inteiro): não prova nada. `None` na lista é o
-    MessageEmpty do Telethon — o id simplesmente não entra."""
+def _presentes(msgs, pedidos) -> Optional[set]:
+    """Ids que o Telegram devolveu, validados contra os `pedidos` desta
+    pergunta. None = resposta malformada (não lista, item sem id inteiro
+    ou com id que NÃO foi pedido): não prova nada — nem ausência, nem
+    controle positivo da quarentena. `None` na lista é o MessageEmpty do
+    Telethon — o id simplesmente não entra."""
     if not isinstance(msgs, (list, tuple)):
         return None
+    pedidos = set(pedidos)
     ids = set()
     for m in msgs:
         if m is None:
             continue
         i = getattr(m, "id", None)
-        if not isinstance(i, int) or isinstance(i, bool):
+        if not isinstance(i, int) or isinstance(i, bool) or i not in pedidos:
             return None
         ids.add(i)
     return ids
@@ -324,10 +327,12 @@ def _presentes(msgs) -> Optional[set]:
 
 async def _perguntar(ids: list, via: str) -> tuple:
     """(confirmados, presentes). Confirmado = FALTA duas vezes seguidas (a
-    2ª pergunta só pelos que faltaram). confirmados None = resposta
-    malformada: não prova nada. Exceção sobe a quem chamou."""
+    2ª pergunta só pelos que faltaram). Cada resposta é validada contra os
+    ids daquela pergunta. confirmados None = resposta malformada (em
+    qualquer dos dois estágios): não prova nada e não devolve presentes.
+    Exceção sobe a quem chamou."""
     from client import client
-    presentes = _presentes(await client.get_messages(config.GRUPO_DESTINO, ids=ids))
+    presentes = _presentes(await client.get_messages(config.GRUPO_DESTINO, ids=ids), ids)
     if presentes is None:
         log_out.warning(f"⚠️ [CONFERENCIA_DESTINO] resposta malformada via={via} — nada muda")
         return None, set()
@@ -337,10 +342,10 @@ async def _perguntar(ids: list, via: str) -> tuple:
     # Um "falta" isolado (rede, Telegram) fundiria um post que está no ar.
     # O que o worker apagou é filtrado no tratamento (_um), sob o lock.
     await asyncio.sleep(_CONFIRMAR_S)
-    de_novo = _presentes(await client.get_messages(config.GRUPO_DESTINO, ids=sumidos))
+    de_novo = _presentes(await client.get_messages(config.GRUPO_DESTINO, ids=sumidos), sumidos)
     if de_novo is None:
         log_out.warning(f"⚠️ [CONFERENCIA_DESTINO] resposta malformada via={via} — nada muda")
-        return None, presentes
+        return None, set()
     return [i for i in sumidos if i not in de_novo], presentes | de_novo
 
 
