@@ -39,7 +39,9 @@ COMO (nenhum caminho de escrita novo):
      nascidos a até CUPOM_RAJADA_S do apagado e sem nome ou benefício em
      conflito (cupom_lancamento.compativeis). Um único com benefício igual
      vence; senão, um único compatível. Mais de um → ambíguo, sem fusão.
-  3. Sob os locks de POST (ordem crescente de msg_id), relido:
+  3. Sob os locks de POST (ordem crescente de msg_id), relido e DECIDIDO DE
+     NOVO (o item 2 inteiro; a escolha fora dos locks só diz quais locks
+     pedir). Mudou o candidato e a prova não vale mais → não funde:
        · com sobrevivente → database.db_fundir_posts (a fusão de sempre:
          âncoras e origens vão para o que ficou; a próxima mensagem da
          campanha chega a ele pelo vínculo ou pela família);
@@ -95,6 +97,9 @@ _FLOOD_MAX_S = 30 * 60
 # Um "vazio" isolado do get_messages nunca mexe no banco: a conferência
 # pergunta de novo, só pelos sumidos, depois desta pausa.
 _CONFIRMAR_S = 2.0
+# A escolha do post que ficou é refeita sob os locks; se apontar outro post
+# (cujo lock não temos), recomeça — no máximo isto, depois silencia.
+_TENTATIVAS = 3
 
 _TAREFAS: set = set()
 _EM_VOO: set = set()          # ids com verificação por suspeita em curso
@@ -210,37 +215,61 @@ async def apagados(ids, via: str = "TELEGRAM") -> list:
     return feitos
 
 
+def _decidir(apagado: int, est: dict, agora: float) -> tuple:
+    """(post que ficou ou None, motivo) para o apagado no estado `est`."""
+    if not viva(float(est.get("janela_fim") or 0.0), agora):
+        return None, "fora_da_vida"
+    return sobrevivente(apagado, est, agora)
+
+
 async def _um(apagado: int) -> tuple:
-    """(situação, sobrevivente, motivo) de UM id apagado no destino. O
-    filtro do worker roda antes (atalho barato) e de novo sob o lock: a
-    substituição anota o id e apaga segurando o lock do post."""
-    if apagados_pelo_worker.foi_o_worker(apagado):
-        return "do_worker", None, ""
-    est = db_get_post(apagado)
-    if not est:
-        return "sem_post", None, ""
-    if est.get("fused_into") or est.get("delete_status"):
-        return "ja_removido", None, ""
-    agora = time.time()
-    sob, motivo = (sobrevivente(apagado, est, agora)
-                   if viva(float(est.get("janela_fim") or 0.0), agora)
-                   else (None, "fora_da_vida"))
-    envolvidos = sorted({apagado} | ({sob} if sob else set()))
-    async with contextlib.AsyncExitStack() as pilha:
-        for mid in envolvidos:                       # ordem CRESCENTE
-            await pilha.enter_async_context(await exclusao.lock_post(mid))
+    """(situação, sobrevivente, motivo) de UM id apagado no destino.
+
+    A escolha fora dos locks é só para saber QUAIS locks pedir. Sob eles
+    (ordem crescente de msg_id) tudo é relido e a decisão inteira refeita
+    — sobrevivente() de novo: plataforma/cupb, benefício, nome, outra
+    fonte, rajada e unicidade. Entre a releitura e a escrita não há await
+    (uma conexão por processo, um loop): nada intercala. Funde só se a
+    decisão sob os locks é a MESMA; se a prova sumiu (sem par, ambíguo),
+    silencia; se apontou outro post (cujo lock não temos), recomeça — até
+    _TENTATIVAS vezes, depois silencia. O filtro do worker roda antes
+    (atalho barato) e de novo sob o lock: a substituição anota o id e
+    apaga segurando o lock do post."""
+    for tentativa in range(1, _TENTATIVAS + 1):
         if apagados_pelo_worker.foi_o_worker(apagado):
-            return "do_worker", None, ""            # anotado enquanto esperava
-        agora = time.time()
-        if sob is not None:
-            e = db_get_post(sob)
-            if (e and not e.get("fused_into") and not e.get("delete_status")
-                    and viva(float(e.get("janela_fim") or 0.0), agora)
-                    and db_fundir_posts(sob, [apagado], agora)):
-                return "fundido", sob, motivo
-            motivo = "sobrevivente_mudou"
-        res = db_silenciar_post_apagado(apagado, agora)
-        return res, None, motivo
+            return "do_worker", None, ""
+        est = db_get_post(apagado)
+        if not est:
+            return "sem_post", None, ""
+        if est.get("fused_into") or est.get("delete_status"):
+            return "ja_removido", None, ""
+        sob, _motivo = _decidir(apagado, est, time.time())
+        envolvidos = sorted({apagado} | ({sob} if sob else set()))
+        async with contextlib.AsyncExitStack() as pilha:
+            for mid in envolvidos:                   # ordem CRESCENTE
+                await pilha.enter_async_context(await exclusao.lock_post(mid))
+            # ── sob os locks: relido e decidido de novo, sem await ──
+            if apagados_pelo_worker.foi_o_worker(apagado):
+                return "do_worker", None, ""        # anotado enquanto esperava
+            est = db_get_post(apagado)
+            if not est:
+                return "sem_post", None, ""
+            if est.get("fused_into") or est.get("delete_status"):
+                return "ja_removido", None, ""
+            agora = time.time()
+            sob2, motivo = _decidir(apagado, est, agora)
+            if sob2 is not None and sob2 == sob:
+                if db_fundir_posts(sob, [apagado], agora):
+                    return "fundido", sob, motivo
+                motivo = "fusao_recusada"
+            elif sob2 is not None:
+                if tentativa < _TENTATIVAS:
+                    continue                        # outro post: recomeça com os locks dele
+                motivo = "sobrevivente_instavel"
+            elif sob is not None:
+                motivo = f"sobrevivente_mudou:{motivo}"   # a prova não vale mais
+            return db_silenciar_post_apagado(apagado, agora), None, motivo
+    return "erro", None, "tentativas"               # inalcançável: a última tentativa decide
 
 
 # ─────────────────────────────────────────────────────────────────

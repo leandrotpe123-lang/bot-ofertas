@@ -44,6 +44,12 @@ CASOS REAIS (prévia pública e logs da Railway):
   12  falha no espelho (editar ou apagar no canal de cupons) nunca dispara a
       verificação nem apagados() do principal
 
+  Revisão independente (21/10):
+  13  corrida no sobrevivente: escolhido fora dos locks, o candidato muda
+      (benefício, fonte, rajada, deixa de ser cupb) ou surge outro → sob
+      os locks a prova é refeita e NÃO funde; trocou para outro único →
+      recomeça e funde nele
+
     python tests/test_post_apagado.py
 """
 import asyncio
@@ -732,6 +738,109 @@ def test_12_espelho_nunca_dispara_o_principal(r):
     r.check(out["res"] == (False, False), "12.edicao_do_espelho_falha", str(out["res"]))
     r.check(out["perguntas"] == [] and out["vivo"], "12.principal_intocado",
             f"perguntas={out['perguntas']} vivo={out['vivo']}")
+
+
+# ══════════════════════════════════════════════════════════════════
+# Revisão independente de 21/10: corrida no sobrevivente, conferência em
+# massa, encerramento das tasks da frente M.
+# ══════════════════════════════════════════════════════════════════
+X_LOJAS = "🔥 Cupom Relâmpago 20% OFF Mercado Livre para Lojas Oficiais\n\nResgate agora"
+
+
+def _sql(q, args=()):
+    with _db() as db:
+        db.execute(q, args)
+
+
+def _corrida_no_sobrevivente(mutar):
+    """pa (Promotom), pb (Fada, 127 s depois) e px (Samuel, mesmo benefício,
+    empurrado para FORA da rajada). O handler escolhe pb fora dos locks e
+    espera o lock de pa (que o teste segura); `mutar(pa, pb, px)` roda
+    nesse intervalo. Devolve o que o tratamento fez e a 1ª escolha."""
+    import config
+    from pipeline import exclusao
+    rajada = config.CUPOM_RAJADA_S[ML]
+    out = {}
+
+    async def corpo(c):
+        pa, pb = await _dois_posts(out)()
+        _recuar(30)
+        x = msg(SAMUEL, X_LOJAS, urls_longas=TUTORIAL_P, plat=ML)
+        await publicar(x)
+        px = _post_de(x)
+        _sql("UPDATE post_estado SET janela_fim = janela_fim + ? WHERE msg_id_dest=?", (rajada + 120, px))
+        escolhas, orig = [], post_apagado.sobrevivente
+
+        def espia(apagado, est, agora):
+            res = orig(apagado, est, agora)
+            escolhas.append(res)
+            return res
+        post_apagado.sobrevivente = espia
+        try:
+            lk = await exclusao.lock_post(pa)
+            async with lk:
+                t = asyncio.get_running_loop().create_task(post_apagado.apagados([pa], "TELEGRAM"))
+                await asyncio.sleep(0.05)       # escolheu fora dos locks e espera o lock de pa
+                out["primeira"] = escolhas[0] if escolhas else None
+                mutar(pa, pb, px, rajada)
+            with _Espelho():
+                out["feitos"] = await t
+        finally:
+            post_apagado.sobrevivente = orig
+        out["ancoras_pa"] = bool(db_ofertas_de_post(pa))
+        out["vivos"] = (_vivo(pb), _vivo(px))
+        out["ids"] = (pa, pb, px)
+    cenario(corpo)
+    return out
+
+
+def test_13_sobrevivente_revalidado_sob_os_locks(r):
+    """_um escolhe o post que ficou ANTES dos locks; sob eles a prova
+    inteira é refeita (plataforma/cupb, benefício, nome, outra fonte,
+    rajada, unicidade). Se o candidato mudou e a prova não vale mais, NÃO
+    funde: o apagado fica silenciado e o outro post, intocado."""
+    def origem_de_pa(pa, pb, px, rajada):
+        with _db() as db:
+            chat = db.execute("SELECT chat FROM origem_post WHERE dest=?", (pa,)).fetchone()[0]
+        _sql("INSERT INTO origem_post(chat, msg_id, dest, ts) VALUES (?, ?, ?, ?)",
+             (chat, 999001, pb, time.time()))
+
+    casos = {
+        "controle_sem_mudanca": (lambda pa, pb, px, rj: None, "fundido"),
+        "beneficio_mudou": (lambda pa, pb, px, rj: _sql(
+            "UPDATE post_estado SET texto=? WHERE msg_id_dest=?", (F_30, pb)), "silenciado"),
+        "mesma_fonte_agora": (origem_de_pa, "silenciado"),
+        "fora_da_rajada_agora": (lambda pa, pb, px, rj: _sql(
+            "UPDATE post_estado SET janela_fim = janela_fim + ? WHERE msg_id_dest=?", (rj + 60, pb)),
+            "silenciado"),
+        "deixou_de_ser_cupb": (lambda pa, pb, px, rj: _sql(
+            "INSERT INTO post_exibida(msg_id_dest, identity, ts) VALUES (?, ?, ?)",
+            (pb, "mercadolivre|MLB999001", time.time())), "silenciado"),
+        "surgiu_outro_candidato": (lambda pa, pb, px, rj: _sql(
+            "UPDATE post_estado SET janela_fim = janela_fim - ? WHERE msg_id_dest=?", (rj + 120, px)),
+            "silenciado"),
+        # pb deixou de valer e px passou a ser o único: recomeça com o lock
+        # do px e funde nele (nunca no pb, cuja prova sumiu)
+        "trocou_para_outro_post": (lambda pa, pb, px, rj: (
+            _sql("UPDATE post_estado SET texto=? WHERE msg_id_dest=?", (F_30, pb)),
+            _sql("UPDATE post_estado SET janela_fim = janela_fim - ? WHERE msg_id_dest=?", (rj + 120, px))),
+            "fundido_px"),
+    }
+    for nome, (mutar, esperado) in casos.items():
+        out = _corrida_no_sobrevivente(mutar)
+        pa, pb, px = out["ids"]
+        r.check(out["primeira"] is not None and out["primeira"][0] == pb,
+                f"13.{nome}.escolheu_pb_fora_dos_locks", str(out["primeira"]))
+        if esperado == "fundido":
+            r.check(out["feitos"] == [(pa, "fundido", pb)], f"13.{nome}.funde", str(out["feitos"]))
+        elif esperado == "fundido_px":
+            r.check(out["feitos"] == [(pa, "fundido", px)], f"13.{nome}.funde_no_novo_unico",
+                    str(out["feitos"]))
+        else:
+            r.check(out["feitos"] == [(pa, "silenciado", None)], f"13.{nome}.nao_funde_silencia",
+                    str(out["feitos"]))
+            r.check(out["ancoras_pa"] and out["vivos"] == (True, True), f"13.{nome}.outros_intocados",
+                    f"ancoras_pa={out['ancoras_pa']} vivos={out['vivos']}")
 
 
 if __name__ == "__main__":
