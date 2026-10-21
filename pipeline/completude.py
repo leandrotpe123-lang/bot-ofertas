@@ -34,8 +34,8 @@ O QUE NÃO FAZ
   - não decide nada de oferta: não normaliza, não deduplica, não
     publica. A mensagem recuperada é tratada exatamente como o update
     que se perdeu — inclusive pela trava de idade da mensagem nova;
-  - não busca histórico: o primeiro id visto de cada canal só inicia a
-    contagem;
+  - não busca histórico: sem estado salvo (1º boot, banco indisponível),
+    o primeiro id visto de cada canal só inicia a contagem;
   - não recupera buraco grande (> _MAX_BURACO): isso é reconexão ou
     atraso longo, e publicar em massa seria pior do que perder;
   - não repete busca: falhou, registra e segue;
@@ -53,6 +53,34 @@ a idempotência do pipeline (chat:msg_id) o descarta como
 JA_PROCESSADO. Um id buscado é marcado como visto e nunca é buscado de
 novo.
 
+═══════════════════════════════════════════════════════════════════
+CONTINUIDADE ENTRE REINÍCIOS — medido em produção, 21/10/2026
+═══════════════════════════════════════════════════════════════════
+Com o estado só em memória, o processo novo começava a contar do 1º
+update visto. Depois do deploy das 04:22 UTC esse update foi uma edição
+velha da @promotom 111716; quando a 111718 chegou, a 111717 virou
+"buraco", foi buscada e dada como perdida no transporte — mas tinha
+chegado às 03:03 e era o post 30480.
+
+Por canal, o estado mínimo que mantém a contagem é gravado no banco
+(database_completude) a cada mudança e restaurado no `instalar`:
+  - o MAIOR id visto: id abaixo dele não abre buraco depois do reinício
+    (a edição velha do boot não muda nada);
+  - os PENDENTES: ids de buraco ainda sem desfecho — os que esperam a
+    busca e os que estão sendo buscados. Um "maior visto" sozinho os
+    esqueceria; restaurados, são buscados UMA vez no boot seguinte.
+O que já teve desfecho (entregue, ausente, serviço, busca ou entrega
+que falhou, rodada abortada) sai dos pendentes e nunca é buscado de
+novo, nem depois de reiniciar. Buraco entre o maior salvo e o 1º id
+depois do boot é real — a mensagem da janela sem bot — e segue o mesmo
+contrato (até _MAX_BURACO, trava de idade). Depois de um reinício a
+idempotência em memória recomeça: quem segura a repetição é a trava de
+idade e a ORIGEM_JA_PUBLICADA (banco).
+Falha ao CARREGAR: aviso e comportamento antigo (base no 1º id visto).
+Falha ao GRAVAR: aviso na primeira falha e quando volta; o processo
+segue certo em memória, e um reinício nesse meio pode repetir buraco já
+resolvido — a proveniência abaixo mostra a diferença.
+
 PROVENIÊNCIA [F1.2-A2-R] — só observação, nunca regra. Cada fato daqui
 sai também como evento, logo depois do log de sempre e FORA de qualquer
 execução: a completude não abre execução, e a recuperada ganha a dela
@@ -60,6 +88,14 @@ no `processar` (via RECUPERACAO). origem.buraco é o buraco detectado;
 origem.recuperada, a busca que devolveu a mensagem (antes da entrega);
 origem.recuperacao_falhou, o resto (ERRO_BUSCA, AUSENTE, SERVICO,
 ENTREGA_FALHOU, ABORTADA), com a exceção só pela classe, em `excecao`.
+A busca que devolve a mensagem prova só que ela existe e que a
+completude não a viu — nunca que o Telegram deixou de entregá-la. A
+origem.recuperada leva os fatos que separam as hipóteses:
+`anterior_ao_inicio` (a data da mensagem é anterior ao início da
+observação deste processo — janela sem bot ou antes dela) e
+`base_restaurada` (a contagem do canal veio do estado salvo; False =
+contada só desde este boot, e a mensagem pode já ter sido tratada pelo
+processo anterior).
 A task de recuperação nasce no `observar`, que o handler chama antes do
 `processar`: o contexto que ela copia não tem execução. Desligada, a
 proveniência não roda nada daqui.
@@ -70,10 +106,13 @@ entrada): este módulo não importa o orquestrador nem o cliente.
 from __future__ import annotations
 
 import asyncio
+import json
+import time
 from typing import Callable, Dict, Optional, Set
 
 import eventos
 import globals as g
+from database import db_completude_carregar, db_completude_gravar
 from logger import log_ing, _idade_seg, _idade_str
 from pipeline.identidade import username_de
 
@@ -122,16 +161,21 @@ class EventoRecuperado:
 
 
 class _Canal:
-    __slots__ = ("maior", "vistos", "pendentes", "tarefa")
+    __slots__ = ("maior", "vistos", "pendentes", "em_curso", "restaurado", "tarefa")
 
     def __init__(self, primeiro: int) -> None:
         self.maior = primeiro
         self.vistos: Set[int] = {primeiro}
         self.pendentes: Set[int] = set()
+        # Tirados dos pendentes pela rodada e ainda sem desfecho: para o
+        # banco continuam pendentes (reinício no meio da busca → retomada).
+        self.em_curso: Set[int] = set()
+        self.restaurado = False
         self.tarefa: Optional[asyncio.Task] = None
 
 
-_estado: dict = {"cliente": None, "entidades": {}, "despachar": None}
+_estado: dict = {"cliente": None, "entidades": {}, "despachar": None,
+                 "inicio": 0.0, "gravacao_ok": True}
 _canais: Dict[int, _Canal] = {}
 
 
@@ -139,7 +183,8 @@ def instalar(cliente, fontes, despachar: Callable) -> None:
     """Liga a completude às fontes resolvidas. UMA vez por processo.
 
     `despachar(evento, is_edit=False)` é o ponto de entrada dos
-    handlers (`pipeline.orchestrator.processar`)."""
+    handlers (`pipeline.orchestrator.processar`). Restaura o estado salvo
+    de cada canal e agenda a retomada dos pendentes do processo anterior."""
     from telethon.utils import get_peer_id
 
     entidades = {}
@@ -148,19 +193,81 @@ def instalar(cliente, fontes, despachar: Callable) -> None:
             entidades[get_peer_id(ent)] = ent
         except Exception as e:
             log_ing.warning(f"🧩 completude: fonte sem id ({type(e).__name__})")
-    _estado.update(cliente=cliente, entidades=entidades, despachar=despachar)
+    _estado.update(cliente=cliente, entidades=entidades, despachar=despachar,
+                   inicio=time.time(), gravacao_ok=True)
     _canais.clear()
+    _restaurar(db_completude_carregar(list(entidades)))
     log_ing.info(
         f"🧩 completude da entrada ativa | canais={len(entidades)} "
-        f"espera={_ESPERA_S:g}s max_buraco={_MAX_BURACO}")
+        f"espera={_ESPERA_S:g}s max_buraco={_MAX_BURACO} restaurados={len(_canais)}")
+    for chat_id, canal in _canais.items():
+        if canal.pendentes:
+            log_ing.info(f"🧩 [RETOMADA] {_nome(chat_id)} ids={sorted(canal.pendentes)} "
+                         f"— pendentes do processo anterior")
+            try:
+                _agendar(chat_id, canal)
+            except RuntimeError:                    # sem loop: o próximo buraco agenda
+                pass
+
+
+def _restaurar(salvos) -> None:
+    """O estado gravado pelo processo anterior (o banco só devolve os canais
+    pedidos: os monitorados). Linha malformada é ignorada (o canal recomeça
+    no 1º id visto)."""
+    if salvos is None:
+        log_ing.warning("🧩 completude: estado anterior indisponível — a contagem de "
+                        "cada canal recomeça no 1º id visto")
+        return
+    for chat_id, (maior, pendentes) in salvos.items():
+        try:
+            ids = json.loads(pendentes)
+            if (type(maior) is not int or not isinstance(ids, list)
+                    or any(type(i) is not int for i in ids)):
+                raise ValueError("tipo")
+        except Exception:
+            log_ing.warning(f"🧩 completude: estado salvo malformado de {_nome(chat_id)} "
+                            f"— ignorado; recomeça no 1º id visto")
+            continue
+        canal = _Canal(maior)
+        canal.vistos = set()
+        canal.pendentes = {i for i in ids if maior - _JANELA_IDS < i < maior}
+        canal.restaurado = True
+        _canais[chat_id] = canal
+
+
+def _gravar(chat_id: int, canal: _Canal) -> None:
+    """Grava o maior visto e os pendentes (os em curso contam até o
+    desfecho). Nunca levanta; avisa na primeira falha e quando volta."""
+    if _canais.get(chat_id) is not canal:
+        return
+    try:
+        ok = bool(db_completude_gravar(
+            chat_id, canal.maior, json.dumps(sorted(canal.pendentes | canal.em_curso))))
+    except Exception:
+        ok = False
+    if ok is _estado["gravacao_ok"]:
+        return
+    _estado["gravacao_ok"] = ok
+    if ok:
+        log_ing.info("🧩 completude: gravação do estado voltou")
+    else:
+        log_ing.warning("🧩 completude: falha ao gravar o estado — segue em memória; um "
+                        "reinício agora pode repetir buraco já resolvido")
+
+
+def _desfecho(chat_id: int, canal: _Canal, ids) -> None:
+    """Os ids tiveram desfecho final: saem dos pendentes salvos."""
+    canal.em_curso.difference_update(ids)
+    _gravar(chat_id, canal)
 
 
 def observar(chat_id, msg_id) -> None:
     """Marca o id como visto e abre buraco se preciso.
 
     Chamado pelos handlers ANTES do pipeline, para nova E edição.
-    Síncrono, sem I/O, e nunca levanta: a completude jamais pode
-    impedir a entrada de uma mensagem que chegou."""
+    Síncrono, sem rede, e nunca levanta: a completude jamais pode
+    impedir a entrada de uma mensagem que chegou. A única I/O é gravar o
+    estado do canal no banco local quando ele muda."""
     try:
         _observar(int(chat_id), int(msg_id))
     except Exception as e:
@@ -178,11 +285,14 @@ def _observar(chat_id: int, msg_id: int) -> None:
 
     canal = _canais.get(chat_id)
     if canal is None:
-        _canais[chat_id] = _Canal(msg_id)
+        canal = _canais[chat_id] = _Canal(msg_id)
+        _gravar(chat_id, canal)
         return
 
     canal.vistos.add(msg_id)
-    canal.pendentes.discard(msg_id)
+    if msg_id in canal.pendentes:               # chegou sozinho (pendente < maior)
+        canal.pendentes.discard(msg_id)
+        _gravar(chat_id, canal)
     if msg_id <= canal.maior:
         return
 
@@ -216,6 +326,7 @@ def _observar(chat_id: int, msg_id: int) -> None:
             _agendar(chat_id, canal)
 
     _podar(canal)
+    _gravar(chat_id, canal)
 
 
 def _podar(canal: _Canal) -> None:
@@ -247,6 +358,8 @@ async def _recuperar(chat_id: int) -> None:
                 return
             faltam = sorted(i for i in canal.pendentes if i not in canal.vistos)
             canal.pendentes.clear()
+            canal.em_curso.update(faltam)
+            _gravar(chat_id, canal)
             if not faltam:
                 log_ing.debug(f"🧩 [BURACO_FECHADO] {_nome(chat_id)} — chegou sozinho")
                 continue
@@ -258,6 +371,8 @@ async def _recuperar(chat_id: int) -> None:
             {"chat": str(chat_id)},
             {"motivo": "ABORTADA", "ids": faltam, "excecao": type(e).__name__}),
             local="completude.recuperar.abortada")
+        if canal is not None:
+            _desfecho(chat_id, canal, faltam)
 
 
 async def _buscar_e_entregar(chat_id: int, canal: _Canal, faltam: list) -> None:
@@ -280,6 +395,7 @@ async def _buscar_e_entregar(chat_id: int, canal: _Canal, faltam: list) -> None:
             {"chat": str(chat_id)},
             {"motivo": "ERRO_BUSCA", "ids": faltam, "excecao": type(e).__name__}),
             local="completude.buscar_e_entregar.erro_busca")
+        _desfecho(chat_id, canal, faltam)
         return
 
     # Casamento por id, nunca por posição: o servidor pode omitir ids
@@ -293,6 +409,7 @@ async def _buscar_e_entregar(chat_id: int, canal: _Canal, faltam: list) -> None:
                 {"chat": str(chat_id), "msg": mid},
                 {"motivo": "AUSENTE", "ids": [mid]}),
                 local="completude.buscar_e_entregar.ausente")
+            _desfecho(chat_id, canal, [mid])
             continue
         if getattr(m, "action", None) is not None:
             log_ing.debug(f"🧩 [SERVICO] {nome} id={mid} — mensagem de serviço, ignorada")
@@ -300,13 +417,22 @@ async def _buscar_e_entregar(chat_id: int, canal: _Canal, faltam: list) -> None:
                 {"chat": str(chat_id), "msg": mid},
                 {"motivo": "SERVICO", "ids": [mid]}),
                 local="completude.buscar_e_entregar.servico")
+            _desfecho(chat_id, canal, [mid])
             continue
+        # Fatos, não hipótese sobre o transporte: a data da mensagem antes do
+        # início da observação deste processo (resolução de 1 s do Telegram)
+        # e de onde veio a contagem do canal.
+        anterior = bool(m.date is not None and m.date.timestamp() < int(_estado["inicio"]))
+        restaurada = canal.restaurado
         log_ing.warning(
-            f"🧩 [RECUPERADA] {nome} id={mid} idade={_idade_str(m.date)} — "
-            f"o Telegram não entregou; entra no pipeline como nova")
+            f"🧩 [RECUPERADA] {nome} id={mid} idade={_idade_str(m.date)} — não observada "
+            f"pela completude{' (anterior ao início deste processo)' if anterior else ''}"
+            f"{'' if restaurada else ' (contagem só deste processo)'}; "
+            f"entra no pipeline como nova")
         eventos.emitir_de("origem.recuperada", lambda: (
             {"chat": str(chat_id), "msg": mid},
-            {"idade_s": round(_idade_seg(m.date), 1)}),
+            {"idade_s": round(_idade_seg(m.date), 1), "anterior_ao_inicio": anterior,
+             "base_restaurada": restaurada}),
             local="completude.buscar_e_entregar.recuperada",
             minimo=lambda: {"chat": str(chat_id), "msg": mid})
         try:
@@ -318,3 +444,6 @@ async def _buscar_e_entregar(chat_id: int, canal: _Canal, faltam: list) -> None:
                 {"chat": str(chat_id), "msg": mid},
                 {"motivo": "ENTREGA_FALHOU", "ids": [mid], "excecao": type(e).__name__}),
                 local="completude.buscar_e_entregar.entrega_falhou")
+        # Cancelado no meio da entrega (o processo caindo), o id segue
+        # pendente no banco: o boot seguinte o retoma.
+        _desfecho(chat_id, canal, [mid])

@@ -113,6 +113,14 @@ _init_db()
 g._init_globals()        # o boot do processo: locks dos pools (lock_post) e caches
 
 
+def _volume_vazio():
+    """Cada cena é um processo NOVO num volume sem estado da completude: a
+    continuidade entre reinícios (o estado salvo) é de
+    tests/test_completude_reinicio.py, não destas cenas de um processo só."""
+    with _db() as db:
+        db.execute("DELETE FROM completude_canal")
+
+
 # ─────────────────────────────────────────────────────────────────
 # Fontes, ponto de entrada e banco
 # ─────────────────────────────────────────────────────────────────
@@ -344,6 +352,7 @@ async def _completude(cen, texto=TEXTO, **extra):
     completude._ESPERA_S = 5.0 if cen == "CANCELA_ESPERA" else 0.05
     cena, pelo_handler = Cena(nome=cen, m0=m0, salto=salto), []
     try:
+        _volume_vazio()
         completude.instalar(fonte, [ENT_A], entrada)
         with a2e.Bancada(cam, log):
 
@@ -541,6 +550,7 @@ async def _dentro_de_uma_execucao():
              dict(sucessao._estado))
     completude.log_ing = a2e.Log()
     try:
+        _volume_vazio()
         completude.instalar(Fonte(), [ENT_A], Entrada())
         sucessao.instalar(Fonte(), [ENT_A], Entrada(), _nada)
         with eventos.execucao(lambda: {"chat": "controle", "msg": 1}):
@@ -697,7 +707,9 @@ _FORMA = {
     "completude.buscar_e_entregar.erro_busca": ({"chat"}, {"motivo", "ids", "excecao"}),
     "completude.buscar_e_entregar.ausente": ({"chat", "msg"}, {"motivo", "ids"}),
     "completude.buscar_e_entregar.servico": ({"chat", "msg"}, {"motivo", "ids"}),
-    "completude.buscar_e_entregar.recuperada": ({"chat", "msg"}, {"idade_s"}),
+    "completude.buscar_e_entregar.recuperada": ({"chat", "msg"},
+                                                {"idade_s", "anterior_ao_inicio",
+                                                 "base_restaurada"}),
     "completude.buscar_e_entregar.entrega_falhou": ({"chat", "msg"},
                                                     {"motivo", "ids", "excecao"}),
     "completude.recuperar.abortada": ({"chat"}, {"motivo", "ids", "excecao"}),
@@ -741,6 +753,9 @@ def _problemas_de_forma(e):
     if e["tipo"] == "origem.recuperada" and not (isinstance(d["idade_s"], (int, float))
                                                  and d["idade_s"] >= 0):
         erros.append(f"idade_s {d['idade_s']!r}")
+    if e["tipo"] == "origem.recuperada" and not (type(d["anterior_ao_inicio"]) is bool
+                                                 and type(d["base_restaurada"]) is bool):
+        erros.append(f"proveniencia {d['anterior_ao_inicio']!r}/{d['base_restaurada']!r}")
     if e["tipo"] == "post.lideranca_transferida":
         la, pv = d["lider_anterior"], d["prova"]
         if not (isinstance(la, dict) and set(la) == {"chat", "msg"}
@@ -785,8 +800,12 @@ _BASE_CREATE_TASK = {
         "asyncio.get_running_loop().create_task(_recuperar(chat_id))"],
     ("pipeline/sucessao.py", "agendar"): ["asyncio.get_running_loop().create_task(_rodar(dest))"],
 }
+# Completude persistente (21/10/2026): o estado do canal só é LIDO no
+# instalar e só é GRAVADO no _gravar — nenhum outro acesso a banco.
 _BASE_DB = {("pipeline/sucessao.py", "_suceder"): ["db_get_post", "db_origens_do_post",
-                                                   "db_transferir_lideranca"]}
+                                                   "db_transferir_lideranca"],
+            ("pipeline/completude.py", "instalar"): ["db_completude_carregar"],
+            ("pipeline/completude.py", "_gravar"): ["db_completude_gravar"]}
 _BASE_LOCK = {("pipeline/sucessao.py", "_suceder"): ["exclusao.lock_post(dest)"]}
 _BASE_DESPACHAR = {
     ("pipeline/completude.py", "_buscar_e_entregar"): [
@@ -1023,6 +1042,7 @@ def test_f02_buraco_detectado_e_buraco_grande(r):
     salvo = (dict(completude._estado), dict(completude._canais), completude.log_ing)
     completude.log_ing = a2e.Log()
     try:
+        _volume_vazio()
         completude.instalar(Fonte(), [ENT_A], Entrada())
         for i in (800000, 800001, 800002, 799990, 800002, 800003):
             completude.observar(int(CHAT_A), i)
@@ -1430,6 +1450,7 @@ def test_r02_dormente_nada_roda(r):
         salvo = (dict(completude._estado), dict(completude._canais), completude.log_ing)
         completude.log_ing = a2e.Log()
         try:
+            _volume_vazio()
             completude.instalar(Fonte(), [ENT_A], Entrada())
             for i in range(900000, 900500):
                 completude.observar(int(CHAT_A), i)
@@ -1534,14 +1555,17 @@ def test_s03_tamanho(r):
                  completude._ESPERA_S)
         completude.log_ing = a2e.Log()
         try:
+            _volume_vazio()
             completude.instalar(Fonte(erros=[ConnectionError("x")]), [ENT_A], Entrada())
             await completude._buscar_e_entregar(int(CHAT_A), completude._Canal(1), list(ids))
+            _volume_vazio()
             completude.instalar(Fonte(devolve=[_Quebra()]), [ENT_A], Entrada())
             completude._ESPERA_S = 0.0
             canal = completude._Canal(1)
             canal.pendentes = set(ids)
             completude._canais[int(CHAT_A)] = canal
             await completude._recuperar(int(CHAT_A))
+            _volume_vazio()
             completude.instalar(Fonte(), [ENT_A], Entrada())
             completude.observar(int(CHAT_A), 5 * 10 ** 6)
             completude.observar(int(CHAT_A), 5 * 10 ** 6 + completude._MAX_BURACO + 1)

@@ -258,6 +258,9 @@ def _init_db():
         CREATE TABLE IF NOT EXISTS espelho_post(
             msg_id_dest INTEGER PRIMARY KEY,
             msg_id_espelho INTEGER NOT NULL, ts REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS completude_canal(
+            chat INTEGER PRIMARY KEY, maior INTEGER NOT NULL,
+            pendentes TEXT NOT NULL DEFAULT '[]', ts REAL NOT NULL);
         CREATE INDEX IF NOT EXISTS idx_lc_plat     ON links_cache(plat);
         CREATE INDEX IF NOT EXISTS idx_lc_ts       ON links_cache(ts);
         CREATE INDEX IF NOT EXISTS idx_sl_code     ON short_links(code);
