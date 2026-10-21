@@ -855,7 +855,7 @@ def test_13_sobrevivente_revalidado_sob_os_locks(r):
                     f"ancoras_pa={out['ancoras_pa']} vivos={out['vivos']}")
 
 
-def _massa(n_posts, falta_lote, falta_unit, ciclos):
+def _massa(n_posts, falta_lote, falta_unit, ciclos, entre=None):
     """n_posts posts vivos (cupom com código, um por post). O lote do
     get_messages esconde `falta_lote(ids)`; a pergunta de UM id só esconde
     `falta_unit(ids)`. Roda `ciclos` conferências e devolve, por ciclo, o
@@ -888,7 +888,9 @@ def _massa(n_posts, falta_lote, falta_unit, ciclos):
         post_apagado.log_out.error = espia_err
         try:
             with _Espelho() as esp:
-                for _ in range(ciclos):
+                for k in range(ciclos):
+                    if entre and k:
+                        await entre(posts, k)
                     del chamadas[:]
                     n_err = len(erros)
                     feitos = await post_apagado.conferir()
@@ -966,6 +968,19 @@ def test_14_conferencia_em_massa_quarentena(r):
     c1 = out["ciclos"][0]
     r.check(len(c1["feitos"]) == 5 and c1["quarentena"] == set() and c1["erros"] == [],
             "14.limite.cinco_passam", f"feitos={c1['feitos']} q={sorted(c1['quarentena'])}")
+
+    # (g) LIMPEZA: 3 dos 6 em quarentena são tratados pelo aviso do
+    #     Telegram entre os ciclos — a reavaliação não os pergunta de novo
+    #     nem gasta com eles o teto de mudanças do ciclo
+    async def telegram_trata_tres(posts, k):
+        if k == 1:
+            await post_apagado.apagados(posts[:3], "TELEGRAM")
+    out = _massa(8, lambda ps: set(ps[:6]), lambda ps: set(ps[:6]), 2, entre=telegram_trata_tres)
+    c2 = out["ciclos"][1]
+    unit = sorted({x[0] for x in c2["chamadas"] if len(x) == 1})
+    r.check(unit == sorted(out["posts"][3:6]) and len(c2["feitos"]) == 3 and c2["quarentena"] == set(),
+            "14.limpeza.tratados_por_outra_via_saem_da_quarentena",
+            f"unit={unit} feitos={c2['feitos']} q={sorted(c2['quarentena'])}")
 
     # (f) a trava é da CONFERÊNCIA: aviso do Telegram com 6 ids e a
     #     suspeita unitária seguem tratando
