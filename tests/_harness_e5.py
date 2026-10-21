@@ -150,8 +150,13 @@ def _instalar_telethon() -> None:
         def __init__(self, *a, **k):
             pass
 
+    class MessageDeleted:
+        def __init__(self, *a, **k):
+            pass
+
     events.NewMessage = NewMessage
     events.MessageEdited = MessageEdited
+    events.MessageDeleted = MessageDeleted
 
     sys.modules.update({
         "telethon": telethon, "telethon.errors": errors,

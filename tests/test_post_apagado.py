@@ -58,6 +58,8 @@ CASOS REAIS (prévia pública e logs da Railway):
       confirmação + suspeita que termina no prazo → encerrar() fecha a
       admissão, drena com prazo, cancela aguardando; nada vivo, nenhum uso
       de Telegram/banco depois, nenhuma exceção solta
+  16  handler registrado por instalar() só agenda e chega à fusão;
+      exceção depois dos locks (espelho) num id não derruba os outros
 
     python tests/test_post_apagado.py
 """
@@ -1049,6 +1051,53 @@ def test_15_encerramento_das_tasks_da_frente_m(r):
     r.check(out["banco"] == (True, True, True, "ok"), "15.banco_intacto_e_a_do_prazo_terminou",
             str(out["banco"]))
     r.check(out["excecoes"] == [], "15.nenhuma_excecao_solta", str(out["excecoes"]))
+
+
+def test_16_handler_ponta_a_ponta_e_falha_isolada(r):
+    """O handler que instalar() registra no Telethon só AGENDA (volta sem
+    esperar lock nem banco) e o tratamento chega à fusão; exceção depois
+    dos locks (espelho) num id não derruba os outros nem escapa da task."""
+    from types import SimpleNamespace
+    out = {}
+
+    async def corpo(c):
+        pa, pb = await _dois_posts(out)()
+        regs = []
+        cliente = SimpleNamespace(add_event_handler=lambda fn, ev: regs.append((fn, ev)))
+        post_apagado.instalar(cliente, "destino")
+        handler = regs[0][0]
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        with _Espelho() as esp:
+            await handler(SimpleNamespace(deleted_ids=[pa]))
+            out["voltou_sem_esperar"] = (loop.time() - t0) < 0.05 and len(post_apagado._TAREFAS) == 1
+            await _drenar()
+            out["espelho"] = list(esp.removidos)
+        out["fundido"] = ((db_get_post(pa) or {}).get("fused_into"), pb)
+        # exceção no espelho do 1º id: o 2º segue; nada escapa
+        x = msg(SAMUEL, "Cupom FALHA1 na Shopee", cupons=["FALHA1"], plat=SHP)
+        y = msg(FADA, "Cupom FALHA2 na Shopee", cupons=["FALHA2"], plat=SHP)
+        await publicar(x)
+        await publicar(y)
+        px, py = _post_de(x), _post_de(y)
+        orig = espelho_cupons.removido
+
+        def removido(mid):
+            if mid == px:
+                raise RuntimeError("espelho caiu")
+        espelho_cupons.removido = removido
+        try:
+            out["feitos"] = await post_apagado.apagados([px, py], "TELEGRAM")
+        finally:
+            espelho_cupons.removido = orig
+        out["xy"] = (px, py, (db_get_post(py) or {}).get("delete_status"))
+    cenario(corpo)
+    r.check(out["voltou_sem_esperar"], "16.handler_so_agenda")
+    r.check(out["fundido"][0] == out["fundido"][1] and len(out["espelho"]) == 1,
+            "16.handler_chega_a_fusao", str(out))
+    px, py, st = out["xy"]
+    r.check([p for p, _s, _o in out["feitos"]] == [py] and st == "ok",
+            "16.falha_num_id_nao_derruba_o_outro", str(out["feitos"]))
 
 
 if __name__ == "__main__":
