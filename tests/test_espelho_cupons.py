@@ -65,6 +65,7 @@ import types
 from dataclasses import replace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _telethon_fakes import afetadas                        # noqa: E402
 from test_cupom_sem_codigo import (                             # noqa: E402
     FADA, PROMOTOM, SAMUEL, _isolar_loop, _zerar_banco, msg)
 from _harness_e5 import rodar                                   # noqa: E402
@@ -248,10 +249,12 @@ class Cliente:
 
     async def delete_messages(self, dest, ids):
         await self._entrada(dest, "delete_messages", {})
-        for i in (ids if isinstance(ids, (list, tuple)) else [ids]):
-            self.msgs.pop((dest, i), None)
+        lista = list(ids) if isinstance(ids, (list, tuple)) else [ids]
+        n = 0
+        for i in lista:
+            n += self.msgs.pop((dest, i), None) is not None
             self.ops.append((time.monotonic(), dest, "delete", i))
-        return True
+        return afetadas(lista, n)
 
     async def get_messages(self, dest, ids=None):
         await asyncio.sleep(0)

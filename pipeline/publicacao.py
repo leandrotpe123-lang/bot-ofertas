@@ -261,6 +261,16 @@ async def _enviar_inner(montada: MensagemMontada,
                     # o fallback "PUBLICAR" (ciclo morto → post novo).
                     raise _PostFundido(msg_id_rel, estado["fused_into"],
                                        estado.get("delete_status") or "")
+                if estado and estado.get("delete_status"):
+                    # [Frente M] o DONO apagou este post sem post que
+                    # ficou (pipeline.post_apagado): até o fim da vida ele
+                    # segue dono da identidade e das origens, mas nada vai
+                    # ao canal — nem edição no apagado, nem post novo.
+                    log_out.info(
+                        f"🗑 [APAGADO_DONO_ABSORVIDO] "
+                        f"({getattr(norm, 'chat', '')},{getattr(norm, 'msg_id', '')})"
+                        f"→post:{msg_id_rel} — apagado pelo dono; nada vai ao canal")
+                    return True
                 if (not dest_fix and not via_lancamento
                         and familia.adocao_obsoleta(msg_id_rel, ofertas)):
                     # [Cupom sem nome] adoção revalidada sob o lock: o

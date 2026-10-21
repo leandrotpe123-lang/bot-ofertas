@@ -63,6 +63,7 @@ from pipeline.identidade import precarregar_usernames
 from pipeline import completude
 from pipeline import convergencia
 from pipeline import origem_apagada
+from pipeline import post_apagado
 from pipeline import sucessao
 
 import plataformas
@@ -272,6 +273,20 @@ async def _encerrar() -> None:
         t.cancel()
         await asyncio.gather(t, return_exceptions=True)
 
+    # [Frente M] conferência do destino — cancela e aguarda.
+    t = _TASKS_FUNDO.get("conferencia_destino")
+    if t is not None and not t.done():
+        t.cancel()
+        await asyncio.gather(t, return_exceptions=True)
+
+    # [Frente M] tasks do handler do destino e das suspeitas — admissão
+    # fechada, prazo curto e cancelamento aguardado, ANTES do canal de
+    # cupons, do HTTP, do Telegram e do banco.
+    try:
+        await post_apagado.encerrar()
+    except Exception as e:
+        log_sys.error(f"❌ encerrar frente M: {e}")
+
     # [F1.1] sinal de vida dos eventos — cancela e aguarda. A porta da
     # API privada é solta adiante, depois do web e antes do banco.
     t = _TASKS_FUNDO.get("api_privada")
@@ -425,6 +440,14 @@ async def _preparar_processo() -> bool:
     origem_apagada.instalar(client, fontes)
     sucessao.instalar(client, fontes, processar,
                       functools.partial(origem_apagada.apagadas, via="SUCESSAO"))
+    # [Frente M] O DONO apagou um post do canal → a campanha segue no post
+    # que ficou (fusão) e o espelho sai junto; sem post que ficou, o
+    # apagado fica apagado até o fim da vida. Handler só sobre o destino;
+    # a conferência periódica (passo 6) cobre o aviso perdido.
+    try:
+        post_apagado.instalar(client, await client.get_entity(GRUPO_DESTINO))
+    except Exception as e:
+        log_sys.error(f"❌ handler do destino (frente M): {e}")
 
     # 6. Tarefas de fundo — UMA instância de cada por processo.
     # _iniciar_orchestrator é aguardado, não posto em task: ele apenas
@@ -437,6 +460,9 @@ async def _preparar_processo() -> bool:
     # por processo, e só com a proveniência ligada no passo 2b.
     if eventos.registro_atual() is not None:
         _TASKS_FUNDO["api_privada"] = asyncio.create_task(_ligar_api_privada())
+    # [Frente M] conferência do canal de destino (cobre o aviso de exclusão
+    # perdido) — UMA task por processo, contexto vazio.
+    _TASKS_FUNDO["conferencia_destino"] = post_apagado.iniciar_conferencia()
 
     # 7. Sinais — instalados no PROCESSO, onde nascem os recursos que o
     # teardown finaliza (simetria criar/finalizar). add_signal_handler e
