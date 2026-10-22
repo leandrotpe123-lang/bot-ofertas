@@ -33,7 +33,7 @@ O QUE ESTE ARQUIVO PROVA
       aviso por sequência de falhas e um quando volta
   09  falha ao CARREGAR: comportamento antigo (base no 1º id visto), mas a
       proveniência diz que a base não foi restaurada e que a mensagem é
-      anterior ao início — sem afirmar nada sobre o transporte
+      anterior ao início da observação — sem afirmar nada sobre o transporte
   10  a completude não afirma perda de transporte em lugar nenhum
   11  estado salvo malformado ou de canal fora da monitoração: ignorado
   12  persistência mínima: uma linha por canal (maior + pendentes), limitada
@@ -42,7 +42,13 @@ O QUE ESTE ARQUIVO PROVA
       AUSENTE uma vez, e não volta a ser buscada no reinício seguinte
   14  gravação que falhou e reinício em seguida (resíduo aceito): a
       contagem salva ficou para trás, os ids do meio são buscados UMA vez e
-      a proveniência mostra que são anteriores ao início
+      a proveniência mostra que são anteriores à observação
+  15  LEITURA falha no boot e a gravação funciona: a linha salva (maior +
+      pendentes) não é apagada nem sobrescrita; o boot seguinte que lê
+      retoma os pendentes UMA vez, e o outro depois dele não retoma de novo
+  16  banco lido e vazio ({}) grava; banco ilegível (None) não grava nada
+  17  a suspensão é do instalar que não leu: o instalar seguinte que lê
+      volta a gravar
 
 Execução (standalone, stdlib + Telethon):
     python3 tests/test_completude_reinicio.py
@@ -259,7 +265,7 @@ def t02_controle_buraco_genuino_no_mesmo_processo(r):
     async def corpo():
         cli, ent = Cliente(), Entrada()
         novo_cenario(cli, ent)
-        await asyncio.sleep(1.1)                    # a mensagem nasce DEPOIS do início
+        await asyncio.sleep(1.1)                    # a mensagem nasce DEPOIS do início da observação
         completude.observar(SAM, 200)
         cli.publicar(SAMUEL, 201, idade_s=0)
         completude.observar(SAM, 202)
@@ -270,8 +276,8 @@ def t02_controle_buraco_genuino_no_mesmo_processo(r):
     r.ok(ent.recebidos == [(SAM, 201, False)], f"entregue UMA vez, como nova ({ent.recebidos})")
     rec = _ev("origem.recuperada")
     d = rec[0]["dados"] if rec else {}
-    r.ok(len(rec) == 1 and d.get("anterior_ao_inicio") is False,
-         f"proveniência: observação contínua, posterior ao início ({rec})")
+    r.ok(len(rec) == 1 and d.get("anterior_a_observacao") is False,
+         f"proveniência: observação contínua, posterior ao início da observação ({rec})")
     r.ok(d.get("base_restaurada") is False, f"base criada neste processo ({d})")
 
 
@@ -293,8 +299,8 @@ def t03_buraco_genuino_atravessa_o_reinicio(r):
     r.ok(ent.recebidos == [(SAM, 301, False)], f"entregue UMA vez ({ent.recebidos})")
     rec = _ev("origem.recuperada")
     d = rec[0]["dados"] if rec else {}
-    r.ok(d.get("anterior_ao_inicio") is True and d.get("base_restaurada") is True,
-         f"proveniência: anterior ao início, base restaurada ({rec})")
+    r.ok(d.get("anterior_a_observacao") is True and d.get("base_restaurada") is True,
+         f"proveniência: anterior à observação, base restaurada ({rec})")
 
 
 def t04_pendente_sobrevive_ao_reinicio(r):
@@ -444,8 +450,8 @@ def t09_falha_ao_carregar(r):
          f"sem base salva, o comportamento antigo: busca a 111717 ({cli.chamadas})")
     rec = _ev("origem.recuperada")
     d = rec[0]["dados"] if rec else {}
-    r.ok(d.get("base_restaurada") is False and d.get("anterior_ao_inicio") is True,
-         f"proveniência: base NÃO restaurada, mensagem anterior ao início ({rec})")
+    r.ok(d.get("base_restaurada") is False and d.get("anterior_a_observacao") is True,
+         f"proveniência: base NÃO restaurada, mensagem anterior à observação ({rec})")
     rec_log = _textos("[RECUPERADA]")
     r.ok(rec_log and all("não entregou" not in m for m in rec_log),
          f"o log não afirma perda de transporte ({rec_log})")
@@ -562,11 +568,91 @@ def t14_gravacao_falhou_e_reiniciou(r):
     r.ok(cli.chamadas == [(SAM, [1100, 1101, 1102])],
          f"a contagem salva ficou para trás: os do meio buscados UMA vez ({cli.chamadas})")
     rec = _ev("origem.recuperada")
-    r.ok(len(rec) == 3 and all(e["dados"].get("anterior_ao_inicio") is True
+    r.ok(len(rec) == 3 and all(e["dados"].get("anterior_a_observacao") is True
                                and e["dados"].get("base_restaurada") is True for e in rec),
-         f"proveniência: anteriores ao início, base restaurada ({rec})")
+         f"proveniência: anteriores à observação, base restaurada ({rec})")
     r.ok(all("não observada" in m for m in _textos("[RECUPERADA]")),
          f"o log diz o fato ({_textos('[RECUPERADA]')})")
+
+
+def t15_leitura_falha_nao_apaga_o_estado_salvo(r):
+    """A leitura do boot falha e a gravação funciona: o processo não pode
+    trocar a linha salva (maior + pendentes) por um estado começado do zero."""
+    async def corpo():
+        cli, ent = Cliente(), Entrada()
+        novo_cenario(cli, ent, espera=5.0)          # A: buraco pendente, morre na espera
+        completude.observar(PRO, 1300)
+        for mid in (1301, 1302, 1303):
+            cli.publicar(PROMOTOM, mid)
+        completude.observar(PRO, 1304)
+        await asyncio.sleep(0.05)
+        salvo_a = _linhas_salvas()
+        for c in list(completude._canais.values()):
+            if c.tarefa is not None and not c.tarefa.done():
+                c.tarefa.cancel()
+        await asyncio.sleep(0.01)
+        database._fechar_db()                       # B: a LEITURA falha; gravar funciona
+        database._init_db()
+        importlib.reload(completude)
+        completude.db_completude_carregar = lambda chats: None
+        ligar(cli, ent)
+        completude.observar(PRO, 1306)              # mensagem depois do boot
+        await esperar()
+        salvo_b = _linhas_salvas()
+        chamadas_b = list(cli.chamadas)
+        await reiniciar(cli, ent)                   # C: a leitura volta
+        await esperar()
+        chamadas_c = list(cli.chamadas)
+        recebidos_c = list(ent.recebidos)
+        await reiniciar(cli, ent)                   # D: nada a retomar de novo
+        await esperar()
+        return cli, ent, salvo_a, salvo_b, chamadas_b, chamadas_c, recebidos_c
+    cli, ent, salvo_a, salvo_b, chamadas_b, chamadas_c, recebidos_c = rodar(corpo)
+    r.ok(salvo_a == [(PRO, 1304, "[1301, 1302, 1303]")], f"linha válida gravada por A ({salvo_a})")
+    r.ok(salvo_b == salvo_a, f"B, sem ler, não apaga nem sobrescreve a linha ({salvo_b})")
+    r.ok(chamadas_b == [], f"B não busca nada ({chamadas_b})")
+    r.ok(chamadas_c == [(PRO, [1301, 1302, 1303])],
+         f"C retoma os pendentes UMA vez ({chamadas_c})")
+    r.ok(sorted(recebidos_c) == [(PRO, 1301, False), (PRO, 1302, False), (PRO, 1303, False)],
+         f"cada pendente entregue UMA vez ({recebidos_c})")
+    r.ok(cli.chamadas == chamadas_c, f"D não retoma de novo ({cli.chamadas})")
+
+
+def t16_banco_vazio_grava_banco_ilegivel_nao(r):
+    """{} (lido, sem estado) e None (não foi possível ler) não se confundem."""
+    async def corpo():
+        cli, ent = Cliente(), Entrada()
+        novo_cenario(cli, ent)                      # banco lido com sucesso e vazio
+        completude.observar(SAM, 1400)
+        vazio = _linhas_salvas()
+        _limpar_banco()
+        importlib.reload(completude)
+        completude.db_completude_carregar = lambda chats: None
+        ligar(cli, ent)
+        completude.observar(SAM, 1500)
+        completude.observar(SAM, 1501)
+        ilegivel = _linhas_salvas()
+        return vazio, ilegivel
+    vazio, ilegivel = rodar(corpo)
+    r.ok(vazio == [(SAM, 1400, "[]")], f"banco vazio: a contagem passa a ser gravada ({vazio})")
+    r.ok(ilegivel == [], f"banco ilegível: nada é gravado neste processo ({ilegivel})")
+
+
+def t17_instalar_com_leitura_boa_volta_a_gravar(r):
+    """O instalar define o estado inteiro: depois de um instalar que não leu
+    (suspenso), um instalar que lê volta a gravar — a suspensão não vaza."""
+    async def corpo():
+        cli, ent = Cliente(), Entrada()
+        novo_cenario(cli, ent)
+        real = completude.db_completude_carregar
+        completude.db_completude_carregar = lambda chats: None
+        ligar(cli, ent)                             # suspenso
+        completude.db_completude_carregar = real
+        ligar(cli, ent)                             # leu: {} (banco vazio)
+        completude.observar(SAM, 1600)
+        return _linhas_salvas()
+    salvas = rodar(corpo)
+    r.ok(salvas == [(SAM, 1600, "[]")], f"o instalar que leu volta a gravar ({salvas})")
 
 
 # ── runner ────────────────────────────────────────────────────────

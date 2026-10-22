@@ -708,7 +708,7 @@ _FORMA = {
     "completude.buscar_e_entregar.ausente": ({"chat", "msg"}, {"motivo", "ids"}),
     "completude.buscar_e_entregar.servico": ({"chat", "msg"}, {"motivo", "ids"}),
     "completude.buscar_e_entregar.recuperada": ({"chat", "msg"},
-                                                {"idade_s", "anterior_ao_inicio",
+                                                {"idade_s", "anterior_a_observacao",
                                                  "base_restaurada"}),
     "completude.buscar_e_entregar.entrega_falhou": ({"chat", "msg"},
                                                     {"motivo", "ids", "excecao"}),
@@ -753,9 +753,9 @@ def _problemas_de_forma(e):
     if e["tipo"] == "origem.recuperada" and not (isinstance(d["idade_s"], (int, float))
                                                  and d["idade_s"] >= 0):
         erros.append(f"idade_s {d['idade_s']!r}")
-    if e["tipo"] == "origem.recuperada" and not (type(d["anterior_ao_inicio"]) is bool
+    if e["tipo"] == "origem.recuperada" and not (type(d["anterior_a_observacao"]) is bool
                                                  and type(d["base_restaurada"]) is bool):
-        erros.append(f"proveniencia {d['anterior_ao_inicio']!r}/{d['base_restaurada']!r}")
+        erros.append(f"proveniencia {d['anterior_a_observacao']!r}/{d['base_restaurada']!r}")
     if e["tipo"] == "post.lideranca_transferida":
         la, pv = d["lider_anterior"], d["prova"]
         if not (isinstance(la, dict) and set(la) == {"chat", "msg"}

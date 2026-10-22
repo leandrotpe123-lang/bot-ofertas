@@ -76,7 +76,14 @@ depois do boot é real — a mensagem da janela sem bot — e segue o mesmo
 contrato (até _MAX_BURACO, trava de idade). Depois de um reinício a
 idempotência em memória recomeça: quem segura a repetição é a trava de
 idade e a ORIGEM_JA_PUBLICADA (banco).
-Falha ao CARREGAR: aviso e comportamento antigo (base no 1º id visto).
+Banco lido e sem linha do canal ({}) não é o mesmo que banco ilegível
+(None). Falha ao CARREGAR: a persistência fica SUSPENSA neste processo —
+nada é gravado, e a linha salva (maior + pendentes) fica intacta até o
+próximo boot que conseguir lê-la, que retoma os pendentes UMA vez. Sem
+saber o estado anterior, gravar seria trocá-lo por um começado do zero.
+Em memória, o comportamento antigo (base no 1º id visto). O boot que
+voltar a ler parte da linha antiga: ids que o processo suspenso tratou
+podem reabrir buraco (até _MAX_BURACO) e ser buscados UMA vez.
 Falha ao GRAVAR: aviso na primeira falha e quando volta; o processo
 segue certo em memória, e um reinício nesse meio pode repetir buraco já
 resolvido — a proveniência abaixo mostra a diferença.
@@ -91,8 +98,10 @@ ENTREGA_FALHOU, ABORTADA), com a exceção só pela classe, em `excecao`.
 A busca que devolve a mensagem prova só que ela existe e que a
 completude não a viu — nunca que o Telegram deixou de entregá-la. A
 origem.recuperada leva os fatos que separam as hipóteses:
-`anterior_ao_inicio` (a data da mensagem é anterior ao início da
-observação deste processo — janela sem bot ou antes dela) e
+`anterior_a_observacao` (a data da mensagem é anterior ao início da
+OBSERVAÇÃO pela completude neste processo — o `instalar`, logo antes de
+os handlers serem registrados; não é o início do processo: mede se ela
+podia ter sido vista ao vivo por ele) e
 `base_restaurada` (a contagem do canal veio do estado salvo; False =
 contada só desde este boot, e a mensagem pode já ter sido tratada pelo
 processo anterior).
@@ -175,7 +184,7 @@ class _Canal:
 
 
 _estado: dict = {"cliente": None, "entidades": {}, "despachar": None,
-                 "inicio": 0.0, "gravacao_ok": True}
+                 "inicio_observacao": 0.0, "persistir": True, "gravacao_ok": True}
 _canais: Dict[int, _Canal] = {}
 
 
@@ -194,7 +203,7 @@ def instalar(cliente, fontes, despachar: Callable) -> None:
         except Exception as e:
             log_ing.warning(f"🧩 completude: fonte sem id ({type(e).__name__})")
     _estado.update(cliente=cliente, entidades=entidades, despachar=despachar,
-                   inicio=time.time(), gravacao_ok=True)
+                   inicio_observacao=time.time(), persistir=True, gravacao_ok=True)
     _canais.clear()
     _restaurar(db_completude_carregar(list(entidades)))
     log_ing.info(
@@ -212,11 +221,15 @@ def instalar(cliente, fontes, despachar: Callable) -> None:
 
 def _restaurar(salvos) -> None:
     """O estado gravado pelo processo anterior (o banco só devolve os canais
-    pedidos: os monitorados). Linha malformada é ignorada (o canal recomeça
-    no 1º id visto)."""
+    pedidos: os monitorados). None = não foi possível ler: a persistência
+    fica suspensa neste processo e a linha salva, intacta. Linha malformada
+    é ignorada: o canal recomeça no 1º id visto e a linha é regravada (o
+    conteúdo ilegível não tem o que preservar)."""
     if salvos is None:
-        log_ing.warning("🧩 completude: estado anterior indisponível — a contagem de "
-                        "cada canal recomeça no 1º id visto")
+        _estado["persistir"] = False
+        log_ing.warning("🧩 completude: estado anterior indisponível — persistência "
+                        "suspensa neste processo (o estado salvo fica intacto até um boot "
+                        "que consiga lê-lo); a contagem recomeça no 1º id visto")
         return
     for chat_id, (maior, pendentes) in salvos.items():
         try:
@@ -226,7 +239,7 @@ def _restaurar(salvos) -> None:
                 raise ValueError("tipo")
         except Exception:
             log_ing.warning(f"🧩 completude: estado salvo malformado de {_nome(chat_id)} "
-                            f"— ignorado; recomeça no 1º id visto")
+                            f"— ignorado; recomeça no 1º id visto e será regravado")
             continue
         canal = _Canal(maior)
         canal.vistos = set()
@@ -237,8 +250,9 @@ def _restaurar(salvos) -> None:
 
 def _gravar(chat_id: int, canal: _Canal) -> None:
     """Grava o maior visto e os pendentes (os em curso contam até o
-    desfecho). Nunca levanta; avisa na primeira falha e quando volta."""
-    if _canais.get(chat_id) is not canal:
+    desfecho). Nunca levanta; avisa na primeira falha e quando volta. Com a
+    persistência suspensa (o boot não leu o estado salvo), não grava."""
+    if not _estado["persistir"] or _canais.get(chat_id) is not canal:
         return
     try:
         ok = bool(db_completude_gravar(
@@ -420,18 +434,19 @@ async def _buscar_e_entregar(chat_id: int, canal: _Canal, faltam: list) -> None:
             _desfecho(chat_id, canal, [mid])
             continue
         # Fatos, não hipótese sobre o transporte: a data da mensagem antes do
-        # início da observação deste processo (resolução de 1 s do Telegram)
-        # e de onde veio a contagem do canal.
-        anterior = bool(m.date is not None and m.date.timestamp() < int(_estado["inicio"]))
+        # início da OBSERVAÇÃO pela completude neste processo (o instalar;
+        # resolução de 1 s do Telegram) e de onde veio a contagem do canal.
+        anterior = bool(m.date is not None
+                        and m.date.timestamp() < int(_estado["inicio_observacao"]))
         restaurada = canal.restaurado
         log_ing.warning(
             f"🧩 [RECUPERADA] {nome} id={mid} idade={_idade_str(m.date)} — não observada "
-            f"pela completude{' (anterior ao início deste processo)' if anterior else ''}"
+            f"pela completude{' (anterior ao início da observação)' if anterior else ''}"
             f"{'' if restaurada else ' (contagem só deste processo)'}; "
             f"entra no pipeline como nova")
         eventos.emitir_de("origem.recuperada", lambda: (
             {"chat": str(chat_id), "msg": mid},
-            {"idade_s": round(_idade_seg(m.date), 1), "anterior_ao_inicio": anterior,
+            {"idade_s": round(_idade_seg(m.date), 1), "anterior_a_observacao": anterior,
              "base_restaurada": restaurada}),
             local="completude.buscar_e_entregar.recuperada",
             minimo=lambda: {"chat": str(chat_id), "msg": mid})
