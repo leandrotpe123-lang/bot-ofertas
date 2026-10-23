@@ -1,12 +1,15 @@
 """
 CANAL DE CUPONS — o post de CUPOM sai no principal e no
-@FullPromotionCupons AO MESMO TEMPO.
+@FullPromotionCupons.
 
 Regra: o post cuja composição é de cupom (cupom com ou sem código,
-nenhum produto) é enviado aos dois canais no mesmo instante — a imagem
-sobe uma vez, a mesma rotina de saída, nenhum espera o outro — e as
-edições (evolução, líder, mídia) também saem juntas. Substituição,
-fusão, falha e mudança de classificação são reconciliadas depois.
+nenhum produto) sai nos dois canais sem um esperar o outro: SEM mídia,
+os dois envios começam no mesmo instante; COM mídia, o principal sai
+sozinho e a cópia começa logo depois, com a foto já publicada por
+referência (nunca dois envios de mídia do mesmo post ao mesmo tempo —
+ver tests/test_cupons_corrida_midia.py). As edições (evolução, líder,
+mídia) saem juntas. Substituição, fusão, falha e mudança de
+classificação são reconciliadas depois.
 
 CORPUS REAL (t.me/s, texto fiel): Fada 17525 (30/90) e 17529 (PROMOML,
 com foto), Promotom 110370 (seco) e 110373 (12 códigos ML), Samuel
@@ -16,12 +19,13 @@ Links curtos são bloqueados aqui: URLs longas de produto/lista sintéticas.
 
   01  classificação pura sobre o corpus (cupom × produto × campanha ×
       cashback × live × página Amazon)
-  02  cupom publicado → os dois envios começam juntos; imagem sobe uma
-      vez; mesmo texto, mesma imagem, mesma formatação
+  02  cupom com foto publicado → o principal sai sozinho (caminho de
+      sempre) e a cópia logo depois: a mesma foto por referência, texto
+      cru e entidades, sem upload nem preparo à parte, vínculo gravado
   03  produto → nenhuma operação no canal de cupons
   04  desligado (sem CANAL_CUPONS) → zero operação, zero task
-  05  VELOCIDADE: canal de cupons lento (1,5 s): saem juntos e o
-      principal não atrasa
+  05  VELOCIDADE: canal de cupons lento (1,5 s): a cópia sai logo depois
+      do principal e o principal não atrasa
   06  evolução (seco → rico) → espelho editado com o texto novo
   07  upgrade de mídia (classe melhor) → espelho com a mídia nova
   08  substituição (apagar+reenviar) → o mesmo espelho segue o id novo
@@ -36,12 +40,12 @@ Links curtos são bloqueados aqui: URLs longas de produto/lista sintéticas.
   15  shutdown: espera o que está em curso e cancela limpo o que travou;
       depois disso, no-op
   16  edição: as duas edições começam juntas; o principal não espera
-  17  principal não saiu → a mensagem do canal de cupons é apagada
+  17  principal não saiu → o canal de cupons nem é tocado
   18  CORRIDA: edição do canal de cupons falha rápido enquanto a do
       principal ainda está no ar → a conferência (depois do principal)
       deixa os dois iguais
-  19  principal degradou para texto (falha da imagem) e o de cupons saiu
-      com imagem → refeito igual ao principal
+  19  principal degradou para texto (falha da imagem) → a cópia copia o
+      que está no ar e nunca sai com imagem
   20  fusão com edição lenta em curso → apagado no fim, sem ressurreição
   21  CANAL_CUPONS igual ao canal principal → desligado (sem duplicar)
   22  o canal de cupons não loga (só as operações do principal)
@@ -50,8 +54,9 @@ Links curtos são bloqueados aqui: URLs longas de produto/lista sintéticas.
       degradando para texto, substituição — sem drenar entre os passos →
       no fim o canal de cupons é IGUAL ao principal (texto e imagem), uma
       mensagem, vínculo certo
-  24  upload único falhou → o principal recebe a imagem original (como
-      sempre) e o de cupons uma CÓPIA (nunca o mesmo buffer ao mesmo tempo)
+  24  troca de mídia com o upload único falhando → o principal recebe a
+      imagem original (como sempre) e o de cupons uma CÓPIA (nunca o mesmo
+      buffer ao mesmo tempo); a publicação não faz upload à parte
 
     python tests/test_espelho_cupons.py
 """
@@ -357,9 +362,12 @@ def test_01_classificacao(r):
 
 
 def test_02_cupom_publicado_vai_aos_dois_canais(r):
-    """Os dois canais recebem AO MESMO TEMPO: os envios começam juntos
-    (nenhum espera o outro terminar), a imagem sobe UMA vez, mesmo texto,
-    mesma imagem, mesma formatação (a mesma rotina de saída)."""
+    """Cupom COM foto: o principal sai SOZINHO, pelo caminho de sempre
+    (send_file com a imagem original, nenhum preparo nem upload à parte),
+    e a cópia começa assim que ele termina — a MESMA foto por referência,
+    o texto cru e as entidades do que está no ar, vínculo gravado. Nunca
+    dois envios de mídia do mesmo post ao mesmo tempo: o porquê, contra o
+    Telethon real, está em tests/test_cupons_corrida_midia.py."""
     out = {}
 
     async def corpo(c):
@@ -376,15 +384,20 @@ def test_02_cupom_publicado_vai_aos_dois_canais(r):
     r.check(len(cupons) == 1, "02.uma_mensagem_no_canal_de_cupons", str(cupons))
     copia = cupons[0] if cupons else None
     r.check(copia is not None and copia.message == pr.message, "02.mesmo_texto")
-    r.check(copia is not None and copia.media.tag == pr.media.tag, "02.mesma_imagem")
-    r.check(c.uploads == 1, "02.imagem_sobe_uma_vez", str(c.uploads))
-    r.check(out["preparos"] == [True], "02.mesmo_preparo_de_imagem_do_send_file",
-            str(out["preparos"]))
-    t_pr, t_cp = c.inicio(GRUPO_DESTINO, "send_file"), c.inicio(CANAL, "send_file")
-    r.check(t_pr and t_cp and abs(t_pr[0] - t_cp[0]) < 0.02, "02.comecam_juntos",
-            f"Δ={abs(t_pr[0] - t_cp[0]) * 1000:.1f}ms" if t_pr and t_cp else str(c.inicios))
-    r.check(c.kwargs[CANAL][0] == c.kwargs[GRUPO_DESTINO][0], "02.mesma_formatacao",
-            f"{c.kwargs[CANAL][:1]} {c.kwargs[GRUPO_DESTINO][:1]}")
+    r.check(copia is not None and copia.media is pr.media, "02.mesma_imagem_por_referencia")
+    r.check(copia is not None and copia.entities == pr.entities, "02.mesmas_entidades")
+    r.check(c.uploads == 0 and out["preparos"] == [], "02.sem_upload_nem_preparo_a_parte",
+            f"uploads={c.uploads} preparos={out['preparos']}")
+    arq_pr = [kw["arquivo"] for op, kw in c.kwargs[GRUPO_DESTINO] if op == "send_file"]
+    r.check(len(arq_pr) == 1 and hasattr(arq_pr[0], "getvalue"),
+            "02.principal_envia_a_imagem_original", str(arq_pr))
+    fim_pr = [t for t, canal, op, _i in c.ops if canal == GRUPO_DESTINO and op == "novo"]
+    t_cp = c.inicio(CANAL, "send_file")
+    r.check(fim_pr and t_cp and fim_pr[0] <= t_cp[0] < fim_pr[0] + 0.05,
+            "02.copia_comeca_logo_depois_do_principal",
+            f"Δ={(t_cp[0] - fim_pr[0]) * 1000:.1f}ms" if fim_pr and t_cp else str(c.inicios))
+    r.check(c.kwargs[CANAL][:1] and c.kwargs[CANAL][0][1]["parse_mode"] is None,
+            "02.copia_crua_sem_reprocessar_markdown", str(c.kwargs[CANAL][:1]))
     r.check(copia is not None and out["vinculo"] == copia.id, "02.vinculo_gravado",
             f"{out['vinculo']} {copia and copia.id}")
 
@@ -423,9 +436,11 @@ def test_05_canal_de_cupons_lento_nao_atrasa_o_principal(r):
         c = cenario(corpo, Cliente(latencia_cupons=lat), ligado=ligado)
         medidas[rot] = out["publicar_s"]
         if ligado:
-            t_pr, t_cp = c.inicio(GRUPO_DESTINO, "send_file"), c.inicio(CANAL, "send_file")
-            r.check(t_pr and t_cp and abs(t_pr[0] - t_cp[0]) < 0.02,
-                    "05.saem_juntos_mesmo_com_o_de_cupons_lento")
+            fim_pr = [t for t, canal, op, _i in c.ops if canal == GRUPO_DESTINO and op == "novo"]
+            t_cp = c.inicio(CANAL, "send_file")
+            r.check(fim_pr and t_cp and fim_pr[0] <= t_cp[0] < fim_pr[0] + 0.05,
+                    "05.copia_logo_depois_mesmo_com_o_de_cupons_lento",
+                    f"{fim_pr} {t_cp}")
             r.check(len(c.no_canal(CANAL)) == 1, "05.chegou_no_canal_de_cupons")
     r.check(medidas["ligado_lento"] < medidas["desligado"] + 0.05,
             "05.mesma_latencia_do_principal",
@@ -675,8 +690,10 @@ def test_17_principal_falhou_nao_deixa_cupom_sozinho(r):
         await pub(foto(msg(FADA, RICO_17525)), score=10)
     c = cenario(corpo, Cliente(principal_falha=True))
     r.check(not c.no_canal(GRUPO_DESTINO), "17.principal_nao_saiu")
-    r.check(not c.no_canal(CANAL) and ("novo", 1) in c.ops_em(CANAL)
-            and ("delete", 1) in c.ops_em(CANAL), "17.canal_de_cupons_limpo", str(c.ops_em(CANAL)))
+    # Cupom com foto: a cópia só começa depois do principal — sem principal,
+    # o canal de cupons nem é tocado (antes nascia e era apagada).
+    r.check(not c.no_canal(CANAL) and not c.ops_em(CANAL) and not c.kwargs[CANAL],
+            "17.canal_de_cupons_nem_tocado", f"{c.ops_em(CANAL)} {c.kwargs[CANAL]}")
 
 
 def test_18_falha_rapida_durante_a_edicao_do_principal(r):
@@ -703,7 +720,8 @@ def test_18_falha_rapida_durante_a_edicao_do_principal(r):
 
 def test_19_principal_degradou_para_texto(r):
     """O principal falhou com a imagem e saiu só com texto (retry do
-    aplicador); o canal de cupons tinha saído com imagem → refeito."""
+    aplicador): a cópia, que só começa depois dele, copia o que está no
+    ar — texto — e nunca chega a sair com imagem."""
     out = {}
 
     async def corpo(c):
@@ -720,7 +738,9 @@ def test_19_principal_degradou_para_texto(r):
     r.check(len(cupons) == 1 and cupons[0].media is None and cupons[0].message == pr.message
             and out["vinculo"] == cupons[0].id, "19.canal_de_cupons_igual",
             f"{[(m.id, m.media) for m in cupons]} {out}")
-    r.check(("delete", 1) in c.ops_em(CANAL), "19.a_com_imagem_foi_apagada", str(c.ops_em(CANAL)))
+    r.check(not [op for op, _kw in c.kwargs[CANAL] if op == "send_file"]
+            and ("delete", 1) not in c.ops_em(CANAL), "19.copia_nunca_saiu_com_imagem",
+            f"{c.kwargs[CANAL]} {c.ops_em(CANAL)}")
 
 
 def test_20_fusao_com_edicao_lenta_em_curso(r):
@@ -852,17 +872,29 @@ def test_23_propriedade_iguais_no_fim(r):
 
 
 def test_24_upload_falhou_buffers_separados(r):
+    """O upload único só existe na TROCA de mídia (as duas edições em
+    paralelo; a publicação manda a foto por referência). Falhou → o
+    principal recebe a imagem original, como sempre, e o de cupons uma
+    CÓPIA (nunca o mesmo buffer ao mesmo tempo)."""
     out = {}
 
     async def corpo(c):
-        c.upload_falha = True
-        n = foto(msg(FADA, RICO_17525))
-        await pub(n, score=10)
+        seco = foto(msg(PROMOTOM, SECO_110370))            # promotom: mídia ruim
+        await pub(seco, score=3)
         await drenar()
-        out["principal"] = principal_de(c, n)
+        out["uploads_publicacao"] = c.uploads
+        c.upload_falha = True
+        mesma = foto(msg(FADA, SECO_110370.replace("Cupons Shopee", "🔥 Cupons Shopee")))
+        await pub(mesma, score=3)                          # IGUAL → upgrade de mídia
+        await drenar()
+        out["principal"] = principal_de(c, seco)
     c = cenario(corpo)
-    arq_pr = [kw["arquivo"] for op, kw in c.kwargs[GRUPO_DESTINO] if op == "send_file"]
-    arq_cp = [kw["arquivo"] for op, kw in c.kwargs[CANAL] if op == "send_file"]
+    arq_pr = [kw["file"] for op, kw in c.kwargs[GRUPO_DESTINO]
+              if op == "edit_message" and kw.get("file") is not None]
+    arq_cp = [kw["file"] for op, kw in c.kwargs[CANAL]
+              if op == "edit_message" and kw.get("file") is not None]
+    r.check(out["uploads_publicacao"] == 0, "24.publicacao_sem_upload_a_parte",
+            str(out["uploads_publicacao"]))
     r.check(len(arq_pr) == 1 and len(arq_cp) == 1 and arq_pr[0] is not arq_cp[0]
             and arq_pr[0].getvalue() == arq_cp[0].getvalue()
             and getattr(arq_cp[0], "name", "") == getattr(arq_pr[0], "name", ""),

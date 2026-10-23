@@ -77,6 +77,10 @@ class _Mudo:
 
 _SEM_LOG = _Mudo()
 
+# Legenda de mídia no Telegram. Texto maior sai como foto sem legenda e,
+# em seguida, o texto numa mensagem própria (é essa que se devolve).
+LIMITE_LEGENDA = 1024
+
 
 # ── [E4.0] Resultado de uma edição ────────────────────────────────
 class ResultadoEdicao(NamedTuple):
@@ -116,7 +120,7 @@ async def _enviar_msg_no_sem(texto: str, img, *,
     from client import client
     log = log_out if destino == GRUPO_DESTINO else _SEM_LOG
     if img:
-        if len(texto) <= 1024:
+        if len(texto) <= LIMITE_LEGENDA:
             try:
                 return await client.send_file(destino, img, caption=texto,
                                               parse_mode="md", force_document=False)

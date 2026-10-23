@@ -407,9 +407,9 @@ async def _preparar_processo() -> bool:
     # sem HEARTBEAT_PING_S. Não bloqueia o boot; cancelado em _encerrar.
     _TASKS_FUNDO["heartbeat"] = heartbeat_sessao.iniciar(client)
 
-    # [Cupons] Post de CUPOM sai também no canal de cupons, ao mesmo
-    # tempo — desligado sem CANAL_CUPONS. Não cria task; o canal
-    # principal nunca espera.
+    # [Cupons] Post de CUPOM sai também no canal de cupons (com mídia, a
+    # cópia logo depois do principal) — desligado sem CANAL_CUPONS. Não
+    # cria task; o canal principal nunca espera.
     espelho_cupons.iniciar()
 
     # [Frente 8] Remoções de posts FUNDIDOS que ficaram pendentes antes

@@ -1,8 +1,8 @@
 """
-Canal de cupons — o post de CUPOM sai nos DOIS canais ao mesmo tempo.
+Canal de cupons — o post de CUPOM sai nos DOIS canais.
 
 Responsabilidade ÚNICA: publicar no canal de cupons (CANAL_CUPONS),
-SIMULTANEAMENTE com o canal principal, todo post cuja composição é de
+junto com o canal principal, todo post cuja composição é de
 cupom (resolucao_identidade.eh_identidade_cupom: cupom com ou sem código
 e nenhum produto), e manter as duas mensagens iguais depois.
   - não decide nada: texto, mídia, família e score continuam decididos
@@ -11,12 +11,20 @@ e nenhum produto), e manter as duas mensagens iguais depois.
   - não toca identidade, família, convergência nem locks;
   - não loga.
 
-AO MESMO TEMPO, sem um esperar o outro:
-  - publicação: a imagem sobe UMA vez (upload_file, com o mesmo preparo
-    que o send_file faria) e o mesmo handle vai aos dois canais; o envio
-    ao canal de cupons é disparado no mesmo instante do envio ao
-    principal, pela MESMA rotina de saída (saida._enviar_msg_no_sem), e
-    o principal nunca o aguarda;
+SEM um esperar o outro:
+  - publicação SEM mídia: o envio ao canal de cupons é disparado no
+    mesmo instante do envio ao principal, pela MESMA rotina de saída
+    (saida._enviar_msg_no_sem), e o principal nunca o aguarda;
+  - publicação COM mídia (publicar_depois): o principal sai SOZINHO e a
+    cópia começa assim que ele sai — a foto JÁ PUBLICADA vai por
+    referência (sem novo upload, sem baixar de novo). Nunca dois envios de
+    mídia do mesmo post ao mesmo tempo: em produção (02–23/10/2026), os
+    dois SendMedia simultâneos com a mesma imagem faziam um deles receber
+    FLOOD_WAIT de ~10 s, dormido em silêncio pelo Telethon
+    (flood_sleep_threshold), que ainda adia todo SendMedia seguinte do
+    processo até o prazo — o principal atrasava 10 s em 37 de 343 cupons
+    com foto e posts de produto ficavam presos junto. A cópia sai alguns
+    décimos de segundo depois do principal; o principal não a aguarda;
   - evolução, sincronização do líder, upgrade de mídia: a mesma edição
     sai nos dois canais em paralelo (saida._editar_inner_no_sem).
 
@@ -60,8 +68,9 @@ from pipeline import saida
 from pipeline.resolucao_identidade import eh_identidade_cupom
 
 __all__ = ["canal_configurado", "iniciar", "encerrar", "vai_para_cupons",
-           "preparar_arquivo", "publicar_junto", "vincular", "abortar",
-           "edicao_junto", "conferir", "conteudo", "substituido", "removido"]
+           "preparar_arquivo", "publicar_junto", "publicar_depois", "vincular",
+           "abortar", "edicao_junto", "conferir", "conteudo", "substituido",
+           "removido"]
 
 _VARIAVEL = "CANAL_CUPONS"
 _TENTATIVAS = 3           # por operação, só para falha transitória
@@ -173,6 +182,24 @@ def publicar_junto(texto: str, arquivo) -> Optional[asyncio.Task]:
         return None
     return _tarefa(_io(lambda _c: saida._enviar_msg_no_sem(
         texto, arquivo, destino=_canal)))
+
+
+def publicar_depois(msg_id_dest: int, principal, texto: str, img) -> None:
+    """Post de cupom COM mídia: o principal JÁ saiu como `principal`. A
+    cópia começa agora — nunca junto com o envio de mídia do principal — e
+    o principal não a espera. Cópia fiel do que está no ar: texto cru +
+    entidades e a foto POR REFERÊNCIA (_copiar).
+
+    Texto longo (> legenda): a foto saiu numa mensagem própria antes do
+    texto e `principal` é o texto. A cópia faz o mesmo, pela mesma rotina
+    de saída, com os bytes já em memória num buffer próprio (sem baixar de
+    novo) e a conferência de sempre (vincular)."""
+    if not _aberto:
+        return
+    if img is not None and len(texto) > saida.LIMITE_LEGENDA and not _tem_midia(principal):
+        vincular(msg_id_dest, publicar_junto(texto, _copia(img)), principal)
+        return
+    _encadear(msg_id_dest, lambda: _publicar_copia(msg_id_dest, principal))
 
 
 def vincular(msg_id_dest: int, tarefa: Optional[asyncio.Task], principal) -> None:
@@ -306,6 +333,18 @@ async def _concluir_publicacao(mid: int, tarefa: asyncio.Task, principal) -> Non
     if copia is not None:
         await _apagar_mensagem(copia.id)
     await _criar(mid, principal)
+
+
+async def _publicar_copia(mid: int, principal) -> None:
+    try:
+        copia = await _io(lambda c: _copiar(c, principal))
+    except Exception:                                  # noqa: BLE001
+        if not _aberto:
+            raise
+        # Uma 2ª tentativa: a mesma rede de segurança que a conferência dava
+        # ao envio simultâneo. Só o ENVIO repete — nada foi publicado ainda.
+        copia = await _io(lambda c: _copiar(c, principal))
+    db_espelho_set(mid, copia.id)
 
 
 async def _descartar(tarefa: asyncio.Task) -> None:
