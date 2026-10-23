@@ -26,8 +26,15 @@ SEM um esperar o outro:
     processo até o prazo — o principal atrasava 10 s em 37 de 343 cupons
     com foto e posts de produto ficavam presos junto. A cópia sai alguns
     décimos de segundo depois do principal; o principal não a aguarda;
-  - evolução, sincronização do líder, upgrade de mídia: a mesma edição
-    sai nos dois canais em paralelo (saida._editar_inner_no_sem).
+  - edição SEM troca de mídia (evolução, sincronização do líder): a
+    mesma edição sai nos dois canais em paralelo
+    (saida._editar_inner_no_sem);
+  - edição COM troca de mídia (upgrade de mídia, evolução ou líder com
+    imagem nova): o principal edita SOZINHO e a do canal de cupons vem
+    depois (conteudo), copiando a foto que ficou no ar por referência —
+    em produção (23/10/2026 14:46:14 e 15:00:19, as duas trocas de mídia
+    em cupom depois da correção da publicação), as duas edições
+    simultâneas com a mesma imagem deram ⏳ EditMessageRequest seg=10.
 
 ORDEM POR POST: toda operação do canal de cupons de um post entra numa
 fila própria daquele post (_cadeia) no momento em que o aplicador a pede
@@ -71,7 +78,7 @@ from pipeline import saida
 from pipeline.resolucao_identidade import eh_identidade_cupom
 
 __all__ = ["canal_configurado", "iniciar", "encerrar", "vai_para_cupons",
-           "preparar_arquivo", "publicar_junto", "publicar_depois", "vincular",
+           "publicar_junto", "publicar_depois", "vincular",
            "abortar", "edicao_junto", "conferir", "conteudo", "substituido",
            "removido"]
 
@@ -135,39 +142,6 @@ def vai_para_cupons(chaves) -> bool:
     return _aberto and eh_identidade_cupom(chaves)
 
 
-async def preparar_arquivo(img):
-    """Sobe a imagem UMA vez para os dois canais. Devolve
-    (para_o_principal, para_o_canal_de_cupons).
-
-    O upload é o MESMO que o send_file/edit_message do principal faria
-    (mesmo preparo da imagem, mesma vaga do _SEM_ENVIO): o principal só
-    deixa de subir a imagem dentro do envio. Falhou: o principal recebe
-    a imagem original, como sempre, e o canal de cupons uma cópia dela
-    (dois envios simultâneos nunca leem o mesmo buffer)."""
-    if img is None or not _aberto:
-        return img, None
-    from client import client
-    try:
-        arquivo = _preparo_do_envio(img)
-        async with (config._SEM_ENVIO or contextlib.nullcontext()):
-            handle = await client.upload_file(arquivo)
-        return handle, handle
-    except Exception:                                  # noqa: BLE001
-        return img, _copia(img)
-    finally:
-        with contextlib.suppress(Exception):
-            img.seek(0)                    # a imagem original segue íntegra
-
-
-def _preparo_do_envio(img):
-    """Exatamente o que o Telethon faz com a imagem antes do upload num
-    send_file/edit_message (redimensiona/converte se precisar). Sem isso
-    o post de cupom poderia sair diferente de qualquer outro post."""
-    from telethon import utils
-    from telethon.client.uploads import _resize_photo_if_needed
-    return _resize_photo_if_needed(img, utils.is_image(img))
-
-
 def _copia(img):
     try:
         copia = io.BytesIO(img.getvalue())
@@ -228,19 +202,21 @@ async def edicao_junto(msg_id_dest: int, chaves, texto: str, imagem,
     """A edição do principal vai sair AGORA: a mesma edição no canal de
     cupons, em paralelo, quando o post é de cupom e já tem a mensagem lá
     (ou ela está nascendo). Devolve (imagem_para_o_principal, task|None);
-    com troca de mídia, a imagem sobe uma vez para os dois. Com task, o
-    aplicador chama conferir() quando o principal terminar."""
+    com task, o aplicador chama conferir() quando o principal terminar.
+
+    Com troca de mídia não há paralelo: devolve (imagem, None) e o
+    aplicador, quando o principal terminar com a mídia aplicada, chama
+    conteudo(midia=True) — a do canal de cupons sai depois, com a foto
+    do principal por referência (nunca duas edições com a mesma imagem
+    ao mesmo tempo; ver o cabeçalho)."""
     if chaves is None:
         chaves = db_exibida(msg_id_dest)
     if not vai_para_cupons(chaves) or not _tem_mensagem(msg_id_dest):
         return imagem, None
-    arquivo = None
     if trocar_midia and imagem is not None:
-        imagem, arquivo = await preparar_arquivo(imagem)
-        if not _aberto:
-            return imagem, None            # encerrou durante o upload
+        return imagem, None
     junto = _encadear(msg_id_dest, lambda: _editar_junto(
-        msg_id_dest, texto, arquivo, trocar_midia))
+        msg_id_dest, texto, trocar_midia))
     return imagem, junto
 
 
@@ -373,12 +349,12 @@ async def _descartar(tarefa: asyncio.Task) -> None:
         await _apagar_mensagem(copia.id)
 
 
-async def _editar_junto(mid: int, texto: str, arquivo, trocar_midia: bool):
+async def _editar_junto(mid: int, texto: str, trocar_midia: bool):
     esp = db_espelho_get(mid)
     if esp is None:
         return None                       # a mensagem não nasceu: conferir() cria
     return await _io(lambda _c: saida._editar_inner_no_sem(
-        esp, texto, arquivo, exigir_imagem=False, trocar_midia=trocar_midia,
+        esp, texto, None, exigir_imagem=False, trocar_midia=trocar_midia,
         destino=_canal))
 
 

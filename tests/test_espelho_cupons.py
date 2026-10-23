@@ -7,9 +7,11 @@ nenhum produto) sai nos dois canais sem um esperar o outro: SEM mídia,
 os dois envios começam no mesmo instante; COM mídia, o principal sai
 sozinho e a cópia começa logo depois, com a foto já publicada por
 referência (nunca dois envios de mídia do mesmo post ao mesmo tempo —
-ver tests/test_cupons_corrida_midia.py). As edições (evolução, líder,
-mídia) saem juntas. Substituição, fusão, falha e mudança de
-classificação são reconciliadas depois.
+ver tests/test_cupons_corrida_midia.py). As edições sem troca de mídia
+(evolução, líder) saem juntas; com troca de mídia, a do canal de cupons
+vem logo depois da do principal, com a foto dele por referência (nunca
+duas edições com a mesma imagem ao mesmo tempo). Substituição, fusão,
+falha e mudança de classificação são reconciliadas depois.
 
 CORPUS REAL (t.me/s, texto fiel): Fada 17525 (30/90) e 17529 (PROMOML,
 com foto), Promotom 110370 (seco) e 110373 (12 códigos ML), Samuel
@@ -27,7 +29,8 @@ Links curtos são bloqueados aqui: URLs longas de produto/lista sintéticas.
   05  VELOCIDADE: canal de cupons lento (1,5 s): a cópia sai logo depois
       do principal e o principal não atrasa
   06  evolução (seco → rico) → espelho editado com o texto novo
-  07  upgrade de mídia (classe melhor) → espelho com a mídia nova
+  07  upgrade de mídia (classe melhor) → espelho com a mídia nova, que
+      começa DEPOIS da troca do principal, por referência, sem upload
   08  substituição (apagar+reenviar) → o mesmo espelho segue o id novo
       e refaz-se com a mídia (Telegram não põe mídia em texto)
   09  fusão (remoção do post) → espelho apagado
@@ -54,9 +57,10 @@ Links curtos são bloqueados aqui: URLs longas de produto/lista sintéticas.
       degradando para texto, substituição — sem drenar entre os passos →
       no fim o canal de cupons é IGUAL ao principal (texto e imagem), uma
       mensagem, vínculo certo
-  24  troca de mídia com o upload único falhando → o principal recebe a
-      imagem original (como sempre) e o de cupons uma CÓPIA (nunca o mesmo
-      buffer ao mesmo tempo); a publicação não faz upload à parte
+  24  troca de mídia → nenhum upload à parte (nem tentado: o upload que
+      cairia não é chamado); o principal recebe a imagem original, como
+      sempre, e o de cupons a mídia do principal por referência (nunca um
+      buffer); a publicação também não faz upload à parte
 
     python tests/test_espelho_cupons.py
 """
@@ -482,8 +486,17 @@ def test_07_upgrade_de_midia_chega_ao_espelho(r):
     r.check(pr.media.tag == f"m{out['fada']}", "07.principal_trocou_a_imagem", pr.media.tag)
     r.check(cupons and cupons[0].media.tag == pr.media.tag, "07.canal_de_cupons_com_a_imagem_nova",
             cupons and cupons[0].media.tag)
-    t_pr, t_cp = c.inicio(GRUPO_DESTINO, "edit_message"), c.inicio(CANAL, "edit_message")
-    r.check(t_pr and t_cp and abs(t_pr[-1] - t_cp[-1]) < 0.02, "07.trocam_juntos")
+    # A troca do canal de cupons só começa quando a do principal TERMINOU
+    # (23/10/2026 14:46/15:00: as duas juntas com a mesma imagem deram
+    # FLOOD_WAIT_10) e vai com a mídia do principal por referência.
+    fim_pr = [t for t, cn, op, _i in c.ops if cn == GRUPO_DESTINO and op == "edit"]
+    t_cp = c.inicio(CANAL, "edit_message")
+    r.check(fim_pr and t_cp and t_cp[-1] >= fim_pr[-1], "07.troca_da_copia_depois_do_principal",
+            f"fim principal {fim_pr} início cópia {t_cp}")
+    arq_cp = [kw["file"] for op, kw in c.kwargs[CANAL]
+              if op == "edit_message" and kw.get("file") is not None]
+    r.check(len(arq_cp) == 1 and isinstance(arq_cp[0], _Midia) and c.uploads == 0,
+            "07.por_referencia_sem_upload", f"{arq_cp} uploads={c.uploads}")
 
 
 def test_08_substituicao_reaponta_o_espelho(r):
@@ -871,11 +884,12 @@ def test_23_propriedade_iguais_no_fim(r):
             f"{len(divergentes)} divergentes: " + " | ".join(divergentes[:3]))
 
 
-def test_24_upload_falhou_buffers_separados(r):
-    """O upload único só existe na TROCA de mídia (as duas edições em
-    paralelo; a publicação manda a foto por referência). Falhou → o
-    principal recebe a imagem original, como sempre, e o de cupons uma
-    CÓPIA (nunca o mesmo buffer ao mesmo tempo)."""
+def test_24_troca_de_midia_sem_upload_a_parte(r):
+    """Nem a publicação nem a troca de mídia fazem upload à parte: o
+    principal recebe a imagem original (o upload dele é o de sempre, dentro
+    do edit_message) e o canal de cupons a mídia do principal por
+    referência. Com o upload à parte caindo, nada muda — ele nem é
+    chamado."""
     out = {}
 
     async def corpo(c):
@@ -895,10 +909,10 @@ def test_24_upload_falhou_buffers_separados(r):
               if op == "edit_message" and kw.get("file") is not None]
     r.check(out["uploads_publicacao"] == 0, "24.publicacao_sem_upload_a_parte",
             str(out["uploads_publicacao"]))
-    r.check(len(arq_pr) == 1 and len(arq_cp) == 1 and arq_pr[0] is not arq_cp[0]
-            and arq_pr[0].getvalue() == arq_cp[0].getvalue()
-            and getattr(arq_cp[0], "name", "") == getattr(arq_pr[0], "name", ""),
-            "24.copia_identica_em_buffer_proprio", f"{arq_pr} {arq_cp}")
+    r.check(c.uploads == 0, "24.troca_sem_upload_a_parte", str(c.uploads))
+    r.check(len(arq_pr) == 1 and hasattr(arq_pr[0], "getvalue")
+            and len(arq_cp) == 1 and isinstance(arq_cp[0], _Midia),
+            "24.principal_imagem_original_copia_por_referencia", f"{arq_pr} {arq_cp}")
     pr = c.no_canal(GRUPO_DESTINO)[out["principal"]]
     cupons = list(c.no_canal(CANAL).values())
     r.check(len(cupons) == 1 and pr.media is not None and cupons[0].media is not None
