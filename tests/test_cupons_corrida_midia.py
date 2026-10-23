@@ -18,10 +18,20 @@ CASO REAL (logs da Railway + prévia pública dos dois canais, 02–23/10/2026):
     (flood_sleep_threshold, nunca passado em client.py) e só registra em
     INFO no logger telethon.client.users, que não tem handler.
 
-MODELO DO SERVIDOR (o fato medido, nada além): dois messages.sendMedia com a
-MESMA mídia em voo ao mesmo tempo → um deles recebe FLOOD_WAIT_10 (qual
-perde varia: os dois lados aparecem em produção). Relógio virtual SÓ dentro
-de telethon.client.users (time.time e asyncio.sleep), para os 10 s do
+CASO REAL DA EDIÇÃO (depois do deploy da correção da publicação, 23/10/2026):
+  · 14:46:14 e 15:00:19 UTC: cupom só texto (Promotom 111845 → 31194;
+    111847 → 31196) e, segundos depois, a mesma oferta COM foto (Samuel
+    122893; …) → [UPGRADE_MIDIA] TROCA/post_sem_midia. As duas edições
+    (principal + canal de cupons) saíram juntas com o MESMO arquivo enviado
+    e a linha nova mostrou: ⏳ [ESPERA_TELETHON] req=EditMessageRequest
+    seg=10 — FLOOD_WAIT_10 do servidor, dormido pelo Telethon, que ainda
+    adia toda EditMessage da conta até o prazo. 2 de 2 trocas de mídia.
+
+MODELO DO SERVIDOR (o fato medido, nada além): dois pedidos de mídia
+(messages.sendMedia ou messages.editMessage com mídia) com a MESMA mídia em
+voo ao mesmo tempo → um deles recebe FLOOD_WAIT_10 (qual perde varia: os
+dois lados aparecem em produção). Relógio virtual SÓ dentro de
+telethon.client.users (time.time e asyncio.sleep), para os 10 s do
 FloodWait custarem milissegundos sem tocar a lógica.
 
   01  biblioteca: FLOOD_WAIT_10 num SendMedia não vira exceção nem WARNING;
@@ -48,6 +58,12 @@ FloodWait custarem milissegundos sem tocar a lógica.
       — WARNING do Telethon sai igual pelo lastResort, INFO continua mudo
   14  medição: ⏱ [ENVIO_MS] separa o envio ao principal e a cópia (ms,
       operação, resultado), sem texto nem link; a espera aparece na cópia
+  15  REPRODUÇÃO DA EDIÇÃO (troca de mídia, caso 31194/31196): antes, as duas
+      edições com o mesmo arquivo → FLOOD_WAIT_10 numa delas. Depois: a do
+      canal de cupons começa quando a do principal termina, com a foto do
+      principal por referência — sem espera, um upload só, os dois iguais
+  16  a troca de mídia não segura a edição de OUTRO post (antes: toda
+      EditMessage da conta ficava adiada até o fim do FloodWait)
 
     python tests/test_cupons_corrida_midia.py
 """
@@ -142,7 +158,8 @@ def _jpeg(semente: int) -> bytes:
 # ══════════════════════════════════════════════════════════════════════
 class Servidor:
     """`send(request)` do MTProtoSender. Responde como o Telegram, com:
-      · `perde`: quando dois SendMedia da MESMA mídia ficam em voo juntos,
+      · `perde`: quando dois pedidos de mídia (SendMedia ou EditMessage com
+        mídia) da MESMA mídia ficam em voo juntos,
         quem recebe FLOOD_WAIT_10 — "segundo" (o que chegou depois) ou
         "primeiro" (o que já estava em voo);
       · `regra(req, destino)`: (latência, exceção|None) por requisição."""
@@ -205,7 +222,8 @@ class Servidor:
         lat, falha = (self.regra(req, dest) if self.regra else (None, None))
         lat = self.lat if lat is None else lat
         voo = {"req": req, "chave": chave, "perde": False}
-        if isinstance(req, functions.messages.SendMediaRequest) and chave is not None:
+        if isinstance(req, (functions.messages.SendMediaRequest,
+                            functions.messages.EditMessageRequest)) and chave is not None:
             rival = next((v for v in self.em_voo if v["chave"] == chave), None)
             if rival is not None:
                 if self.perde == "segundo":
@@ -769,6 +787,95 @@ def test_14_medicao_separa_principal_e_copia(r):
     real_do_flood = FLOOD_S * _ESCALA * 1000
     r.check(ms["floodwait_na_copia"] >= 0.8 * real_do_flood > ms["normal"],
             "14.a_espera_aparece_no_tempo_da_copia", f"{ms} (FloodWait = {real_do_flood:.0f} ms reais)")
+
+
+# ── edição com troca de mídia (UPGRADE_MIDIA TROCA/post_sem_midia) ─────
+def _so_texto(chat=PROMOTOM):
+    return msg(chat, SHOPEE_17860, cupons=["4DMD4CUP0M"])
+
+
+def _com_foto(chat=SAMUEL):
+    return foto(msg(chat, SHOPEE_17860, cupons=["4DMD4CUP0M"]))
+
+
+def _edicoes(s, canal, com_midia=True):
+    """(chega, fim, chave) de cada EditMessageRequest no canal."""
+    out, aberto = [], {}
+    for t, e, c, d, k in s.reg:
+        if c != "EditMessageRequest" or d != canal or (com_midia and k is None):
+            continue
+        if e == "chega":
+            aberto.setdefault(k, []).append(t)
+        elif e in ("fim", "flood", "erro") and aberto.get(k):
+            out.append((aberto[k].pop(0), t, k, e))
+    return out
+
+
+def test_15_reproducao_edicao_com_troca_de_midia(r):
+    for perde in ("segundo", "primeiro"):
+        srv = Servidor(perde=perde)
+
+        async def corpo(c, s):
+            await pub(_so_texto(), score=9)
+            await drenar()
+            partes_antes = len({k for _t, e, cl, _d, k in s.reg if cl == "SaveFilePartRequest"})
+            t0 = agora()
+            await pub(_com_foto(), score=9)                 # IGUAL → troca de mídia
+            fim_pub = agora() - t0
+            await drenar()
+            partes = {k for _t, e, cl, _d, k in s.reg if cl == "SaveFilePartRequest"}
+            return t0, fim_pub, len(partes) - partes_antes
+        t0, fim_pub, uploads = cenario(corpo, srv)
+        rot = f"15.{perde}"
+        pr, cp = srv.em("principal"), srv.em("cupons")
+        r.check(len(pr) == 1 and len(cp) == 1 and pr[0]["foto"] is not None,
+                f"{rot}.troca_de_midia_no_principal", f"{pr} {cp}")
+        if not (pr and cp):
+            continue
+        r.check(cp[0]["foto"] == pr[0]["foto"] and cp[0]["texto"] == pr[0]["texto"],
+                f"{rot}.canal_de_cupons_igual_mesma_foto", f"{cp[0]['foto']} {pr[0]['foto']}")
+        r.check(not srv.eventos("flood", classe="EditMessageRequest"),
+                f"{rot}.nenhum_floodwait_na_edicao",
+                str(srv.eventos("flood", classe="EditMessageRequest")))
+        ep = _edicoes(srv, "principal")
+        ec = _edicoes(srv, "cupons", com_midia=False)        # TODA edição lá
+        r.check(len(ep) == 1 and len(ec) == 1 and ec[0][0] >= ep[0][1],
+                f"{rot}.uma_edicao_no_canal_de_cupons_depois_do_principal", f"{ep} {ec}")
+        r.check(len(ec) == 1 and ec[0][2] == ("foto", pr[0]["foto"]),
+                f"{rot}.copia_por_referencia", str(ec))
+        r.check(uploads == 1, f"{rot}.um_upload_so", str(uploads))
+        r.check(len(ep) == 1 and ep[0][1] - t0 < RAPIDO and fim_pub < RAPIDO,
+                f"{rot}.principal_nao_espera",
+                f"principal editou em {ep[0][1] - t0:.1f}s; aplicador {fim_pub:.1f}s" if ep else "")
+
+
+def test_16_troca_de_midia_nao_segura_edicao_de_outro_post(r):
+    srv = Servidor(perde="segundo")
+
+    async def corpo(c, s):
+        seco = msg(FADA, SECO_110370)
+        await pub(seco, score=3)                       # post B (cupom sem código)
+        await pub(_so_texto(), score=9)                # post A (só texto)
+        await drenar()
+        id_b = next(p["id"] for p in s.em("principal") if "Cupons Shopee" in p["texto"])
+        up = asyncio.ensure_future(pub(_com_foto(), score=9))     # A: troca de mídia
+        await vdormir(1.0)
+        t_b = agora()
+        await pub(msg(SAMUEL, RICO_17525), score=10)              # B: evolução (texto)
+        await up
+        await drenar()
+        return id_b, t_b
+    id_b, t_b = cenario(corpo, srv)
+    edic_b = [(t, e) for t, e, c, d, _k in srv.reg if c == "EditMessageRequest"
+              and d == "principal" and e == "fim"]
+    b_final = next((p for p in srv.em("principal") if p["id"] == id_b), None)
+    r.check(b_final is not None and "R$30 OFF em R$299" in b_final["texto"],
+            "16.post_b_evoluiu", str(b_final and b_final["texto"][:40]))
+    fins_b = [t for t, _e in edic_b if t >= t_b]
+    r.check(fins_b and min(fins_b) - t_b < RAPIDO, "16.edicao_de_b_nao_fica_presa",
+            f"B iniciou em {t_b:.1f}; edições terminadas: {[round(t - t_b, 1) for t in fins_b]}")
+    r.check(not srv.eventos("flood", classe="EditMessageRequest"), "16.nenhum_floodwait",
+            str(srv.eventos("flood", classe="EditMessageRequest")))
 
 
 if __name__ == "__main__":

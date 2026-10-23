@@ -85,7 +85,7 @@ async def _aplicar_evolucao(montada, norm, d, estado, msg_id_dest,
     rebaixou d.permite_substituir), porque repostar apagaria a imagem
     boa de forma irrecuperável."""
     # [Cupons] Post de cupom: a MESMA edição sai no canal de cupons em
-    # paralelo (com troca de mídia, a imagem sobe uma vez para os dois).
+    # paralelo; com troca de mídia, a de lá vem depois (conteudo abaixo).
     imagem, junto = await espelho_cupons.edicao_junto(
         msg_id_dest, exibidas, montada.texto, montada.imagem, d.trocar_midia)
     res = await editar_msg(
@@ -196,7 +196,8 @@ async def _aplicar_sincronizacao(montada, norm, score, estado, msg_id_dest,
     if no_op:
         ok, midia_aplicada = True, False
     else:
-        # [Cupons] A mesma sincronização sai no canal de cupons em paralelo.
+        # [Cupons] A mesma sincronização sai no canal de cupons em paralelo
+        # (com troca de mídia, depois: conteudo abaixo).
         imagem, junto = await espelho_cupons.edicao_junto(
             msg_id_dest, exibidas, montada.texto, montada.imagem,
             d.trocar_midia)
@@ -249,7 +250,8 @@ async def _aplicar_upgrade_midia(montada, norm, d, estado, msg_id_dest,
     familia.unir(msg_id, []): é operação de domínio, e unir com lista
     vazia seria um leitor disfarçado com semântica de escrita."""
     texto_atual = estado.get("texto", "") or montada.texto
-    # [Cupons] A mesma troca de mídia sai no canal de cupons em paralelo.
+    # [Cupons] A troca de mídia do canal de cupons sai DEPOIS da do
+    # principal, por referência (conteudo abaixo) — nunca as duas juntas.
     imagem, junto = await espelho_cupons.edicao_junto(
         msg_id_dest, None, texto_atual, montada.imagem, True)
     res = await editar_msg(

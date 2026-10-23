@@ -44,7 +44,7 @@ CONTRATO DE AQUISIÇÃO — uma operação de saída, UMA aquisição:
       _substituir_inner_no_sem
 
   [Cupons] pipeline.espelho_cupons é a ÚNICA outra fronteira: o seu
-  _io (e o upload único de preparar_arquivo) adquire UMA vez e chama
+  _io adquire UMA vez e chama
   _enviar_msg_no_sem / _editar_inner_no_sem com destino= o canal de
   cupons — mesma regra, nunca aninhada, nunca de dentro de uma pública.
 
