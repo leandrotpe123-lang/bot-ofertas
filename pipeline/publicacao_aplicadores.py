@@ -35,12 +35,14 @@ o NOVO quando houve substituição. O upgrade de mídia não muda conteúdo:
 não grava composição e não chama `pos_escrita`. Este módulo continua
 sem decidir nada: quem decide a fusão é pipeline.convergencia.
 
-[Cupons] Post de cupom sai nos DOIS canais ao mesmo tempo: o envio e a
-edição do canal de cupons (pipeline.espelho_cupons) são disparados no
-mesmo instante dos do principal, que nunca os aguarda. Quando o
-principal termina, o aplicador só AGENDA a conferência (sem await): o
-que não saiu igual é refeito copiando o principal. Desligado sem
-CANAL_CUPONS.
+[Cupons] Post de cupom sai nos DOIS canais: a edição e a publicação SEM
+mídia do canal de cupons (pipeline.espelho_cupons) são disparadas no
+mesmo instante das do principal; a publicação COM mídia do canal de
+cupons começa logo DEPOIS que a do principal saiu, com a foto já
+publicada por referência (nunca dois envios de mídia do mesmo post ao
+mesmo tempo). O principal nunca as aguarda. Quando o principal termina,
+o aplicador só AGENDA a conferência (sem await): o que não saiu igual é
+refeito copiando o principal. Desligado sem CANAL_CUPONS.
 """
 from __future__ import annotations
 
@@ -295,14 +297,18 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
     janela e dispara os efeitos colaterais (idempotência, saturação,
     burst). Sem decisão — chamado quando não há post parente vivo."""
     img = montada.imagem
-    # [Cupons] Post de cupom: os DOIS canais no MESMO instante — a imagem
-    # sobe uma vez (o mesmo upload que o envio faria) e o envio ao canal de
-    # cupons é disparado junto com o do principal, que não o espera.
+    # [Cupons] Post de cupom sai também no canal de cupons. SEM mídia: os
+    # dois envios começam no mesmo instante. COM mídia: o principal sai
+    # sozinho, pelo mesmo caminho de um post de produto, e a cópia só
+    # começa depois (espelho_cupons.publicar_depois) — dois SendMedia do
+    # mesmo post ao mesmo tempo faziam um deles esperar ~10 s em silêncio
+    # e seguravam todo envio de mídia do processo nesse intervalo.
+    para_cupons = espelho_cupons.vai_para_cupons(
+        ofertas if exibidas is None else exibidas)
     tarefa_cupons = None
-    if espelho_cupons.vai_para_cupons(
-            ofertas if exibidas is None else exibidas):
-        img, img_cupons = await espelho_cupons.preparar_arquivo(img)
-        tarefa_cupons = espelho_cupons.publicar_junto(montada.texto, img_cupons)
+    if para_cupons and img is None:
+        tarefa_cupons = espelho_cupons.publicar_junto(montada.texto, None)
+    t_envio = time.monotonic()
     sent = None
     for t in range(1, 4):
         try:
@@ -313,12 +319,22 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
             log_out.error(f"❌ envio t={t}: {e}")
             if t == 1: img = None
             elif t < 3: await asyncio.sleep(2 ** t)
+    # Medição: só o envio ao Telegram (fila do _SEM_ENVIO, upload, SendMedia
+    # e espera automática do Telethon) — sem texto, link ou destino real.
+    log_sys.info(
+        f"⏱ [ENVIO_MS] destino=principal op=publicar "
+        f"ms={round((time.monotonic() - t_envio) * 1000)} "
+        f"resultado={'ok' if sent else 'falha'} tentativas={t} "
+        f"midia={'sim' if montada.imagem is not None else 'nao'}")
 
     if not sent:
         log_out.error(f"❌ Envio falhou | @{montada.chat}")
         espelho_cupons.abortar(tarefa_cupons)
         return False
-    espelho_cupons.vincular(sent.id, tarefa_cupons, sent)
+    if para_cupons and tarefa_cupons is None:
+        espelho_cupons.publicar_depois(sent.id, sent, montada.texto, img)
+    else:
+        espelho_cupons.vincular(sent.id, tarefa_cupons, sent)
 
     # Gravar estado IMEDIATAMENTE após envio. Falhas secundárias
     # (mapa, sat, burst) NÃO devem deixar o post sem registro — senão
