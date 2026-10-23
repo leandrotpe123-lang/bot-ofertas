@@ -46,6 +46,7 @@ import globals as g
 from client import client
 import ack_imediato
 import heartbeat_sessao
+import espera_telethon
 from pipeline import espelho_cupons
 
 import config
@@ -406,6 +407,11 @@ async def _preparar_processo() -> bool:
     # [S6.8-A] Heartbeat de sessão — PING público adicional, desligado
     # sem HEARTBEAT_PING_S. Não bloqueia o boot; cancelado em _encerrar.
     _TASKS_FUNDO["heartbeat"] = heartbeat_sessao.iniciar(client)
+
+    # [Cupons] Espera automática de FloodWait do Telethon passa a ter UMA
+    # linha no log (⏳ [ESPERA_TELETHON]); o comportamento do Telethon e o
+    # destino dos registros dele não mudam. Ver espera_telethon.py.
+    espera_telethon.instalar()
 
     # [Cupons] Post de CUPOM sai também no canal de cupons (com mídia, a
     # cópia logo depois do principal) — desligado sem CANAL_CUPONS. Não

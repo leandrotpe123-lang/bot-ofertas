@@ -9,7 +9,8 @@ e nenhum produto), e manter as duas mensagens iguais depois.
     UMA vez, sob os locks de sempre; o canal de cupons recebe a MESMA
     operação, com o mesmo texto e a mesma imagem;
   - não toca identidade, família, convergência nem locks;
-  - não loga.
+  - não loga — só a medição da publicação (⏱ [ENVIO_MS]: destino,
+    operação, ms, resultado; nada de texto ou link).
 
 SEM um esperar o outro:
   - publicação SEM mídia: o envio ao canal de cupons é disparado no
@@ -56,12 +57,14 @@ import contextlib
 import contextvars
 import io
 import os
+import time
 from typing import Optional
 
 from telethon.errors import FloodWaitError, MessageNotModifiedError
 
 import config
 from config import GRUPO_DESTINO
+from logger import log_sys
 from database import (db_espelho_del, db_espelho_get, db_espelho_mover,
                       db_espelho_set, db_exibida)
 from pipeline import saida
@@ -180,8 +183,8 @@ def publicar_junto(texto: str, arquivo) -> Optional[asyncio.Task]:
     Devolve a task (o principal NUNCA a aguarda)."""
     if not _aberto:
         return None
-    return _tarefa(_io(lambda _c: saida._enviar_msg_no_sem(
-        texto, arquivo, destino=_canal)))
+    return _tarefa(_medido("publicar", _io(lambda _c: saida._enviar_msg_no_sem(
+        texto, arquivo, destino=_canal))))
 
 
 def publicar_depois(msg_id_dest: int, principal, texto: str, img) -> None:
@@ -199,7 +202,7 @@ def publicar_depois(msg_id_dest: int, principal, texto: str, img) -> None:
     if img is not None and len(texto) > saida.LIMITE_LEGENDA and not _tem_midia(principal):
         vincular(msg_id_dest, publicar_junto(texto, _copia(img)), principal)
         return
-    _encadear(msg_id_dest, lambda: _publicar_copia(msg_id_dest, principal))
+    _encadear(msg_id_dest, lambda: _medido("copia", _publicar_copia(msg_id_dest, principal)))
 
 
 def vincular(msg_id_dest: int, tarefa: Optional[asyncio.Task], principal) -> None:
@@ -333,6 +336,22 @@ async def _concluir_publicacao(mid: int, tarefa: asyncio.Task, principal) -> Non
     if copia is not None:
         await _apagar_mensagem(copia.id)
     await _criar(mid, principal)
+
+
+async def _medido(op: str, coro):
+    """⏱ duração de uma publicação no canal de cupons (fila do _SEM_ENVIO,
+    envio e espera automática do Telethon): destino, operação, ms e
+    resultado (classe da exceção). Nada de texto, link ou id."""
+    t0 = time.monotonic()
+    resultado = "ok"
+    try:
+        return await coro
+    except BaseException as e:
+        resultado = f"falha:{type(e).__name__}"
+        raise
+    finally:
+        log_sys.info(f"⏱ [ENVIO_MS] destino=cupons op={op} "
+                     f"ms={round((time.monotonic() - t0) * 1000)} resultado={resultado}")
 
 
 async def _publicar_copia(mid: int, principal) -> None:

@@ -43,6 +43,11 @@ FloodWait custarem milissegundos sem tocar a lógica.
   11  ordem: nenhum envio de mídia do canal de cupons começa antes de o do
       principal terminar
   12  shutdown com a cópia em curso → drena, sem duplicar
+  13  medição: cada espera automática do Telethon vira UMA linha
+      (⏳ [ESPERA_TELETHON] classe, segundos, antecipada) e nada mais muda
+      — WARNING do Telethon sai igual pelo lastResort, INFO continua mudo
+  14  medição: ⏱ [ENVIO_MS] separa o envio ao principal e a cópia (ms,
+      operação, resultado), sem texto nem link; a espera aparece na cópia
 
     python tests/test_cupons_corrida_midia.py
 """
@@ -671,6 +676,99 @@ def test_12_shutdown_com_copia_em_curso(r):
     cp = srv.em("cupons")
     r.check(len(srv.em("principal")) == 1 and len(cp) == 1 and vinculo == cp[0]["id"],
             "12.drenou_sem_duplicar", f"{cp} {vinculo}")
+
+
+class _Coleta(logging.Handler):
+    def __init__(self, nome):
+        super().__init__(logging.DEBUG)
+        self.linhas, self.lg = [], logging.getLogger(nome)
+
+    def emit(self, rec):
+        self.linhas.append((rec.levelno, rec.getMessage()))
+
+    def __enter__(self):
+        self.lg.addHandler(self)
+        return self
+
+    def __exit__(self, *exc):
+        self.lg.removeHandler(self)
+        return False
+
+
+def test_13_espera_do_telethon_ganha_uma_linha_e_nada_mais_muda(r):
+    import espera_telethon
+    lg = logging.getLogger("telethon.client.users")
+    nivel_antes, ultimo_antes = lg.level, logging.lastResort
+    saida_padrao = io.StringIO()
+    logging.lastResort = logging.StreamHandler(saida_padrao)
+    logging.lastResort.setLevel(logging.WARNING)
+    srv = Servidor(perde="segundo")
+    try:
+        espera_telethon.instalar()
+        espera_telethon.instalar()                         # idempotente
+        r.check(lg.filters.count(espera_telethon._FILTRO) == 1, "13.um_filtro_so")
+
+        async def corpo(c, s):
+            h = await c.upload_file(_bytesio(_jpeg(3)))
+            a = asyncio.ensure_future(c.send_file(GRUPO_DESTINO, h, caption="segredo-a"))
+            await vdormir(0.01)
+            b = asyncio.ensure_future(c.send_file(CANAL, h, caption="segredo-b"))
+            await vdormir(1.0)
+            terc = asyncio.ensure_future(c.send_file(GRUPO_DESTINO, _bytesio(_jpeg(4)),
+                                                     caption="segredo-c"))
+            await asyncio.gather(a, b, terc)
+            lg.warning("aviso real do Telethon %s", "x")    # WARNING: caminho de sempre
+        with _Coleta("SISTEMA") as sis:
+            cenario(corpo, srv)
+    finally:
+        lg.removeFilter(espera_telethon._FILTRO)
+        lg.setLevel(nivel_antes)
+        logging.lastResort = ultimo_antes
+    esperas = [m for _lv, m in sis.linhas if "[ESPERA_TELETHON]" in m]
+    nao = [m for m in esperas
+           if m == "⏳ [ESPERA_TELETHON] req=SendMediaRequest seg=10 antecipada=nao"]
+    sim = [m for m in esperas if m.startswith("⏳ [ESPERA_TELETHON] req=SendMediaRequest seg=")
+           and m.endswith(" antecipada=sim")]
+    r.check(len(esperas) == 2 and len(nao) == 1 and len(sim) == 1,
+            "13.uma_linha_por_espera_perdedor_e_antecipada", str(esperas))
+    r.check(all(lv == logging.WARNING for lv, m in sis.linhas if "[ESPERA_TELETHON]" in m),
+            "13.nivel_warning")
+    r.check(not any("segredo" in m for _lv, m in sis.linhas), "13.nada_de_texto")
+    impresso = saida_padrao.getvalue()
+    r.check(impresso.count("aviso real do Telethon x") == 1 and "flood wait" not in impresso,
+            "13.lastresort_igual_WARNING_sai_INFO_nao", repr(impresso))
+
+
+def test_14_medicao_separa_principal_e_copia(r):
+    def flood_na_copia(req, d, visto=[]):
+        if d == "cupons" and not visto:
+            visto.append(1)
+            return None, errors.FloodWaitError(request=req, capture=FLOOD_S)
+        return None, None
+    medidas = {}
+    for rot, regra in (("normal", None), ("floodwait_na_copia", flood_na_copia)):
+        srv = Servidor(regra=regra)
+
+        async def corpo(c, s):
+            await pub(cupom_com_foto())
+            await drenar()
+        with _Coleta("SISTEMA") as sis:
+            cenario(corpo, srv)
+        linhas = [m for _lv, m in sis.linhas if "[ENVIO_MS]" in m]
+        medidas[rot] = linhas
+        pr = [m for m in linhas if "destino=principal op=publicar" in m]
+        cp = [m for m in linhas if "destino=cupons op=copia" in m]
+        r.check(len(pr) == 1 and "resultado=ok tentativas=1 midia=sim" in pr[0],
+                f"14.{rot}.uma_linha_do_principal", str(linhas))
+        r.check(len(cp) == 1 and cp[0].endswith("resultado=ok"), f"14.{rot}.uma_linha_da_copia",
+                str(linhas))
+        r.check(not any(("Shopee" in m or "http" in m or "R$" in m) for m in linhas),
+                f"14.{rot}.nada_de_texto_ou_link", str(linhas))
+    ms = {rot: int(next(m for m in ls if "cupons" in m).split("ms=")[1].split()[0])
+          for rot, ls in medidas.items()}
+    real_do_flood = FLOOD_S * _ESCALA * 1000
+    r.check(ms["floodwait_na_copia"] >= 0.8 * real_do_flood > ms["normal"],
+            "14.a_espera_aparece_no_tempo_da_copia", f"{ms} (FloodWait = {real_do_flood:.0f} ms reais)")
 
 
 if __name__ == "__main__":

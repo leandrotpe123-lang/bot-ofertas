@@ -308,6 +308,7 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
     tarefa_cupons = None
     if para_cupons and img is None:
         tarefa_cupons = espelho_cupons.publicar_junto(montada.texto, None)
+    t_envio = time.monotonic()
     sent = None
     for t in range(1, 4):
         try:
@@ -318,6 +319,13 @@ async def _aplicar_novo_envio(montada, norm, ofertas, score,
             log_out.error(f"❌ envio t={t}: {e}")
             if t == 1: img = None
             elif t < 3: await asyncio.sleep(2 ** t)
+    # Medição: só o envio ao Telegram (fila do _SEM_ENVIO, upload, SendMedia
+    # e espera automática do Telethon) — sem texto, link ou destino real.
+    log_sys.info(
+        f"⏱ [ENVIO_MS] destino=principal op=publicar "
+        f"ms={round((time.monotonic() - t_envio) * 1000)} "
+        f"resultado={'ok' if sent else 'falha'} tentativas={t} "
+        f"midia={'sim' if montada.imagem is not None else 'nao'}")
 
     if not sent:
         log_out.error(f"❌ Envio falhou | @{montada.chat}")
