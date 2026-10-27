@@ -297,12 +297,13 @@ async def editar_por_id(msg_id_dest: int, texto_novo: str,
         )
 
 
-def _exclusao_provada(resultado) -> bool:
+def exclusao_provada(resultado) -> bool:
     """[Frente M] Telethon 1.45.0, canal: delete_messages devolve
     [AffectedMessages] (um por bloco de 100); pts_count = quantas o Telegram
     apagou DE FATO. Só pts_count > 0 prova a exclusão. 0 (a mensagem já não
     existia: o dono apagou), lista vazia ou formato desconhecido não provam
-    nada."""
+    nada. Regra ÚNICA de prova de exclusão: a substituição do principal e o
+    canal de cupons (pipeline.espelho_cupons) usam esta."""
     if not isinstance(resultado, (list, tuple)) or not resultado:
         return False
     total = 0
@@ -364,7 +365,7 @@ async def _substituir_inner_no_sem(
         # [Frente M] Reenvio só com a exclusão PROVADA. pts_count 0 = a
         # mensagem já não existia (o dono apagou): reenviar ressuscitaria
         # o post apagado.
-        if not _exclusao_provada(apagou):
+        if not exclusao_provada(apagou):
             return _abortar_substituicao(
                 msg_id_dest_antigo,
                 f"exclusão sem prova (retorno {type(apagou).__name__})")

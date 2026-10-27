@@ -74,10 +74,17 @@ FloodWait custarem milissegundos sem tocar a lógica.
   18  FALHA DA EDIÇÃO PRINCIPAL na troca de mídia: o canal de cupons é
       reconciliado pelo que ficou no ar (sem mídia nova), sem mensagem nova,
       vínculo intacto; medição: falha no principal, recon no de cupons
-  19  FALHA DA EDIÇÃO DO CANAL DE CUPONS: a mídia não entra lá → apaga
-      (com resposta do Telegram) e copia por referência, uma mensagem só;
-      o apagar também falha → NADA de segunda mensagem, a de antes fica,
-      vínculo intacto, falha medida; o principal não sente nenhuma das duas
+  19  FALHA DA EDIÇÃO DO CANAL DE CUPONS (a mídia não entra na cópia) e a
+      PROVA DE EXCLUSÃO, pela resposta real do delete:
+        B  pts_count=1 → apagada com prova: UMA cópia nova, fiel, por
+           referência, vínculo no id novo;
+        A  resposta normal com pts_count=0 e a cópia ainda no ar → NÃO é
+           prova: nada de segunda mensagem, a de antes fica, vínculo
+           intacto, falha medida (CopiaNoAr);
+        A' pts_count=0 e a leitura não acha a cópia (o dono a apagou) →
+           AUSENTE: não recria, vínculo marcado ausente;
+        C  o delete lança → nada de segunda mensagem, vínculo intacto;
+      o principal não sente nenhuma
   20  CORRELAÇÃO: um FLOOD_WAIT_10 forçado na troca de mídia do principal e
       a edição de OUTRO post adiada pelo Telethon dentro do prazo → cada
       linha ⏳ diz o cid, o destino e a op de QUEM esperou, e os cids casam
@@ -87,6 +94,16 @@ FloodWait custarem milissegundos sem tocar a lógica.
       com uma foto começa DEPOIS de terminar a edição do principal que pôs
       essa foto; nenhum FloodWait; no fim, os dois canais iguais, uma
       mensagem por post, vínculo certo
+  22  CÓPIA APAGADA À MÃO pelo dono no canal de cupons (o worker não é
+      avisado): a troca de mídia seguinte acha MESSAGE_ID_INVALID, a
+      leitura confirma → AUSENTE: NÃO ressuscita, nenhuma mensagem nova, e
+      a operação seguinte do post nem toca o canal de cupons. Controle:
+      MESSAGE_ID_INVALID com a cópia AINDA no ar → não é ausência: falha
+      medida, vínculo intacto, nenhuma duplicata
+  23  REMOÇÃO DA CÓPIA (post deixou de ser cupom; post removido do
+      principal): o vínculo só sai com a cópia apagada COM PROVA. Delete
+      que lança, ou pts_count=0 com a cópia ainda no ar → a cópia fica
+      publicada E rastreada (vínculo intacto) — nunca no ar sem rastro
 
     python tests/test_cupons_corrida_midia.py
 """
@@ -120,6 +137,7 @@ from _harness_e5 import rodar  # noqa: E402
 import client as modulo_client  # noqa: E402
 from config import GRUPO_DESTINO  # noqa: E402
 from database import db_espelho_get  # noqa: E402
+from database_conexao import _db  # noqa: E402
 from pipeline import convergencia, espelho_cupons, publicacao, saida  # noqa: E402
 from pipeline.enriquecimento import enriquecer  # noqa: E402
 from pipeline.montagem import montar  # noqa: E402
@@ -190,12 +208,19 @@ class Servidor:
         que casa fica EM VOO até o evento abrir — ordem controlada pelo
         teste, sem depender de temporização.
     `edicoes_reg`: cada EditMessageRequest com início, fim, desfecho,
-    mensagem e a foto que ela deixou."""
+    mensagem e a foto que ela deixou. Como o Telegram: editar mensagem que
+    não existe → MESSAGE_ID_INVALID; DeleteMessages → AffectedMessages com
+    pts_count = quantas apagou DE FATO (0 se já não existia). Em
+    `delete_sem_efeito` (canais), o delete responde normal com pts_count=0
+    e NÃO apaga (a resposta que não prova nada). `deletes`: (canal, ids,
+    pts_count) de cada resposta."""
 
     def __init__(self, perde="segundo", regra=None, lat=0.3):
         self.perde, self.regra, self.lat = perde, regra, lat
         self.portao = None
         self.edicoes_reg = []
+        self.delete_sem_efeito = set()
+        self.deletes = []
         self.reg = []                # (t, evento, classe, destino, chave)
         self.publicados = []         # dicts das mensagens criadas
         self.em_voo = []
@@ -276,6 +301,10 @@ class Servidor:
                     ed.update(t1=agora(), fim="flood")
                 fut.set_exception(errors.FloodWaitError(request=req, capture=FLOOD_S))
                 return
+            if falha is None and ed is not None and not any(
+                    p["canal"] == dest and p["id"] == req.id and not p["apagada"]
+                    for p in self.publicados):
+                falha = errors.MessageIdInvalidError(request=req)
             if falha is not None:
                 self.reg.append((agora(), "erro", nome, dest, chave))
                 if ed is not None:
@@ -313,8 +342,10 @@ class Servidor:
         if isinstance(req, functions.channels.DeleteMessagesRequest):
             n = 0
             for p in self.publicados:
-                if p["canal"] == dest and p["id"] in req.id and not p["apagada"]:
+                if (p["canal"] == dest and p["id"] in req.id and not p["apagada"]
+                        and dest not in self.delete_sem_efeito):
                     p["apagada"], n = True, n + 1
+            self.deletes.append((dest, list(req.id), n))
             return types.messages.AffectedMessages(pts=1, pts_count=n)
         if isinstance(req, functions.channels.GetMessagesRequest):
             ids = [getattr(i, "id", i) for i in req.id]
@@ -1042,45 +1073,81 @@ def test_18_falha_da_edicao_principal(r):
             "18.reconciliado_com_o_mesmo_cid", str(lin))
 
 
+def _apagar_a_mao(s, canal, msg_id):
+    """O dono apaga a mensagem pelo celular: some do canal e o worker não é
+    avisado (ele não escuta o canal de cupons)."""
+    next(p for p in s.publicados if p["canal"] == canal and p["id"] == msg_id)["apagada"] = True
+
+
+def _viva(s, canal, msg_id):
+    return any(p["id"] == msg_id for p in s.em(canal))
+
+
 def test_19_falha_da_edicao_do_canal_de_cupons(r):
-    for rot, apagar_falha in (("recria_com_prova", False), ("sem_prova_nao_duplica", True)):
-        def regra(req, d, apagar_falha=apagar_falha):
+    #      rot                        delete lança  sem efeito  dono apagou antes
+    casos = (("B.pts_positivo_recria", False, False, False),
+             ("A.pts_zero_copia_no_ar", False, True, False),
+             ("A2.pts_zero_copia_ausente", False, False, True),
+             ("C.delete_lanca", True, False, False))
+    for rot, lanca, sem_efeito, dono_apagou in casos:
+        def regra(req, d, lanca=lanca):
             if (d == "cupons" and isinstance(req, functions.messages.EditMessageRequest)
                     and req.media is not None):
-                return None, errors.MediaEmptyError(request=req)
-            if apagar_falha and d == "cupons" and isinstance(
+                return None, errors.MediaEmptyError(request=req)   # mídia não entra na cópia
+            if lanca and d == "cupons" and isinstance(
                     req, functions.channels.DeleteMessagesRequest):
                 return None, errors.ChatAdminRequiredError(request=req)
             return None, None
         srv = Servidor(regra=regra)
+        if sem_efeito:
+            srv.delete_sem_efeito.add("cupons")
 
-        async def corpo(c, s):
+        async def corpo(c, s, dono_apagou=dono_apagou):
             await pub(_so_texto(), score=9)
             await drenar()
             mid = _principal(s)
             copia, envios = db_espelho_get(mid), len(_envios(s, "cupons"))
+            if dono_apagou:
+                _apagar_a_mao(s, "cupons", copia)
             t0 = agora()
             await pub(_com_foto(), score=9)
             fim_pub = agora() - t0
             await drenar()
             return copia, db_espelho_get(mid), envios, len(_envios(s, "cupons")), fim_pub
         with _Coleta("SISTEMA") as sis:
-            copia, copia_fim, envios, envios_fim, fim_pub = cenario(corpo, srv)
+            copia, vinculo, envios, envios_fim, fim_pub = cenario(corpo, srv)
         pr, cp = srv.em("principal"), srv.em("cupons")
         cl = [m for m in _linhas(sis, "[EDICAO_MS]") if "destino=cupons" in m]
+        dels = [n for d, _ids, n in srv.deletes if d == "cupons"]
+        tag = f"19.{rot}"
         r.check(len(pr) == 1 and pr[0]["foto"] is not None and fim_pub < RAPIDO,
-                f"19.{rot}.principal_com_a_foto_e_rapido", f"{pr} {fim_pub:.1f}s")
-        if not apagar_falha:
-            r.check(len(cp) == 1 and cp[0]["id"] != copia and cp[0]["id"] == copia_fim
-                    and cp[0]["foto"] == pr[0]["foto"] and cp[0]["por_referencia"],
-                    f"19.{rot}.uma_copia_nova_fiel_por_referencia", f"{cp} {copia_fim}")
-            r.check(len(cl) == 1 and "recon=recriou" in cl[0], f"19.{rot}.medicao", str(cl))
+                f"{tag}.principal_com_a_foto_e_rapido", f"{pr} {fim_pub:.1f}s")
+        if rot.startswith("B."):
+            r.check(dels == [1], f"{tag}.delete_respondeu_pts_count_1", str(srv.deletes))
+            r.check(len(cp) == 1 and cp[0]["id"] != copia and cp[0]["id"] == vinculo
+                    and not _viva(srv, "cupons", copia) and cp[0]["foto"] == pr[0]["foto"]
+                    and cp[0]["por_referencia"] and envios_fim == envios + 1,
+                    f"{tag}.uma_copia_nova_fiel_por_referencia_vinculo_no_id_novo",
+                    f"{cp} vínculo={vinculo} envios {envios}→{envios_fim}")
+            r.check(len(cl) == 1 and "resultado=ok recon=recriou" in cl[0], f"{tag}.medicao", str(cl))
+        elif rot.startswith("A."):
+            r.check(dels == [0], f"{tag}.delete_respondeu_normal_pts_count_0", str(srv.deletes))
+            r.check(len(cp) == 1 and cp[0]["id"] == copia == vinculo and envios_fim == envios,
+                    f"{tag}.sem_prova_nada_de_segunda_mensagem_vinculo_intacto",
+                    f"{cp} vínculo={vinculo} envios {envios}→{envios_fim}")
+            r.check(len(cl) == 1 and "resultado=falha:CopiaNoAr" in cl[0], f"{tag}.falha_medida",
+                    str(cl))
+        elif rot.startswith("A2."):
+            r.check(dels == [0], f"{tag}.delete_respondeu_normal_pts_count_0", str(srv.deletes))
+            r.check(not cp and vinculo == espelho_cupons._AUSENTE and envios_fim == envios,
+                    f"{tag}.ausente_nao_recria", f"{cp} vínculo={vinculo} envios {envios}→{envios_fim}")
+            r.check(len(cl) == 1 and "resultado=ok recon=ausente" in cl[0], f"{tag}.medicao", str(cl))
         else:
-            r.check(len(cp) == 1 and cp[0]["id"] == copia == copia_fim and envios_fim == envios,
-                    f"19.{rot}.nenhuma_segunda_mensagem_vinculo_intacto",
-                    f"{cp} {copia_fim} envios {envios}→{envios_fim}")
-            r.check(len(cl) == 1 and "resultado=falha:MediaEmptyError" in cl[0],
-                    f"19.{rot}.falha_medida", str(cl))
+            r.check(not dels and len(cp) == 1 and cp[0]["id"] == copia == vinculo
+                    and envios_fim == envios, f"{tag}.nada_de_segunda_mensagem_vinculo_intacto",
+                    f"{cp} vínculo={vinculo} envios {envios}→{envios_fim} {srv.deletes}")
+            r.check(len(cl) == 1 and "resultado=falha:ChatAdminRequiredError" in cl[0],
+                    f"{tag}.falha_medida", str(cl))
 
 
 def test_20_correlacao_da_espera_com_a_operacao(r):
@@ -1184,6 +1251,92 @@ def test_21_propriedade_ordem_nas_trocas_de_midia(r):
             violacoes.append((semente, "flood", srv.eventos("flood", classe="EditMessageRequest")))
     r.check(not violacoes, "21.copia_so_depois_do_principal_sem_floodwait_iguais_no_fim",
             str(violacoes[:3]))
+
+
+def test_22_copia_apagada_a_mao_nao_ressuscita(r):
+    for rot, espuria in (("D.sumiu", False), ("D.invalid_com_a_copia_no_ar", True)):
+        def regra(req, d, espuria=espuria):
+            if espuria and d == "cupons" and isinstance(req, functions.messages.EditMessageRequest):
+                return None, errors.MessageIdInvalidError(request=req)
+            return None, None
+        srv = Servidor(regra=regra)
+
+        async def corpo(c, s, espuria=espuria):
+            await pub(_so_texto(), score=9)
+            await drenar()
+            mid = _principal(s)
+            copia, envios = db_espelho_get(mid), len(_envios(s, "cupons"))
+            if not espuria:
+                _apagar_a_mao(s, "cupons", copia)
+            await pub(_com_foto(), score=9)                       # troca 1 (pipeline real)
+            await drenar()
+            vinculo_1 = db_espelho_get(mid)
+            marca = len(s.reg)
+            texto = s.em("principal")[0]["texto"]                 # operação SEGUINTE do post
+            res = await saida.editar_msg(mid, texto, _bytesio(_jpeg(44)),
+                                         exigir_imagem=False, trocar_midia=True)
+            espelho_cupons.conteudo(mid, midia=True, rastro=("t22.2", "upgrade_midia"))
+            await drenar()
+            toques = [x for x in s.reg[marca:] if x[3] == "cupons"]
+            return (copia, vinculo_1, db_espelho_get(mid), envios, len(_envios(s, "cupons")),
+                    res.midia_aplicada, toques)
+        with _Coleta("SISTEMA") as sis:
+            copia, v1, v2, envios, envios_fim, aplicou, toques = cenario(corpo, srv)
+        cl = [m for m in _linhas(sis, "[EDICAO_MS]") if "destino=cupons" in m]
+        pr, cp = srv.em("principal"), srv.em("cupons")
+        tag = f"22.{rot}"
+        r.check(len(pr) == 1 and pr[0]["foto"] is not None and aplicou,
+                f"{tag}.principal_segue_trocando_a_midia", str(pr))
+        r.check(envios_fim == envios, f"{tag}.nenhuma_mensagem_nova_no_canal_de_cupons",
+                f"envios {envios}→{envios_fim}")
+        if not espuria:
+            r.check(not cp and v1 == v2 == espelho_cupons._AUSENTE,
+                    f"{tag}.nao_ressuscita_vinculo_ausente", f"{cp} {v1} {v2}")
+            r.check(not toques, f"{tag}.operacao_seguinte_nem_toca_o_canal_de_cupons", str(toques))
+            r.check(len(cl) == 1 and "resultado=ok recon=ausente" in cl[0], f"{tag}.medicao", str(cl))
+        else:
+            r.check(len(cp) == 1 and cp[0]["id"] == copia == v1 == v2,
+                    f"{tag}.copia_no_ar_nao_e_ausencia_vinculo_intacto", f"{cp} {v1} {v2}")
+            r.check(len(cl) == 2 and all("resultado=falha:MessageIdInvalidError" in m for m in cl),
+                    f"{tag}.falha_medida", str(cl))
+
+
+def test_23_remocao_so_tira_o_vinculo_com_prova(r):
+    for via in ("deixou_de_ser_cupom", "removido"):
+        for modo in ("provada", "delete_lanca", "pts_zero_no_ar"):
+            def regra(req, d, modo=modo):
+                if modo == "delete_lanca" and d == "cupons" and isinstance(
+                        req, functions.channels.DeleteMessagesRequest):
+                    return None, errors.ChatAdminRequiredError(request=req)
+                return None, None
+            srv = Servidor(regra=regra)
+            if modo == "pts_zero_no_ar":
+                srv.delete_sem_efeito.add("cupons")
+
+            async def corpo(c, s, via=via):
+                await pub(_so_texto(), score=9)
+                await drenar()
+                mid = _principal(s)
+                copia = db_espelho_get(mid)
+                if via == "deixou_de_ser_cupom":
+                    with _db() as db:                              # passa a exibir produto
+                        db.execute("INSERT INTO post_exibida(msg_id_dest,identity,ts) "
+                                   "VALUES(?,?,?)", (mid, "shopee|338371559.22593482107",
+                                                     time.time()))
+                    espelho_cupons.conteudo(mid)
+                else:
+                    espelho_cupons.removido(mid)
+                await drenar()
+                return copia, db_espelho_get(mid)
+            copia, vinculo = cenario(corpo, srv)
+            tag = f"23.{via}.{modo}"
+            viva = _viva(srv, "cupons", copia)
+            if modo == "provada":
+                r.check(not viva and vinculo is None, f"{tag}.apagada_com_prova_vinculo_sai",
+                        f"viva={viva} vínculo={vinculo} {srv.deletes}")
+            else:
+                r.check(viva and vinculo == copia, f"{tag}.copia_no_ar_continua_rastreada",
+                        f"viva={viva} vínculo={vinculo} {srv.deletes}")
 
 
 if __name__ == "__main__":

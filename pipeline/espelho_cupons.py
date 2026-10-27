@@ -52,10 +52,23 @@ o mais novo faz por ela — herdando o "a mídia mudou". Nenhuma edição velha
 é aplicada depois de uma mais nova ser pedida.
 
 FALHA: do principal (ok=False) → reconcilia pelo que está no ar (a edição
-pode ter entrado e só a resposta se perdido). Do canal de cupons → a
-mensagem de lá só é refeita (apagar + copiar) quando o apagar foi
-respondido pelo Telegram; sem essa prova, nada de segunda mensagem — fica
-a de antes e a próxima operação do post tenta de novo.
+pode ter entrado e só a resposta se perdido). Do canal de cupons, duas
+provas distintas, nunca uma pela outra:
+  · APAGADA — o worker apagou a cópia: só pts_count > 0 na resposta do
+    delete (saida.exclusao_provada, a mesma regra da substituição do
+    principal). Só com ela a cópia é refeita (apagar + copiar) ou o vínculo
+    sai;
+  · AUSENTE — a cópia sumiu sem ter sido o worker (o dono a apagou à mão):
+    o Telegram não a acha (MessageIdInvalid na edição, ou o delete
+    respondeu sem apagar nada) E a leitura por id confirma. A cópia NÃO é
+    recriada — apagado fica apagado, como o post do principal (frente M) —
+    e o vínculo vira AUSENTE: não é tratado como cópia saudável e nenhuma
+    operação seguinte daquele post toca o canal de cupons.
+Sem nenhuma das duas provas (delete ou leitura falhou, ou respondeu 0 com a
+cópia ainda lá): nada de segunda mensagem e o vínculo FICA como estava — a
+falha sobe e a próxima operação do post tenta de novo. Nunca uma mensagem no
+canal de cupons sem vínculo, por este módulo, nos caminhos de edição,
+reconciliação e remoção (publicação: ver _apagar_mensagem).
 
 CONFERÊNCIA (depois que o principal termina, nunca antes): se o canal
 de cupons não saiu igual ao principal — falhou, FloodWait longo, só um
@@ -111,6 +124,12 @@ _cadeia: dict = {}        # msg_id_dest -> última operação daquele post
 _tarefas: set = set()     # toda operação em curso (para o shutdown)
 _pedidos: dict = {}       # msg_id_dest -> (versão da reconciliação mais nova, mídia mudou)
 _versoes = itertools.count(1)
+_AUSENTE = 0              # vínculo de cópia AUSENTE (ver FALHA): nunca recriada nem tocada
+
+
+class CopiaNoAr(Exception):
+    """O delete respondeu sem provar a exclusão e a leitura ainda acha a
+    cópia: ela continua publicada — nada de segunda mensagem, vínculo fica."""
 
 
 def canal_configurado():
@@ -260,8 +279,8 @@ def conteudo(msg_id_dest: int, midia: bool = False, *, rastro=None) -> None:
     está no ar QUANDO a operação roda. `midia` = a imagem publicada mudou
     (ou pode ter mudado). Um pedido mais novo do mesmo post torna este
     obsoleto (ver A MAIS NOVA VALE no cabeçalho)."""
-    if not _aberto:
-        return
+    if not _aberto or db_espelho_get(msg_id_dest) == _AUSENTE:
+        return            # cópia AUSENTE: apagado fica apagado (ver FALHA)
     if not (_tem_mensagem(msg_id_dest) or eh_identidade_cupom(db_exibida(msg_id_dest))):
         return            # nem é cupom, nem tem mensagem lá (produto): nada a fazer
     versao = next(_versoes)
@@ -331,7 +350,15 @@ def _resultado(tarefa: asyncio.Task):
 
 
 def _tem_mensagem(msg_id_dest: int) -> bool:
+    if db_espelho_get(msg_id_dest) == _AUSENTE:
+        return False                      # cópia ausente: nada a editar lá
     return msg_id_dest in _cadeia or db_espelho_get(msg_id_dest) is not None
+
+
+def _mensagem_de(msg_id_dest: int) -> Optional[int]:
+    """msg_id da cópia viva do post, ou None (sem vínculo, ou AUSENTE)."""
+    esp = db_espelho_get(msg_id_dest)
+    return None if esp == _AUSENTE else esp
 
 
 # ── Operações ─────────────────────────────────────────────────────
@@ -390,9 +417,9 @@ def _medida(mid: int, rastro, troca) -> "medicao_edicao.Medida":
 
 async def _editar_junto(mid: int, texto: str, med):
     with medicao_edicao.medir(med):
-        esp = db_espelho_get(mid)
-        if esp is None:
-            med.recon = "sem_mensagem"    # a mensagem não nasceu: conferir() cria
+        esp = _mensagem_de(mid)
+        if esp is None:                   # não nasceu (conferir() cria) ou AUSENTE
+            med.recon = "ausente" if db_espelho_get(mid) == _AUSENTE else "sem_mensagem"
             return None
         res = await _io(lambda _c: saida._editar_inner_no_sem(
             esp, texto, None, exigir_imagem=False, trocar_midia=False,
@@ -430,15 +457,19 @@ async def _substituir(antigo: int, principal) -> None:
 
 async def _remover(mid: int) -> None:
     esp = db_espelho_get(mid)
-    if esp is not None:
+    if esp == _AUSENTE:
+        db_espelho_del(mid)               # nada no ar: só o vínculo AUSENTE sai
+    elif esp is not None:
         await _apagar(mid, esp)
 
 
 async def _reconciliar(mid: int, midia: bool, principal=None) -> str:
     """Deixa o canal de cupons igual ao que está no ar no principal.
     Devolve o que fez (o `recon` da medição)."""
-    cupom = eh_identidade_cupom(db_exibida(mid))
     esp = db_espelho_get(mid)
+    if esp == _AUSENTE:
+        return "ausente"                  # sumiu sem ter sido o worker: não recria
+    cupom = eh_identidade_cupom(db_exibida(mid))
     if esp is None and not cupom:
         return "nao_cupom"
     if esp is not None and not cupom:
@@ -470,17 +501,25 @@ async def _editar(mid: int, esp: int, principal, midia: bool) -> str:
         return "igual"
     except FloodWaitError:
         raise
-    except Exception as e:                             # noqa: BLE001
-        if arquivo is None and not isinstance(e, MessageIdInvalidError):
+    except MessageIdInvalidError:
+        # O Telegram não acha a cópia. AUSENTE só com a leitura por id
+        # confirmando (ver FALHA): então nunca é recriada. Ainda no ar, ou
+        # leitura que falha: a falha sobe e o vínculo fica.
+        if await _ler(esp) is None:
+            db_espelho_set(mid, _AUSENTE)
+            return "ausente"
+        raise
+    except Exception:                                  # noqa: BLE001
+        if arquivo is None:
             raise
-        # A mensagem do canal de cupons nasceu sem mídia (o principal
-        # ganhou a primeira imagem agora: a mesma limitação do Telegram do
-        # canal principal) ou não está mais lá. Refaz como cópia fiel do
-        # que está no ar — só com a prova de que a antiga saiu: sem ela,
-        # nada de segunda mensagem (fica a de antes; a próxima operação do
-        # post tenta de novo).
-        if not await _apagar_comprovado(esp):
-            raise
+        # A cópia nasceu sem mídia e o principal ganhou a primeira imagem
+        # (o Telegram não põe mídia em mensagem de texto — a mesma
+        # limitação do canal principal): refaz como cópia fiel do que está
+        # no ar, SÓ com a exclusão PROVADA. Ausente: não recria. Sem prova
+        # (CopiaNoAr ou o delete/leitura falhou): sobe, o vínculo fica.
+        if await _apagar_copia(esp) == "ausente":
+            db_espelho_set(mid, _AUSENTE)
+            return "ausente"
         db_espelho_del(mid)
         await _criar(mid, principal)
         return "recriou"
@@ -488,25 +527,38 @@ async def _editar(mid: int, esp: int, principal, midia: bool) -> str:
 
 
 async def _apagar(mid: int, esp: int) -> None:
-    await _apagar_mensagem(esp)
+    """Tira a cópia do canal de cupons e SÓ ENTÃO o vínculo (apagada com
+    prova, ou ausente). Sem prova, a exceção sobe e o vínculo fica: nunca
+    uma mensagem publicada sem rastro no banco."""
+    await _apagar_copia(esp)
     db_espelho_del(mid)
 
 
+async def _apagar_copia(msg_id: int) -> str:
+    """Apaga a cópia e diz o que ficou PROVADO: "apagada" (pts_count > 0,
+    saida.exclusao_provada) ou "ausente" (o delete não apagou nada e a
+    leitura por id não a acha). Delete ou leitura que falha: a exceção
+    sobe; respondeu sem prova e a cópia segue lá: CopiaNoAr."""
+    resultado = await _io(lambda c: c.delete_messages(_canal, msg_id))
+    if saida.exclusao_provada(resultado):
+        return "apagada"
+    if await _ler(msg_id) is None:
+        return "ausente"
+    raise CopiaNoAr(msg_id)
+
+
+async def _ler(msg_id: int):
+    """A cópia lida por id no canal de cupons, ou None quando o Telegram
+    não a tem. Falha de leitura sobe (nunca vira "não está lá")."""
+    return await _io(lambda c: c.get_messages(_canal, ids=msg_id))
+
+
 async def _apagar_mensagem(msg_id: int) -> None:
+    """Publicação (_concluir_publicacao, _descartar): apagar sem prova e
+    sem levantar — LIMITE conhecido, anterior a este módulo de edição: se
+    o delete falhar, a cópia pode ficar no ar sem vínculo (ver o PR)."""
     with contextlib.suppress(Exception):
         await _io(lambda c: c.delete_messages(_canal, msg_id))
-
-
-async def _apagar_comprovado(msg_id: int) -> bool:
-    """A mensagem não está mais no canal de cupons? True quando o Telegram
-    RESPONDEU ao apagar (apagou agora, ou ela já não existia); False quando
-    o apagar falhou — sem resposta não há prova, e quem chama não cria
-    outra."""
-    try:
-        await _io(lambda c: c.delete_messages(_canal, msg_id))
-    except Exception:                                  # noqa: BLE001
-        return False
-    return True
 
 
 def _midia_copiavel(mensagem):
