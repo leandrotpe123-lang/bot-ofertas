@@ -54,8 +54,9 @@ FloodWait custarem milissegundos sem tocar a lógica.
       principal terminar
   12  shutdown com a cópia em curso → drena, sem duplicar
   13  medição: cada espera automática do Telethon vira UMA linha
-      (⏳ [ESPERA_TELETHON] classe, segundos, antecipada) e nada mais muda
-      — WARNING do Telethon sai igual pelo lastResort, INFO continua mudo
+      (⏳ [ESPERA_TELETHON] classe, segundos, antecipada, cid=- fora de
+      edição medida) e nada mais muda — WARNING do Telethon sai igual pelo
+      lastResort, INFO continua mudo
   14  medição: ⏱ [ENVIO_MS] separa o envio ao principal e a cópia (ms,
       operação, resultado), sem texto nem link; a espera aparece na cópia
   15  REPRODUÇÃO DA EDIÇÃO (troca de mídia, caso 31194/31196): antes, as duas
@@ -63,7 +64,29 @@ FloodWait custarem milissegundos sem tocar a lógica.
       canal de cupons começa quando a do principal termina, com a foto do
       principal por referência — sem espera, um upload só, os dois iguais
   16  a troca de mídia não segura a edição de OUTRO post (antes: toda
-      EditMessage da conta ficava adiada até o fim do FloodWait)
+      EditMessage da conta ficava adiada até o fim do FloodWait — em
+      produção, 27/10 12:01:46, o upgrade do produto 31661 esperou 6 s pela
+      cópia do cupom 31658)
+  17  DUAS ATUALIZAÇÕES SUCESSIVAS do mesmo post com a do canal de cupons
+      presa (portão no servidor, ordem controlada): o principal nunca
+      espera; a reconciliação do meio é OBSOLETA e não roda; o canal de
+      cupons termina com a foto MAIS NOVA, por referência, sem a do meio
+  18  FALHA DA EDIÇÃO PRINCIPAL na troca de mídia: o canal de cupons é
+      reconciliado pelo que ficou no ar (sem mídia nova), sem mensagem nova,
+      vínculo intacto; medição: falha no principal, recon no de cupons
+  19  FALHA DA EDIÇÃO DO CANAL DE CUPONS: a mídia não entra lá → apaga
+      (com resposta do Telegram) e copia por referência, uma mensagem só;
+      o apagar também falha → NADA de segunda mensagem, a de antes fica,
+      vínculo intacto, falha medida; o principal não sente nenhuma das duas
+  20  CORRELAÇÃO: um FLOOD_WAIT_10 forçado na troca de mídia do principal e
+      a edição de OUTRO post adiada pelo Telethon dentro do prazo → cada
+      linha ⏳ diz o cid, o destino e a op de QUEM esperou, e os cids casam
+      com as linhas ⏱ [EDICAO_MS]; nada de texto ou link
+  21  PROPRIEDADE (15 sementes; latências e perdedor aleatórios; dois posts
+      trocando de mídia ao mesmo tempo): toda edição do canal de cupons
+      com uma foto começa DEPOIS de terminar a edição do principal que pôs
+      essa foto; nenhum FloodWait; no fim, os dois canais iguais, uma
+      mensagem por post, vínculo certo
 
     python tests/test_cupons_corrida_midia.py
 """
@@ -97,7 +120,7 @@ from _harness_e5 import rodar  # noqa: E402
 import client as modulo_client  # noqa: E402
 from config import GRUPO_DESTINO  # noqa: E402
 from database import db_espelho_get  # noqa: E402
-from pipeline import convergencia, espelho_cupons, publicacao  # noqa: E402
+from pipeline import convergencia, espelho_cupons, publicacao, saida  # noqa: E402
 from pipeline.enriquecimento import enriquecer  # noqa: E402
 from pipeline.montagem import montar  # noqa: E402
 
@@ -162,10 +185,17 @@ class Servidor:
         mídia) da MESMA mídia ficam em voo juntos,
         quem recebe FLOOD_WAIT_10 — "segundo" (o que chegou depois) ou
         "primeiro" (o que já estava em voo);
-      · `regra(req, destino)`: (latência, exceção|None) por requisição."""
+      · `regra(req, destino)`: (latência, exceção|None) por requisição;
+      · `portao` = (predicado(req, destino), asyncio.Event): a requisição
+        que casa fica EM VOO até o evento abrir — ordem controlada pelo
+        teste, sem depender de temporização.
+    `edicoes_reg`: cada EditMessageRequest com início, fim, desfecho,
+    mensagem e a foto que ela deixou."""
 
     def __init__(self, perde="segundo", regra=None, lat=0.3):
         self.perde, self.regra, self.lat = perde, regra, lat
+        self.portao = None
+        self.edicoes_reg = []
         self.reg = []                # (t, evento, classe, destino, chave)
         self.publicados = []         # dicts das mensagens criadas
         self.em_voo = []
@@ -219,6 +249,11 @@ class Servidor:
             raise NotImplementedError(nome)
         chave = self.chave(getattr(req, "media", None))
         self.reg.append((agora(), "chega", nome, dest, chave))
+        ed = None
+        if isinstance(req, functions.messages.EditMessageRequest):
+            ed = dict(dest=dest, id=req.id, chave=chave, t0=agora(), t1=None,
+                      fim=None, foto=None)
+            self.edicoes_reg.append(ed)
         lat, falha = (self.regra(req, dest) if self.regra else (None, None))
         lat = self.lat if lat is None else lat
         voo = {"req": req, "chave": chave, "perde": False}
@@ -232,16 +267,25 @@ class Servidor:
                     rival["perde"] = True
         self.em_voo.append(voo)
         try:
+            if self.portao is not None and self.portao[0](req, dest):
+                await self.portao[1].wait()
             await vdormir(0.05 if voo["perde"] else lat)
             if voo["perde"]:
                 self.reg.append((agora(), "flood", nome, dest, chave))
+                if ed is not None:
+                    ed.update(t1=agora(), fim="flood")
                 fut.set_exception(errors.FloodWaitError(request=req, capture=FLOOD_S))
                 return
             if falha is not None:
                 self.reg.append((agora(), "erro", nome, dest, chave))
+                if ed is not None:
+                    ed.update(t1=agora(), fim="erro")
                 fut.set_exception(falha)
                 return
             fut.set_result(self._responder(req, dest, chave))
+            if ed is not None:
+                p = next(p for p in self.publicados if p["canal"] == dest and p["id"] == req.id)
+                ed.update(t1=agora(), fim="ok", foto=p["foto"])
         finally:
             self.em_voo.remove(voo)
 
@@ -743,10 +787,12 @@ def test_13_espera_do_telethon_ganha_uma_linha_e_nada_mais_muda(r):
         lg.setLevel(nivel_antes)
         logging.lastResort = ultimo_antes
     esperas = [m for _lv, m in sis.linhas if "[ESPERA_TELETHON]" in m]
+    # Publicação não é edição medida: quem esperou fica cid=- (nunca um
+    # destino inventado).
     nao = [m for m in esperas
-           if m == "⏳ [ESPERA_TELETHON] req=SendMediaRequest seg=10 antecipada=nao"]
+           if m == "⏳ [ESPERA_TELETHON] req=SendMediaRequest seg=10 antecipada=nao cid=-"]
     sim = [m for m in esperas if m.startswith("⏳ [ESPERA_TELETHON] req=SendMediaRequest seg=")
-           and m.endswith(" antecipada=sim")]
+           and m.endswith(" antecipada=sim cid=-")]
     r.check(len(esperas) == 2 and len(nao) == 1 and len(sim) == 1,
             "13.uma_linha_por_espera_perdedor_e_antecipada", str(esperas))
     r.check(all(lv == logging.WARNING for lv, m in sis.linhas if "[ESPERA_TELETHON]" in m),
@@ -876,6 +922,268 @@ def test_16_troca_de_midia_nao_segura_edicao_de_outro_post(r):
             f"B iniciou em {t_b:.1f}; edições terminadas: {[round(t - t_b, 1) for t in fins_b]}")
     r.check(not srv.eventos("flood", classe="EditMessageRequest"), "16.nenhum_floodwait",
             str(srv.eventos("flood", classe="EditMessageRequest")))
+
+
+# ── ordem controlada, falhas e correlação ─────────────────────────────
+async def _ate(cond, limite=30.0):
+    fim = time.monotonic() + limite
+    while not cond():
+        assert time.monotonic() < fim, "a condição esperada não chegou"
+        await asyncio.sleep(0.002)
+
+
+def _edicoes_de(s, canal, mid=None):
+    return [e for e in s.edicoes_reg if e["dest"] == canal and (mid is None or e["id"] == mid)]
+
+
+def _linhas(sis, marca):
+    return [m for _lv, m in sis.linhas if marca in m]
+
+
+def _campo(linha, nome):
+    return next((p.split("=", 1)[1] for p in linha.split() if p.startswith(nome + "=")), None)
+
+
+def _envios(s, canal):
+    return [t for t, e, cl, d, _k in s.reg if d == canal and e == "chega"
+            and cl in ("SendMediaRequest", "SendMessageRequest")]
+
+
+def test_17_atualizacoes_sucessivas_a_mais_nova_vence(r):
+    srv = Servidor()
+
+    async def corpo(c, s):
+        await pub(_so_texto(), score=9)
+        await drenar()
+        mid = _principal(s)
+        copia = db_espelho_get(mid)
+        porta = asyncio.Event()
+        s.portao = (lambda req, d: d == "cupons"
+                    and isinstance(req, functions.messages.EditMessageRequest), porta)
+        up = asyncio.ensure_future(pub(_com_foto(), score=9))     # troca 1, pipeline real
+        await _ate(lambda: _edicoes_de(s, "cupons"))          # a do canal de cupons: PRESA
+        await asyncio.wait({up}, timeout=RAPIDO * _ESCALA)    # o aplicador não a espera
+        aplicador_livre = up.done()
+        f1 = next((e["foto"] for e in _edicoes_de(s, "principal", mid) if e["fim"] == "ok"), None)
+        texto = s.em("principal")[0]["texto"]
+        t0 = agora()
+        fotos = []
+        for semente, cid in ((22, "t17.2"), (33, "t17.3")):   # trocas 2 e 3, logo depois
+            res = await saida.editar_msg(mid, texto, _bytesio(_jpeg(semente)),
+                                         exigir_imagem=False, trocar_midia=True)
+            fotos.append(s.em("principal")[0]["foto"] if res.midia_aplicada else None)
+            espelho_cupons.conteudo(mid, midia=True, rastro=(cid, "upgrade_midia"))
+        principal_levou = agora() - t0
+        ec = _edicoes_de(s, "cupons")
+        presa = not porta.is_set() and len(ec) == 1 and ec[0]["t1"] is None
+        porta.set()
+        await up
+        await drenar()
+        return (mid, copia, db_espelho_get(mid), f1, fotos, principal_levou, presa,
+                aplicador_livre)
+    with _Coleta("SISTEMA") as sis:
+        (mid, copia, copia_fim, f1, (f2, f3), principal_levou, presa,
+         aplicador_livre) = cenario(corpo, srv)
+    pr, cp = srv.em("principal"), srv.em("cupons")
+    r.check(aplicador_livre, "17.aplicador_termina_com_a_copia_presa",
+            "o aplicador da troca 1 ficou esperando a edição do canal de cupons")
+    r.check(presa and principal_levou < RAPIDO, "17.principal_nao_espera_a_copia_presa",
+            f"duas trocas no principal em {principal_levou:.1f}s; cópia presa={presa}")
+    r.check(None not in (f1, f2, f3) and len({f1, f2, f3}) == 3, "17.tres_fotos_no_principal",
+            f"{f1} {f2} {f3}")
+    ec = _edicoes_de(srv, "cupons", mid=copia)
+    r.check([e["chave"] for e in ec] == [("foto", f1), ("foto", f3)],
+            "17.copia_termina_na_mais_nova_sem_a_do_meio", str([e["chave"] for e in ec]))
+    r.check(len(pr) == 1 and len(cp) == 1 and cp[0]["id"] == copia == copia_fim
+            and cp[0]["foto"] == pr[0]["foto"] == f3 and cp[0]["texto"] == pr[0]["texto"],
+            "17.dois_canais_iguais_uma_mensagem_vinculo_certo", f"{pr} {cp} {copia_fim}")
+    ep3 = [e for e in _edicoes_de(srv, "principal", mid) if e["foto"] == f3]
+    r.check(ec and ep3 and ec[-1]["t0"] >= ep3[0]["t1"], "17.copia_final_depois_do_principal",
+            f"{ec[-1] if ec else None} {ep3}")
+    r.check(not srv.eventos("flood", classe="EditMessageRequest"), "17.nenhum_floodwait",
+            str(srv.eventos("flood", classe="EditMessageRequest")))
+    lin = _linhas(sis, "[EDICAO_MS]")
+    r.check(any("cid=t17.2 destino=cupons" in m and m.endswith("recon=obsoleta") for m in lin),
+            "17.do_meio_obsoleta_nao_roda", str(lin))
+    r.check(any("cid=t17.3 destino=cupons" in m and "resultado=ok recon=editou_ref" in m
+                for m in lin), "17.mais_nova_por_referencia", str(lin))
+
+
+def test_18_falha_da_edicao_principal(r):
+    def regra(req, d):
+        if d == "principal" and isinstance(req, functions.messages.EditMessageRequest):
+            return None, errors.ChatWriteForbiddenError(request=req)
+        return None, None
+    srv = Servidor(regra=regra)
+
+    async def corpo(c, s):
+        await pub(_so_texto(), score=9)
+        await drenar()
+        mid = _principal(s)
+        copia, envios = db_espelho_get(mid), len(_envios(s, "cupons"))
+        await pub(_com_foto(), score=9)          # troca de mídia: o principal falha (3×)
+        await drenar()
+        return mid, copia, db_espelho_get(mid), envios, len(_envios(s, "cupons"))
+    with _Coleta("SISTEMA") as sis:
+        mid, copia, copia_fim, envios, envios_fim = cenario(corpo, srv)
+    pr, cp = srv.em("principal"), srv.em("cupons")
+    r.check(len(pr) == 1 and pr[0]["foto"] is None, "18.principal_sem_a_midia_nova", str(pr))
+    r.check(len(cp) == 1 and cp[0]["id"] == copia == copia_fim and cp[0]["foto"] is None
+            and cp[0]["texto"] == pr[0]["texto"], "18.copia_igual_ao_que_ficou_no_ar",
+            f"{cp} {copia_fim}")
+    r.check(envios_fim == envios, "18.nenhuma_mensagem_nova_no_canal_de_cupons",
+            f"{envios}→{envios_fim}")
+    lin = _linhas(sis, "[EDICAO_MS]")
+    pl = [m for m in lin if "destino=principal op=upgrade_midia" in m]
+    cl = [m for m in lin if "destino=cupons op=upgrade_midia" in m]
+    r.check(len(pl) == 1 and "resultado=falha" in pl[0], "18.medicao_falha_no_principal", str(lin))
+    r.check(len(cl) == 1 and _campo(cl[0], "cid") == _campo(pl[0], "cid")
+            and _campo(cl[0], "recon") in ("editou", "igual") and "resultado=ok" in cl[0],
+            "18.reconciliado_com_o_mesmo_cid", str(lin))
+
+
+def test_19_falha_da_edicao_do_canal_de_cupons(r):
+    for rot, apagar_falha in (("recria_com_prova", False), ("sem_prova_nao_duplica", True)):
+        def regra(req, d, apagar_falha=apagar_falha):
+            if (d == "cupons" and isinstance(req, functions.messages.EditMessageRequest)
+                    and req.media is not None):
+                return None, errors.MediaEmptyError(request=req)
+            if apagar_falha and d == "cupons" and isinstance(
+                    req, functions.channels.DeleteMessagesRequest):
+                return None, errors.ChatAdminRequiredError(request=req)
+            return None, None
+        srv = Servidor(regra=regra)
+
+        async def corpo(c, s):
+            await pub(_so_texto(), score=9)
+            await drenar()
+            mid = _principal(s)
+            copia, envios = db_espelho_get(mid), len(_envios(s, "cupons"))
+            t0 = agora()
+            await pub(_com_foto(), score=9)
+            fim_pub = agora() - t0
+            await drenar()
+            return copia, db_espelho_get(mid), envios, len(_envios(s, "cupons")), fim_pub
+        with _Coleta("SISTEMA") as sis:
+            copia, copia_fim, envios, envios_fim, fim_pub = cenario(corpo, srv)
+        pr, cp = srv.em("principal"), srv.em("cupons")
+        cl = [m for m in _linhas(sis, "[EDICAO_MS]") if "destino=cupons" in m]
+        r.check(len(pr) == 1 and pr[0]["foto"] is not None and fim_pub < RAPIDO,
+                f"19.{rot}.principal_com_a_foto_e_rapido", f"{pr} {fim_pub:.1f}s")
+        if not apagar_falha:
+            r.check(len(cp) == 1 and cp[0]["id"] != copia and cp[0]["id"] == copia_fim
+                    and cp[0]["foto"] == pr[0]["foto"] and cp[0]["por_referencia"],
+                    f"19.{rot}.uma_copia_nova_fiel_por_referencia", f"{cp} {copia_fim}")
+            r.check(len(cl) == 1 and "recon=recriou" in cl[0], f"19.{rot}.medicao", str(cl))
+        else:
+            r.check(len(cp) == 1 and cp[0]["id"] == copia == copia_fim and envios_fim == envios,
+                    f"19.{rot}.nenhuma_segunda_mensagem_vinculo_intacto",
+                    f"{cp} {copia_fim} envios {envios}→{envios_fim}")
+            r.check(len(cl) == 1 and "resultado=falha:MediaEmptyError" in cl[0],
+                    f"19.{rot}.falha_medida", str(cl))
+
+
+def test_20_correlacao_da_espera_com_a_operacao(r):
+    import espera_telethon
+    lg = logging.getLogger("telethon.client.users")
+    nivel_antes = lg.level
+    visto = []
+
+    def regra(req, d):
+        if (d == "principal" and isinstance(req, functions.messages.EditMessageRequest)
+                and req.media is not None and not visto):
+            visto.append(1)
+            return None, errors.FloodWaitError(request=req, capture=FLOOD_S)
+        return None, None
+    srv = Servidor(regra=regra)
+
+    async def corpo(c, s):
+        await pub(msg(FADA, SECO_110370), score=3)                # B (cupom sem código)
+        await pub(_so_texto(), score=9)                           # A (só texto)
+        await drenar()
+        up = asyncio.ensure_future(pub(_com_foto(), score=9))     # A: troca → FLOOD_WAIT_10
+        await _ate(lambda: any(e["fim"] == "erro" for e in _edicoes_de(s, "principal")))
+        await vdormir(1.0)
+        await pub(msg(SAMUEL, RICO_17525), score=10)              # B: evolução, dentro do prazo
+        await up
+        await drenar()
+    try:
+        espera_telethon.instalar()
+        with _Coleta("SISTEMA") as sis:
+            cenario(corpo, srv)
+    finally:
+        lg.removeFilter(espera_telethon._FILTRO)
+        lg.setLevel(nivel_antes)
+    esperas = _linhas(sis, "[ESPERA_TELETHON]")
+    medidas = _linhas(sis, "[EDICAO_MS]")
+    up_pr = [m for m in medidas if "destino=principal op=upgrade_midia" in m]
+    ev_pr = [m for m in medidas if "destino=principal op=evolucao" in m]
+    nao = [m for m in esperas if "antecipada=nao" in m]
+    sim = [m for m in esperas if "antecipada=sim" in m]
+    r.check(len(nao) == 1 and len(up_pr) == 1
+            and nao[0].endswith(f"cid={_campo(up_pr[0], 'cid')} destino=principal op=upgrade_midia")
+            and "req=EditMessageRequest seg=10" in nao[0],
+            "20.quem_recebeu_o_floodwait_e_o_principal_da_troca", f"{esperas} {up_pr}")
+    r.check(sim and len(ev_pr) == 1 and all(
+        _campo(m, "cid") == _campo(ev_pr[0], "cid") and _campo(m, "op") == "evolucao" for m in sim)
+        and {_campo(m, "destino") for m in sim} == {"principal", "cupons"},
+        "20.adiadas_sao_a_evolucao_de_B_nos_dois_destinos", f"{sim} {ev_pr}")
+    r.check(not any(m.endswith("cid=-") for m in esperas), "20.nenhuma_espera_sem_dono", str(esperas))
+    real_do_flood = FLOOD_S * _ESCALA * 1000
+    r.check(up_pr and int(_campo(up_pr[0], "ms")) >= 0.8 * real_do_flood,
+            "20.a_espera_aparece_no_ms_da_edicao", f"{up_pr} (FloodWait = {real_do_flood:.0f} ms reais)")
+    cp_up = [m for m in medidas if "destino=cupons op=upgrade_midia" in m]
+    r.check(len(cp_up) == 1 and _campo(cp_up[0], "cid") == _campo(up_pr[0], "cid")
+            and "recon=editou_ref" in cp_up[0], "20.copia_da_troca_com_o_mesmo_cid", str(cp_up))
+    r.check(not any(("Shopee" in m or "http" in m or "R$" in m or "4DMD" in m)
+                    for m in esperas + medidas), "20.nada_de_texto_link_ou_codigo",
+            str(esperas + medidas))
+
+
+PARES_TROCA = (
+    (lambda: msg(PROMOTOM, SHOPEE_17860, cupons=["4DMD4CUP0M"]),
+     lambda: foto(msg(SAMUEL, SHOPEE_17860, cupons=["4DMD4CUP0M"]))),
+    (lambda: msg(FADA, ML_17529, cupons=["PROMOML"], plat="mercadolivre"),
+     lambda: foto(msg(SAMUEL, ML_17529, cupons=["PROMOML"], plat="mercadolivre"))),
+)
+
+
+def test_21_propriedade_ordem_nas_trocas_de_midia(r):
+    violacoes = []
+    for semente in range(15):
+        rng = random.Random(1000 + semente)
+        srv = Servidor(perde=rng.choice(["primeiro", "segundo"]),
+                       regra=lambda req, d, rng=rng: (rng.uniform(0.05, 1.5), None))
+
+        async def corpo(c, s, rng=rng):
+            for so_texto, _com in PARES_TROCA:
+                await pub(so_texto(), score=9)
+            await drenar()
+            ordem = list(PARES_TROCA)
+            rng.shuffle(ordem)
+            await asyncio.gather(*(pub(com(), score=9) for _st, com in ordem))
+            await drenar()
+            return {p["id"]: db_espelho_get(p["id"]) for p in s.em("principal")}
+        vinculo = cenario(corpo, srv)
+        pr, cp = srv.em("principal"), srv.em("cupons")
+        if len(pr) != 2 or len(cp) != 2:
+            violacoes.append((semente, "contagem", len(pr), len(cp)))
+        for p in pr:
+            q = next((q for q in cp if q["id"] == vinculo.get(p["id"])), None)
+            if (p["foto"] is None or q is None or q["foto"] != p["foto"]
+                    or q["texto"] != p["texto"]):
+                violacoes.append((semente, "diferentes", p, q))
+        for e in _edicoes_de(srv, "cupons"):
+            if not e["chave"]:
+                continue
+            pai = [x["t1"] for x in _edicoes_de(srv, "principal")
+                   if x["fim"] == "ok" and x["foto"] == e["chave"][1]]
+            if not pai or e["t0"] < min(pai):
+                violacoes.append((semente, "antes_do_principal", e))
+        if srv.eventos("flood", classe="EditMessageRequest"):
+            violacoes.append((semente, "flood", srv.eventos("flood", classe="EditMessageRequest")))
+    r.check(not violacoes, "21.copia_so_depois_do_principal_sem_floodwait_iguais_no_fim",
+            str(violacoes[:3]))
 
 
 if __name__ == "__main__":

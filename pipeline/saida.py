@@ -62,6 +62,7 @@ from telethon.errors import (FloodWaitError, MessageIdInvalidError,
                              MessageNotModifiedError)
 
 import config
+import medicao_edicao
 from config import GRUPO_DESTINO
 from logger import log_out
 from pipeline import apagados_pelo_worker
@@ -276,8 +277,10 @@ async def editar_msg(msg_id_dest: int, texto_novo: str,
     semáforo limita o I/O e o retry/FloodWait daquela operação).
 
     Assinatura idêntica à de _editar_inner_no_sem: esta função só
-    acrescenta a aquisição, não interpreta nem altera parâmetro algum."""
+    acrescenta a aquisição, não interpreta nem altera parâmetro algum.
+    A vaga saiu: fim da fila da edição medida em curso (medicao_edicao)."""
     async with config._SEM_ENVIO:
+        medicao_edicao.comecou()
         return await _editar_inner_no_sem(
             msg_id_dest, texto_novo, imagem_nova,
             exigir_imagem=exigir_imagem, trocar_midia=trocar_midia
