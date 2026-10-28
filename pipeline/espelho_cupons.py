@@ -460,14 +460,20 @@ async def _substituir(antigo: int, principal) -> None:
 
 
 async def _remover(mid: int) -> None:
-    esp = db_espelho_get(mid)
+    # Leitura ESTRITA só para o registro: a decisão é a de sempre (leitura
+    # que falha = None = nada a apagar, como em db_espelho_get), mas a linha
+    # só diz "sem_copia" quando a leitura CONFIRMOU que não há vínculo.
+    try:
+        esp, falha = db_espelho_get(mid, estrito=True), None
+    except Exception as e:                             # noqa: BLE001
+        esp, falha = None, f"falha_leitura:{type(e).__name__}"
     if esp == _AUSENTE:
         db_espelho_del(mid)               # nada no ar: só o vínculo AUSENTE sai
         _registrar_remocao(mid, None, "post_removido", "ausente_antes")
     elif esp is not None:
         await _apagar(mid, esp, "post_removido")
     else:
-        _registrar_remocao(mid, None, "post_removido", "sem_copia")
+        _registrar_remocao(mid, None, "post_removido", falha or "sem_copia")
 
 
 async def _reconciliar(mid: int, midia: bool, principal=None) -> str:
@@ -595,8 +601,10 @@ def _registrar_remocao(mid: Optional[int], copia: Optional[int], motivo: str,
     `resultado` None: o PEDIDO (removido(), antes da fila do post). Depois,
     o que ficou PROVADO: "apagada" (pts_count > 0), "ausente" (o delete não
     apagou e a leitura não a acha), "ausente_antes" (vínculo AUSENTE: nada
-    no ar), "sem_copia" (o post não tinha cópia), "sem_prova" (publicação:
-    a resposta não provou) ou "falha:<Classe>". Só ids, motivo e resultado
+    no ar), "sem_copia" (a leitura do vínculo funcionou e não achou cópia),
+    "sem_prova" (publicação: a resposta não provou), "falha:<Classe>" ou
+    "falha_leitura:<Classe>" (a leitura do vínculo falhou: nada foi apagado
+    e NÃO se afirma que não havia cópia). Só ids, motivo e resultado
     — nada de texto, link ou código. NUNCA levanta: o log não cria nem
     impede exclusão."""
     with contextlib.suppress(Exception):
