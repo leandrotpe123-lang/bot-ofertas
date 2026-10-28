@@ -168,3 +168,15 @@ CUPOM_RAJADA_S = {"mercadolivre": 8 * 60, "shopee": 8 * 60}
 # série horária (próximas liberações chegaram a 55–60 min). Entre a RAJADA e
 # o SUPERIOR o tempo sozinho não decide: zona cinzenta (CUPOM_INCERTO).
 CUPOM_LIMITE_SUPERIOR_S = 30 * 60
+
+# ── CAMPANHA POR PÁGINA DE RESGATE (pipeline/campanha_resgate*) ──
+# Constante de CÓDIGO, sem variável de ambiente: ligar ou desligar é PR do
+# dono. Qualquer valor diferente de "ATIVO" vale como "SOMBRA".
+# "SOMBRA" (padrão): só registra o que a regra faria (🎟 [RESGATE_SOMBRA]);
+# publicação, família, canal de cupons e locks são os de sempre.
+# "ATIVO": a mensagem que abriria post NOVO junta no post vivo da mesma
+# campanha (mesma página de resgate declarada como destino principal), e o
+# post cujo único destino é essa página vai também ao canal de cupons.
+# Inclui as junções "compatível" (benefício ausente de um lado): os dois
+# casos reais de 28/10/2026 são desse tipo.
+CAMPANHA_RESGATE_MODO = "SOMBRA"
