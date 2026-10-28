@@ -91,12 +91,40 @@ Com família já escolhida pelo pipeline, a regra **nunca troca de post**:
 A regra não faz chamada de rede nova: usa a normalização e o link publicado
 que já existem.
 
-**Canal de cupons, separado da natureza.** Um post cujo link principal é a
-página declarada é elegível ao canal de cupons mesmo sem "cupom" no título.
-Na junção, vale o canal do post. "Elegível ao canal de cupons" é
-roteamento, como o `eh_identidade_cupom` de hoje. **Não** significa que o
-cupom vale para a conta de afiliado do dono: o CLAUDE.md §9.1 segue sem
-implementação.
+**Canal de cupons: destino elegível pela política × estado efetivo da cópia.**
+São duas coisas diferentes, e a linha da sombra registra cada uma em separado.
+
+- **`destino_elegivel`** — a **política proposta**. Um post cujo link
+  principal é a página declarada é elegível ao canal de cupons, mesmo sem
+  "cupom" no título. "Elegível ao canal" é roteamento; **não** significa que o
+  cupom vale para a conta de afiliado do dono (o CLAUDE.md §9.1 segue sem
+  implementação).
+- **`copia`** — o **estado** da cópia do post que a campanha usaria:
+  - `nova`: post novo; a publicação cria a cópia;
+  - `vinculada`: há vínculo no banco;
+  - `ausente`: o dono apagou a cópia e a leitura confirmou; o
+    `espelho_cupons` nunca a recria;
+  - `sem_vinculo`;
+  - `nao_lida`: a leitura falhou, e o resultado é INDETERMINADO.
+- **`destino_efetivo`** — o que as regras do espelho de hoje **deixam**
+  acontecer:
+  - elegível + `nova` ou `vinculada` → principal + cupons;
+  - elegível + `ausente` → **principal** (a exclusão manual fica preservada);
+  - elegível + `sem_vinculo` → principal (não se presume criação);
+  - não elegível → principal.
+
+**Limite declarado.** `vinculada` quer dizer "há vínculo", não "a mensagem
+existe". O worker só descobre que o dono apagou a cópia quando tenta editá-la
+(`espelho_cupons._editar`: MESSAGE_ID_INVALID mais a leitura por id que
+confirma → AUSENTE). Até lá, o banco diz `vinculada`. A sombra não consulta o
+Telegram (não faz I/O), então registra exatamente isso. Teste 14:
+"não descoberta aparece como vinculada".
+
+**Dependência do #33 (declarada).** O estado da cópia é lido com
+`db_espelho_get(estrito=True)`, que vem do #33: uma falha de consulta nunca
+vira "sem vínculo". O #34 contém o merge do #33 (`c0b4ba9`). A ordem de
+integração é **#33 primeiro**; depois disso, o diff do #34 volta a mostrar só
+a frente A.
 
 **Sombra** (`pipeline/campanha_resgate_sombra.py`):
 - Chamada em `publicacao._enviar_inner` logo depois de
@@ -104,24 +132,26 @@ implementação.
   mensagem nova.
 - Só lê o estado e devolve sempre `None`. Erro inesperado vira uma linha
   `❌ [RESGATE_SOMBRA] <Classe>` e mais nada (nem o log do erro escapa).
-- O canal do post vem da política de roteamento de hoje
-  (`eh_identidade_cupom` das âncoras exibidas, como em
-  `espelho_cupons._reconciliar`). A sombra não lê a tabela de espelho.
-- Escreve uma linha só quando a regra junta, duvida, mudaria o canal, vê
-  outro post com a mesma página ou não consegue ler o estado:
+- O estado da cópia é lido (estrito) só para o post que importa: a família de
+  hoje (`espelho_familia`) e o alvo da junção (`espelho_post`).
+- Escreve uma linha só quando a regra junta, duvida, mudaria o destino
+  efetivo, vê outro post com a mesma página, acha a cópia `ausente` ou não
+  consegue ler o estado:
 
 ```
 🎟 [RESGATE_SOMBRA] msg=(chat,id) acao=JUNTA|MANTER|INCERTO|INDETERMINADO
    post:<id> motivo=… Δ=…min pagina=<canônica> hoje=post:<id>|post_novo
    ident_atual=[…] ident_proposta=[…, '<plat>|resgate|<página>']
-   destino_hoje=… destino_previsto=… prova=canonica_persistida|so_link_publicado
+   destino_hoje=… destino_elegivel=… copia=nova|vinculada|ausente|sem_vinculo|nao_lida
+   destino_efetivo=… prova=canonica_persistida|so_link_publicado
    aprovacao=pendente|- nome=(cand|post) beneficio=(cand|post) outros=[…]
 ```
 
 **Leitura estrita → INDETERMINADO.**
 - As leituras do estado que a sombra usa (`db_posts_vivos_com_prefixo`,
-  `db_get_post`, `db_exibida`, `db_ofertas_de_post` e `db_origens_do_post`)
-  devolvem o vazio do tipo também quando a leitura **falha**. É o contrato de
+  `db_get_post`, `db_exibida`, `db_ofertas_de_post`, `db_origens_do_post` e
+  `db_espelho_get`, esta do #33) devolvem o vazio do tipo também quando a
+  leitura **falha**. É o contrato de
   sempre dos outros consumidores, e não muda.
 - A sombra pede `estrito=True` (opt-in): a falha levanta.
 - Estado que não pôde ser lido inteiro dá `acao=INDETERMINADO`,
@@ -130,8 +160,9 @@ implementação.
   leitura seguinte (`erro_leitura:post:Ausente`).
 - Nesse caso a sombra nunca dá MANTER, JUNTA ou INCERTO como se o estado
   estivesse completo.
-- Testes 12 e 13: cada etapa falhando no caso real; padrão inalterado das 5
-  leituras.
+- Testes 12, 13 e 14: cada etapa falhando no caso real, inclusive
+  `espelho_familia` e `espelho_post`; padrão inalterado das leituras; com a
+  cópia AUSENTE, a leitura que falha dá INDETERMINADO e nunca "sem vínculo".
 
 Custo medido:
 - fora da regra (quase todas as mensagens): p50 1,5 µs, p99 5,8 µs;
@@ -222,8 +253,8 @@ A canônica só é afirmada com prova: a identidade logada, ou o link publicado
 | # | Texto / origem (UTC) | Identidade hoje | Canal de cupons hoje | Post hoje | Decisão proposta | Justificativa | Teste |
 |---|---|---|---|---|---|---|---|
 | 1 | Promotom 112024 "Cupons Shopee", 28/10 02:59 | `cupb|geral` | sim | 31943 | MANTER (1º do lançamento) | página como 1º link, sem par vivo | 03 |
-| 2 | Fada 18042 "Começou! Esquenta 11.11", 03:00 | `url|…/m/cupom-de-desconto` | não | 31945 novo | **JUNTA no 31943**, principal + cupons, **pendente** (`so_link_publicado`) | mesma página como 1º link dos dois lados; Δ 0,7 min; fontes diferentes; nome só de um lado e nenhum benefício (compatível, não igual) | 03 |
-| 3 | Samuel 123470, 03:00:15 | `url|…` | não | DUP no 31945 | MANTER `ja_no_mesmo_post`, outros=[31943] (`canonica_persistida`) | família de hoje já tem a página; registra o risco | 03 |
+| 2 | Fada 18042 "Começou! Esquenta 11.11", 03:00 | `url|…/m/cupom-de-desconto` | não | 31945 novo | **JUNTA no 31943**, elegível principal + cupons, `copia=vinculada` → efetivo principal + cupons, **pendente** (`so_link_publicado`) | mesma página como 1º link dos dois lados; Δ 0,7 min; fontes diferentes; nome só de um lado e nenhum benefício (compatível, não igual) | 03 |
+| 3 | Samuel 123470, 03:00:15 | `url|…` | não | DUP no 31945 | MANTER `ja_no_mesmo_post`, outros=[31943] (`canonica_persistida`); `copia=sem_vinculo` → efetivo principal | família de hoje já tem a página; registra o risco | 03 |
 | 4 | fumotom 42674, produto com a página como 1º link, 03:01 | `shopee|1930141978.58270173531` | não | 31947 | fora (âncora forte) | produto tem dono; 186 casos assim em 7 dias | 03, 06 |
 | 5 | Promotom 111508 × Fada 17870 "Novo Cupom Shopee VIP", 17/10 (corpus de `test_post_apagado`) | `cupb|geral` × `cupb|vip` | sim × sim | 29546 × 29549; hoje em ATIVO: CUPOM_INCERTO sem_beneficio, 2 posts | **JUNTA** no da Promotom, **pendente** | mesma página como 1º link; o dono apagou o 29546; sem benefício | 03b |
 | 6 | Promotom 111724 (21/10 12:03) × Fada 17927 "Dia de Cupons" (12:00) | `cupb|geral` × `cupb|dia` | sim × sim | 30602 × 30591 (CUPOM_INCERTO sem_beneficio) | abstém | o link da Fada leva a outra página (`4LK2yNECtS`, canônica lacuna) | 05 |
@@ -231,7 +262,9 @@ A canônica só é afirmada com prova: a identidade logada, ou o link publicado
 | 8 | Promotom 111915 → Fada 17997 → Samuel → Fada 17998 "Tech" → Samuel, 26/10 | `cupb|geral`, `cupb|tech` | sim | 31451, 31463 | abstém | no Tech a página é o 2º link (campanha própria) | 02, 05 |
 | 9 | Promotom 111992 → Fada 18025 30% → Samuel → Fada 18028 (Δ 37 min), 27/10 | `cupb|geral` | sim | 31770, 31785 | abstém | 1º link do 31770 é outro (`60SGP3K099`); acima do superior | 05 |
 | 10 | Fada 18038 "É AMANHÃ! ESQUENTA 11.11" | `url|…/m/11-11` | não | 31930 | fora | página de evento, não declarada | 09 |
-| 11 | Fada 18042 sozinha (variação: sem a Promotom) | `url|…` | não | novo | MANTER, **previsto principal + cupons** | elegível sem "cupom" no título | 09 |
+| 11 | Fada 18042 sozinha (variação: sem a Promotom) | `url|…` | não | novo | MANTER, elegível principal + cupons, `copia=nova` → efetivo principal + cupons | elegível sem "cupom" no título; post novo nasce com cópia | 09 |
+| 13 | Promotom 112024 → o dono apaga **só a cópia** (SINTÉTICO, marcado) → a edição da fonte (SINTÉTICA) faz o worker descobrir → AUSENTE → Fada 18042 | `cupb|geral` × `url|…` | sim (cópia apagada) | 31943-equivalente vivo no principal, cópia AUSENTE | **JUNTA**, pendente, `copia=ausente` → **efetivo principal** | a exclusão manual da cópia é preservada; a sombra nunca afirma que a cópia volta | 14 |
+| 14 | Promotom 111784 → o dono apaga só a cópia → a EVOLUI da Fada 17953 descobre (AUSENTE) → Samuel 122635 (link como HIPÓTESE) | `cupb|geral` | cópia AUSENTE | 30837-equivalente | MANTER `ja_no_mesmo_post`, `copia=ausente` → efetivo principal (linha registrada) | família com cópia apagada: estado explícito | 14 |
 | 12 | Samuel 122540/122578 "Pessoal, pra algumas contas não está aparecendo…" | `cupb|geral` | sim | 30697 / 30743 | fora | o link leva a `LoB6msmOY`, não à página | retro |
 
 Variações sintéticas, todas **marcadas** no teste 02, para pares que o corpus
@@ -328,11 +361,15 @@ A lacuna dos links do Samuel não muda o resultado: a mesma retroativa com a
    Fada teria entrado no 31943 às 03:00:06, antes de o dono apagá-lo às
    03:00:17. Pela decisão M, apagar o post apaga a campanha inteira, sem
    ressurreição (teste 07). A ativação precisa da revisão do dono sobre isso.
-6. **Tudo foi medido em 7 dias** (a retenção) e só nas 15 janelas
+6. **Cópia apagada à mão e ainda não descoberta.** Aparece como
+   `copia=vinculada` até o worker tentar editá-la. A sombra não consulta o
+   Telegram. Na ativação, o espelho continua sendo a autoridade: ao descobrir,
+   marca AUSENTE e não recria.
+7. **Tudo foi medido em 7 dias** (a retenção) e só nas 15 janelas
    analisadas. Antes de ativar, a sombra deve rodar em produção e as linhas
    `🎟 [RESGATE_SOMBRA]` devem ser revisadas noite a noite, inclusive as
    `INDETERMINADO`.
-7. **Leituras que a sombra não controla.** A família de hoje (`familia_hoje`)
+8. **Leituras que a sombra não controla.** A família de hoje (`familia_hoje`)
    vem das leituras tolerantes do pipeline. Se uma delas falhou, a família pode
    estar errada sem que a sombra saiba. A sombra só garante as próprias
    leituras.
@@ -342,11 +379,14 @@ A lacuna dos links do Samuel não muda o resultado: a mesma retroativa com a
 A ativação seria:
 - `familia.lancamento_cupom` (ou um passo vizinho, em frente própria) devolver
   o post da decisão JUNTA;
-- o canal seguir `destino_previsto`.
+- o canal seguir o **`destino_efetivo`**, nunca só o `destino_elegivel`: uma
+  cópia AUSENTE continua ausente.
 
 Pré-condições:
 - a canônica persistida (seção 4, opção A ou B) no lugar da comparação de link
-  publicado;
+  publicado. `prova=so_link_publicado` é evidência limitada, não garantia da
+  API;
+- o #33 integrado antes (leitura estrita do vínculo);
 - a decisão do dono sobre as junções `pendente`;
 - a revisão das linhas da sombra em produção.
 

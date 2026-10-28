@@ -42,7 +42,8 @@ O QUE ESTE ARQUIVO PROVA:
   08  falha no reconhecimento do link nunca junta (sem conversão,
       canônica ainda encurtada, outra rota, link publicado diferente)
   09  canais separados: evento sozinho na página é elegível ao canal de
-      cupons sem "cupom" no título (só previsto); /m/11-11 não; o canal
+      cupons sem "cupom" no título (elegível; post novo nasce com cópia);
+      /m/11-11 não; o canal
       de hoje não muda
   10  SIMULAÇÃO DE TESTE (não é ativação; a junção do caso real é PENDENTE
       de aprovação — sem benefício explícito): se a família fosse a da
@@ -55,6 +56,14 @@ O QUE ESTE ARQUIVO PROVA:
       WARNING — nunca MANTER, JUNTA ou INCERTO — e a publicação é a mesma
   13  leitura estrita é OPT-IN: o padrão das 5 leituras de database_posts
       (vazio do tipo na falha) não muda; estrito=True levanta
+  14  só a CÓPIA apagada à mão pelo dono (post elegível vivo no principal):
+      o worker descobre pelo caminho real e marca AUSENTE; a Fada traz a
+      mesma página → a sombra registra copia=ausente e
+      destino_efetivo=principal (nunca que a cópia volta); AUSENTE
+      preservado; nenhum envio/edição/exclusão no canal de cupons; a sombra
+      ligada × desligada: mesmas chamadas e mesmo banco; cópia apagada mas
+      não descoberta aparece "vinculada" (limite: a sombra não consulta o
+      Telegram); leitura do vínculo que falha → INDETERMINADO
 
     python tests/test_campanha_resgate.py
 """
@@ -72,6 +81,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import test_cupom_sem_codigo as T                               # noqa: E402  (preparar())
 from test_cupom_sem_codigo import FADA, PROMOTOM, SAMUEL, _db    # noqa: E402
 from _telethon_fakes import afetadas                            # noqa: E402
+from telethon.errors import MessageIdInvalidError               # noqa: E402
 from _harness_e5 import rodar                                   # noqa: E402
 
 import config                                                   # noqa: E402
@@ -244,8 +254,9 @@ PUB_31947 = ("Placa-Mãe Msi A520m-a Pro, Amd Am4, Matx, Ddr4, Preto - A520m-a P
 # Telegram falso por canal + registro de cada chamada
 # ══════════════════════════════════════════════════════════════════
 class _Msg:
-    def __init__(self, i):
+    def __init__(self, i, texto=""):
         self.id, self.media = i, None
+        self.message, self.entities = texto, None
 
 
 class Canais:
@@ -274,8 +285,11 @@ class Canais:
 
     async def edit_message(self, dest, msg_id, texto=None, *a, **k):
         self.chamadas.append(("edit", str(dest), msg_id, texto))
-        self.no_ar.setdefault(str(dest), {})[msg_id] = texto
-        return _Msg(msg_id)
+        if msg_id not in self.no_ar.get(str(dest), {}):
+            # como o Telegram: a mensagem não existe mais (apagada à mão)
+            raise MessageIdInvalidError(request=None)
+        self.no_ar[str(dest)][msg_id] = texto
+        return _Msg(msg_id, texto)
 
     async def delete_messages(self, dest, ids, *a, **k):
         lista = ids if isinstance(ids, (list, tuple)) else [ids]
@@ -285,8 +299,16 @@ class Canais:
         return afetadas(lista)
 
     async def get_messages(self, dest, ids=None, *a, **k):
+        canal = self.no_ar.get(str(dest), {})
         lista = ids if isinstance(ids, (list, tuple)) else [ids]
-        return [_Msg(i) if i in self.no_ar.get(str(dest), {}) else None for i in lista]
+        for i in lista:
+            self.chamadas.append(("get", str(dest), i, None))
+        achadas = [_Msg(i, canal[i]) if i in canal else None for i in lista]
+        return achadas if isinstance(ids, (list, tuple)) else achadas[0]
+
+    def apagar_a_mao(self, dest, msg_id):
+        """O DONO apaga a mensagem no app: o worker não é avisado."""
+        self.no_ar.get(str(dest), {}).pop(msg_id, None)
 
     async def download_media(self, media, file=None, *a, **k):
         return None
@@ -304,7 +326,8 @@ class Canais:
 _RE_LINHA = re.compile(
     r"msg=\((?P<chat>-?\d+),(?P<msg>\d+)\) acao=(?P<acao>\w+) post:(?P<post>\S+) "
     r"motivo=(?P<motivo>\S+) .* destino_hoje=(?P<hoje>\S+) "
-    r"destino_previsto=(?P<previsto>\S+) .* outros=\[(?P<outros>[^\]]*)\]$")
+    r"destino_elegivel=(?P<elegivel>\S+) copia=(?P<copia>\S+) "
+    r"destino_efetivo=(?P<efetivo>\S+) .* outros=\[(?P<outros>[^\]]*)\]$")
 
 
 class _Captura(logging.Handler):
@@ -347,6 +370,18 @@ class Noite:
             enr = enriquecer(norm)
             if await deve_enviar_async(enr):
                 await publicacao.enviar(await montar(norm), norm, enr=enr, is_edit=False)
+        await _drenar()
+        return norm
+
+    async def edita(self, chat, mid, texto):
+        """A fonte EDITA a mensagem: o caminho real da edição."""
+        bruta = MensagemBruta(msg_id=mid, chat=str(chat), texto=texto,
+                              links=links_de(texto), tem_midia=False, media_obj=None)
+        norm = await normalizacao.normalizar(bruta)
+        if norm is not None:
+            enr = enriquecer_edicao(norm)
+            if await deve_enviar_async(enr):
+                await publicacao.enviar(await montar(norm), norm, enr=enr, is_edit=True)
         await _drenar()
         return norm
 
@@ -461,10 +496,9 @@ def _cand(texto, chat=FADA, chaves=("shopee|url|" + PAGINA,), pagina=PAGINA,
 
 
 def _vivo(mid, texto, chaves=("shopee|cupb|geral",), fontes=(PROMOTOM,), idade=46.0,
-          vai_aos_cupons=True, plat="shopee"):
+          plat="shopee"):
     return regra.PostVivo(mid, plat, frozenset(chaves), next(iter(links_de(texto)), ""),
-                          _perfil(texto), AGORA - idade, frozenset(str(f) for f in fontes),
-                          vai_aos_cupons)
+                          _perfil(texto), AGORA - idade, frozenset(str(f) for f in fontes))
 
 
 def test_02_regra_pura(r):
@@ -475,7 +509,7 @@ def test_02_regra_pura(r):
     d = av(_cand(F), [p43])
     r.check((d.acao, d.post, d.motivo) == (regra.JUNTA, 31943, "mesma_pagina_de_resgate:compativel"),
             "02.caso_real_junta", str(d))
-    r.check((d.destino_hoje, d.destino_previsto) == ("principal", "principal+cupons"),
+    r.check((d.destino_hoje, d.destino_elegivel) == ("principal", "principal+cupons"),
             "02.caso_real_canais", str(d))
     r.check(abs(d.delta_s - 46.0) < 1e-6, "02.delta", str(d.delta_s))
     r.check(d.pendente and d.prova == "so_link_publicado", "02.caso_real_pendente_so_link_publicado",
@@ -491,13 +525,23 @@ def test_02_regra_pura(r):
             "02.mesmo_beneficio_explicito_nao_e_pendente", str(d))
     # o post que guarda a canônica (url|<página>) dispensa o link publicado
     d = av(_cand(F), [_vivo(31945, "🚨 Começou! Esquenta 11.11 Shopee\n\nhttps://s.shopee.com.br/AAHdNLxGSX",
-                           chaves=("shopee|url|" + PAGINA,), fontes=(SAMUEL,), vai_aos_cupons=False)])
+                           chaves=("shopee|url|" + PAGINA,), fontes=(SAMUEL,))])
     r.check(d.acao == regra.JUNTA and d.prova == "canonica_persistida", "02.prova_canonica_persistida",
             str(d))
 
-    d = av(_cand(F), [replace(p43, vai_aos_cupons=False)])
-    r.check(d.acao == regra.JUNTA and d.destino_previsto == "principal",
-            "02.juncao_vale_o_canal_do_post", str(d))
+    # elegibilidade × estado da cópia (finalizar): AUSENTE nunca volta; sem
+    # vínculo não se presume criação; só o post novo elegível nasce com cópia
+    d = av(_cand(F), [p43])
+    efetivo = {c: regra.finalizar(d, c).destino_efetivo
+               for c in (regra.NOVA, regra.VINCULADA, regra.AUSENTE, regra.SEM_VINCULO)}
+    r.check(efetivo == {regra.NOVA: "principal+cupons", regra.VINCULADA: "principal+cupons",
+                        regra.AUSENTE: "principal", regra.SEM_VINCULO: "principal"},
+            "02.destino_efetivo_pelo_estado_da_copia", str(efetivo))
+    r.check(all(regra.destino_efetivo("principal", c) == "principal"
+                for c in (regra.NOVA, regra.VINCULADA, regra.AUSENTE, regra.SEM_VINCULO)),
+            "02.nao_elegivel_nunca_vai_aos_cupons")
+    r.check(regra.finalizar(d, regra.AUSENTE).destino_elegivel == "principal+cupons",
+            "02.ausente_nao_muda_a_elegibilidade_so_o_efetivo")
 
     # Tech 31463: a página é o 2º link → não é par (26/10 03:02, campanha própria)
     d = av(_cand(F), [_vivo(31463, PUB_31463, ("shopee|cupb|tech",), (FADA,))])
@@ -521,8 +565,9 @@ def test_02_regra_pura(r):
     d = av(_cand(F), [replace(p43, plat="mercadolivre")])
     r.check(d.motivo == "sem_par", "02.outra_plataforma_nao_e_par", str(d))
     d = av(_cand(F), [])
-    r.check((d.acao, d.motivo, d.destino_previsto) == (regra.MANTER, "sem_par", "principal+cupons"),
-            "02.sem_par_previsto_dois_canais", str(d))
+    r.check((d.acao, d.motivo, d.destino_elegivel) == (regra.MANTER, "sem_par", "principal+cupons")
+            and regra.finalizar(d, regra.NOVA).destino_efetivo == "principal+cupons",
+            "02.sem_par_post_novo_elegivel_nasce_com_copia", str(d))
 
     d = av(_cand(F), [_vivo(31943, PUB_31943, fontes=(PROMOTOM, FADA))])
     r.check((d.acao, d.motivo) == (regra.INCERTO, "mesma_fonte"), "02.mesma_fonte", str(d))
@@ -554,7 +599,8 @@ def test_02_regra_pura(r):
     r.check((d.acao, d.post, d.motivo) == (regra.INCERTO, 31943, "familia_de_hoje_diferente"),
             "02.familia_diferente_incerto", str(d))
     d = av(_cand(F, familia_hoje=31451), [])
-    r.check((d.acao, d.destino_previsto) == (regra.MANTER, d.destino_hoje),
+    r.check(d.acao == regra.MANTER
+            and regra.finalizar(d, regra.SEM_VINCULO).destino_efetivo == d.destino_hoje,
             "02.familia_sem_par_nao_muda_canal", str(d))
 
 
@@ -589,8 +635,9 @@ def test_03_caso_real_2810(r):
         r.check((f["msg"], f["acao"], f["post"], f["motivo"]) ==
                 (18042, "JUNTA", pa, "mesma_pagina_de_resgate:compativel"),
                 "03.fada_junta_no_post_da_promotom", cap.linhas[0])
-        r.check((f["hoje"], f["previsto"]) == ("principal", "principal+cupons"),
-                "03.fada_iria_aos_dois_canais", cap.linhas[0])
+        r.check((f["hoje"], f["elegivel"], f["copia"], f["efetivo"]) ==
+                ("principal", "principal+cupons", "vinculada", "principal+cupons"),
+                "03.fada_iria_aos_dois_canais_pela_copia_vinculada", cap.linhas[0])
         r.check("hoje=post_novo" in cap.linhas[0] and "Δ=0." in cap.linhas[0],
                 "03.fada_hoje_post_novo_delta", cap.linhas[0])
         r.check(f"ident_atual=['shopee|url|{PAGINA}']" in cap.linhas[0]
@@ -605,6 +652,8 @@ def test_03_caso_real_2810(r):
         r.check((s["msg"], s["acao"], s["post"], s["motivo"], s["outros"]) ==
                 (123470, "MANTER", pf, "ja_no_mesmo_post", [pa]),
                 "03.samuel_segue_o_dedup_e_registra_o_risco", cap.linhas[1])
+        r.check((s["hoje"], s["copia"], s["efetivo"]) == ("principal", "sem_vinculo", "principal"),
+                "03.samuel_post_da_fada_sem_copia_nao_presume_criacao", cap.linhas[1])
     # nada de texto nem link publicado na linha
     r.check(not any(PUB_PAGINA in x or "Resgate" in x for x in cap.linhas),
             "03.linha_sem_texto_nem_link_publicado", "\n".join(cap.linhas))
@@ -624,7 +673,8 @@ def test_03b_1710_vip(r):
             f"{pa} {pf} {db_ofertas_de_post(pf)} {noite.cli.cupons()}")
     # a página como link principal dos dois lados é a prova que faltava
     r.check(len(linhas) == 1 and linhas[0]["acao"] == "JUNTA" and linhas[0]["post"] == pa
-            and (linhas[0]["hoje"], linhas[0]["previsto"]) == ("principal+cupons", "principal+cupons"),
+            and (linhas[0]["hoje"], linhas[0]["copia"], linhas[0]["efetivo"]) ==
+            ("principal+cupons", "vinculada", "principal+cupons"),
             "03b.vip_junta_no_post_da_promotom", "\n".join(cap.linhas))
     r.check("nome=(vip|-)" in (cap.linhas or [""])[0], "03b.nome_de_um_lado_so", str(cap.linhas))
 
@@ -846,8 +896,9 @@ def test_09_canais_separados(r):
     noite, cap = cenario(so_fada)
     pf = noite.post(FADA, 18042)
     linhas = [_ler(x) for x in cap.linhas]
-    r.check(len(linhas) == 1 and (linhas[0]["acao"], linhas[0]["hoje"], linhas[0]["previsto"]) ==
-            ("MANTER", "principal", "principal+cupons"),
+    r.check(len(linhas) == 1 and (linhas[0]["acao"], linhas[0]["hoje"], linhas[0]["elegivel"],
+                                  linhas[0]["copia"], linhas[0]["efetivo"]) ==
+            ("MANTER", "principal", "principal+cupons", "nova", "principal+cupons"),
             "09.evento_na_pagina_elegivel_sem_cupom_no_titulo", "\n".join(cap.linhas))
     r.check(noite.cli.cupons() == [] and not db_espelho_get(pf), "09.hoje_nao_vai_ao_canal_de_cupons",
             str(noite.cli.cupons()))
@@ -978,7 +1029,8 @@ def test_12_falha_de_leitura_vira_indeterminado(r):
     # os posts vivos
     esperado = {"vivos": [112024, 18042, 123470], "post": [18042, 123470],
                 "exibida": [18042, 123470], "ofertas": [18042, 123470],
-                "origens": [18042, 123470], "familia": [123470]}
+                "origens": [18042, 123470], "espelho_familia": [123470],
+                "espelho_post": [18042]}
     niveis = []
 
     class _Nivel(logging.Handler):
@@ -1000,8 +1052,9 @@ def test_12_falha_de_leitura_vira_indeterminado(r):
                 r.check(not cap.erros, f"{tag}.sem_erro_inesperado", str(cap.erros))
                 r.check(ind == msgs and all(
                     linhas[m][0]["motivo"] == f"erro_leitura:{etapa}:{classe}"
-                    and (linhas[m][0]["hoje"], linhas[m][0]["previsto"]) ==
-                    ("indeterminado", "indeterminado") for m in ind),
+                    and (linhas[m][0]["hoje"], linhas[m][0]["elegivel"], linhas[m][0]["copia"],
+                         linhas[m][0]["efetivo"]) ==
+                    ("indeterminado", "indeterminado", "nao_lida", "indeterminado") for m in ind),
                     f"{tag}.quem_dependia_da_leitura_sai_indeterminado", "\n".join(cap.linhas))
                 # quem não dependia dela decide igual a uma noite sem falha
                 r.check(all(linhas[m][1] == normal[m] for m in linhas if m not in msgs)
@@ -1060,6 +1113,129 @@ def test_13_leitura_estrita_opt_in(r):
                 str(o["padrao"]))
         r.check(o["estrito"] == "OperationalError", f"13.{nome}.estrito_levanta", str(o["estrito"]))
     r.check(out["prefixo_vazio"] == [], "13.prefixo_vazio_nao_consulta")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 14 — só a CÓPIA apagada à mão: AUSENTE preservado, sombra explícita
+# ══════════════════════════════════════════════════════════════════
+# SINTÉTICO (marcado): a edição da Promotom só existe para o worker descobrir,
+# pelo caminho real, a cópia que o dono apagou (MESSAGE_ID_INVALID → leitura
+# confirma → AUSENTE). Os textos são os reais de 28/10.
+P_112024_EDITADO = P_112024 + "\n\nVálido até 23:59"
+
+
+def _copia_apagada(descobrir=True, ler_falha=False):
+    out = {}
+
+    async def corpo(noite):
+        await noite.chega(PROMOTOM, 112024, P_112024)
+        pa = noite.post(PROMOTOM, 112024)
+        copia = db_espelho_get(pa)
+        noite.cli.apagar_a_mao(CANAL_CUPONS, copia)
+        out.update(pa=pa, copia=copia, vinculo_antes=db_espelho_get(pa))
+        if descobrir:
+            await noite.edita(PROMOTOM, 112024, P_112024_EDITADO)
+        out["vinculo_meio"] = db_espelho_get(pa)
+        out["motivos_meio"] = list(T.MOTIVOS)
+        n = len(noite.cli.chamadas)
+        if ler_falha:
+            with _falha_na_leitura("espelho_post"):
+                await noite.chega(FADA, 18042, F_18042)
+        else:
+            await noite.chega(FADA, 18042, F_18042)
+        out["depois"] = noite.cli.chamadas[n:]
+        out["vinculo_fim"] = db_espelho_get(pa)
+    noite, cap = cenario(corpo)
+    return noite, cap, out
+
+
+def test_14_copia_apagada_a_mao_fica_ausente(r):
+    """Post elegível vivo no principal; o dono apaga SÓ a cópia no canal de
+    cupons; o worker descobre (AUSENTE); a Fada traz a mesma página."""
+    noite, cap, out = _copia_apagada()
+    pa, copia = out["pa"], out["copia"]
+    r.check(copia and out["vinculo_antes"] == copia, "14.antes_de_descobrir_o_banco_nao_sabe",
+            str(out))
+    r.check("SINCRONIZACAO" in out["motivos_meio"] and out["vinculo_meio"] == 0,
+            "14.edicao_da_fonte_descobre_e_marca_ausente", str(out))
+    r.check(noite.cli.cupons() == [] and pa in noite.cli.principal(),
+            "14.principal_vivo_copia_fora_do_ar", f"{noite.cli.principal()} {noite.cli.cupons()}")
+    linhas = [_ler(x) for x in cap.linhas]
+    fada = [x for x in linhas if x["msg"] == 18042]
+    r.check(len(fada) == 1 and (fada[0]["acao"], fada[0]["post"], fada[0]["copia"],
+                                fada[0]["elegivel"], fada[0]["efetivo"]) ==
+            ("JUNTA", pa, "ausente", "principal+cupons", "principal"),
+            "14.sombra_registra_ausente_e_destino_efetivo_principal", "\n".join(cap.linhas))
+    r.check(not any("destino_efetivo=principal+cupons" in x for x in cap.linhas if "18042)" in x),
+            "14.nunca_afirma_que_a_copia_volta", "\n".join(cap.linhas))
+    r.check("aprovacao=pendente" in (cap.linhas or [""])[0], "14.continua_pendente", str(cap.linhas))
+    r.check(out["vinculo_fim"] == 0, "14.ausente_preservado_depois_da_fada", str(out))
+    r.check(not [c for c in out["depois"] if c[1] == CANAL_CUPONS and c[0] in ("send", "edit", "delete")],
+            "14.nada_vai_ao_canal_de_cupons", str(out["depois"]))
+
+    # a sombra não muda NADA neste cenário (envio, edição, exclusão, leitura
+    # no Telegram, banco e decisões de hoje)
+    real = sombra.registrar
+    sombra.registrar = lambda *a, **k: None
+    try:
+        noite_off, _cap_off, out_off = _copia_apagada()
+        banco_off = _banco()
+    finally:
+        sombra.registrar = real
+    noite_on, _cap_on, _out_on = _copia_apagada()
+    r.check(noite_on.cli.chamadas == noite_off.cli.chamadas, "14.mesmas_chamadas_ao_telegram",
+            f"{len(noite_on.cli.chamadas)} × {len(noite_off.cli.chamadas)}")
+    r.check(_banco() == banco_off and out_off["vinculo_fim"] == 0, "14.mesmo_banco")
+
+    # apagada mas AINDA NÃO descoberta: o banco só sabe do vínculo — a sombra
+    # diz "vinculada" (presença não conferida) e não consulta o Telegram
+    noite, cap, out = _copia_apagada(descobrir=False)
+    fada = [_ler(x) for x in cap.linhas if "18042)" in x]
+    r.check(len(fada) == 1 and fada[0]["copia"] == "vinculada" and out["vinculo_fim"] == out["copia"],
+            "14.nao_descoberta_aparece_como_vinculada", "\n".join(cap.linhas))
+    real = sombra.registrar
+    sombra.registrar = lambda *a, **k: None
+    try:
+        noite_off, _c, _o = _copia_apagada(descobrir=False)
+    finally:
+        sombra.registrar = real
+    r.check(noite.cli.chamadas == noite_off.cli.chamadas, "14.sombra_nao_consulta_o_telegram",
+            f"{[c for c in noite.cli.chamadas if c[0] == 'get']}")
+
+    # leitura do vínculo que falha: INDETERMINADO, nunca "sem vínculo"
+    noite, cap, out = _copia_apagada(ler_falha=True)
+    fada = [_ler(x) for x in cap.linhas if "18042)" in x]
+    r.check(len(fada) == 1 and (fada[0]["acao"], fada[0]["motivo"], fada[0]["copia"], fada[0]["efetivo"]) ==
+            ("INDETERMINADO", "erro_leitura:espelho_post:OperationalError", "nao_lida", "indeterminado"),
+            "14.leitura_do_espelho_falha_indeterminado", "\n".join(cap.linhas))
+    r.check(out["vinculo_fim"] == 0, "14.falha_de_leitura_nao_mexe_no_ausente", str(out))
+
+    # família de hoje com a cópia AUSENTE (22/10, textos reais): o dono
+    # apaga a cópia do post da Promotom; a EVOLUI da Fada descobre (AUSENTE);
+    # o Samuel (HIPÓTESE: o link dele é a página, como no teste 05) fica no
+    # mesmo post — MANTER, mas a linha sai para registrar copia=ausente
+    hip = dict(RESOLUCAO)
+    hip["https://s.shopee.com.br/60SYicbJh9"] = (PUB_PAGINA, PAGINA, "HIPÓTESE do teste")
+    out = {}
+
+    async def corpo(noite):
+        await noite.chega(PROMOTOM, 111784, P_111784)
+        pa = noite.post(PROMOTOM, 111784)
+        noite.cli.apagar_a_mao(CANAL_CUPONS, db_espelho_get(pa))
+        noite.recuar(36)
+        await noite.chega(FADA, 17953, F_17953)
+        out["vinculo_meio"] = db_espelho_get(pa)
+        noite.recuar(8)
+        await noite.chega(SAMUEL, 122635, S_122635)
+        out.update(pa=pa, vinculo_fim=db_espelho_get(pa), cupons=noite.cli.cupons())
+    noite, cap = cenario(corpo, resolucao=hip)
+    sam = [_ler(x) for x in cap.linhas if "122635)" in x]
+    r.check(out["vinculo_meio"] == 0 and out["vinculo_fim"] == 0 and out["cupons"] == [],
+            "14.evolui_da_fada_descobre_ausente_e_nada_volta", str(out))
+    r.check(len(sam) == 1 and (sam[0]["acao"], sam[0]["post"], sam[0]["motivo"], sam[0]["hoje"],
+                               sam[0]["copia"], sam[0]["efetivo"]) ==
+            ("MANTER", out["pa"], "ja_no_mesmo_post", "principal", "ausente", "principal"),
+            "14.familia_com_copia_ausente_registrada", "\n".join(cap.linhas))
 
 
 if __name__ == "__main__":

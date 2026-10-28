@@ -13,19 +13,29 @@ código, sob os mesmos locks (ORIGEM → IDENTIDADE), só para mensagem nova.
 Custo: nada para quem tem âncora forte ou não leva a uma página de resgate
 declarada (a imensa maioria); o resto lê os posts vivos da plataforma.
 
-LEITURA ESTRITA: toda leitura do estado usa estrito=True (database_posts):
-a falha levanta em vez de virar lista vazia ou None. Estado que não pôde
-ser lido INTEIRO (falha, ou post da lista de vivos que some na leitura
-seguinte) dá acao=INDETERMINADO motivo=erro_leitura:<etapa>:<Classe> —
-nunca MANTER, JUNTA ou INCERTO como se o estado estivesse completo.
+LEITURA ESTRITA: toda leitura do estado usa estrito=True (database_posts e
+database_espelho — esta, do #33): a falha levanta em vez de virar lista
+vazia ou None. Estado que não pôde ser lido INTEIRO (falha, ou post da
+lista de vivos que some na leitura seguinte) dá acao=INDETERMINADO
+motivo=erro_leitura:<etapa>:<Classe> — nunca MANTER, JUNTA ou INCERTO como
+se o estado estivesse completo.
 
-LINHA (só quando a regra junta, duvida, mudaria o canal, vê outro post com
-a mesma página ou não consegue ler; ids, chaves, página canônica, nomes e
-benefícios — nada de texto nem link publicado):
+ESTADO DA CÓPIA (separado da elegibilidade — ver pipeline.campanha_resgate):
+lido do vínculo do espelho (espelho_post), só para o post que importa: a
+família de hoje (etapa espelho_familia) e o alvo da junção (espelho_post).
+Vínculo AUSENTE (o dono apagou a cópia): o destino efetivo fica
+"principal" — a sombra nunca afirma que a cópia volta. Vínculo presente:
+"vinculada", sem conferir no Telegram se a mensagem ainda existe (a sombra
+não faz I/O; o worker só descobre a cópia apagada à mão ao editá-la).
+
+LINHA (só quando a regra junta, duvida, mudaria o destino efetivo, vê outro
+post com a mesma página, acha a cópia AUSENTE ou não consegue ler; ids,
+chaves, página canônica, nomes e benefícios — nada de texto nem link
+publicado):
   🎟 [RESGATE_SOMBRA] msg=(chat,id) acao= post: motivo= Δ= pagina=
      hoje=post:<id>|post_novo ident_atual=[…] ident_proposta=[…]
-     destino_hoje= destino_previsto= prova= aprovacao=pendente|-
-     nome=(cand|post) beneficio=(cand|post)
+     destino_hoje= destino_elegivel= copia= destino_efetivo=
+     prova= aprovacao=pendente|- nome=(cand|post) beneficio=(cand|post)
      outros=[posts que também têm a página como destino principal]
 """
 from __future__ import annotations
@@ -35,12 +45,14 @@ import time
 from typing import Optional
 
 import config
-from database import (db_exibida, db_get_post, db_ofertas_de_post,
-                      db_origens_do_post, db_posts_vivos_com_prefixo)
+from database import (db_espelho_get, db_exibida, db_get_post,
+                      db_ofertas_de_post, db_origens_do_post,
+                      db_posts_vivos_com_prefixo)
 from logger import log_out
 from plataformas import registry
 from pipeline import campanha_resgate as regra
 from pipeline import cupom_lancamento
+from pipeline.espelho_cupons import _AUSENTE    # o valor do vínculo AUSENTE
 from pipeline.ingestao import links_de
 from pipeline.resolucao_identidade import eh_identidade_cupom
 from pipeline.vida_oferta import VIDA_OFERTA_S
@@ -81,9 +93,13 @@ def _publicada_da_ancora(norm) -> str:
     return next(iter((getattr(norm, "mapa", None) or {}).values()), "")
 
 
-def _vai_aos_cupons(mid: int, etapa: str) -> bool:
-    """O roteamento de hoje para o post (espelho_cupons: âncoras exibidas)."""
-    return eh_identidade_cupom(_ler(etapa, db_exibida, mid))
+def _estado_copia(mid: int, etapa: str) -> str:
+    """Estado da cópia do post `mid` no canal de cupons, pelo vínculo
+    (leitura estrita: erro de consulta NUNCA vira "sem vínculo")."""
+    esp = _ler(etapa, db_espelho_get, mid)
+    if esp is None:
+        return regra.SEM_VINCULO
+    return regra.AUSENTE if esp == _AUSENTE else regra.VINCULADA
 
 
 def _vivos(plat: str) -> list:
@@ -97,15 +113,14 @@ def _vivos(plat: str) -> list:
         est = _ler("post", db_get_post, mid)
         if not est:             # estava na lista de vivos: a leitura ficou incompleta
             raise LeituraFalhou("post", "Ausente")
-        exibida = _ler("exibida", db_exibida, mid)
         vivos.append(regra.PostVivo(
             msg_id=mid, plat=est.get("plat") or plat,
-            chaves=frozenset(exibida) | frozenset(_ler("ofertas", db_ofertas_de_post, mid)),
+            chaves=(frozenset(_ler("exibida", db_exibida, mid))
+                    | frozenset(_ler("ofertas", db_ofertas_de_post, mid))),
             primeiro_link=next(iter(links_de(est.get("texto") or "")), ""),
             perfil=cupom_lancamento.perfil(est.get("texto") or "", plat),
             nascimento=float(est.get("janela_fim") or 0.0) - VIDA_OFERTA_S,
-            fontes=frozenset(str(o) for o, _m in _ler("origens", db_origens_do_post, mid)),
-            vai_aos_cupons=eh_identidade_cupom(exibida)))
+            fontes=frozenset(str(o) for o, _m in _ler("origens", db_origens_do_post, mid))))
     return vivos
 
 
@@ -127,18 +142,28 @@ def avaliar(norm, ofertas, familia_hoje: Optional[int],
                 pagina=pagina, publicada=_publicada_da_ancora(norm),
                 perfil=cupom_lancamento.perfil(getattr(norm, "texto_analise", "") or "", plat),
                 familia_hoje=familia_hoje)
+    vivos, d = [], None
     try:
-        cupons_hoje = (_vai_aos_cupons(familia_hoje, "familia") if familia_hoje is not None
-                       else eh_identidade_cupom(chaves))
+        if familia_hoje is not None:
+            copia_familia = _estado_copia(familia_hoje, "espelho_familia")
+            cupons_hoje = copia_familia == regra.VINCULADA
+        else:                       # post novo: o roteamento de hoje decide
+            copia_familia = regra.NOVA
+            cupons_hoje = eh_identidade_cupom(chaves)
         c = regra.Candidato(cupons_hoje=cupons_hoje, **base)
         vivos = _vivos(plat)
+        d = regra.avaliar(c, vivos, agora, float(config.CUPOM_LIMITE_SUPERIOR_S))
+        # a cópia do post que a campanha usaria: o alvo da junção, ou a
+        # família de hoje / o post novo (nada muda de post)
+        copia = (_estado_copia(d.post, "espelho_post") if d.acao == regra.JUNTA
+                 else copia_familia)
     except LeituraFalhou as f:
         c = regra.Candidato(cupons_hoje=False, **base)
-        return c, [], regra.Decisao(regra.INDETERMINADO, None,
-                                    f"erro_leitura:{f.etapa}:{f.classe}", None,
-                                    "indeterminado", "indeterminado")
-    return c, vivos, regra.avaliar(c, vivos, agora,
-                                   float(config.CUPOM_LIMITE_SUPERIOR_S))
+        return c, vivos, regra.Decisao(
+            regra.INDETERMINADO, d.post if d is not None else None,
+            f"erro_leitura:{f.etapa}:{f.classe}", None, "indeterminado",
+            "indeterminado", copia="nao_lida", destino_efetivo="indeterminado")
+    return c, vivos, regra.finalizar(d, copia)
 
 
 def _par(a, b) -> str:
@@ -158,8 +183,8 @@ def registrar(norm, ofertas, familia_hoje: Optional[int],
         if r is None:
             return None
         c, vivos, d = r
-        if (d.acao == regra.MANTER and d.destino_previsto == d.destino_hoje
-                and not d.outros):
+        if (d.acao == regra.MANTER and d.destino_efetivo == d.destino_hoje
+                and not d.outros and d.copia != regra.AUSENTE):
             return None
         p = next((v for v in vivos if v.msg_id == d.post), None)
         delta = f"{d.delta_s / 60:.1f}min" if d.delta_s is not None else "-"
@@ -171,7 +196,8 @@ def registrar(norm, ofertas, familia_hoje: Optional[int],
             f" acao={d.acao} post:{d.post if d.post is not None else '-'}"
             f" motivo={d.motivo} Δ={delta} pagina={c.pagina} hoje={hoje}"
             f" ident_atual={sorted(c.chaves)} ident_proposta={proposta}"
-            f" destino_hoje={d.destino_hoje} destino_previsto={d.destino_previsto}"
+            f" destino_hoje={d.destino_hoje} destino_elegivel={d.destino_elegivel}"
+            f" copia={d.copia} destino_efetivo={d.destino_efetivo}"
             f" prova={d.prova} aprovacao={'pendente' if d.pendente else '-'}"
             f" nome={_par(c.perfil.nome, p.perfil.nome if p else '')}"
             f" beneficio={_par(_beneficio(c.perfil), _beneficio(p.perfil) if p else '')}"

@@ -72,12 +72,24 @@ ausente ou incomparável de um lado — onde a regra de cupom de hoje fica em
 INCERTO) sai com `pendente=True`. Só "igual" (o mesmo benefício explícito)
 não é pendente. Ativar as pendentes exige aprovação separada do dono.
 
-CANAL DE CUPONS (separado da natureza): o post que leva a uma página
-reconhecida de resgate de cupons é elegível ao canal de cupons mesmo quando
-o título não diz "cupom" (natureza evento). Junção: vale o canal do post
-(a política de roteamento de hoje, eh_identidade_cupom das âncoras
-exibidas). Elegível ao CANAL não quer dizer cupom elegível à conta de
-afiliado do dono (CLAUDE.md §9.1).
+CANAL DE CUPONS — ELEGIBILIDADE × ESTADO DA CÓPIA (separados):
+  · destino_elegivel: a POLÍTICA proposta — o post cujo link principal é a
+    página reconhecida de resgate de cupons é elegível ao canal de cupons
+    mesmo quando o título não diz "cupom" (natureza evento). Elegível ao
+    CANAL não quer dizer cupom elegível à conta de afiliado do dono
+    (CLAUDE.md §9.1);
+  · copia: o ESTADO da cópia do post que a campanha usaria — "nova" (post
+    novo: a publicação cria a cópia), "vinculada" (há vínculo no banco; a
+    presença no canal NÃO é conferida — o worker só descobre uma cópia
+    apagada à mão quando a edita), "ausente" (o dono apagou a cópia e a
+    leitura confirmou: espelho_cupons nunca a recria) ou "sem_vinculo";
+  · destino_efetivo: o que as regras do espelho de hoje DEIXAM acontecer —
+    elegível + nova/vinculada → principal+cupons; elegível + ausente →
+    principal (exclusão manual preservada); elegível + sem_vinculo →
+    principal (não se presume criação); não elegível → principal.
+O estado da cópia é lido pelo adaptador, com leitura estrita, só para o post
+que importa (família de hoje ou alvo da junção); a regra só combina
+(finalizar).
 
 INDETERMINADO não sai daqui: é do adaptador, quando uma LEITURA do estado
 falha (a regra nunca decide sobre estado incompleto).
@@ -92,13 +104,16 @@ from typing import Iterable, Optional
 from pipeline import cupom_lancamento
 from pipeline.resolucao_identidade import eh_chave_forte
 
-__all__ = ["Candidato", "PostVivo", "Decisao", "avaliar", "sem_ancora_forte",
-           "chave_resgate", "MANTER", "JUNTA", "INCERTO", "INDETERMINADO",
-           "PRINCIPAL", "PRINCIPAL_E_CUPONS"]
+__all__ = ["Candidato", "PostVivo", "Decisao", "avaliar", "finalizar",
+           "destino_efetivo", "sem_ancora_forte", "chave_resgate", "MANTER",
+           "JUNTA", "INCERTO", "INDETERMINADO", "PRINCIPAL", "PRINCIPAL_E_CUPONS",
+           "NOVA", "VINCULADA", "AUSENTE", "SEM_VINCULO"]
 
 MANTER, JUNTA, INCERTO = "MANTER", "JUNTA", "INCERTO"
 INDETERMINADO = "INDETERMINADO"           # do adaptador: leitura do estado falhou
 PRINCIPAL, PRINCIPAL_E_CUPONS = "principal", "principal+cupons"
+# estado da cópia do post no canal de cupons
+NOVA, VINCULADA, AUSENTE, SEM_VINCULO = "nova", "vinculada", "ausente", "sem_vinculo"
 
 
 def sem_ancora_forte(chaves: Iterable[str]) -> bool:
@@ -123,7 +138,7 @@ class Candidato:
     publicada: str            # link publicado dessa página ("" = sem)
     perfil: cupom_lancamento.Perfil
     familia_hoje: Optional[int]
-    cupons_hoje: bool         # o post de hoje vai ao canal de cupons?
+    cupons_hoje: bool         # hoje a mensagem fica também no canal de cupons?
 
 
 @dataclass(frozen=True)
@@ -135,7 +150,6 @@ class PostVivo:
     perfil: cupom_lancamento.Perfil
     nascimento: float
     fontes: frozenset
-    vai_aos_cupons: bool      # roteamento de hoje (âncoras exibidas)
 
 
 @dataclass(frozen=True)
@@ -144,15 +158,34 @@ class Decisao:
     post: Optional[int]
     motivo: str
     delta_s: Optional[float]
-    destino_hoje: str
-    destino_previsto: str
+    destino_hoje: str         # efetivo hoje (com o estado da cópia da família)
+    destino_elegivel: str     # pela política proposta (página declarada)
     outros: tuple = ()        # posts que também têm a página como principal
     pendente: bool = False    # JUNTA só "compatível": exige aprovação separada
     prova: str = "-"          # canonica_persistida | so_link_publicado
+    copia: str = "-"          # nova | vinculada | ausente | sem_vinculo (finalizar)
+    destino_efetivo: str = "-"   # o que o espelho deixa acontecer (finalizar)
 
 
 def _destino(cupons: bool) -> str:
     return PRINCIPAL_E_CUPONS if cupons else PRINCIPAL
+
+
+def destino_efetivo(elegivel: str, copia: str) -> str:
+    """O destino que as regras do espelho de hoje deixam acontecer: cópia
+    AUSENTE nunca volta (exclusão manual do dono); sem vínculo, não se
+    presume que uma cópia será criada; só o post NOVO elegível nasce com
+    cópia."""
+    if elegivel == PRINCIPAL_E_CUPONS and copia in (NOVA, VINCULADA):
+        return PRINCIPAL_E_CUPONS
+    return PRINCIPAL
+
+
+def finalizar(d: Decisao, copia: str) -> Decisao:
+    """A decisão com o estado da cópia do post que a campanha usaria."""
+    return Decisao(d.acao, d.post, d.motivo, d.delta_s, d.destino_hoje,
+                   d.destino_elegivel, d.outros, d.pendente, d.prova, copia,
+                   destino_efetivo(d.destino_elegivel, copia))
 
 
 def _prova(c: Candidato, p: PostVivo) -> str:
@@ -170,7 +203,10 @@ def avaliar(c: Candidato, vivos: list, agora: float, superior_s: float) -> Decis
         return Decisao(MANTER, None, "fora:ancora_forte", None, hoje, hoje)
     if not c.pagina or not c.publicada:
         return Decisao(MANTER, None, "fora:sem_pagina_de_resgate", None, hoje, hoje)
-    previsto_novo = PRINCIPAL_E_CUPONS          # página de resgate de cupons
+    # política proposta: a página de resgate de cupons como link principal
+    # torna a campanha elegível ao canal de cupons (o estado da cópia vem
+    # depois, em finalizar)
+    elegivel = PRINCIPAL_E_CUPONS
     exibem = [p for p in vivos
               if p.plat == c.plat and sem_ancora_forte(p.chaves)
               and p.primeiro_link == c.publicada]
@@ -179,14 +215,14 @@ def avaliar(c: Candidato, vivos: list, agora: float, superior_s: float) -> Decis
         outros = tuple(p.msg_id for p in exibem if p.msg_id != c.familia_hoje)
         if fam is not None:
             return Decisao(MANTER, fam.msg_id, "ja_no_mesmo_post",
-                           agora - fam.nascimento, hoje, hoje, outros,
+                           agora - fam.nascimento, hoje, elegivel, outros,
                            prova=_prova(c, fam))
         if outros:
             return Decisao(INCERTO, outros[0], "familia_de_hoje_diferente", None,
-                           hoje, hoje, outros)
-        return Decisao(MANTER, None, "sem_par", None, hoje, hoje)
+                           hoje, elegivel, outros)
+        return Decisao(MANTER, None, "sem_par", None, hoje, elegivel)
     if not exibem:
-        return Decisao(MANTER, None, "sem_par", None, hoje, previsto_novo)
+        return Decisao(MANTER, None, "sem_par", None, hoje, elegivel)
     validos, motivos = [], []
     for p in exibem:
         delta = agora - p.nascimento
@@ -204,10 +240,10 @@ def avaliar(c: Candidato, vivos: list, agora: float, superior_s: float) -> Decis
     if len(validos) == 1:
         rel, p, delta = validos[0]
         return Decisao(JUNTA, p.msg_id, f"mesma_pagina_de_resgate:{rel}", delta,
-                       hoje, _destino(p.vai_aos_cupons), todos,
+                       hoje, elegivel, todos,
                        pendente=(rel != "igual"), prova=_prova(c, p))
     if len(validos) > 1:
         return Decisao(INCERTO, validos[0][1].msg_id, "ambiguo", None,
-                       hoje, previsto_novo, todos)
+                       hoje, elegivel, todos)
     motivo, p, delta = motivos[0]
-    return Decisao(INCERTO, p.msg_id, motivo, delta, hoje, previsto_novo, todos)
+    return Decisao(INCERTO, p.msg_id, motivo, delta, hoje, elegivel, todos)
