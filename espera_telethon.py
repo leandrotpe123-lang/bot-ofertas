@@ -14,11 +14,14 @@ sendo o único destino dos registros do Telethon (WARNING+ saem exatamente
 como antes; INFO continua não impresso) e a sonda S6.1, quando ligada,
 recebe tudo igual.
 
-    ⏳ [ESPERA_TELETHON] req=SendMediaRequest seg=10 antecipada=nao
+    ⏳ [ESPERA_TELETHON] req=EditMessageRequest seg=10 antecipada=nao cid=31658.12 destino=cupons op=upgrade_midia
 
-Só o nome da classe da requisição, os segundos e se foi a espera
-antecipada (requisição do mesmo tipo dentro do prazo de outra). Nunca
-argumento, texto, URL, destino ou corpo de resposta.
+Só o nome da classe da requisição, os segundos, se foi a espera
+antecipada (requisição do mesmo tipo dentro do prazo de outra) e QUEM
+esperou: a edição medida em curso na task que fez a requisição
+(medicao_edicao — o cid casa com a linha ⏱ [EDICAO_MS]), ou cid=- quando
+não há edição medida naquela task. Nunca argumento, texto, URL, nome do
+canal ou corpo de resposta.
 
 Reverter: remover a chamada `espera_telethon.instalar()` em main.py.
 """
@@ -26,6 +29,7 @@ from __future__ import annotations
 
 import logging
 
+import medicao_edicao
 from logger import log_sys
 
 __all__ = ["instalar"]
@@ -41,9 +45,11 @@ class _Espera(logging.Filter):
         try:
             if record.msg == _MODELO and len(record.args) >= 4:
                 antecipada, seg, _duracao, req = record.args[:4]
+                quem = medicao_edicao.atual()
                 log_sys.warning(
                     f"⏳ [ESPERA_TELETHON] req={req} seg={int(seg)} "
-                    f"antecipada={'sim' if str(antecipada).strip() else 'nao'}")
+                    f"antecipada={'sim' if str(antecipada).strip() else 'nao'} "
+                    f"{quem.rotulo() if quem is not None else 'cid=-'}")
         except Exception:                                  # noqa: BLE001
             pass                    # diagnóstico nunca derruba o envio
         return True                 # o registro segue intacto

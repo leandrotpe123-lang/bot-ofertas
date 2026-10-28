@@ -44,7 +44,7 @@ CONTRATO DE AQUISIÇÃO — uma operação de saída, UMA aquisição:
       _substituir_inner_no_sem
 
   [Cupons] pipeline.espelho_cupons é a ÚNICA outra fronteira: o seu
-  _io (e o upload único de preparar_arquivo) adquire UMA vez e chama
+  _io adquire UMA vez e chama
   _enviar_msg_no_sem / _editar_inner_no_sem com destino= o canal de
   cupons — mesma regra, nunca aninhada, nunca de dentro de uma pública.
 
@@ -62,6 +62,7 @@ from telethon.errors import (FloodWaitError, MessageIdInvalidError,
                              MessageNotModifiedError)
 
 import config
+import medicao_edicao
 from config import GRUPO_DESTINO
 from logger import log_out
 from pipeline import apagados_pelo_worker
@@ -276,8 +277,10 @@ async def editar_msg(msg_id_dest: int, texto_novo: str,
     semáforo limita o I/O e o retry/FloodWait daquela operação).
 
     Assinatura idêntica à de _editar_inner_no_sem: esta função só
-    acrescenta a aquisição, não interpreta nem altera parâmetro algum."""
+    acrescenta a aquisição, não interpreta nem altera parâmetro algum.
+    A vaga saiu: fim da fila da edição medida em curso (medicao_edicao)."""
     async with config._SEM_ENVIO:
+        medicao_edicao.comecou()
         return await _editar_inner_no_sem(
             msg_id_dest, texto_novo, imagem_nova,
             exigir_imagem=exigir_imagem, trocar_midia=trocar_midia
@@ -294,12 +297,13 @@ async def editar_por_id(msg_id_dest: int, texto_novo: str,
         )
 
 
-def _exclusao_provada(resultado) -> bool:
+def exclusao_provada(resultado) -> bool:
     """[Frente M] Telethon 1.45.0, canal: delete_messages devolve
     [AffectedMessages] (um por bloco de 100); pts_count = quantas o Telegram
     apagou DE FATO. Só pts_count > 0 prova a exclusão. 0 (a mensagem já não
     existia: o dono apagou), lista vazia ou formato desconhecido não provam
-    nada."""
+    nada. Regra ÚNICA de prova de exclusão: a substituição do principal e o
+    canal de cupons (pipeline.espelho_cupons) usam esta."""
     if not isinstance(resultado, (list, tuple)) or not resultado:
         return False
     total = 0
@@ -361,7 +365,7 @@ async def _substituir_inner_no_sem(
         # [Frente M] Reenvio só com a exclusão PROVADA. pts_count 0 = a
         # mensagem já não existia (o dono apagou): reenviar ressuscitaria
         # o post apagado.
-        if not _exclusao_provada(apagou):
+        if not exclusao_provada(apagou):
             return _abortar_substituicao(
                 msg_id_dest_antigo,
                 f"exclusão sem prova (retorno {type(apagou).__name__})")
