@@ -67,6 +67,20 @@ _HOSTS_CONTAINER = frozenset({
     "live.shopee.com.br",
 })
 
+# ── Páginas de RESGATE DE CUPONS (canônicas, como limpa_url as deixa) ─
+# "Resgate todos os cupons aqui": a página que lista os cupons do momento.
+# Casos reais (28/10/2026 00:00 BRT): Promotom 112024 "Cupons Shopee"
+# (link 1), Fada 18042 e Samuel 123470 "Começou! Esquenta 11.11 Shopee —
+# Resgate todos os cupons aqui" — os três aqui (log: identidade
+# `shopee|url|https://shopee.com.br/m/cupom-de-desconto`; post 31945 e post
+# 30602 publicam o mesmo s.shopee.com.br/AAHdNLxGSX). A Shopee dá UM link
+# publicado por destino (cache por destino em afiliacao.afilia), condição
+# do contrato desta capacidade. Carteira (/user/voucher-wallet) e carrinho
+# NÃO entram: levam a qualquer cupom com código, de qualquer campanha.
+_PAGINAS_RESGATE = frozenset({
+    "https://shopee.com.br/m/cupom-de-desconto",
+})
+
 # ── Definição da plataforma ───────────────────────────────────────
 PLATAFORMA = Plataforma(
     identificador=_IDENTIFICADOR,
@@ -79,6 +93,7 @@ PLATAFORMA = Plataforma(
     hosts_campanha=_HOSTS_CAMPANHA,
     sinais_cashback=_SINAIS_CASHBACK,
     hosts_container=_HOSTS_CONTAINER,
+    paginas_resgate=_PAGINAS_RESGATE,
     # Entrada de cache cuja canônica ainda é encurtador (expansão que
     # não aconteceu) não é servida: `afilia` refaz e sobrescreve.
     afiliacao_vigente=afiliacao_vigente,
