@@ -91,34 +91,49 @@ Com família já escolhida pelo pipeline, a regra **nunca troca de post**:
 A regra não faz chamada de rede nova: usa a normalização e o link publicado
 que já existem.
 
-**Canal de cupons: destino elegível pela política × estado efetivo da cópia.**
-São duas coisas diferentes, e a linha da sombra registra cada uma em separado.
+**Canal de cupons: quatro coisas separadas.** A linha da sombra registra cada
+uma em separado.
 
 - **`destino_elegivel`** — a **política proposta**. Um post cujo link
   principal é a página declarada é elegível ao canal de cupons, mesmo sem
   "cupom" no título. "Elegível ao canal" é roteamento; **não** significa que o
   cupom vale para a conta de afiliado do dono (o CLAUDE.md §9.1 segue sem
   implementação).
-- **`copia`** — o **estado** da cópia do post que a campanha usaria:
-  - `nova`: post novo; a publicação cria a cópia;
-  - `vinculada`: há vínculo no banco;
-  - `ausente`: o dono apagou a cópia e a leitura confirmou; o
-    `espelho_cupons` nunca a recria;
+- **`vinculo`** — o que o **banco** guarda em `espelho_post` para o post que a
+  campanha usaria:
+  - `nova`: post novo, ainda sem cópia;
+  - `presente`: há vínculo para uma mensagem;
+  - `ausente`: o worker marcou AUSENTE e nunca recria a cópia;
   - `sem_vinculo`;
-  - `nao_lida`: a leitura falhou, e o resultado é INDETERMINADO.
-- **`destino_efetivo`** — o que as regras do espelho de hoje **deixam**
-  acontecer:
-  - elegível + `nova` ou `vinculada` → principal + cupons;
-  - elegível + `ausente` → **principal** (a exclusão manual fica preservada);
-  - elegível + `sem_vinculo` → principal (não se presume criação);
-  - não elegível → principal.
+  - `nao_lido`: a leitura falhou, e o resultado é INDETERMINADO.
+- **`presenca`** — o que se **sabe** da cópia no Telegram:
+  - `nao_verificada`: há vínculo, mas a sombra não consulta o Telegram;
+  - `ausente_confirmada`: o AUSENTE só é gravado com a leitura por id
+    confirmando;
+  - `a_criar`: post novo;
+  - `-`: sem vínculo, nada rastreado.
+- **`destino_afirmavel`** — o destino que a **evidência sustenta**, e a
+  condicional quando não sustenta:
 
-**Limite declarado.** `vinculada` quer dizer "há vínculo", não "a mensagem
-existe". O worker só descobre que o dono apagou a cópia quando tenta editá-la
-(`espelho_cupons._editar`: MESSAGE_ID_INVALID mais a leitura por id que
-confirma → AUSENTE). Até lá, o banco diz `vinculada`. A sombra não consulta o
-Telegram (não faz I/O), então registra exatamente isso. Teste 14:
-"não descoberta aparece como vinculada".
+  | Situação | `destino_afirmavel` | `se_copia_no_ar` |
+  |---|---|---|
+  | elegível + `nova` | principal + cupons (é a publicação que envia aos dois) | `-` |
+  | elegível + `presente` | **principal** | `principal+cupons` (nunca como certeza) |
+  | elegível + `ausente` | principal (a exclusão manual fica preservada) | `-` |
+  | elegível + `sem_vinculo` | principal (não se presume criação) | `-` |
+  | não elegível | principal | `-` |
+
+**Por que `presente` não é certeza.** O vínculo diz que houve uma cópia, não
+que ela continua no ar. O worker só descobre que o dono apagou a cópia quando
+tenta editá-la (`espelho_cupons._editar`: MESSAGE_ID_INVALID mais a leitura
+por id que confirma → AUSENTE). Até lá, o banco guarda o vínculo. A sombra não
+consulta o Telegram, e nenhuma consulta de rede foi adicionada só para a
+observabilidade. Por isso registra `presenca=nao_verificada`, afirma só o
+principal e deixa o canal de cupons como condicional. Teste 15.
+
+O mesmo vale para o `destino_hoje` de uma família: sem consultar o Telegram,
+só o principal é afirmado, e o vínculo da família aparece em `vinculo` e
+`presenca`.
 
 **Dependência do #33 (declarada).** O estado da cópia é lido com
 `db_espelho_get(estrito=True)`, que vem do #33: uma falha de consulta nunca
@@ -132,18 +147,19 @@ a frente A.
   mensagem nova.
 - Só lê o estado e devolve sempre `None`. Erro inesperado vira uma linha
   `❌ [RESGATE_SOMBRA] <Classe>` e mais nada (nem o log do erro escapa).
-- O estado da cópia é lido (estrito) só para o post que importa: a família de
-  hoje (`espelho_familia`) e o alvo da junção (`espelho_post`).
+- O vínculo do espelho é lido (estrito) só para o post que importa: a família
+  de hoje (`espelho_familia`) e o alvo da junção (`espelho_post`).
 - Escreve uma linha só quando a regra junta, duvida, mudaria o destino
-  efetivo, vê outro post com a mesma página, acha a cópia `ausente` ou não
+  afirmável, vê outro post com a mesma página, acha o vínculo `ausente` ou não
   consegue ler o estado:
 
 ```
 🎟 [RESGATE_SOMBRA] msg=(chat,id) acao=JUNTA|MANTER|INCERTO|INDETERMINADO
    post:<id> motivo=… Δ=…min pagina=<canônica> hoje=post:<id>|post_novo
    ident_atual=[…] ident_proposta=[…, '<plat>|resgate|<página>']
-   destino_hoje=… destino_elegivel=… copia=nova|vinculada|ausente|sem_vinculo|nao_lida
-   destino_efetivo=… prova=canonica_persistida|so_link_publicado
+   destino_hoje=… destino_elegivel=… vinculo=nova|presente|ausente|sem_vinculo|nao_lido
+   presenca=nao_verificada|ausente_confirmada|a_criar|- destino_afirmavel=…
+   se_copia_no_ar=principal+cupons|- prova=canonica_persistida|so_link_publicado
    aprovacao=pendente|- nome=(cand|post) beneficio=(cand|post) outros=[…]
 ```
 
@@ -253,8 +269,8 @@ A canônica só é afirmada com prova: a identidade logada, ou o link publicado
 | # | Texto / origem (UTC) | Identidade hoje | Canal de cupons hoje | Post hoje | Decisão proposta | Justificativa | Teste |
 |---|---|---|---|---|---|---|---|
 | 1 | Promotom 112024 "Cupons Shopee", 28/10 02:59 | `cupb|geral` | sim | 31943 | MANTER (1º do lançamento) | página como 1º link, sem par vivo | 03 |
-| 2 | Fada 18042 "Começou! Esquenta 11.11", 03:00 | `url|…/m/cupom-de-desconto` | não | 31945 novo | **JUNTA no 31943**, elegível principal + cupons, `copia=vinculada` → efetivo principal + cupons, **pendente** (`so_link_publicado`) | mesma página como 1º link dos dois lados; Δ 0,7 min; fontes diferentes; nome só de um lado e nenhum benefício (compatível, não igual) | 03 |
-| 3 | Samuel 123470, 03:00:15 | `url|…` | não | DUP no 31945 | MANTER `ja_no_mesmo_post`, outros=[31943] (`canonica_persistida`); `copia=sem_vinculo` → efetivo principal | família de hoje já tem a página; registra o risco | 03 |
+| 2 | Fada 18042 "Começou! Esquenta 11.11", 03:00 | `url|…/m/cupom-de-desconto` | não | 31945 novo | **JUNTA no 31943**, elegível principal + cupons, `vinculo=presente presenca=nao_verificada` → afirmável **principal**, `se_copia_no_ar=principal+cupons`, **pendente** (`so_link_publicado`) | mesma página como 1º link dos dois lados; Δ 0,7 min; fontes diferentes; nome só de um lado e nenhum benefício (compatível, não igual) | 03 |
+| 3 | Samuel 123470, 03:00:15 | `url|…` | não | DUP no 31945 | MANTER `ja_no_mesmo_post`, outros=[31943] (`canonica_persistida`); `vinculo=sem_vinculo` → afirmável principal | família de hoje já tem a página; registra o risco | 03 |
 | 4 | fumotom 42674, produto com a página como 1º link, 03:01 | `shopee|1930141978.58270173531` | não | 31947 | fora (âncora forte) | produto tem dono; 186 casos assim em 7 dias | 03, 06 |
 | 5 | Promotom 111508 × Fada 17870 "Novo Cupom Shopee VIP", 17/10 (corpus de `test_post_apagado`) | `cupb|geral` × `cupb|vip` | sim × sim | 29546 × 29549; hoje em ATIVO: CUPOM_INCERTO sem_beneficio, 2 posts | **JUNTA** no da Promotom, **pendente** | mesma página como 1º link; o dono apagou o 29546; sem benefício | 03b |
 | 6 | Promotom 111724 (21/10 12:03) × Fada 17927 "Dia de Cupons" (12:00) | `cupb|geral` × `cupb|dia` | sim × sim | 30602 × 30591 (CUPOM_INCERTO sem_beneficio) | abstém | o link da Fada leva a outra página (`4LK2yNECtS`, canônica lacuna) | 05 |
@@ -262,9 +278,10 @@ A canônica só é afirmada com prova: a identidade logada, ou o link publicado
 | 8 | Promotom 111915 → Fada 17997 → Samuel → Fada 17998 "Tech" → Samuel, 26/10 | `cupb|geral`, `cupb|tech` | sim | 31451, 31463 | abstém | no Tech a página é o 2º link (campanha própria) | 02, 05 |
 | 9 | Promotom 111992 → Fada 18025 30% → Samuel → Fada 18028 (Δ 37 min), 27/10 | `cupb|geral` | sim | 31770, 31785 | abstém | 1º link do 31770 é outro (`60SGP3K099`); acima do superior | 05 |
 | 10 | Fada 18038 "É AMANHÃ! ESQUENTA 11.11" | `url|…/m/11-11` | não | 31930 | fora | página de evento, não declarada | 09 |
-| 11 | Fada 18042 sozinha (variação: sem a Promotom) | `url|…` | não | novo | MANTER, elegível principal + cupons, `copia=nova` → efetivo principal + cupons | elegível sem "cupom" no título; post novo nasce com cópia | 09 |
-| 13 | Promotom 112024 → o dono apaga **só a cópia** (SINTÉTICO, marcado) → a edição da fonte (SINTÉTICA) faz o worker descobrir → AUSENTE → Fada 18042 | `cupb|geral` × `url|…` | sim (cópia apagada) | 31943-equivalente vivo no principal, cópia AUSENTE | **JUNTA**, pendente, `copia=ausente` → **efetivo principal** | a exclusão manual da cópia é preservada; a sombra nunca afirma que a cópia volta | 14 |
-| 14 | Promotom 111784 → o dono apaga só a cópia → a EVOLUI da Fada 17953 descobre (AUSENTE) → Samuel 122635 (link como HIPÓTESE) | `cupb|geral` | cópia AUSENTE | 30837-equivalente | MANTER `ja_no_mesmo_post`, `copia=ausente` → efetivo principal (linha registrada) | família com cópia apagada: estado explícito | 14 |
+| 11 | Fada 18042 sozinha (variação: sem a Promotom) | `url|…` | não | novo | MANTER, elegível principal + cupons, `vinculo=nova presenca=a_criar` → afirmável principal + cupons | elegível sem "cupom" no título; post novo nasce com cópia | 09 |
+| 13 | Promotom 112024 → o dono apaga **só a cópia** (SINTÉTICO, marcado) → a edição da fonte (SINTÉTICA) faz o worker descobrir → AUSENTE → Fada 18042 | `cupb|geral` × `url|…` | sim (cópia apagada) | 31943-equivalente vivo no principal, cópia AUSENTE | **JUNTA**, pendente, `vinculo=ausente presenca=ausente_confirmada` → afirmável **principal** | a exclusão manual da cópia é preservada; a sombra nunca afirma que a cópia volta | 14 |
+| 14 | Promotom 111784 → o dono apaga só a cópia → a EVOLUI da Fada 17953 descobre (AUSENTE) → Samuel 122635 (link como HIPÓTESE) | `cupb|geral` | cópia AUSENTE | 30837-equivalente | MANTER `ja_no_mesmo_post`, `vinculo=ausente` → afirmável principal (linha registrada) | família com cópia apagada: estado explícito | 14 |
+| 15 | Promotom 112024 → o dono apaga só a cópia e o worker **ainda não descobriu** (SINTÉTICO, marcado) → Fada 18042 | `cupb|geral` × `url|…` | vínculo ainda no banco, cópia fora do ar | 31943-equivalente | **JUNTA**, pendente, `vinculo=presente presenca=nao_verificada` → afirmável **principal**, `se_copia_no_ar=principal+cupons` | o log nunca afirma a cópia disponível; a sombra não consulta o Telegram | 14, 15 |
 | 12 | Samuel 122540/122578 "Pessoal, pra algumas contas não está aparecendo…" | `cupb|geral` | sim | 30697 / 30743 | fora | o link leva a `LoB6msmOY`, não à página | retro |
 
 Variações sintéticas, todas **marcadas** no teste 02, para pares que o corpus
@@ -362,9 +379,10 @@ A lacuna dos links do Samuel não muda o resultado: a mesma retroativa com a
    03:00:17. Pela decisão M, apagar o post apaga a campanha inteira, sem
    ressurreição (teste 07). A ativação precisa da revisão do dono sobre isso.
 6. **Cópia apagada à mão e ainda não descoberta.** Aparece como
-   `copia=vinculada` até o worker tentar editá-la. A sombra não consulta o
-   Telegram. Na ativação, o espelho continua sendo a autoridade: ao descobrir,
-   marca AUSENTE e não recria.
+   `vinculo=presente presenca=nao_verificada` até o worker tentar editá-la. O
+   destino afirmado é só o principal, com o canal de cupons como condicional.
+   A sombra não consulta o Telegram. Na ativação, o espelho continua sendo a
+   autoridade: ao descobrir, marca AUSENTE e não recria.
 7. **Tudo foi medido em 7 dias** (a retenção) e só nas 15 janelas
    analisadas. Antes de ativar, a sombra deve rodar em produção e as linhas
    `🎟 [RESGATE_SOMBRA]` devem ser revisadas noite a noite, inclusive as
@@ -379,8 +397,9 @@ A lacuna dos links do Samuel não muda o resultado: a mesma retroativa com a
 A ativação seria:
 - `familia.lancamento_cupom` (ou um passo vizinho, em frente própria) devolver
   o post da decisão JUNTA;
-- o canal seguir o **`destino_efetivo`**, nunca só o `destino_elegivel`: uma
-  cópia AUSENTE continua ausente.
+- o canal seguir as regras do espelho (o `destino_afirmavel` e a condicional),
+  nunca só o `destino_elegivel`: uma cópia AUSENTE continua ausente, e uma
+  cópia com vínculo só existe se ainda estiver no ar.
 
 Pré-condições:
 - a canônica persistida (seção 4, opção A ou B) no lugar da comparação de link

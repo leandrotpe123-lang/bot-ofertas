@@ -20,22 +20,25 @@ lista de vivos que some na leitura seguinte) dá acao=INDETERMINADO
 motivo=erro_leitura:<etapa>:<Classe> — nunca MANTER, JUNTA ou INCERTO como
 se o estado estivesse completo.
 
-ESTADO DA CÓPIA (separado da elegibilidade — ver pipeline.campanha_resgate):
-lido do vínculo do espelho (espelho_post), só para o post que importa: a
+VÍNCULO × PRESENÇA × DESTINO AFIRMÁVEL (ver pipeline.campanha_resgate): o
+vínculo do espelho (espelho_post) é lido só para o post que importa — a
 família de hoje (etapa espelho_familia) e o alvo da junção (espelho_post).
-Vínculo AUSENTE (o dono apagou a cópia): o destino efetivo fica
-"principal" — a sombra nunca afirma que a cópia volta. Vínculo presente:
-"vinculada", sem conferir no Telegram se a mensagem ainda existe (a sombra
-não faz I/O; o worker só descobre a cópia apagada à mão ao editá-la).
+A sombra NÃO consulta o Telegram: vínculo presente sai como
+presenca=nao_verificada, destino_afirmavel=principal e
+se_copia_no_ar=principal+cupons (condicional, nunca certeza — o worker só
+descobre uma cópia apagada à mão quando tenta editá-la). Vínculo AUSENTE:
+presenca=ausente_confirmada, destino_afirmavel=principal (a cópia nunca
+volta). Leitura que falha: INDETERMINADO.
 
-LINHA (só quando a regra junta, duvida, mudaria o destino efetivo, vê outro
-post com a mesma página, acha a cópia AUSENTE ou não consegue ler; ids,
+LINHA (só quando a regra junta, duvida, mudaria o destino afirmável, vê
+outro post com a mesma página, acha a cópia AUSENTE ou não consegue ler; ids,
 chaves, página canônica, nomes e benefícios — nada de texto nem link
 publicado):
   🎟 [RESGATE_SOMBRA] msg=(chat,id) acao= post: motivo= Δ= pagina=
      hoje=post:<id>|post_novo ident_atual=[…] ident_proposta=[…]
-     destino_hoje= destino_elegivel= copia= destino_efetivo=
-     prova= aprovacao=pendente|- nome=(cand|post) beneficio=(cand|post)
+     destino_hoje= destino_elegivel= vinculo= presenca= destino_afirmavel=
+     se_copia_no_ar= prova= aprovacao=pendente|- nome=(cand|post)
+     beneficio=(cand|post)
      outros=[posts que também têm a página como destino principal]
 """
 from __future__ import annotations
@@ -93,13 +96,13 @@ def _publicada_da_ancora(norm) -> str:
     return next(iter((getattr(norm, "mapa", None) or {}).values()), "")
 
 
-def _estado_copia(mid: int, etapa: str) -> str:
-    """Estado da cópia do post `mid` no canal de cupons, pelo vínculo
-    (leitura estrita: erro de consulta NUNCA vira "sem vínculo")."""
+def _vinculo(mid: int, etapa: str) -> str:
+    """O vínculo da cópia do post `mid` no banco (leitura estrita: erro de
+    consulta NUNCA vira "sem vínculo"). Não diz se a mensagem está no ar."""
     esp = _ler(etapa, db_espelho_get, mid)
     if esp is None:
         return regra.SEM_VINCULO
-    return regra.AUSENTE if esp == _AUSENTE else regra.VINCULADA
+    return regra.AUSENTE if esp == _AUSENTE else regra.PRESENTE
 
 
 def _vivos(plat: str) -> list:
@@ -145,25 +148,27 @@ def avaliar(norm, ofertas, familia_hoje: Optional[int],
     vivos, d = [], None
     try:
         if familia_hoje is not None:
-            copia_familia = _estado_copia(familia_hoje, "espelho_familia")
-            cupons_hoje = copia_familia == regra.VINCULADA
+            vinculo_familia = _vinculo(familia_hoje, "espelho_familia")
+            # sem conferir o Telegram, só o principal é afirmável hoje
+            cupons_hoje = False
         else:                       # post novo: o roteamento de hoje decide
-            copia_familia = regra.NOVA
+            vinculo_familia = regra.NOVA
             cupons_hoje = eh_identidade_cupom(chaves)
         c = regra.Candidato(cupons_hoje=cupons_hoje, **base)
         vivos = _vivos(plat)
         d = regra.avaliar(c, vivos, agora, float(config.CUPOM_LIMITE_SUPERIOR_S))
         # a cópia do post que a campanha usaria: o alvo da junção, ou a
         # família de hoje / o post novo (nada muda de post)
-        copia = (_estado_copia(d.post, "espelho_post") if d.acao == regra.JUNTA
-                 else copia_familia)
+        vinculo = (_vinculo(d.post, "espelho_post") if d.acao == regra.JUNTA
+                   else vinculo_familia)
     except LeituraFalhou as f:
         c = regra.Candidato(cupons_hoje=False, **base)
         return c, vivos, regra.Decisao(
             regra.INDETERMINADO, d.post if d is not None else None,
             f"erro_leitura:{f.etapa}:{f.classe}", None, "indeterminado",
-            "indeterminado", copia="nao_lida", destino_efetivo="indeterminado")
-    return c, vivos, regra.finalizar(d, copia)
+            "indeterminado", vinculo="nao_lido", presenca="-",
+            destino_afirmavel="indeterminado")
+    return c, vivos, regra.finalizar(d, vinculo)
 
 
 def _par(a, b) -> str:
@@ -183,8 +188,8 @@ def registrar(norm, ofertas, familia_hoje: Optional[int],
         if r is None:
             return None
         c, vivos, d = r
-        if (d.acao == regra.MANTER and d.destino_efetivo == d.destino_hoje
-                and not d.outros and d.copia != regra.AUSENTE):
+        if (d.acao == regra.MANTER and d.destino_afirmavel == d.destino_hoje
+                and not d.outros and d.vinculo != regra.AUSENTE):
             return None
         p = next((v for v in vivos if v.msg_id == d.post), None)
         delta = f"{d.delta_s / 60:.1f}min" if d.delta_s is not None else "-"
@@ -197,7 +202,8 @@ def registrar(norm, ofertas, familia_hoje: Optional[int],
             f" motivo={d.motivo} Δ={delta} pagina={c.pagina} hoje={hoje}"
             f" ident_atual={sorted(c.chaves)} ident_proposta={proposta}"
             f" destino_hoje={d.destino_hoje} destino_elegivel={d.destino_elegivel}"
-            f" copia={d.copia} destino_efetivo={d.destino_efetivo}"
+            f" vinculo={d.vinculo} presenca={d.presenca}"
+            f" destino_afirmavel={d.destino_afirmavel} se_copia_no_ar={d.se_copia_no_ar}"
             f" prova={d.prova} aprovacao={'pendente' if d.pendente else '-'}"
             f" nome={_par(c.perfil.nome, p.perfil.nome if p else '')}"
             f" beneficio={_par(_beneficio(c.perfil), _beneficio(p.perfil) if p else '')}"

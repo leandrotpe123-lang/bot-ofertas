@@ -72,24 +72,29 @@ ausente ou incomparável de um lado — onde a regra de cupom de hoje fica em
 INCERTO) sai com `pendente=True`. Só "igual" (o mesmo benefício explícito)
 não é pendente. Ativar as pendentes exige aprovação separada do dono.
 
-CANAL DE CUPONS — ELEGIBILIDADE × ESTADO DA CÓPIA (separados):
+CANAL DE CUPONS — QUATRO COISAS SEPARADAS:
   · destino_elegivel: a POLÍTICA proposta — o post cujo link principal é a
     página reconhecida de resgate de cupons é elegível ao canal de cupons
     mesmo quando o título não diz "cupom" (natureza evento). Elegível ao
     CANAL não quer dizer cupom elegível à conta de afiliado do dono
     (CLAUDE.md §9.1);
-  · copia: o ESTADO da cópia do post que a campanha usaria — "nova" (post
-    novo: a publicação cria a cópia), "vinculada" (há vínculo no banco; a
-    presença no canal NÃO é conferida — o worker só descobre uma cópia
-    apagada à mão quando a edita), "ausente" (o dono apagou a cópia e a
-    leitura confirmou: espelho_cupons nunca a recria) ou "sem_vinculo";
-  · destino_efetivo: o que as regras do espelho de hoje DEIXAM acontecer —
-    elegível + nova/vinculada → principal+cupons; elegível + ausente →
-    principal (exclusão manual preservada); elegível + sem_vinculo →
+  · vinculo: o que o BANCO guarda (espelho_post) para o post que a campanha
+    usaria — "nova" (post novo: ainda não há cópia), "presente" (há vínculo
+    para uma mensagem), "ausente" (o worker marcou AUSENTE depois de achar a
+    cópia apagada: espelho_cupons nunca a recria) ou "sem_vinculo";
+  · presenca: o que se SABE da cópia no Telegram — "nao_verificada" (há
+    vínculo, mas a sombra não consulta o Telegram, e o worker só descobre
+    uma cópia apagada à mão quando tenta editá-la), "ausente_confirmada"
+    (o vínculo AUSENTE só é gravado com a leitura por id confirmando),
+    "a_criar" (post novo) ou "-" (sem vínculo, nada rastreado);
+  · destino_afirmavel: o destino que a evidência SUSTENTA — elegível + nova
+    → principal+cupons (é a publicação que envia aos dois); elegível +
+    presente → principal, com a condicional explícita
+    se_copia_no_ar=principal+cupons (nunca como certeza); elegível + ausente
+    → principal (exclusão manual preservada); elegível + sem_vinculo →
     principal (não se presume criação); não elegível → principal.
-O estado da cópia é lido pelo adaptador, com leitura estrita, só para o post
-que importa (família de hoje ou alvo da junção); a regra só combina
-(finalizar).
+O vínculo é lido pelo adaptador, com leitura estrita, só para o post que
+importa (família de hoje ou alvo da junção); a regra só combina (finalizar).
 
 INDETERMINADO não sai daqui: é do adaptador, quando uma LEITURA do estado
 falha (a regra nunca decide sobre estado incompleto).
@@ -105,15 +110,17 @@ from pipeline import cupom_lancamento
 from pipeline.resolucao_identidade import eh_chave_forte
 
 __all__ = ["Candidato", "PostVivo", "Decisao", "avaliar", "finalizar",
-           "destino_efetivo", "sem_ancora_forte", "chave_resgate", "MANTER",
+           "destino_afirmavel", "sem_ancora_forte", "chave_resgate", "MANTER",
            "JUNTA", "INCERTO", "INDETERMINADO", "PRINCIPAL", "PRINCIPAL_E_CUPONS",
-           "NOVA", "VINCULADA", "AUSENTE", "SEM_VINCULO"]
+           "NOVA", "PRESENTE", "AUSENTE", "SEM_VINCULO", "NAO_VERIFICADA",
+           "AUSENTE_CONFIRMADA", "A_CRIAR"]
 
 MANTER, JUNTA, INCERTO = "MANTER", "JUNTA", "INCERTO"
 INDETERMINADO = "INDETERMINADO"           # do adaptador: leitura do estado falhou
 PRINCIPAL, PRINCIPAL_E_CUPONS = "principal", "principal+cupons"
-# estado da cópia do post no canal de cupons
-NOVA, VINCULADA, AUSENTE, SEM_VINCULO = "nova", "vinculada", "ausente", "sem_vinculo"
+# vínculo da cópia no BANCO (espelho_post) e o que se sabe dela no TELEGRAM
+NOVA, PRESENTE, AUSENTE, SEM_VINCULO = "nova", "presente", "ausente", "sem_vinculo"
+NAO_VERIFICADA, AUSENTE_CONFIRMADA, A_CRIAR = "nao_verificada", "ausente_confirmada", "a_criar"
 
 
 def sem_ancora_forte(chaves: Iterable[str]) -> bool:
@@ -158,34 +165,46 @@ class Decisao:
     post: Optional[int]
     motivo: str
     delta_s: Optional[float]
-    destino_hoje: str         # efetivo hoje (com o estado da cópia da família)
+    destino_hoje: str         # o que a evidência sustenta hoje
     destino_elegivel: str     # pela política proposta (página declarada)
     outros: tuple = ()        # posts que também têm a página como principal
     pendente: bool = False    # JUNTA só "compatível": exige aprovação separada
     prova: str = "-"          # canonica_persistida | so_link_publicado
-    copia: str = "-"          # nova | vinculada | ausente | sem_vinculo (finalizar)
-    destino_efetivo: str = "-"   # o que o espelho deixa acontecer (finalizar)
+    vinculo: str = "-"        # nova | presente | ausente | sem_vinculo (finalizar)
+    presenca: str = "-"       # nao_verificada | ausente_confirmada | a_criar | -
+    destino_afirmavel: str = "-"   # o que a evidência sustenta (finalizar)
+    se_copia_no_ar: str = "-"      # condicional explícita (vínculo não verificado)
 
 
 def _destino(cupons: bool) -> str:
     return PRINCIPAL_E_CUPONS if cupons else PRINCIPAL
 
 
-def destino_efetivo(elegivel: str, copia: str) -> str:
-    """O destino que as regras do espelho de hoje deixam acontecer: cópia
-    AUSENTE nunca volta (exclusão manual do dono); sem vínculo, não se
-    presume que uma cópia será criada; só o post NOVO elegível nasce com
-    cópia."""
-    if elegivel == PRINCIPAL_E_CUPONS and copia in (NOVA, VINCULADA):
-        return PRINCIPAL_E_CUPONS
-    return PRINCIPAL
+_PRESENCA = {NOVA: A_CRIAR, PRESENTE: NAO_VERIFICADA,
+             AUSENTE: AUSENTE_CONFIRMADA, SEM_VINCULO: "-"}
 
 
-def finalizar(d: Decisao, copia: str) -> Decisao:
-    """A decisão com o estado da cópia do post que a campanha usaria."""
+def destino_afirmavel(elegivel: str, vinculo: str) -> tuple:
+    """(destino que a evidência sustenta, condicional). Só o post NOVO
+    elegível vai aos dois canais sem condição (é a publicação que envia).
+    Vínculo presente: a cópia PODE estar no ar — a sombra não confere —,
+    então só o principal é afirmado e o canal de cupons vira condicional.
+    AUSENTE nunca volta; sem vínculo não se presume criação."""
+    if elegivel != PRINCIPAL_E_CUPONS:
+        return PRINCIPAL, "-"
+    if vinculo == NOVA:
+        return PRINCIPAL_E_CUPONS, "-"
+    if vinculo == PRESENTE:
+        return PRINCIPAL, PRINCIPAL_E_CUPONS
+    return PRINCIPAL, "-"
+
+
+def finalizar(d: Decisao, vinculo: str) -> Decisao:
+    """A decisão com o vínculo da cópia do post que a campanha usaria."""
+    afirmavel, condicional = destino_afirmavel(d.destino_elegivel, vinculo)
     return Decisao(d.acao, d.post, d.motivo, d.delta_s, d.destino_hoje,
-                   d.destino_elegivel, d.outros, d.pendente, d.prova, copia,
-                   destino_efetivo(d.destino_elegivel, copia))
+                   d.destino_elegivel, d.outros, d.pendente, d.prova, vinculo,
+                   _PRESENCA.get(vinculo, "-"), afirmavel, condicional)
 
 
 def _prova(c: Candidato, p: PostVivo) -> str:

@@ -58,12 +58,16 @@ O QUE ESTE ARQUIVO PROVA:
       (vazio do tipo na falha) não muda; estrito=True levanta
   14  só a CÓPIA apagada à mão pelo dono (post elegível vivo no principal):
       o worker descobre pelo caminho real e marca AUSENTE; a Fada traz a
-      mesma página → a sombra registra copia=ausente e
-      destino_efetivo=principal (nunca que a cópia volta); AUSENTE
+      mesma página → a sombra registra vinculo=ausente e
+      destino_afirmavel=principal (nunca que a cópia volta); AUSENTE
       preservado; nenhum envio/edição/exclusão no canal de cupons; a sombra
-      ligada × desligada: mesmas chamadas e mesmo banco; cópia apagada mas
-      não descoberta aparece "vinculada" (limite: a sombra não consulta o
-      Telegram); leitura do vínculo que falha → INDETERMINADO
+      ligada × desligada: mesmas chamadas e mesmo banco; leitura do vínculo
+      que falha → INDETERMINADO
+  15  VÍNCULO AINDA NO BANCO depois de a cópia ser apagada à mão (o worker
+      ainda não descobriu): a linha diz vinculo=presente
+      presenca=nao_verificada destino_afirmavel=principal e só como
+      CONDICIONAL se_copia_no_ar=principal+cupons — nunca afirma a cópia
+      disponível; a sombra não consulta o Telegram nem toca o vínculo
 
     python tests/test_campanha_resgate.py
 """
@@ -326,8 +330,9 @@ class Canais:
 _RE_LINHA = re.compile(
     r"msg=\((?P<chat>-?\d+),(?P<msg>\d+)\) acao=(?P<acao>\w+) post:(?P<post>\S+) "
     r"motivo=(?P<motivo>\S+) .* destino_hoje=(?P<hoje>\S+) "
-    r"destino_elegivel=(?P<elegivel>\S+) copia=(?P<copia>\S+) "
-    r"destino_efetivo=(?P<efetivo>\S+) .* outros=\[(?P<outros>[^\]]*)\]$")
+    r"destino_elegivel=(?P<elegivel>\S+) vinculo=(?P<vinculo>\S+) presenca=(?P<presenca>\S+) "
+    r"destino_afirmavel=(?P<afirmavel>\S+) se_copia_no_ar=(?P<cond>\S+) "
+    r".* outros=\[(?P<outros>[^\]]*)\]$")
 
 
 class _Captura(logging.Handler):
@@ -532,16 +537,19 @@ def test_02_regra_pura(r):
     # elegibilidade × estado da cópia (finalizar): AUSENTE nunca volta; sem
     # vínculo não se presume criação; só o post novo elegível nasce com cópia
     d = av(_cand(F), [p43])
-    efetivo = {c: regra.finalizar(d, c).destino_efetivo
-               for c in (regra.NOVA, regra.VINCULADA, regra.AUSENTE, regra.SEM_VINCULO)}
-    r.check(efetivo == {regra.NOVA: "principal+cupons", regra.VINCULADA: "principal+cupons",
-                        regra.AUSENTE: "principal", regra.SEM_VINCULO: "principal"},
-            "02.destino_efetivo_pelo_estado_da_copia", str(efetivo))
-    r.check(all(regra.destino_efetivo("principal", c) == "principal"
-                for c in (regra.NOVA, regra.VINCULADA, regra.AUSENTE, regra.SEM_VINCULO)),
+    tabela = {v: (lambda f: (f.presenca, f.destino_afirmavel, f.se_copia_no_ar))(regra.finalizar(d, v))
+              for v in (regra.NOVA, regra.PRESENTE, regra.AUSENTE, regra.SEM_VINCULO)}
+    r.check(tabela == {
+        regra.NOVA: ("a_criar", "principal+cupons", "-"),
+        regra.PRESENTE: ("nao_verificada", "principal", "principal+cupons"),   # só condicional
+        regra.AUSENTE: ("ausente_confirmada", "principal", "-"),
+        regra.SEM_VINCULO: ("-", "principal", "-")},
+        "02.vinculo_presenca_e_destino_afirmavel", str(tabela))
+    r.check(all(regra.destino_afirmavel("principal", v) == ("principal", "-")
+                for v in (regra.NOVA, regra.PRESENTE, regra.AUSENTE, regra.SEM_VINCULO)),
             "02.nao_elegivel_nunca_vai_aos_cupons")
     r.check(regra.finalizar(d, regra.AUSENTE).destino_elegivel == "principal+cupons",
-            "02.ausente_nao_muda_a_elegibilidade_so_o_efetivo")
+            "02.ausente_nao_muda_a_elegibilidade_so_o_afirmavel")
 
     # Tech 31463: a página é o 2º link → não é par (26/10 03:02, campanha própria)
     d = av(_cand(F), [_vivo(31463, PUB_31463, ("shopee|cupb|tech",), (FADA,))])
@@ -566,7 +574,7 @@ def test_02_regra_pura(r):
     r.check(d.motivo == "sem_par", "02.outra_plataforma_nao_e_par", str(d))
     d = av(_cand(F), [])
     r.check((d.acao, d.motivo, d.destino_elegivel) == (regra.MANTER, "sem_par", "principal+cupons")
-            and regra.finalizar(d, regra.NOVA).destino_efetivo == "principal+cupons",
+            and regra.finalizar(d, regra.NOVA).destino_afirmavel == "principal+cupons",
             "02.sem_par_post_novo_elegivel_nasce_com_copia", str(d))
 
     d = av(_cand(F), [_vivo(31943, PUB_31943, fontes=(PROMOTOM, FADA))])
@@ -600,7 +608,7 @@ def test_02_regra_pura(r):
             "02.familia_diferente_incerto", str(d))
     d = av(_cand(F, familia_hoje=31451), [])
     r.check(d.acao == regra.MANTER
-            and regra.finalizar(d, regra.SEM_VINCULO).destino_efetivo == d.destino_hoje,
+            and regra.finalizar(d, regra.SEM_VINCULO).destino_afirmavel == d.destino_hoje,
             "02.familia_sem_par_nao_muda_canal", str(d))
 
 
@@ -635,9 +643,10 @@ def test_03_caso_real_2810(r):
         r.check((f["msg"], f["acao"], f["post"], f["motivo"]) ==
                 (18042, "JUNTA", pa, "mesma_pagina_de_resgate:compativel"),
                 "03.fada_junta_no_post_da_promotom", cap.linhas[0])
-        r.check((f["hoje"], f["elegivel"], f["copia"], f["efetivo"]) ==
-                ("principal", "principal+cupons", "vinculada", "principal+cupons"),
-                "03.fada_iria_aos_dois_canais_pela_copia_vinculada", cap.linhas[0])
+        r.check((f["hoje"], f["elegivel"], f["vinculo"], f["presenca"], f["afirmavel"], f["cond"]) ==
+                ("principal", "principal+cupons", "presente", "nao_verificada", "principal",
+                 "principal+cupons"),
+                "03.fada_junta_no_post_com_vinculo_presente_nao_verificado", cap.linhas[0])
         r.check("hoje=post_novo" in cap.linhas[0] and "Δ=0." in cap.linhas[0],
                 "03.fada_hoje_post_novo_delta", cap.linhas[0])
         r.check(f"ident_atual=['shopee|url|{PAGINA}']" in cap.linhas[0]
@@ -652,7 +661,8 @@ def test_03_caso_real_2810(r):
         r.check((s["msg"], s["acao"], s["post"], s["motivo"], s["outros"]) ==
                 (123470, "MANTER", pf, "ja_no_mesmo_post", [pa]),
                 "03.samuel_segue_o_dedup_e_registra_o_risco", cap.linhas[1])
-        r.check((s["hoje"], s["copia"], s["efetivo"]) == ("principal", "sem_vinculo", "principal"),
+        r.check((s["hoje"], s["vinculo"], s["presenca"], s["afirmavel"], s["cond"]) ==
+                ("principal", "sem_vinculo", "-", "principal", "-"),
                 "03.samuel_post_da_fada_sem_copia_nao_presume_criacao", cap.linhas[1])
     # nada de texto nem link publicado na linha
     r.check(not any(PUB_PAGINA in x or "Resgate" in x for x in cap.linhas),
@@ -673,8 +683,9 @@ def test_03b_1710_vip(r):
             f"{pa} {pf} {db_ofertas_de_post(pf)} {noite.cli.cupons()}")
     # a página como link principal dos dois lados é a prova que faltava
     r.check(len(linhas) == 1 and linhas[0]["acao"] == "JUNTA" and linhas[0]["post"] == pa
-            and (linhas[0]["hoje"], linhas[0]["copia"], linhas[0]["efetivo"]) ==
-            ("principal+cupons", "vinculada", "principal+cupons"),
+            and (linhas[0]["hoje"], linhas[0]["vinculo"], linhas[0]["presenca"],
+                 linhas[0]["afirmavel"], linhas[0]["cond"]) ==
+            ("principal+cupons", "presente", "nao_verificada", "principal", "principal+cupons"),
             "03b.vip_junta_no_post_da_promotom", "\n".join(cap.linhas))
     r.check("nome=(vip|-)" in (cap.linhas or [""])[0], "03b.nome_de_um_lado_so", str(cap.linhas))
 
@@ -897,8 +908,8 @@ def test_09_canais_separados(r):
     pf = noite.post(FADA, 18042)
     linhas = [_ler(x) for x in cap.linhas]
     r.check(len(linhas) == 1 and (linhas[0]["acao"], linhas[0]["hoje"], linhas[0]["elegivel"],
-                                  linhas[0]["copia"], linhas[0]["efetivo"]) ==
-            ("MANTER", "principal", "principal+cupons", "nova", "principal+cupons"),
+                                  linhas[0]["vinculo"], linhas[0]["presenca"], linhas[0]["afirmavel"]) ==
+            ("MANTER", "principal", "principal+cupons", "nova", "a_criar", "principal+cupons"),
             "09.evento_na_pagina_elegivel_sem_cupom_no_titulo", "\n".join(cap.linhas))
     r.check(noite.cli.cupons() == [] and not db_espelho_get(pf), "09.hoje_nao_vai_ao_canal_de_cupons",
             str(noite.cli.cupons()))
@@ -1052,9 +1063,9 @@ def test_12_falha_de_leitura_vira_indeterminado(r):
                 r.check(not cap.erros, f"{tag}.sem_erro_inesperado", str(cap.erros))
                 r.check(ind == msgs and all(
                     linhas[m][0]["motivo"] == f"erro_leitura:{etapa}:{classe}"
-                    and (linhas[m][0]["hoje"], linhas[m][0]["elegivel"], linhas[m][0]["copia"],
-                         linhas[m][0]["efetivo"]) ==
-                    ("indeterminado", "indeterminado", "nao_lida", "indeterminado") for m in ind),
+                    and (linhas[m][0]["hoje"], linhas[m][0]["elegivel"], linhas[m][0]["vinculo"],
+                         linhas[m][0]["afirmavel"]) ==
+                    ("indeterminado", "indeterminado", "nao_lido", "indeterminado") for m in ind),
                     f"{tag}.quem_dependia_da_leitura_sai_indeterminado", "\n".join(cap.linhas))
                 # quem não dependia dela decide igual a uma noite sem falha
                 r.check(all(linhas[m][1] == normal[m] for m in linhas if m not in msgs)
@@ -1162,11 +1173,13 @@ def test_14_copia_apagada_a_mao_fica_ausente(r):
             "14.principal_vivo_copia_fora_do_ar", f"{noite.cli.principal()} {noite.cli.cupons()}")
     linhas = [_ler(x) for x in cap.linhas]
     fada = [x for x in linhas if x["msg"] == 18042]
-    r.check(len(fada) == 1 and (fada[0]["acao"], fada[0]["post"], fada[0]["copia"],
-                                fada[0]["elegivel"], fada[0]["efetivo"]) ==
-            ("JUNTA", pa, "ausente", "principal+cupons", "principal"),
-            "14.sombra_registra_ausente_e_destino_efetivo_principal", "\n".join(cap.linhas))
-    r.check(not any("destino_efetivo=principal+cupons" in x for x in cap.linhas if "18042)" in x),
+    r.check(len(fada) == 1 and (fada[0]["acao"], fada[0]["post"], fada[0]["vinculo"],
+                                fada[0]["presenca"], fada[0]["elegivel"], fada[0]["afirmavel"],
+                                fada[0]["cond"]) ==
+            ("JUNTA", pa, "ausente", "ausente_confirmada", "principal+cupons", "principal", "-"),
+            "14.sombra_registra_ausente_e_destino_afirmavel_principal", "\n".join(cap.linhas))
+    r.check(not any("principal+cupons" in x.split("destino_afirmavel=")[1].split(" prova=")[0]
+                    for x in cap.linhas if "18042)" in x),
             "14.nunca_afirma_que_a_copia_volta", "\n".join(cap.linhas))
     r.check("aprovacao=pendente" in (cap.linhas or [""])[0], "14.continua_pendente", str(cap.linhas))
     r.check(out["vinculo_fim"] == 0, "14.ausente_preservado_depois_da_fada", str(out))
@@ -1191,8 +1204,9 @@ def test_14_copia_apagada_a_mao_fica_ausente(r):
     # diz "vinculada" (presença não conferida) e não consulta o Telegram
     noite, cap, out = _copia_apagada(descobrir=False)
     fada = [_ler(x) for x in cap.linhas if "18042)" in x]
-    r.check(len(fada) == 1 and fada[0]["copia"] == "vinculada" and out["vinculo_fim"] == out["copia"],
-            "14.nao_descoberta_aparece_como_vinculada", "\n".join(cap.linhas))
+    r.check(len(fada) == 1 and (fada[0]["vinculo"], fada[0]["presenca"], fada[0]["afirmavel"]) ==
+            ("presente", "nao_verificada", "principal") and out["vinculo_fim"] == out["copia"],
+            "14.nao_descoberta_aparece_como_vinculo_nao_verificado", "\n".join(cap.linhas))
     real = sombra.registrar
     sombra.registrar = lambda *a, **k: None
     try:
@@ -1205,15 +1219,15 @@ def test_14_copia_apagada_a_mao_fica_ausente(r):
     # leitura do vínculo que falha: INDETERMINADO, nunca "sem vínculo"
     noite, cap, out = _copia_apagada(ler_falha=True)
     fada = [_ler(x) for x in cap.linhas if "18042)" in x]
-    r.check(len(fada) == 1 and (fada[0]["acao"], fada[0]["motivo"], fada[0]["copia"], fada[0]["efetivo"]) ==
-            ("INDETERMINADO", "erro_leitura:espelho_post:OperationalError", "nao_lida", "indeterminado"),
+    r.check(len(fada) == 1 and (fada[0]["acao"], fada[0]["motivo"], fada[0]["vinculo"], fada[0]["afirmavel"]) ==
+            ("INDETERMINADO", "erro_leitura:espelho_post:OperationalError", "nao_lido", "indeterminado"),
             "14.leitura_do_espelho_falha_indeterminado", "\n".join(cap.linhas))
     r.check(out["vinculo_fim"] == 0, "14.falha_de_leitura_nao_mexe_no_ausente", str(out))
 
     # família de hoje com a cópia AUSENTE (22/10, textos reais): o dono
     # apaga a cópia do post da Promotom; a EVOLUI da Fada descobre (AUSENTE);
     # o Samuel (HIPÓTESE: o link dele é a página, como no teste 05) fica no
-    # mesmo post — MANTER, mas a linha sai para registrar copia=ausente
+    # mesmo post — MANTER, mas a linha sai para registrar vinculo=ausente
     hip = dict(RESOLUCAO)
     hip["https://s.shopee.com.br/60SYicbJh9"] = (PUB_PAGINA, PAGINA, "HIPÓTESE do teste")
     out = {}
@@ -1233,9 +1247,53 @@ def test_14_copia_apagada_a_mao_fica_ausente(r):
     r.check(out["vinculo_meio"] == 0 and out["vinculo_fim"] == 0 and out["cupons"] == [],
             "14.evolui_da_fada_descobre_ausente_e_nada_volta", str(out))
     r.check(len(sam) == 1 and (sam[0]["acao"], sam[0]["post"], sam[0]["motivo"], sam[0]["hoje"],
-                               sam[0]["copia"], sam[0]["efetivo"]) ==
+                               sam[0]["vinculo"], sam[0]["afirmavel"]) ==
             ("MANTER", out["pa"], "ja_no_mesmo_post", "principal", "ausente", "principal"),
             "14.familia_com_copia_ausente_registrada", "\n".join(cap.linhas))
+
+
+# ══════════════════════════════════════════════════════════════════
+# 15 — vínculo presente após exclusão manual NÃO descoberta
+# ══════════════════════════════════════════════════════════════════
+def test_15_vinculo_presente_nao_afirma_copia_disponivel(r):
+    """O dono apagou a cópia e o worker ainda não sabe: o banco guarda o
+    vínculo, o canal não tem a mensagem. A sombra registra o vínculo, diz
+    que a presença NÃO foi verificada e não afirma o canal de cupons."""
+    noite, cap, out = _copia_apagada(descobrir=False)
+    pa, copia = out["pa"], out["copia"]
+    r.check(out["vinculo_antes"] == copia and out["vinculo_fim"] == copia
+            and copia not in noite.cli.no_ar.get(CANAL_CUPONS, {}),
+            "15.banco_tem_vinculo_e_o_canal_nao_tem_a_copia",
+            f"vínculo={out['vinculo_fim']} cópia={copia} no_ar={noite.cli.no_ar.get(CANAL_CUPONS)}")
+    fada = [x for x in cap.linhas if "18042)" in x]
+    d = _ler(fada[0]) if len(fada) == 1 else {}
+    r.check(len(fada) == 1 and (d["acao"], d["post"], d["vinculo"], d["presenca"], d["afirmavel"],
+                                d["cond"]) ==
+            ("JUNTA", pa, "presente", "nao_verificada", "principal", "principal+cupons"),
+            "15.vinculo_registrado_presenca_nao_verificada", "\n".join(cap.linhas))
+    r.check(fada and "destino_afirmavel=principal+cupons" not in fada[0]
+            and "confirmad" not in fada[0].split("presenca=")[1].split(" ")[0],
+            "15.nunca_afirma_a_copia_disponivel", "\n".join(fada))
+    r.check(not [c for c in out["depois"] if c[1] == CANAL_CUPONS],
+            "15.nenhuma_chamada_ao_canal_de_cupons_depois", str(out["depois"]))
+    # sombra ligada × desligada: as mesmas chamadas (a sombra não lê o Telegram)
+    real = sombra.registrar
+    sombra.registrar = lambda *a, **k: None
+    try:
+        noite_off, _c, out_off = _copia_apagada(descobrir=False)
+        banco_off = _banco()
+    finally:
+        sombra.registrar = real
+    noite_on, _c2, _o2 = _copia_apagada(descobrir=False)
+    r.check(noite_on.cli.chamadas == noite_off.cli.chamadas and _banco() == banco_off
+            and out_off["vinculo_fim"] == out_off["copia"],
+            "15.sombra_nao_consulta_o_telegram_nem_toca_o_vinculo")
+    # a regra pura, direto: vínculo presente nunca vira destino certo
+    dd = regra.avaliar(_cand(F_18042), [_vivo(31943, PUB_31943)], AGORA, SUP)
+    f = regra.finalizar(dd, regra.PRESENTE)
+    r.check((f.vinculo, f.presenca, f.destino_afirmavel, f.se_copia_no_ar) ==
+            ("presente", "nao_verificada", "principal", "principal+cupons"),
+            "15.regra_pura_condicional", str(f))
 
 
 if __name__ == "__main__":
