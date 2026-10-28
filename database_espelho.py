@@ -15,8 +15,12 @@ from typing import Optional
 from database_conexao import _db
 
 
-def db_espelho_get(msg_id_dest: int) -> Optional[int]:
-    """msg_id do espelho do post, ou None quando não há espelho."""
+def db_espelho_get(msg_id_dest: int, *, estrito: bool = False) -> Optional[int]:
+    """msg_id do espelho do post, ou None quando não há espelho.
+
+    Padrão (todos os consumidores de sempre): a falha de leitura também
+    devolve None. `estrito=True` (opt-in): a falha LEVANTA — None passa a
+    significar só "a leitura funcionou e não há vínculo"."""
     try:
         with _db() as db:
             row = db.execute(
@@ -24,6 +28,8 @@ def db_espelho_get(msg_id_dest: int) -> Optional[int]:
                 (msg_id_dest,)).fetchone()
         return row[0] if row else None
     except Exception:
+        if estrito:
+            raise
         return None
 
 
