@@ -4,7 +4,9 @@ Canal de cupons — o post de CUPOM sai nos DOIS canais.
 Responsabilidade ÚNICA: publicar no canal de cupons (CANAL_CUPONS),
 junto com o canal principal, todo post cuja composição é de
 cupom (resolucao_identidade.eh_identidade_cupom: cupom com ou sem código
-e nenhum produto), e manter as duas mensagens iguais depois.
+e nenhum produto; com a campanha por página de resgate em ATIVO, também a
+campanha cujo destino é a página de resgate declarada — ver _de_cupons), e
+manter as duas mensagens iguais depois.
   - não decide nada: texto, mídia, família e score continuam decididos
     UMA vez, sob os locks de sempre; o canal de cupons recebe a MESMA
     operação, com o mesmo texto e a mesma imagem;
@@ -108,7 +110,7 @@ from config import GRUPO_DESTINO
 from logger import log_sys
 from database import (db_espelho_del, db_espelho_get, db_espelho_mover,
                       db_espelho_set, db_exibida)
-from pipeline import saida
+from pipeline import campanha_resgate, saida
 from pipeline.resolucao_identidade import eh_identidade_cupom
 
 __all__ = ["canal_configurado", "iniciar", "encerrar", "vai_para_cupons",
@@ -182,7 +184,19 @@ async def encerrar() -> None:
 # ── Simultâneo (chamado pelos aplicadores ANTES do I/O do principal) ──
 def vai_para_cupons(chaves) -> bool:
     """O post (por estas âncoras exibidas) sai também no canal de cupons?"""
-    return _aberto and eh_identidade_cupom(chaves)
+    return _aberto and _de_cupons(chaves)
+
+
+def _de_cupons(chaves) -> bool:
+    """Exibidas de post do canal de cupons: composição de cupom
+    (eh_identidade_cupom) ou — só com config.CAMPANHA_RESGATE_MODO =
+    "ATIVO" — campanha cujo destino é a página de resgate de cupons
+    declarada (campanha_resgate.so_pagina_de_resgate; caso real 28/10/2026:
+    o dono encaminhou à mão o post 31945 da Fada ao canal de cupons). Em
+    SOMBRA, exatamente eh_identidade_cupom."""
+    return eh_identidade_cupom(chaves) or (
+        config.CAMPANHA_RESGATE_MODO == "ATIVO"
+        and campanha_resgate.so_pagina_de_resgate(chaves))
 
 
 def _copia(img):
@@ -284,7 +298,7 @@ def conteudo(msg_id_dest: int, midia: bool = False, *, rastro=None) -> None:
     obsoleto (ver A MAIS NOVA VALE no cabeçalho)."""
     if not _aberto or db_espelho_get(msg_id_dest) == _AUSENTE:
         return            # cópia AUSENTE: apagado fica apagado (ver FALHA)
-    if not (_tem_mensagem(msg_id_dest) or eh_identidade_cupom(db_exibida(msg_id_dest))):
+    if not (_tem_mensagem(msg_id_dest) or _de_cupons(db_exibida(msg_id_dest))):
         return            # nem é cupom, nem tem mensagem lá (produto): nada a fazer
     versao = next(_versoes)
     _pedidos[msg_id_dest] = (versao, _pedidos.get(msg_id_dest, (0, False))[1] or bool(midia))
@@ -482,7 +496,7 @@ async def _reconciliar(mid: int, midia: bool, principal=None) -> str:
     esp = db_espelho_get(mid)
     if esp == _AUSENTE:
         return "ausente"                  # sumiu sem ter sido o worker: não recria
-    cupom = eh_identidade_cupom(db_exibida(mid))
+    cupom = _de_cupons(db_exibida(mid))
     if esp is None and not cupom:
         return "nao_cupom"
     if esp is not None and not cupom:

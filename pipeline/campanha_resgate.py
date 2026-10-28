@@ -1,5 +1,6 @@
 """
-CAMPANHA POR PÁGINA DE RESGATE — regra pura, só em SOMBRA nesta frente.
+CAMPANHA POR PÁGINA DE RESGATE — regra pura (SOMBRA por padrão; ATIVO por
+config.CAMPANHA_RESGATE_MODO — ver COM CÓDIGO DE CUPOM, abaixo).
 
 Responsabilidade ÚNICA: dado um candidato SEM âncora forte e os posts vivos
 da mesma plataforma, também sem âncora forte, responder se ele é a MESMA
@@ -70,7 +71,9 @@ docs/arquitetura/campanha-resgate.md.
 PENDENTE DE APROVAÇÃO: JUNTA com nome/benefício só "compatível" (benefício
 ausente ou incomparável de um lado — onde a regra de cupom de hoje fica em
 INCERTO) sai com `pendente=True`. Só "igual" (o mesmo benefício explícito)
-não é pendente. Ativar as pendentes exige aprovação separada do dono.
+não é pendente. Ativar as pendentes exige aprovação separada do dono: é a
+flag config.CAMPANHA_RESGATE_MODO = "ATIVO" (os dois casos reais de 28/10
+são "compatível"); o campo continua na linha como registro.
 
 CANAL DE CUPONS — QUATRO COISAS SEPARADAS:
   · destino_elegivel: a POLÍTICA proposta — o post cujo link principal é a
@@ -99,18 +102,48 @@ importa (família de hoje ou alvo da junção); a regra só combina (finalizar).
 INDETERMINADO não sai daqui: é do adaptador, quando uma LEITURA do estado
 falha (a regra nunca decide sobre estado incompleto).
 
-NÃO faz: banco, Telegram, log, relógio, mudança de chave ou de natureza.
+COM CÓDIGO DE CUPOM (`com_codigo=True`; o adaptador só passa em ATIVO).
+Caso real (28/10/2026 11:59 UTC, logs + prévia): Fada 18049 "Cupons
+Renovados! Esquenta Shopee / Resgate todos os cupons aqui: <página>" → post
+32138, que na edição seguinte ganhou o código 3SQU3NT411 (R$150 OFF em
+R$999); Promotom 112034 "Cupons Shopee / Resgate aqui: <página>" 18 s depois
+→ post NOVO 32139 (CUPOM_INCERTO sem_beneficio). O dono apagou o 32139 às
+12:08. Com "sem âncora forte" dos dois lados, o 32138 (com código) nem é par.
+  · produto e destino declarado continuam fora dos dois lados
+    (ancora_estrutural): os 186+ posts de produto do fumotom que abrem com a
+    página seguem fora;
+  · código de cupom deixa de excluir, mas a junção NUNCA pode esconder um
+    código (codigo_preservado). Quem escolhe o texto depois é a decisão de
+    evolução de sempre (pipeline.decisao), e relacao_composicao é None
+    quando um lado só tem chave fraca — aí decide o SCORE. Então:
+      – só o post tem código: junta só se o candidato NÃO vence pelo score
+        (o texto com o código fica: SCORE_NAO_EVOLUI/DUP_SILENCIOSO); se o
+        candidato tem parte dos códigos, é REDUZ e nunca substitui;
+      – só o candidato tem código: junta só se ele VENCE pelo score e o post
+        ainda tem orçamento de edição (o texto com o código entra: EVOLUI);
+        se o post tem parte dos códigos, é AMPLIA e basta o orçamento;
+      – códigos diferentes nos dois lados: nunca (codigos_distintos);
+      – score ou orçamento não informados (PostVivo.score_maior/orcamento
+        None): não junta;
+  · com `com_codigo=False` (SOMBRA) a regra é exatamente a de antes.
+
+NÃO faz: banco, Telegram, log, relógio, mudança de chave ou de natureza. A
+única consulta é estática: a capacidade `paginas_resgate` das plataformas.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
+from plataformas import registry
 from pipeline import cupom_lancamento
-from pipeline.resolucao_identidade import eh_chave_forte
+from pipeline.resolucao_identidade import (eh_chave_destino, eh_chave_forte,
+                                           eh_chave_produto)
 
 __all__ = ["Candidato", "PostVivo", "Decisao", "avaliar", "finalizar",
-           "destino_afirmavel", "sem_ancora_forte", "chave_resgate", "MANTER",
+           "destino_afirmavel", "sem_ancora_forte", "chave_resgate",
+           "ancora_estrutural", "entra_na_regra", "codigo_preservado",
+           "pagina_de_resgate", "so_pagina_de_resgate", "MANTER",
            "JUNTA", "INCERTO", "INDETERMINADO", "PRINCIPAL", "PRINCIPAL_E_CUPONS",
            "NOVA", "PRESENTE", "AUSENTE", "SEM_VINCULO", "NAO_VERIFICADA",
            "AUSENTE_CONFIRMADA", "A_CRIAR"]
@@ -128,6 +161,74 @@ def sem_ancora_forte(chaves: Iterable[str]) -> bool:
     menos uma chave."""
     chaves = list(chaves or ())
     return bool(chaves) and not any(eh_chave_forte(k) for k in chaves)
+
+
+def _codigo(chave: str) -> bool:
+    """Cupom COM código: `<plat>|cup|<código>`."""
+    partes = (chave or "").split("|", 2)
+    return len(partes) == 3 and partes[1] == "cup" and eh_chave_forte(chave)
+
+
+def ancora_estrutural(chaves: Iterable[str]) -> bool:
+    """Alguma âncora forte que não é código de cupom (produto, destino
+    declarado): essa oferta tem autoridade própria e nunca entra na regra."""
+    return any(eh_chave_forte(k) and not _codigo(k) for k in chaves or ())
+
+
+def entra_na_regra(chaves: Iterable[str], com_codigo: bool = False) -> bool:
+    """As chaves podem entrar na regra? Sem `com_codigo`: sem âncora forte
+    nenhuma (sem_ancora_forte). Com: só não pode haver âncora estrutural."""
+    chaves = list(chaves or ())
+    if not com_codigo:
+        return sem_ancora_forte(chaves)
+    return bool(chaves) and not ancora_estrutural(chaves)
+
+
+def _codigos(chaves) -> frozenset:
+    return frozenset(k for k in chaves or () if _codigo(k))
+
+
+def codigo_preservado(chaves_candidato: Iterable[str], p: "PostVivo") -> str:
+    """"" quando juntar o candidato ao post `p` não esconde código de cupom
+    nenhum na decisão de evolução que roda depois; senão o motivo (ver COM
+    CÓDIGO DE CUPOM no cabeçalho)."""
+    cc, cp = _codigos(chaves_candidato), _codigos(p.chaves)
+    if cc == cp:
+        return ""
+    if cc < cp:                    # o post exibe código que o candidato não traz
+        if cc or p.score_maior is False:
+            return ""              # REDUZ, ou o score não deixa substituir
+        return "codigo_do_post_sairia"
+    if cp < cc:                    # o candidato traz código que o post não exibe
+        if p.orcamento and (cp or p.score_maior):
+            return ""              # AMPLIA, ou o score faz o texto evoluir
+        return "codigo_novo_ficaria_oculto"
+    return "codigos_distintos"
+
+
+def pagina_de_resgate(plat: str, canonica: str) -> str:
+    """`canonica` quando a plataforma `plat` a declara página de resgate
+    de cupons (Plataforma.paginas_resgate); senão ""."""
+    if not plat or not canonica:
+        return ""
+    donos = registry.compor_capacidade("paginas_resgate").get(canonica)
+    return canonica if donos and plat in donos else ""
+
+
+def so_pagina_de_resgate(chaves: Iterable[str]) -> bool:
+    """As chaves exibidas são de uma campanha cujo destino é a página de
+    resgate declarada: `<plat>|url|<página>` e nada de produto ou destino
+    declarado. (A chave `url` nasce da 1ª canônica — a página é o destino
+    PRINCIPAL por construção.)"""
+    chaves = list(chaves or ())
+    if any(eh_chave_produto(k) or eh_chave_destino(k) for k in chaves):
+        return False
+    for k in chaves:
+        partes = k.split("|", 2)
+        if (len(partes) == 3 and partes[1] == "url"
+                and pagina_de_resgate(partes[0], partes[2])):
+            return True
+    return False
 
 
 def chave_resgate(plat: str, pagina: str) -> str:
@@ -157,6 +258,11 @@ class PostVivo:
     perfil: cupom_lancamento.Perfil
     nascimento: float
     fontes: frozenset
+    # só para COM CÓDIGO DE CUPOM (o adaptador preenche em ATIVO), na régua
+    # da decisão de evolução: o score do candidato, na escala do post, é
+    # MAIOR que o do texto no ar? o post ainda tem orçamento de edição?
+    score_maior: Optional[bool] = None
+    orcamento: Optional[bool] = None
 
 
 @dataclass(frozen=True)
@@ -214,11 +320,13 @@ def _prova(c: Candidato, p: PostVivo) -> str:
     return "so_link_publicado"
 
 
-def avaliar(c: Candidato, vivos: list, agora: float, superior_s: float) -> Decisao:
+def avaliar(c: Candidato, vivos: list, agora: float, superior_s: float,
+            com_codigo: bool = False) -> Decisao:
     """A decisão da relação para o candidato `c` diante dos posts `vivos`
-    (os dados chegam prontos e COMPLETOS; nada aqui consulta estado)."""
+    (os dados chegam prontos e COMPLETOS; nada aqui consulta estado).
+    `com_codigo`: ver COM CÓDIGO DE CUPOM no cabeçalho."""
     hoje = _destino(c.cupons_hoje)
-    if not sem_ancora_forte(c.chaves):
+    if not entra_na_regra(c.chaves, com_codigo):
         return Decisao(MANTER, None, "fora:ancora_forte", None, hoje, hoje)
     if not c.pagina or not c.publicada:
         return Decisao(MANTER, None, "fora:sem_pagina_de_resgate", None, hoje, hoje)
@@ -227,7 +335,7 @@ def avaliar(c: Candidato, vivos: list, agora: float, superior_s: float) -> Decis
     # depois, em finalizar)
     elegivel = PRINCIPAL_E_CUPONS
     exibem = [p for p in vivos
-              if p.plat == c.plat and sem_ancora_forte(p.chaves)
+              if p.plat == c.plat and entra_na_regra(p.chaves, com_codigo)
               and p.primeiro_link == c.publicada]
     if c.familia_hoje is not None:
         fam = next((p for p in exibem if p.msg_id == c.familia_hoje), None)
@@ -249,6 +357,10 @@ def avaliar(c: Candidato, vivos: list, agora: float, superior_s: float) -> Decis
                                            superior_s):
             motivos.append(("mesma_fonte" if c.chat in p.fontes
                             else "acima_do_superior", p, delta))
+            continue
+        esconde = codigo_preservado(c.chaves, p) if com_codigo else ""
+        if esconde:
+            motivos.append((esconde, p, delta))
             continue
         rel = cupom_lancamento.compativeis(c.perfil, p.perfil)
         if rel == "conflito":

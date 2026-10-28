@@ -84,8 +84,12 @@ async def enviar(montada: MensagemMontada,
     # única ordenação — a ordem global de aquisição continua total. Os
     # mutexes só serializam: nunca entram em `ofertas` (família, banco,
     # decisão). Ver familia.mutexes_de_adocao.
+    # [Campanha por página de resgate, só ATIVO] mais a trava da campanha
+    # (campanha_resgate_sombra.mutexes): a mesma serialização, para as
+    # mensagens que levam à mesma página de resgate. Em SOMBRA: nenhuma.
     travas = sorted(set(ofertas) | set(familia.mutexes_de_adocao(
-        ofertas, destinos, _container_de(norm, ofertas))))
+        ofertas, destinos, _container_de(norm, ofertas)))
+        | set(campanha_resgate_sombra.mutexes(norm, ofertas)))
 
 # ── Camada 0: ORIGEM (Fase 1 do MB) — lock mais externo (I6) ──
     if norm is not None:
@@ -248,13 +252,18 @@ async def _enviar_inner(montada: MensagemMontada,
         # nova não passa pela revalidação da ADOÇÃO (que a recusaria e
         # refaria a busca em laço).
         via_lancamento = False
+        via_campanha = False
         if not dest_fix and not is_edit:
             msg_id_rel, via_lancamento = familia.lancamento_cupom(
                 ofertas, norm.texto_analise, norm.chat, norm.msg_id,
                 msg_id_rel, destinos=destinos, container=container)
-            # [CAMPANHA POR PÁGINA DE RESGATE] SOMBRA: só registra o que a
-            # regra faria; não devolve nada e não muda a família.
-            campanha_resgate_sombra.registrar(norm, ofertas, msg_id_rel)
+            # [CAMPANHA POR PÁGINA DE RESGATE] SOMBRA (padrão): só registra
+            # o que a regra faria; a família é a mesma. ATIVO: a mensagem
+            # que abriria post NOVO (e que a regra de cupom não decidiu)
+            # junta no post vivo da mesma campanha — como a regra de cupom,
+            # sem a revalidação da ADOÇÃO.
+            msg_id_rel, via_campanha = campanha_resgate_sombra.familia(
+                norm, ofertas, msg_id_rel, via_lancamento, score=score)
         if msg_id_rel is not None:
             alvo_existente = True
             post_lock = await exclusao.lock_post(msg_id_rel)
@@ -275,7 +284,7 @@ async def _enviar_inner(montada: MensagemMontada,
                         f"({getattr(norm, 'chat', '')},{getattr(norm, 'msg_id', '')})"
                         f"→post:{msg_id_rel} — apagado pelo dono; nada vai ao canal")
                     return True
-                if (not dest_fix and not via_lancamento
+                if (not dest_fix and not via_lancamento and not via_campanha
                         and familia.adocao_obsoleta(msg_id_rel, ofertas)):
                     # [Cupom sem nome] adoção revalidada sob o lock: o
                     # alvo deixou de ser complementar → nova busca.

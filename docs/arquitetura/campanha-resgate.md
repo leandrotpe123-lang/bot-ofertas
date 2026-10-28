@@ -2,6 +2,8 @@
 
 Frente A (28/10/2026). **Só sombra**: nada aqui publica, edita, apaga, funde
 ou muda estado. A regra só sai da sombra com revisão explícita do dono.
+A correção funcional (ATIVO atrás de `config.CAMPANHA_RESGATE_MODO`, padrão
+SOMBRA) está em [campanha-resgate-ativo.md](campanha-resgate-ativo.md).
 
 ## 1. O caso real (logs da Railway × prévia pública dos canais)
 
