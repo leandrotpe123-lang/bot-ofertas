@@ -63,9 +63,18 @@ condições abaixo. Nunca é "mesmo link = mesma campanha".
    (ambíguo), que é o comportamento de hoje.
 
 **Relação com a regra de cupom sem código (ATIVO).** Nos casos em que ela
-fica em INCERTO por `sem_beneficio`, a página como link principal dos dois
-lados é a prova que faltava, e a sombra junta. Há dois casos reais, e nos
-dois o dono apagou o post duplicado: 17/10 (29546) e 28/10 (31943).
+fica em INCERTO por falta de benefício explícito, a sombra junta pela página,
+mas com `aprovacao=pendente`. Isso **não** autoriza nada. Há dois casos
+reais, e nos dois o dono apagou o post duplicado: 17/10 (29546) e 28/10
+(31943).
+
+**Pendente de aprovação (decisão do dono, separada).**
+- Só a junção `mesma_pagina_de_resgate:igual` (o mesmo benefício explícito
+  dos dois lados, sem conflito de nome) sai sem pendência.
+- Toda junção `mesma_pagina_de_resgate:compativel` (benefício ausente ou
+  incomparável de um lado) sai com `aprovacao=pendente` (`Decisao.pendente`).
+- Nenhuma ativação futura pode incluir as pendentes sem uma aprovação própria.
+- As duas junções reais conhecidas (17/10 e 28/10) são **pendentes**.
 
 Onde a regra de cupom decide NOVA, esta regra **nunca** junta. Os três
 casos de NOVA em `cupom_lancamento._relacao` são `mesma_fonte`,
@@ -93,23 +102,113 @@ implementação.
 - Chamada em `publicacao._enviar_inner` logo depois de
   `familia.lancamento_cupom`, sob os locks ORIGEM → IDENTIDADE, só para
   mensagem nova.
-- Só lê o estado e devolve sempre `None`. Erro vira uma linha
+- Só lê o estado e devolve sempre `None`. Erro inesperado vira uma linha
   `❌ [RESGATE_SOMBRA] <Classe>` e mais nada (nem o log do erro escapa).
-- Escreve uma linha só quando a regra junta, duvida, mudaria o canal ou vê
-  outro post com a mesma página:
+- O canal do post vem da política de roteamento de hoje
+  (`eh_identidade_cupom` das âncoras exibidas, como em
+  `espelho_cupons._reconciliar`). A sombra não lê a tabela de espelho.
+- Escreve uma linha só quando a regra junta, duvida, mudaria o canal, vê
+  outro post com a mesma página ou não consegue ler o estado:
 
 ```
-🎟 [RESGATE_SOMBRA] msg=(chat,id) acao=JUNTA|MANTER|INCERTO post:<id> motivo=…
-   Δ=…min pagina=<canônica> hoje=post:<id>|post_novo ident_atual=[…]
-   ident_proposta=[…, '<plat>|resgate|<página>'] destino_hoje=…
-   destino_previsto=… nome=(cand|post) beneficio=(cand|post) outros=[…]
+🎟 [RESGATE_SOMBRA] msg=(chat,id) acao=JUNTA|MANTER|INCERTO|INDETERMINADO
+   post:<id> motivo=… Δ=…min pagina=<canônica> hoje=post:<id>|post_novo
+   ident_atual=[…] ident_proposta=[…, '<plat>|resgate|<página>']
+   destino_hoje=… destino_previsto=… prova=canonica_persistida|so_link_publicado
+   aprovacao=pendente|- nome=(cand|post) beneficio=(cand|post) outros=[…]
 ```
+
+**Leitura estrita → INDETERMINADO.**
+- As leituras do estado que a sombra usa (`db_posts_vivos_com_prefixo`,
+  `db_get_post`, `db_exibida`, `db_ofertas_de_post` e `db_origens_do_post`)
+  devolvem o vazio do tipo também quando a leitura **falha**. É o contrato de
+  sempre dos outros consumidores, e não muda.
+- A sombra pede `estrito=True` (opt-in): a falha levanta.
+- Estado que não pôde ser lido inteiro dá `acao=INDETERMINADO`,
+  `motivo=erro_leitura:<etapa>:<Classe>`, em WARNING. Isso vale para uma
+  leitura que falha e também para um post da lista de vivos que some na
+  leitura seguinte (`erro_leitura:post:Ausente`).
+- Nesse caso a sombra nunca dá MANTER, JUNTA ou INCERTO como se o estado
+  estivesse completo.
+- Testes 12 e 13: cada etapa falhando no caso real; padrão inalterado das 5
+  leituras.
 
 Custo medido:
-- fora da regra (quase todas as mensagens): p50 1,5 µs, p99 4,7 µs;
-- caminho completo (página declarada como 1º link): p50 0,3 ms, p99 0,7 ms.
+- fora da regra (quase todas as mensagens): p50 1,5 µs, p99 5,8 µs;
+- caminho completo (página declarada como 1º link, leituras estritas):
+  p50 0,34 ms, p99 0,54 ms.
 
-## 4. Corpus real e resultado por caso
+## 4. O link publicado × o contrato da normalização (tensão declarada)
+
+**O contrato.** `normalizacao_identidade` estabelece: "A derivação de
+identidade opera EXCLUSIVAMENTE sobre a URL afiliada LONGA (…), nunca (…)
+sobre URL encurtada". `derivar_ancora_url` reforça: "A URL de publicação
+(possivelmente encurtada) JAMAIS participa". A regra nova compara o **link
+publicado** (curto). A tensão é real e não é resolvida em silêncio.
+
+**O papel exato do link publicado na regra.**
+- O **candidato** é reconhecido só pela **canônica** (`ancora_url` = a 1ª
+  canônica, declarada como página de resgate). O link publicado nunca o
+  reconhece.
+- O link publicado do candidato (`publicada`) é o que a afiliação devolveu
+  para essa **mesma** canônica: `mapa` e `canonicas` saem da mesma
+  `Afiliacao`, na mesma ordem (`normalizacao_links.resolver_e_afiliar`).
+- Do **post vivo** a regra só tem o texto publicado. Um post `cupb` não guarda
+  a canônica do seu 1º link. Por isso compara o 1º link publicado do post com
+  a `publicada` do candidato, **só como teste de igualdade**.
+- Nada disso cria, muda ou grava identidade. A chave proposta
+  (`<plat>|resgate|<página>`) só aparece na linha da sombra.
+
+**O que a igualdade garante, e por quê.**
+- **Certeza (nenhuma junção falsa):** link publicado igual ⇒ mesmo destino.
+  Um link curto leva a um único destino. Isso vale sem depender de nenhuma
+  promessa da Shopee.
+- **Alcance (quando junta):** mesmo destino ⇒ mesmo link publicado. Isso vale
+  só enquanto a plataforma der um link por destino, condição do contrato da
+  capacidade `paginas_resgate`. Se falhar, a regra deixa de juntar (o lado
+  conservador; teste 08, "link_publicado_diferente").
+
+**Prova da garantia da Shopee.**
+- **Código.** `plataformas/shopee/afiliacao.afilia`, "Cache por DESTINO":
+  `consultar_link(url_limpa)` devolve a `publicada` já gravada para a mesma
+  URL limpa, venha o link de que fonte vier. A gravação pelo destino só
+  acontece com o que a API deu para a própria URL limpa.
+- **Dados (7 dias, prévia pública × fontes).**
+  - 564 links de fonte Shopee alinhados a um post, e nenhum com dois links
+    publicados diferentes.
+  - 152 links de fonte distintos, de 5 canais (fumotom 140, Fada 5,
+    Promotom 3, Samuel 3, fadapromos 1), viraram o **mesmo** `AAHdNLxGSX`.
+  - 207 posts publicaram esse link (de 21/10 11:02 a 28/10 04:32).
+  - As duas mensagens com a canônica provada por log (Fada 18042 e Samuel
+    123470: `url|…/m/cupom-de-desconto`) também deram `AAHdNLxGSX`.
+- **Limite honesto.**
+  - Os 7 dias provam o **cache**, não o determinismo da API da Shopee. A
+    entrada do destino é renovada a cada leitura; `TTL_LINK_INATIVO` é de
+    30 dias e só vale para entrada parada.
+  - Se a entrada se perder (perda do banco, ou `afiliacao_vigente` falsa
+    levando a `db_remover_link`), a API pode dar outro código curto.
+  - Nesse caso a regra só abstém até os dois lados terem o código novo.
+
+**Alternativa sem a tensão: canônica persistida.** Recomendada antes de
+qualquer ativação; **não implementada**, sem expansão de critério.
+
+| | O que é | Prós | Contras |
+|---|---|---|---|
+| (A) | guardar a canônica do 1º link do post (`ancora_url`) junto do post, gravada na publicação | compara canônica com canônica, cumpre o contrato e dispensa a garantia da Shopee | muda o schema e o caminho de gravação do núcleo (frente própria, com migração e testes) |
+| (B) | na ativação, gravar a chave fraca `<plat>|resgate|<página>` (derivada da canônica) nas âncoras do post | a família acha o par pelo mecanismo de sempre (`oferta_index`/`post_exibida`), sem comparar link | é a própria ativação: muda identidade e família; só com aprovação |
+| (C) | consulta reversa no `links_cache` (`url_conv` → `url_canon`) | sem schema novo | é cache (expira; não tem índice por `url_conv`); não serve de fonte de verdade. Não recomendada |
+
+**Até lá, a dependência fica visível em cada decisão.** O campo `prova=` da
+linha diz em que a igualdade se apoiou:
+- `canonica_persistida`: o post guarda `<plat>|url|<página>`, a canônica já
+  está no estado;
+- `so_link_publicado`: o post é `cupb` e só o link publicado liga os dois.
+
+No caso real, a junção da Fada é `so_link_publicado` (o post da Promotom é
+`cupb`). O Samuel, que fica no post da Fada (`url|<página>`), é
+`canonica_persistida`.
+
+## 5. Corpus real e resultado por caso
 
 Fontes dos dados:
 - textos: prévia pública t.me/s, HTML convertido para o markdown do Telethon;
@@ -123,10 +222,10 @@ A canônica só é afirmada com prova: a identidade logada, ou o link publicado
 | # | Texto / origem (UTC) | Identidade hoje | Canal de cupons hoje | Post hoje | Decisão proposta | Justificativa | Teste |
 |---|---|---|---|---|---|---|---|
 | 1 | Promotom 112024 "Cupons Shopee", 28/10 02:59 | `cupb|geral` | sim | 31943 | MANTER (1º do lançamento) | página como 1º link, sem par vivo | 03 |
-| 2 | Fada 18042 "Começou! Esquenta 11.11", 03:00 | `url|…/m/cupom-de-desconto` | não | 31945 novo | **JUNTA no 31943**, principal + cupons | mesma página como 1º link dos dois lados; Δ 0,7 min; fontes diferentes; nome só de um lado (compatível) | 03 |
-| 3 | Samuel 123470, 03:00:15 | `url|…` | não | DUP no 31945 | MANTER `ja_no_mesmo_post`, outros=[31943] | família de hoje já tem a página; registra o risco | 03 |
+| 2 | Fada 18042 "Começou! Esquenta 11.11", 03:00 | `url|…/m/cupom-de-desconto` | não | 31945 novo | **JUNTA no 31943**, principal + cupons, **pendente** (`so_link_publicado`) | mesma página como 1º link dos dois lados; Δ 0,7 min; fontes diferentes; nome só de um lado e nenhum benefício (compatível, não igual) | 03 |
+| 3 | Samuel 123470, 03:00:15 | `url|…` | não | DUP no 31945 | MANTER `ja_no_mesmo_post`, outros=[31943] (`canonica_persistida`) | família de hoje já tem a página; registra o risco | 03 |
 | 4 | fumotom 42674, produto com a página como 1º link, 03:01 | `shopee|1930141978.58270173531` | não | 31947 | fora (âncora forte) | produto tem dono; 186 casos assim em 7 dias | 03, 06 |
-| 5 | Promotom 111508 × Fada 17870 "Novo Cupom Shopee VIP", 17/10 (corpus de `test_post_apagado`) | `cupb|geral` × `cupb|vip` | sim × sim | 29546 × 29549; hoje em ATIVO: CUPOM_INCERTO sem_beneficio, 2 posts | **JUNTA** no da Promotom | mesma página como 1º link; o dono apagou o 29546 | 03b |
+| 5 | Promotom 111508 × Fada 17870 "Novo Cupom Shopee VIP", 17/10 (corpus de `test_post_apagado`) | `cupb|geral` × `cupb|vip` | sim × sim | 29546 × 29549; hoje em ATIVO: CUPOM_INCERTO sem_beneficio, 2 posts | **JUNTA** no da Promotom, **pendente** | mesma página como 1º link; o dono apagou o 29546; sem benefício | 03b |
 | 6 | Promotom 111724 (21/10 12:03) × Fada 17927 "Dia de Cupons" (12:00) | `cupb|geral` × `cupb|dia` | sim × sim | 30602 × 30591 (CUPOM_INCERTO sem_beneficio) | abstém | o link da Fada leva a outra página (`4LK2yNECtS`, canônica lacuna) | 05 |
 | 7 | Promotom 111784 (3 links; 1º `LoB6msmOY`) → Fada 17953 → Samuel, 22/10 | `cupb|geral` | sim | 30837 (a Fada EVOLUI) | abstém (MANTER sem linha) | a página não é o 1º link do post; o cupb já junta hoje | 05 |
 | 8 | Promotom 111915 → Fada 17997 → Samuel → Fada 17998 "Tech" → Samuel, 26/10 | `cupb|geral`, `cupb|tech` | sim | 31451, 31463 | abstém | no Tech a página é o 2º link (campanha própria) | 02, 05 |
@@ -145,7 +244,20 @@ não tem:
 O teste 06 também troca a ordem (produto antes) e o teste 08 traz as falhas de
 link.
 
-## 5. Retroativa de 7 dias (21/10 11:02 → 28/10, a retenção da Railway)
+## 6. Retroativa de 7 dias (21/10 11:02 → 28/10, a retenção da Railway)
+
+**Alcance (leia antes dos números).** Os números abaixo valem **só** para o
+que foi analisado:
+- as 15 janelas Shopee de cupom/evento sem âncora forte, criadas pelos 45
+  posts fracos da Shopee;
+- as mensagens que entraram nesses posts.
+
+**Não** valem para todo o fluxo de mensagens dos 7 dias:
+- outras plataformas não declaram página;
+- mensagem descartada antes da publicação não chega à sombra;
+- uma página não declarada é abstenção por construção.
+
+A sombra em produção é que vai medir o resto.
 
 **Método.**
 - Cada uma das 15 janelas Shopee de cupom/evento sem âncora forte é
@@ -157,14 +269,15 @@ link.
   exceção é 21/10 14:02, onde houve exclusão pelo dono e edição, que a
   réplica não refaz.
 
-| Resultado | Quantidade |
+| Resultado (15 janelas / 45 posts) | Quantidade |
 |---|---|
-| JUNTA | **1**: Fada 18042 → post da Promotom (o caso real) |
+| JUNTA | **1**: Fada 18042 → post da Promotom (o caso real), **pendente de aprovação** (sem benefício) |
+| JUNTA não pendente (`igual`) | 0 |
 | MANTER com risco registrado | 1: Samuel 123470 (outros = o post da Promotom) |
 | INCERTO | 0 |
 | Mudança de canal | 1: a própria Fada 18042 (principal → principal + cupons) |
-| Falso positivo | **0** |
-| Erro da sombra | 0 |
+| Falso positivo | **0** nas 15 janelas analisadas |
+| INDETERMINADO / erro da sombra | 0 / 0 |
 
 A lacuna dos links do Samuel não muda o resultado: a mesma retroativa com a
 **hipótese** "todo link do Samuel em 'Resgate… aqui' é a página" dá as mesmas
@@ -178,7 +291,7 @@ A lacuna dos links do Samuel não muda o resultado: a mesma retroativa com a
 - 31770 × 31785 (27/10): 1º link diferente e Δ 37 min;
 - avisos do Samuel (21/10): outra página.
 
-## 6. Onde a regra se abstém (comportamento de hoje fica)
+## 7. Onde a regra se abstém (comportamento de hoje fica)
 
 - **A página não é o 1º link.** É o caso do "Cupons Shopee" de 3 links da
   Promotom (1º `LoB6msmOY`). Hoje o `cupb|geral` já junta essas noites.
@@ -192,16 +305,20 @@ A lacuna dos links do Samuel não muda o resultado: a mesma retroativa com a
   diferente (teste 08).
 - Fonte igual, acima do limite superior, nome ou benefício em conflito, ou
   dois pares possíveis.
+- Leitura do estado que falha ou fica incompleta: INDETERMINADO, nunca uma
+  decisão.
 
-## 7. Riscos residuais
+## 8. Riscos residuais
 
-1. **O contrato depende de "um link publicado por destino".** Se a Shopee ou
-   o cache passarem a dar links diferentes para o mesmo destino, a regra só
-   deixa de juntar (o lado conservador). Isso está no teste 08.
+1. **Tensão com o contrato da normalização** (seção 4). A regra depende de "um
+   link publicado por destino" para **alcance**, nunca para certeza. Se a
+   Shopee ou o cache derem links diferentes para o mesmo destino, a regra só
+   deixa de juntar (teste 08). A solução de fundo é a canônica persistida.
 2. **Página nova de resgate.** Só entra por declaração na plataforma, com
    prova. Até lá, abstenção.
-3. **Junção onde a regra de cupom ficaria em INCERTO `sem_beneficio`**
-   (caso 5).
+3. **Junção onde a regra de cupom ficaria em INCERTO** (casos 2 e 5): sai
+   como `aprovacao=pendente`, e a decisão sobre esses casos continua com o
+   dono.
    Também desempata o `ambiguo` da regra de cupom quando só um dos posts
    tem a página como link principal. Não houve caso assim nos 7 dias.
 4. **Junção "compatível" sem benefício dos dois lados.** O caso real é o seco
@@ -211,15 +328,27 @@ A lacuna dos links do Samuel não muda o resultado: a mesma retroativa com a
    Fada teria entrado no 31943 às 03:00:06, antes de o dono apagá-lo às
    03:00:17. Pela decisão M, apagar o post apaga a campanha inteira, sem
    ressurreição (teste 07). A ativação precisa da revisão do dono sobre isso.
-6. **Tudo foi medido em 7 dias** (a retenção). Antes de ativar, a sombra deve
-   rodar em produção e as linhas `🎟 [RESGATE_SOMBRA]` devem ser revisadas
-   noite a noite.
+6. **Tudo foi medido em 7 dias** (a retenção) e só nas 15 janelas
+   analisadas. Antes de ativar, a sombra deve rodar em produção e as linhas
+   `🎟 [RESGATE_SOMBRA]` devem ser revisadas noite a noite, inclusive as
+   `INDETERMINADO`.
+7. **Leituras que a sombra não controla.** A família de hoje (`familia_hoje`)
+   vem das leituras tolerantes do pipeline. Se uma delas falhou, a família pode
+   estar errada sem que a sombra saiba. A sombra só garante as próprias
+   leituras.
 
-## 8. Para sair da sombra (não feito; precisa de revisão explícita)
+## 9. Para sair da sombra (não feito; precisa de revisão explícita)
 
-A ativação seria: `familia.lancamento_cupom` (ou um passo vizinho, em frente
-própria) devolver o post da decisão JUNTA, e o canal seguir
-`destino_previsto`.
+A ativação seria:
+- `familia.lancamento_cupom` (ou um passo vizinho, em frente própria) devolver
+  o post da decisão JUNTA;
+- o canal seguir `destino_previsto`.
+
+Pré-condições:
+- a canônica persistida (seção 4, opção A ou B) no lugar da comparação de link
+  publicado;
+- a decisão do dono sobre as junções `pendente`;
+- a revisão das linhas da sombra em produção.
 
 O teste 10 já mostra, **só como simulação de teste**, que os aplicadores de
 hoje dariam 1 post no principal e 1 cópia no canal de cupons para o caso

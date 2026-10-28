@@ -44,10 +44,17 @@ O QUE ESTE ARQUIVO PROVA:
   09  canais separados: evento sozinho na página é elegível ao canal de
       cupons sem "cupom" no título (só previsto); /m/11-11 não; o canal
       de hoje não muda
-  10  SIMULAÇÃO DE TESTE (não é ativação): se a família fosse a da
+  10  SIMULAÇÃO DE TESTE (não é ativação; a junção do caso real é PENDENTE
+      de aprovação — sem benefício explícito): se a família fosse a da
       decisão, os aplicadores de hoje dariam 1 post no principal e 1 cópia
       no canal de cupons
   11  só mensagem NOVA passa pela sombra; a edição não
+  12  LEITURA QUE FALHA (cada uma: lista de vivos, post, exibida, ofertas,
+      origens, família; e o post que some entre duas leituras): a mensagem
+      que dependia dela sai INDETERMINADO erro_leitura:<etapa>:<Classe>, em
+      WARNING — nunca MANTER, JUNTA ou INCERTO — e a publicação é a mesma
+  13  leitura estrita é OPT-IN: o padrão das 5 leituras de database_posts
+      (vazio do tipo na falha) não muda; estrito=True levanta
 
     python tests/test_campanha_resgate.py
 """
@@ -56,6 +63,7 @@ import contextlib
 import logging
 import os
 import re
+import sqlite3
 import sys
 import time
 from dataclasses import replace
@@ -447,16 +455,16 @@ SUP = 1800.0
 
 
 def _cand(texto, chat=FADA, chaves=("shopee|url|" + PAGINA,), pagina=PAGINA,
-          publicada=PUB_PAGINA, familia_hoje=None, espelho_hoje=False):
+          publicada=PUB_PAGINA, familia_hoje=None, cupons_hoje=False):
     return regra.Candidato("shopee", str(chat), tuple(chaves), pagina, publicada,
-                           _perfil(texto), familia_hoje, espelho_hoje)
+                           _perfil(texto), familia_hoje, cupons_hoje)
 
 
 def _vivo(mid, texto, chaves=("shopee|cupb|geral",), fontes=(PROMOTOM,), idade=46.0,
-          espelhado=True, plat="shopee"):
+          vai_aos_cupons=True, plat="shopee"):
     return regra.PostVivo(mid, plat, frozenset(chaves), next(iter(links_de(texto)), ""),
                           _perfil(texto), AGORA - idade, frozenset(str(f) for f in fontes),
-                          espelhado)
+                          vai_aos_cupons)
 
 
 def test_02_regra_pura(r):
@@ -470,8 +478,24 @@ def test_02_regra_pura(r):
     r.check((d.destino_hoje, d.destino_previsto) == ("principal", "principal+cupons"),
             "02.caso_real_canais", str(d))
     r.check(abs(d.delta_s - 46.0) < 1e-6, "02.delta", str(d.delta_s))
+    r.check(d.pendente and d.prova == "so_link_publicado", "02.caso_real_pendente_so_link_publicado",
+            str(d))
+    # par REAL de 22/10 (Samuel 122635 entrou no 30837, texto da Fada no ar),
+    # com o link do Samuel como HIPÓTESE (lacuna): o mesmo benefício explícito
+    # (R$30/R$299 e R$90/R$899) → "igual", não pendente
+    p837 = _vivo(30837, "🚨 Novos Cupons Shopee\n\n🎟 R$30 OFF em R$299\n🎟 R$90 OFF em R$899\n\n"
+                        "✅ Resgate aqui: \nhttps://s.shopee.com.br/AAHdNLxGSX", fontes=(PROMOTOM, FADA))
+    d = av(_cand(S_122635, chat=SAMUEL, chaves=("shopee|cupb|v:30-299", "shopee|cupb|v:90-899")),
+           [p837])
+    r.check((d.acao, d.motivo, d.pendente) == (regra.JUNTA, "mesma_pagina_de_resgate:igual", False),
+            "02.mesmo_beneficio_explicito_nao_e_pendente", str(d))
+    # o post que guarda a canônica (url|<página>) dispensa o link publicado
+    d = av(_cand(F), [_vivo(31945, "🚨 Começou! Esquenta 11.11 Shopee\n\nhttps://s.shopee.com.br/AAHdNLxGSX",
+                           chaves=("shopee|url|" + PAGINA,), fontes=(SAMUEL,), vai_aos_cupons=False)])
+    r.check(d.acao == regra.JUNTA and d.prova == "canonica_persistida", "02.prova_canonica_persistida",
+            str(d))
 
-    d = av(_cand(F), [replace(p43, espelhado=False)])
+    d = av(_cand(F), [replace(p43, vai_aos_cupons=False)])
     r.check(d.acao == regra.JUNTA and d.destino_previsto == "principal",
             "02.juncao_vale_o_canal_do_post", str(d))
 
@@ -523,7 +547,7 @@ def test_02_regra_pura(r):
     r.check(set(d.outros) == {31943, 31566}, "02.ambiguo_lista_os_dois", str(d.outros))
 
     # com família escolhida pelo pipeline, a regra nunca troca de post
-    d = av(_cand(F, familia_hoje=31943, espelho_hoje=True), [p43])
+    d = av(_cand(F, familia_hoje=31943, cupons_hoje=True), [p43])
     r.check((d.acao, d.post, d.motivo) == (regra.MANTER, 31943, "ja_no_mesmo_post"),
             "02.familia_ja_e_o_par", str(d))
     d = av(_cand(F, familia_hoje=31451), [p43])
@@ -574,6 +598,10 @@ def test_03_caso_real_2810(r):
                 "03.identidade_atual_e_proposta", cap.linhas[0])
         r.check("nome=(esquent|-) beneficio=(-|-)" in cap.linhas[0], "03.nome_e_beneficio",
                 cap.linhas[0])
+        r.check("prova=so_link_publicado aprovacao=pendente" in cap.linhas[0],
+                "03.fada_pendente_e_apoiada_so_no_link_publicado", cap.linhas[0])
+        r.check("prova=canonica_persistida aprovacao=-" in cap.linhas[1],
+                "03.samuel_no_post_que_guarda_a_canonica", cap.linhas[1])
         r.check((s["msg"], s["acao"], s["post"], s["motivo"], s["outros"]) ==
                 (123470, "MANTER", pf, "ja_no_mesmo_post", [pa]),
                 "03.samuel_segue_o_dedup_e_registra_o_risco", cap.linhas[1])
@@ -904,6 +932,134 @@ def test_11_edicao_nao_passa_pela_sombra(r):
     r.check(chamadas[:2] == [112024, 18042], "11.mensagens_novas_passam", str(chamadas))
     r.check(noite.depois_da_edicao == [], "11.edicao_nao_passa", str(noite.depois_da_edicao))
     r.check(len(cap.linhas) == 1, "11.uma_linha_so", "\n".join(cap.linhas))
+
+
+# ══════════════════════════════════════════════════════════════════
+# 12 — leitura do estado que falha → INDETERMINADO, nunca uma decisão
+# ══════════════════════════════════════════════════════════════════
+@contextlib.contextmanager
+def _falha_na_leitura(etapa, *, ausente=False):
+    """A leitura `etapa` da sombra falha como o SQLite falha
+    (OperationalError), passando pelo _ler de verdade; `ausente`: o post da
+    lista de vivos não volta na leitura seguinte (leitura incompleta)."""
+    real = sombra._ler
+
+    def ler(et, leitura, *args):
+        if et == etapa:
+            if ausente:
+                return real(et, lambda *a, **k: None, *args)
+
+            def falha(*a, **k):
+                raise sqlite3.OperationalError("database is locked")
+            return real(et, falha, *args)
+        return real(et, leitura, *args)
+    sombra._ler = ler
+    try:
+        yield
+    finally:
+        sombra._ler = real
+
+
+def test_12_falha_de_leitura_vira_indeterminado(r):
+    """Cada leitura da sombra falhando no caso real: a mensagem que
+    dependia dela sai INDETERMINADO erro_leitura:<etapa>:<Classe> (WARNING)
+    — nunca MANTER, JUNTA ou INCERTO —, e a publicação é a mesma de sempre."""
+    real_reg = sombra.registrar
+    sombra.registrar = lambda *a, **k: None
+    try:
+        base, _ = cenario(_caso_real)
+        base_cham, base_banco = base.cli.chamadas, _banco()
+    finally:
+        sombra.registrar = real_reg
+    _, cap_ok = cenario(_caso_real)
+    normal = {_ler(x)["msg"]: x for x in cap_ok.linhas}        # Fada JUNTA, Samuel MANTER
+    # quem lê o quê no caso real: a Promotom só a lista de vivos (não há post
+    # vivo ainda); a Fada lê todos os posts vivos; o Samuel lê a família e
+    # os posts vivos
+    esperado = {"vivos": [112024, 18042, 123470], "post": [18042, 123470],
+                "exibida": [18042, 123470], "ofertas": [18042, 123470],
+                "origens": [18042, 123470], "familia": [123470]}
+    niveis = []
+
+    class _Nivel(logging.Handler):
+        def emit(self, rec):
+            if "[RESGATE_SOMBRA]" in rec.getMessage():
+                niveis.append(rec.levelno)
+    h = _Nivel()
+    log_out.addHandler(h)
+    try:
+        for etapa, msgs in esperado.items():
+            for ausente in ((False, True) if etapa == "post" else (False,)):
+                niveis.clear()
+                with _falha_na_leitura(etapa, ausente=ausente):
+                    noite, cap = cenario(_caso_real)
+                classe = "Ausente" if ausente else "OperationalError"
+                tag = f"12.{etapa}{'.ausente' if ausente else ''}"
+                linhas = {_ler(x)["msg"]: (_ler(x), x) for x in cap.linhas}
+                ind = [m for m, (x, _l) in linhas.items() if x["acao"] == "INDETERMINADO"]
+                r.check(not cap.erros, f"{tag}.sem_erro_inesperado", str(cap.erros))
+                r.check(ind == msgs and all(
+                    linhas[m][0]["motivo"] == f"erro_leitura:{etapa}:{classe}"
+                    and (linhas[m][0]["hoje"], linhas[m][0]["previsto"]) ==
+                    ("indeterminado", "indeterminado") for m in ind),
+                    f"{tag}.quem_dependia_da_leitura_sai_indeterminado", "\n".join(cap.linhas))
+                # quem não dependia dela decide igual a uma noite sem falha
+                r.check(all(linhas[m][1] == normal[m] for m in linhas if m not in msgs)
+                        and all(m in linhas for m in normal if m not in msgs),
+                        f"{tag}.os_outros_decidem_igual", "\n".join(cap.linhas))
+                r.check(niveis.count(logging.WARNING) == len(msgs), f"{tag}.indeterminado_em_warning",
+                        str(niveis))
+                r.check(noite.cli.chamadas == base_cham and _banco() == base_banco,
+                        f"{tag}.publicacao_igual")
+    finally:
+        log_out.removeHandler(h)
+
+
+def test_13_leitura_estrita_opt_in(r):
+    """database_posts: o padrão de sempre (vazio do tipo na falha) não
+    muda; estrito=True levanta. Leitura que funciona: o mesmo nos dois."""
+    import database_posts as dp
+    out = {}
+
+    async def corpo(noite):
+        await noite.chega(PROMOTOM, 112024, P_112024)
+        pa = noite.post(PROMOTOM, 112024)
+        leituras = {
+            "db_posts_vivos_com_prefixo": ("shopee|cupb|",), "db_get_post": (pa,),
+            "db_exibida": (pa,), "db_ofertas_de_post": (pa,), "db_origens_do_post": (pa,)}
+        for nome, args in leituras.items():
+            f = getattr(dp, nome)
+            out[nome] = {"ok": (f(*args), f(*args, estrito=True))}
+        real = dp._db
+
+        @contextlib.contextmanager
+        def falho():
+            raise sqlite3.OperationalError("database is locked")
+            yield                                            # pragma: no cover
+        dp._db = falho
+        try:
+            for nome, args in leituras.items():
+                f = getattr(dp, nome)
+                out[nome]["padrao"] = f(*args)
+                try:
+                    f(*args, estrito=True)
+                    out[nome]["estrito"] = "não levantou"
+                except sqlite3.OperationalError as e:
+                    out[nome]["estrito"] = type(e).__name__
+            out["prefixo_vazio"] = dp.db_posts_vivos_com_prefixo("", estrito=True)
+        finally:
+            dp._db = real
+    cenario(corpo)
+    vazio = {"db_posts_vivos_com_prefixo": [], "db_get_post": None, "db_exibida": set(),
+             "db_ofertas_de_post": [], "db_origens_do_post": []}
+    for nome, v in vazio.items():
+        o = out[nome]
+        r.check(o["ok"][0] == o["ok"][1] and o["ok"][0] not in (None, [], set()),
+                f"13.{nome}.leitura_ok_igual", str(o["ok"]))
+        r.check(o["padrao"] == v and type(o["padrao"]) is type(v), f"13.{nome}.padrao_inalterado",
+                str(o["padrao"]))
+        r.check(o["estrito"] == "OperationalError", f"13.{nome}.estrito_levanta", str(o["estrito"]))
+    r.check(out["prefixo_vazio"] == [], "13.prefixo_vazio_nao_consulta")
 
 
 if __name__ == "__main__":

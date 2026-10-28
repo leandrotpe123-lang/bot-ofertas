@@ -13,11 +13,19 @@ código, sob os mesmos locks (ORIGEM → IDENTIDADE), só para mensagem nova.
 Custo: nada para quem tem âncora forte ou não leva a uma página de resgate
 declarada (a imensa maioria); o resto lê os posts vivos da plataforma.
 
-LINHA (só quando a regra junta, duvida ou mudaria o canal; ids, chaves,
-página canônica, nomes e benefícios — nada de texto nem link publicado):
+LEITURA ESTRITA: toda leitura do estado usa estrito=True (database_posts):
+a falha levanta em vez de virar lista vazia ou None. Estado que não pôde
+ser lido INTEIRO (falha, ou post da lista de vivos que some na leitura
+seguinte) dá acao=INDETERMINADO motivo=erro_leitura:<etapa>:<Classe> —
+nunca MANTER, JUNTA ou INCERTO como se o estado estivesse completo.
+
+LINHA (só quando a regra junta, duvida, mudaria o canal, vê outro post com
+a mesma página ou não consegue ler; ids, chaves, página canônica, nomes e
+benefícios — nada de texto nem link publicado):
   🎟 [RESGATE_SOMBRA] msg=(chat,id) acao= post: motivo= Δ= pagina=
      hoje=post:<id>|post_novo ident_atual=[…] ident_proposta=[…]
-     destino_hoje= destino_previsto= nome=(cand|post) beneficio=(cand|post)
+     destino_hoje= destino_previsto= prova= aprovacao=pendente|-
+     nome=(cand|post) beneficio=(cand|post)
      outros=[posts que também têm a página como destino principal]
 """
 from __future__ import annotations
@@ -29,7 +37,6 @@ from typing import Optional
 import config
 from database import (db_exibida, db_get_post, db_ofertas_de_post,
                       db_origens_do_post, db_posts_vivos_com_prefixo)
-from database_espelho import db_espelho_get
 from logger import log_out
 from plataformas import registry
 from pipeline import campanha_resgate as regra
@@ -42,6 +49,20 @@ __all__ = ["registrar", "avaliar", "pagina_de_resgate"]
 
 # Espécies fracas: as únicas em que a regra olha (âncora forte tem dono).
 _FRACAS = ("cupb", "url", "camp", "cash", "txt")
+
+
+class LeituraFalhou(Exception):
+    """Uma leitura do estado não pôde ser feita inteira."""
+    def __init__(self, etapa: str, classe: str):
+        super().__init__(f"{etapa}:{classe}")
+        self.etapa, self.classe = etapa, classe
+
+
+def _ler(etapa: str, leitura, *args):
+    try:
+        return leitura(*args, estrito=True)
+    except Exception as e:                                 # noqa: BLE001
+        raise LeituraFalhou(etapa, type(e).__name__) from e
 
 
 def pagina_de_resgate(plat: str, canonica: str) -> str:
@@ -60,42 +81,40 @@ def _publicada_da_ancora(norm) -> str:
     return next(iter((getattr(norm, "mapa", None) or {}).values()), "")
 
 
-def _espelhado(mid: int) -> bool:
-    esp = db_espelho_get(mid)
-    return esp is not None and esp != 0
+def _vai_aos_cupons(mid: int, etapa: str) -> bool:
+    """O roteamento de hoje para o post (espelho_cupons: âncoras exibidas)."""
+    return eh_identidade_cupom(_ler(etapa, db_exibida, mid))
 
 
 def _vivos(plat: str) -> list:
     ids = []
     for especie in _FRACAS:
-        for mid in db_posts_vivos_com_prefixo(f"{plat}|{especie}|"):
+        for mid in _ler("vivos", db_posts_vivos_com_prefixo, f"{plat}|{especie}|"):
             if mid not in ids:
                 ids.append(mid)
     vivos = []
     for mid in ids:
-        est = db_get_post(mid)
-        if not est:             # fundido e apagado pelo dono já ficaram fora
-            continue            # (db_posts_vivos_com_prefixo, Frente M)
+        est = _ler("post", db_get_post, mid)
+        if not est:             # estava na lista de vivos: a leitura ficou incompleta
+            raise LeituraFalhou("post", "Ausente")
+        exibida = _ler("exibida", db_exibida, mid)
         vivos.append(regra.PostVivo(
             msg_id=mid, plat=est.get("plat") or plat,
-            chaves=frozenset(db_exibida(mid)) | frozenset(db_ofertas_de_post(mid)),
+            chaves=frozenset(exibida) | frozenset(_ler("ofertas", db_ofertas_de_post, mid)),
             primeiro_link=next(iter(links_de(est.get("texto") or "")), ""),
             perfil=cupom_lancamento.perfil(est.get("texto") or "", plat),
             nascimento=float(est.get("janela_fim") or 0.0) - VIDA_OFERTA_S,
-            fontes=frozenset(str(o) for o, _m in db_origens_do_post(mid)),
-            espelhado=_espelhado(mid)))
+            fontes=frozenset(str(o) for o, _m in _ler("origens", db_origens_do_post, mid)),
+            vai_aos_cupons=eh_identidade_cupom(exibida)))
     return vivos
-
-
-def _par(a, b) -> str:
-    return f"({a or '-'}|{b or '-'})"
 
 
 def avaliar(norm, ofertas, familia_hoje: Optional[int],
             agora: Optional[float] = None):
     """(candidato, posts vivos, decisão) para a mensagem `norm`, ou None
     quando ela está fora da regra (âncora forte ou nenhuma página de
-    resgate declarada). Só LÊ o estado; quem decide é a regra pura."""
+    resgate declarada). Só LÊ o estado; quem decide é a regra pura. Leitura
+    que falha: decisão INDETERMINADO (e posts vivos vazios)."""
     plat = getattr(norm, "plat", "") or ""
     chaves = tuple(ofertas or ())
     if not regra.sem_ancora_forte(chaves):
@@ -104,16 +123,26 @@ def avaliar(norm, ofertas, familia_hoje: Optional[int],
     if not pagina:
         return None
     agora = time.time() if agora is None else agora
-    c = regra.Candidato(
-        plat=plat, chat=str(getattr(norm, "chat", "")), chaves=chaves,
-        pagina=pagina, publicada=_publicada_da_ancora(norm),
-        perfil=cupom_lancamento.perfil(getattr(norm, "texto_analise", "") or "", plat),
-        familia_hoje=familia_hoje,
-        espelho_hoje=(_espelhado(familia_hoje) if familia_hoje is not None
-                      else eh_identidade_cupom(chaves)))
-    vivos = _vivos(plat)
+    base = dict(plat=plat, chat=str(getattr(norm, "chat", "")), chaves=chaves,
+                pagina=pagina, publicada=_publicada_da_ancora(norm),
+                perfil=cupom_lancamento.perfil(getattr(norm, "texto_analise", "") or "", plat),
+                familia_hoje=familia_hoje)
+    try:
+        cupons_hoje = (_vai_aos_cupons(familia_hoje, "familia") if familia_hoje is not None
+                       else eh_identidade_cupom(chaves))
+        c = regra.Candidato(cupons_hoje=cupons_hoje, **base)
+        vivos = _vivos(plat)
+    except LeituraFalhou as f:
+        c = regra.Candidato(cupons_hoje=False, **base)
+        return c, [], regra.Decisao(regra.INDETERMINADO, None,
+                                    f"erro_leitura:{f.etapa}:{f.classe}", None,
+                                    "indeterminado", "indeterminado")
     return c, vivos, regra.avaliar(c, vivos, agora,
                                    float(config.CUPOM_LIMITE_SUPERIOR_S))
+
+
+def _par(a, b) -> str:
+    return f"({a or '-'}|{b or '-'})"
 
 
 def _beneficio(perfil) -> str:
@@ -136,12 +165,14 @@ def registrar(norm, ofertas, familia_hoje: Optional[int],
         delta = f"{d.delta_s / 60:.1f}min" if d.delta_s is not None else "-"
         hoje = f"post:{familia_hoje}" if familia_hoje is not None else "post_novo"
         proposta = sorted(set(c.chaves) | {regra.chave_resgate(c.plat, c.pagina)})
-        log_out.info(
+        nivel = log_out.warning if d.acao == regra.INDETERMINADO else log_out.info
+        nivel(
             f"🎟 [RESGATE_SOMBRA] msg=({c.chat},{getattr(norm, 'msg_id', '')})"
             f" acao={d.acao} post:{d.post if d.post is not None else '-'}"
             f" motivo={d.motivo} Δ={delta} pagina={c.pagina} hoje={hoje}"
             f" ident_atual={sorted(c.chaves)} ident_proposta={proposta}"
             f" destino_hoje={d.destino_hoje} destino_previsto={d.destino_previsto}"
+            f" prova={d.prova} aprovacao={'pendente' if d.pendente else '-'}"
             f" nome={_par(c.perfil.nome, p.perfil.nome if p else '')}"
             f" beneficio={_par(_beneficio(c.perfil), _beneficio(p.perfil) if p else '')}"
             f" outros={list(d.outros)}")

@@ -34,23 +34,53 @@ A RELAÇÃO (conservadora — nunca "mesmo link = mesma campanha"):
      genérica (carteira, carrinho, campanha sazonal, live) não serve;
   3. a página é o destino PRINCIPAL dos dois lados: o 1º link do candidato
      (o da âncora) e o 1º link publicado do post vivo são o MESMO link
-     publicado (só vale para plataforma que dá um link publicado por
-     destino — contrato da capacidade). Página só como link secundário não
-     conta: post de produto com "resgate todos os cupons" no rodapé, ou um
-     cupom de campanha própria que cita a página geral (26/10 03:02: Fada
-     17998 "Novos Cupons Shopee Tech, R$100 OFF em R$999" tinha a página
-     como 2º link, ao lado do 31451 do Promotom — campanhas distintas);
+     publicado (ver O LINK PUBLICADO NA REGRA). Página só como link
+     secundário não conta: post de produto com "resgate todos os cupons" no
+     rodapé, ou um cupom de campanha própria que cita a página geral (26/10
+     03:02: Fada 17998 "Novos Cupons Shopee Tech, R$100 OFF em R$999" tinha
+     a página como 2º link, ao lado do 31451 do Promotom — campanhas
+     distintas);
   4. fonte diferente e dentro do LIMITE SUPERIOR do lançamento
      (cupom_lancamento.pode_mudar — a mesma régua da regra de cupom);
   5. nome e benefício compatíveis (cupom_lancamento.compativeis): nome ou
      benefício em conflito NUNCA junta — fica INCERTO (comportamento de hoje);
   6. exatamente UM post assim: JUNTA; mais de um: INCERTO (ambíguo).
 Com família já escolhida pelo pipeline, a regra não troca de post: se a
-família já exibe a página, é o mesmo post; se não, INCERTO.
+família já tem a página como principal, é o mesmo post; se não, INCERTO.
+
+O LINK PUBLICADO NA REGRA (tensão DECLARADA com o contrato da normalização:
+"a URL de publicação JAMAIS participa" da identidade —
+normalizacao_identidade.derivar_ancora_url). A regra não cria nem muda
+identidade; o link publicado entra SÓ como teste de igualdade, porque o
+post `cupb` não guarda a canônica do seu 1º link (só o texto publicado):
+  · o candidato é reconhecido pela CANÔNICA (ancora_url) — nunca pelo link;
+  · o link publicado do candidato é o que a afiliação deu para essa mesma
+    canônica (mapa e canônicas vêm da mesma Afiliacao);
+  · igualdade de link publicado ⇒ mesmo destino: um link curto leva a um
+    destino só. É a parte que dá CERTEZA (nenhuma junção falsa por ela);
+  · mesmo destino ⇒ mesmo link publicado só vale enquanto a plataforma der
+    um link por destino (contrato da capacidade; na Shopee, o cache por
+    destino em afiliacao.afilia). Se isso quebrar, a regra só deixa de
+    juntar — o lado conservador.
+Cada decisão registra em `prova` em que se apoiou: "canonica_persistida"
+(o post guarda `<plat>|url|<página>`) ou "so_link_publicado". A alternativa
+sem esta tensão — persistir a canônica do 1º link do post — está em
+docs/arquitetura/campanha-resgate.md.
+
+PENDENTE DE APROVAÇÃO: JUNTA com nome/benefício só "compatível" (benefício
+ausente ou incomparável de um lado — onde a regra de cupom de hoje fica em
+INCERTO) sai com `pendente=True`. Só "igual" (o mesmo benefício explícito)
+não é pendente. Ativar as pendentes exige aprovação separada do dono.
 
 CANAL DE CUPONS (separado da natureza): o post que leva a uma página
 reconhecida de resgate de cupons é elegível ao canal de cupons mesmo quando
-o título não diz "cupom" (natureza evento). Junção: vale o canal do post.
+o título não diz "cupom" (natureza evento). Junção: vale o canal do post
+(a política de roteamento de hoje, eh_identidade_cupom das âncoras
+exibidas). Elegível ao CANAL não quer dizer cupom elegível à conta de
+afiliado do dono (CLAUDE.md §9.1).
+
+INDETERMINADO não sai daqui: é do adaptador, quando uma LEITURA do estado
+falha (a regra nunca decide sobre estado incompleto).
 
 NÃO faz: banco, Telegram, log, relógio, mudança de chave ou de natureza.
 """
@@ -63,10 +93,11 @@ from pipeline import cupom_lancamento
 from pipeline.resolucao_identidade import eh_chave_forte
 
 __all__ = ["Candidato", "PostVivo", "Decisao", "avaliar", "sem_ancora_forte",
-           "chave_resgate", "MANTER", "JUNTA", "INCERTO", "PRINCIPAL",
-           "PRINCIPAL_E_CUPONS"]
+           "chave_resgate", "MANTER", "JUNTA", "INCERTO", "INDETERMINADO",
+           "PRINCIPAL", "PRINCIPAL_E_CUPONS"]
 
 MANTER, JUNTA, INCERTO = "MANTER", "JUNTA", "INCERTO"
+INDETERMINADO = "INDETERMINADO"           # do adaptador: leitura do estado falhou
 PRINCIPAL, PRINCIPAL_E_CUPONS = "principal", "principal+cupons"
 
 
@@ -92,7 +123,7 @@ class Candidato:
     publicada: str            # link publicado dessa página ("" = sem)
     perfil: cupom_lancamento.Perfil
     familia_hoje: Optional[int]
-    espelho_hoje: bool        # o post de hoje iria ao canal de cupons?
+    cupons_hoje: bool         # o post de hoje vai ao canal de cupons?
 
 
 @dataclass(frozen=True)
@@ -104,28 +135,37 @@ class PostVivo:
     perfil: cupom_lancamento.Perfil
     nascimento: float
     fontes: frozenset
-    espelhado: bool           # tem cópia no canal de cupons
+    vai_aos_cupons: bool      # roteamento de hoje (âncoras exibidas)
 
 
 @dataclass(frozen=True)
 class Decisao:
-    acao: str                 # MANTER | JUNTA | INCERTO
+    acao: str                 # MANTER | JUNTA | INCERTO (| INDETERMINADO, do adaptador)
     post: Optional[int]
     motivo: str
     delta_s: Optional[float]
     destino_hoje: str
     destino_previsto: str
     outros: tuple = ()        # posts que também têm a página como principal
+    pendente: bool = False    # JUNTA só "compatível": exige aprovação separada
+    prova: str = "-"          # canonica_persistida | so_link_publicado
 
 
-def _destino(espelho: bool) -> str:
-    return PRINCIPAL_E_CUPONS if espelho else PRINCIPAL
+def _destino(cupons: bool) -> str:
+    return PRINCIPAL_E_CUPONS if cupons else PRINCIPAL
+
+
+def _prova(c: Candidato, p: PostVivo) -> str:
+    """Em que a igualdade de página com o post `p` se apoia."""
+    if f"{c.plat}|url|{c.pagina}" in p.chaves:
+        return "canonica_persistida"
+    return "so_link_publicado"
 
 
 def avaliar(c: Candidato, vivos: list, agora: float, superior_s: float) -> Decisao:
     """A decisão da relação para o candidato `c` diante dos posts `vivos`
-    (os dados chegam prontos; nada aqui consulta estado)."""
-    hoje = _destino(c.espelho_hoje)
+    (os dados chegam prontos e COMPLETOS; nada aqui consulta estado)."""
+    hoje = _destino(c.cupons_hoje)
     if not sem_ancora_forte(c.chaves):
         return Decisao(MANTER, None, "fora:ancora_forte", None, hoje, hoje)
     if not c.pagina or not c.publicada:
@@ -139,7 +179,8 @@ def avaliar(c: Candidato, vivos: list, agora: float, superior_s: float) -> Decis
         outros = tuple(p.msg_id for p in exibem if p.msg_id != c.familia_hoje)
         if fam is not None:
             return Decisao(MANTER, fam.msg_id, "ja_no_mesmo_post",
-                           agora - fam.nascimento, hoje, hoje, outros)
+                           agora - fam.nascimento, hoje, hoje, outros,
+                           prova=_prova(c, fam))
         if outros:
             return Decisao(INCERTO, outros[0], "familia_de_hoje_diferente", None,
                            hoje, hoje, outros)
@@ -163,7 +204,8 @@ def avaliar(c: Candidato, vivos: list, agora: float, superior_s: float) -> Decis
     if len(validos) == 1:
         rel, p, delta = validos[0]
         return Decisao(JUNTA, p.msg_id, f"mesma_pagina_de_resgate:{rel}", delta,
-                       hoje, _destino(p.espelhado), todos)
+                       hoje, _destino(p.vai_aos_cupons), todos,
+                       pendente=(rel != "igual"), prova=_prova(c, p))
     if len(validos) > 1:
         return Decisao(INCERTO, validos[0][1].msg_id, "ambiguo", None,
                        hoje, previsto_novo, todos)
