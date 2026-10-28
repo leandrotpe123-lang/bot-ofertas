@@ -104,6 +104,16 @@ FloodWait custarem milissegundos sem tocar a lógica.
       principal): o vínculo só sai com a cópia apagada COM PROVA. Delete
       que lança, ou pts_count=0 com a cópia ainda no ar → a cópia fica
       publicada E rastreada (vínculo intacto) — nunca no ar sem rastro
+  24  OBSERVABILIDADE DA REMOÇÃO (sem mudar regra): cada remoção da cópia vira
+      🗑 [CUPONS_REMOCAO] com o post do principal, a cópia, o motivo e o que
+      ficou PROVADO — o pedido (post removido) e o fim; "apagada" só com
+      pts_count > 0, "ausente" só com a leitura confirmando, falha em
+      WARNING com a classe; refazer a cópia, post sem cópia e vínculo
+      AUSENTE (nenhum delete) também; nada de texto, link ou código
+  25  O LOG NÃO DECIDE: o mesmo cenário com a linha 🗑 [CUPONS_REMOCAO]
+      levantando → as MESMAS requisições ao Telegram, as mesmas respostas de
+      delete, o mesmo estado dos canais e o mesmo vínculo (remoção nos 8
+      casos e publicação abortada, com e sem prova)
 
     python tests/test_cupons_corrida_midia.py
 """
@@ -1337,6 +1347,222 @@ def test_23_remocao_so_tira_o_vinculo_com_prova(r):
             else:
                 r.check(viva and vinculo == copia, f"{tag}.copia_no_ar_continua_rastreada",
                         f"viva={viva} vínculo={vinculo} {srv.deletes}")
+
+
+# ── observabilidade da remoção da cópia (frente B, sem mudar regra) ────
+_RESULTADO_ESPERADO = {"provada": "apagada", "ausente": "ausente",
+                       "pts_zero_no_ar": "falha:CopiaNoAr",
+                       "delete_lanca": "falha:ChatAdminRequiredError"}
+
+
+def _servidor_remocao(modo):
+    def regra(req, d, modo=modo):
+        if modo == "delete_lanca" and d == "cupons" and isinstance(
+                req, functions.channels.DeleteMessagesRequest):
+            return None, errors.ChatAdminRequiredError(request=req)
+        return None, None
+    srv = Servidor(regra=regra)
+    if modo == "pts_zero_no_ar":
+        srv.delete_sem_efeito.add("cupons")
+    return srv
+
+
+def _remover_copia(via, modo):
+    """Post de cupom com cópia; a cópia sai por `via` (post removido do
+    principal, ou o post deixou de ser cupom) com o delete em `modo`.
+    Devolve (mid, cópia, vínculo final, servidor)."""
+    srv = _servidor_remocao(modo)
+
+    async def corpo(c, s):
+        await pub(_so_texto(), score=9)
+        await drenar()
+        mid = _principal(s)
+        copia = db_espelho_get(mid)
+        if modo == "ausente":
+            _apagar_a_mao(s, "cupons", copia)
+        if via == "deixou_de_ser_cupom":
+            with _db() as db:                                  # passa a exibir produto
+                db.execute("INSERT INTO post_exibida(msg_id_dest,identity,ts) "
+                           "VALUES(?,?,?)", (mid, "shopee|338371559.22593482107", time.time()))
+            espelho_cupons.conteudo(mid)
+        else:
+            espelho_cupons.removido(mid)
+        await drenar()
+        return mid, copia, db_espelho_get(mid)
+    mid, copia, vinculo = cenario(corpo, srv)
+    return mid, copia, vinculo, srv
+
+
+def test_24_remocao_da_copia_vira_linha_observavel(r):
+    """🗑 [CUPONS_REMOCAO]: o PEDIDO (removido) e o que ficou PROVADO, com o
+    post do principal e a cópia; sucesso só com a remoção concluída
+    (apagada com pts_count > 0, ou ausente confirmada); nada de texto."""
+    for via in ("removido", "deixou_de_ser_cupom"):
+        for modo, esperado in _RESULTADO_ESPERADO.items():
+            with _Coleta("SISTEMA") as sis:
+                mid, copia, vinculo, srv = _remover_copia(via, modo)
+            lin = [(lv, m) for lv, m in sis.linhas if "[CUPONS_REMOCAO]" in m]
+            pedidos = [m for _lv, m in lin if "etapa=pedido" in m]
+            fins = [(lv, m) for lv, m in lin if "etapa=fim" in m]
+            motivo = "post_removido" if via == "removido" else "deixou_de_ser_cupom"
+            tag = f"24.{via}.{modo}"
+            r.check(pedidos == ([f"🗑 [CUPONS_REMOCAO] post:{mid} copia:- etapa=pedido "
+                                 f"motivo=post_removido"] if via == "removido" else []),
+                    f"{tag}.pedido", str(pedidos))
+            r.check(len(fins) == 1 and fins[0][1] == (
+                f"🗑 [CUPONS_REMOCAO] post:{mid} copia:{copia} etapa=fim motivo={motivo} "
+                f"resultado={esperado}"), f"{tag}.uma_linha_com_o_que_ficou_provado", str(fins))
+            sucesso = esperado in ("apagada", "ausente")
+            r.check(fins and fins[0][0] == (logging.INFO if sucesso else logging.WARNING),
+                    f"{tag}.nivel", str(fins))
+            apagou_com_prova = ("cupons", [copia], 1) in [tuple(d) for d in srv.deletes]
+            r.check(("resultado=apagada" in (fins[0][1] if fins else "")) == apagou_com_prova,
+                    f"{tag}.apagada_so_com_pts_count_positivo", str(srv.deletes))
+            r.check((vinculo is None) == sucesso, f"{tag}.vinculo_segue_a_mesma_regra",
+                    f"vínculo={vinculo}")
+            r.check(not any(t in m for _lv, m in lin for t in ("http", "R$", "4DMD4CUP0M")),
+                    f"{tag}.sem_texto_link_ou_codigo", str(lin))
+
+    # refazer a cópia (a mídia não entra na cópia; delete com prova → recria)
+    def regra(req, d):
+        if (d == "cupons" and isinstance(req, functions.messages.EditMessageRequest)
+                and req.media is not None):
+            return None, errors.MediaEmptyError(request=req)
+        return None, None
+    srv = Servidor(regra=regra)
+
+    async def corpo(c, s):
+        await pub(_so_texto(), score=9)
+        await drenar()
+        mid = _principal(s)
+        copia = db_espelho_get(mid)
+        await pub(_com_foto(), score=9)
+        await drenar()
+        return mid, copia, db_espelho_get(mid)
+    with _Coleta("SISTEMA") as sis:
+        mid, copia, nova = cenario(corpo, srv)
+    lin = _linhas(sis, "[CUPONS_REMOCAO]")
+    r.check(lin == [f"🗑 [CUPONS_REMOCAO] post:{mid} copia:{copia} etapa=fim "
+                    f"motivo=refazer_copia resultado=apagada"] and nova not in (None, copia),
+            "24.refazer_copia", f"{lin} nova={nova}")
+
+    # sem cópia (post de produto) e vínculo AUSENTE: nenhum delete, uma linha
+    srv = Servidor()
+
+    async def corpo2(c, s):
+        await pub(produto_com_foto(), score=9)
+        await drenar()
+        prod = _principal(s)
+        espelho_cupons.removido(prod)
+        await pub(_so_texto(), score=9)
+        await drenar()
+        mid = s.em("principal")[-1]["id"]
+        _apagar_a_mao(s, "cupons", db_espelho_get(mid))
+        await pub(_com_foto(), score=9)                       # troca → AUSENTE
+        await drenar()
+        ausente = db_espelho_get(mid)
+        espelho_cupons.removido(mid)
+        await drenar()
+        return prod, mid, ausente, db_espelho_get(mid)
+    with _Coleta("SISTEMA") as sis:
+        prod, mid, ausente, fim = cenario(corpo2, srv)
+    fins = [m for m in _linhas(sis, "[CUPONS_REMOCAO]") if "etapa=fim" in m]
+    r.check(fins == [f"🗑 [CUPONS_REMOCAO] post:{prod} copia:- etapa=fim motivo=post_removido "
+                     f"resultado=sem_copia",
+                     f"🗑 [CUPONS_REMOCAO] post:{mid} copia:- etapa=fim motivo=post_removido "
+                     f"resultado=ausente_antes"]
+            and ausente == espelho_cupons._AUSENTE and fim is None
+            and not [d for d in srv.deletes if d[0] == "cupons"],
+            "24.sem_copia_e_ausente_antes_sem_delete", f"{fins} {srv.deletes}")
+
+
+class _LogQueQuebra:
+    """log_sys em que SÓ a linha 🗑 [CUPONS_REMOCAO] levanta (as demais —
+    ⏱ ENVIO_MS/EDICAO_MS — seguem para o log de verdade): prova que o
+    registro da remoção não decide nada (_registrar_remocao nunca levanta)."""
+    def __init__(self, real):
+        self._real = real
+
+    def __getattr__(self, nome):
+        metodo = getattr(self._real, nome)
+
+        def talvez_falhe(msg, *a, **k):
+            if "[CUPONS_REMOCAO]" in str(msg):
+                raise RuntimeError("log quebrado")
+            return metodo(msg, *a, **k)
+        return talvez_falhe
+
+
+def test_25_log_da_remocao_nao_cria_nem_impede_exclusao(r):
+    """Mesmo cenário com o log normal e com o log quebrado: as MESMAS
+    requisições ao Telegram, as mesmas respostas de delete, o mesmo estado
+    dos canais e o mesmo vínculo — remoção e publicação."""
+    def rodar_os_dois(fn):
+        normal = fn()
+        antes = espelho_cupons.log_sys
+        espelho_cupons.log_sys = _LogQueQuebra(antes)
+        try:
+            quebrado = fn()
+        finally:
+            espelho_cupons.log_sys = antes
+        return normal, quebrado
+
+    def fotografia(srv, extra):
+        reqs = [(e, c, d) for _t, e, c, d, _k in srv.reg
+                if c in ("DeleteMessagesRequest", "SendMessageRequest", "SendMediaRequest",
+                         "EditMessageRequest", "GetMessagesRequest")]
+        return (reqs, [tuple(d) for d in srv.deletes],
+                [(p["canal"], p["id"], p["apagada"]) for p in srv.publicados], extra)
+
+    for via in ("removido", "deixou_de_ser_cupom"):
+        for modo in _RESULTADO_ESPERADO:
+            def fn(via=via, modo=modo):
+                mid, copia, vinculo, srv = _remover_copia(via, modo)
+                return fotografia(srv, (mid, copia, vinculo))
+            normal, quebrado = rodar_os_dois(fn)
+            r.check(normal == quebrado, f"25.{via}.{modo}.identico_com_log_quebrado",
+                    f"{normal} ≠ {quebrado}")
+
+    # publicação abortada (o principal não sai): a cópia já publicada é
+    # apagada como sempre — com prova "apagada"; sem prova "sem_prova" e a
+    # cópia fica (LIMITE anterior, inalterado) — o log só diz o que houve
+    import pipeline.publicacao_aplicadores as pa
+    asyncio_antes = pa.asyncio
+
+    class _SemEspera:
+        async def sleep(self, *_a, **_k):
+            await asyncio.sleep(0)
+
+        def __getattr__(self, nome):
+            return getattr(asyncio, nome)
+    pa.asyncio = _SemEspera()
+    try:
+        for sem_efeito in (False, True):
+            def fn(sem_efeito=sem_efeito):
+                srv = Servidor(regra=lambda req, d: (
+                    None, errors.ChatWriteForbiddenError(request=req))
+                    if d == "principal" else (None, None))
+                if sem_efeito:
+                    srv.delete_sem_efeito.add("cupons")
+
+                async def corpo(c, s):
+                    await pub(msg(PROMOTOM, SECO_110370), score=3)   # só texto: junto
+                    await drenar()
+                with _Coleta("SISTEMA") as sis:
+                    cenario(corpo, srv)
+                return fotografia(srv, None), _linhas(sis, "[CUPONS_REMOCAO]")
+            (normal, lin), (quebrado, _lin2) = rodar_os_dois(fn)
+            cp = [p for p in normal[2] if p[0] == "cupons"]
+            tag = f"25.publicacao_abortada.{'sem_prova' if sem_efeito else 'provada'}"
+            esperado = "sem_prova" if sem_efeito else "apagada"
+            r.check(len(cp) == 1 and lin == [
+                f"🗑 [CUPONS_REMOCAO] post:- copia:{cp[0][1]} etapa=fim "
+                f"motivo=publicacao_abortada resultado={esperado}"]
+                and cp[0][2] == (not sem_efeito), f"{tag}.linha_e_estado", f"{lin} {cp}")
+            r.check(normal == quebrado, f"{tag}.identico_com_log_quebrado",
+                    f"{normal} ≠ {quebrado}")
+    finally:
+        pa.asyncio = asyncio_antes
 
 
 if __name__ == "__main__":
