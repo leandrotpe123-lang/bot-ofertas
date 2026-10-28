@@ -76,9 +76,11 @@ NÃO RESOLVIDO AQUI (frentes próprias, ver o PR #25):
   · janelas de queda da SUBSTITUIÇÃO (pipeline.saida): depois do delete e
     antes do envio, e depois do envio e antes do banco. A anotação de
     apagados_pelo_worker é em memória e não recupera esses casos sozinha;
-  · espelho: espelho_cupons._apagar engole a falha do delete e remove o
-    vínculo — a mensagem do canal de cupons pode ficar órfã. A exclusão
-    do espelho NÃO é garantida.
+  · espelho: o vínculo só sai com a cópia apagada COM PROVA (pts_count > 0)
+    ou ausente confirmada pela leitura por id (espelho_cupons._apagar);
+    sem prova, a cópia continua no canal de cupons E rastreada (nunca órfã
+    por este caminho), a falha vira 🗑 [CUPONS_REMOCAO] … resultado=falha:…
+    e NÃO há nova tentativa — a exclusão do espelho continua NÃO garantida.
 """
 from __future__ import annotations
 
