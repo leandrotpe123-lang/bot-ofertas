@@ -126,8 +126,11 @@ _LIMITE_PISTA = 65536
 # Duas classes de falha, porque só uma delas passa sozinha:
 #
 #   TRANSITÓRIA — 5xx, 429, desafio de WAF, timeout, resposta fora
-#     do contrato. Pausa exponencial a partir do limite: 5 min, 10,
-#     20… teto de 2 h. O sucesso zera.
+#     do contrato. Política de antes, inalterada: no limite, pausa
+#     fixa de 5 min; o sucesso zera. Mudar a pausa do 503 muda quantas
+#     ofertas saem curtas (29/10: das 271 longas desde 14:19, só 38
+#     foram recusa; as demais caíram na pausa) e por isso só com os
+#     dados da sonda — não por hipótese.
 #
 #   SESSÃO RECUSADA — redirecionamento (para o login) ou 401. O
 #     endpoint é XHR: com sessão válida responde JSON, nunca
@@ -144,7 +147,6 @@ _LIMITE_PISTA = 65536
 # 14:19) os 302 sumiram e os shorts voltaram, entremeados de 503.
 _LIMITE_FALHAS = 3
 _PAUSA_DISJUNTOR = 300.0
-_PAUSA_TETO = 7200.0
 _PAUSA_SESSAO_RECUSADA = 21600.0
 
 _TRANSITORIA = "transitoria"
@@ -719,14 +721,10 @@ def _registrar_falha(motivo: str, classe: str = _TRANSITORIA) -> None:
         f"{_LIMITE_FALHAS}): {motivo}"
     )
     if _falhas_seguidas >= _LIMITE_FALHAS:
-        # Expoente limitado: em falha persistente o contador não tem
-        # teto, e 2**n grande demais estoura a conversão para float.
-        excesso = min(_falhas_seguidas - _LIMITE_FALHAS, 16)
-        pausa = min(_PAUSA_TETO, _PAUSA_DISJUNTOR * 2 ** excesso)
-        _disjuntor_ate = time.monotonic() + pausa
+        _disjuntor_ate = time.monotonic() + _PAUSA_DISJUNTOR
         log_nrm.error(
             f"🔌 AMZ SiteStripe suspenso por "
-            f"{int(pausa)}s — publicando URL longa"
+            f"{int(_PAUSA_DISJUNTOR)}s — publicando URL longa"
         )
 
 

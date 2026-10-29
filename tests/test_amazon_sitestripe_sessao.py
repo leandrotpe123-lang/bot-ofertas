@@ -23,8 +23,10 @@ não separava login de captcha.
   02  sondagem que volta a responder → short oficial, [AMZ_SESSAO_OK]
       e fim da pausa
   03  caso 29/10: 503 de captcha é transitória — nunca vira sessão
-      recusada; pausa 5 min, 10, 20… teto de 2 h
-  04  contador sem teto não estoura a pausa
+      recusada, e a política da main fica intacta: no limite, pausa
+      fixa de 5 min (mudá-la muda quantas ofertas saem curtas; só com
+      os dados da sonda)
+  04  falha transitória em série longa continua com a pausa da main
   05  classificação: 3xx e 401 recusam a sessão; 3xx para o captcha,
       403, 429 e 5xx são transitórias
   06  a primeira resposta boa aparece no log uma vez, não a cada short
@@ -238,8 +240,8 @@ def test_03_caso_real_503_captcha_e_transitoria(r):
             _rodar(amazon._sitestripe(CANONICA))
             pausas.append(max(0, round(amazon._disjuntor_ate - relogio.t)))
         r.check(rede.chamadas == 9, "cada chamada só depois da pausa")
-        r.check(pausas == [0, 0, 300, 600, 1200, 2400, 4800, 7200, 7200],
-                "abre no limite; pausa exponencial com teto de 2 h", pausas)
+        r.check(pausas == [0, 0, 300, 300, 300, 300, 300, 300, 300],
+                "abre no limite; pausa fixa de 5 min, como na main", pausas)
         r.check(not cap.com("[AMZ_SESSAO_RECUSADA]"),
                 "captcha nunca vira sessão recusada")
         r.check(not amazon._sessao_recusada, "estado não marca recusa")
@@ -249,7 +251,7 @@ def test_03_caso_real_503_captcha_e_transitoria(r):
 
 
 # ── 04 ────────────────────────────────────────────────────────────
-def test_04_contador_sem_teto_nao_estoura(r):
+def test_04_transitoria_em_serie_longa_mantem_pausa_da_main(r):
     rede = _Rede(CAPTCHA_503)
     relogio = _cenario(rede)
     amazon._falhas_seguidas = 10_000
@@ -259,9 +261,9 @@ def test_04_contador_sem_teto_nao_estoura(r):
             erro = None
         except Exception as e:                  # noqa: BLE001
             erro = e
-    r.check(erro is None, "sem OverflowError", repr(erro))
-    r.check(round(amazon._disjuntor_ate - relogio.t) == 7200,
-            "pausa no teto", amazon._disjuntor_ate - relogio.t)
+    r.check(erro is None, "sem exceção", repr(erro))
+    r.check(round(amazon._disjuntor_ate - relogio.t) == 300,
+            "5 min, como na main", amazon._disjuntor_ate - relogio.t)
 
 
 # ── 05 ────────────────────────────────────────────────────────────
