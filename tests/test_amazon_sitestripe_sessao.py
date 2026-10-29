@@ -34,6 +34,10 @@ não separava login de captcha.
       longa com a nossa tag, e só a nossa
   10  Base64 que não decodifica não põe o segredo no log no lugar do
       nome do cookie
+  11  SONDA PASSIVA: uma linha [AMZ_SONDA] por chamada — sucesso, 503,
+      302 e exceção —, com intervalo, forma do alvo, marca e título, e
+      nada de query, cookie ou corpo
+  12  JSON fora do contrato (lista) não derruba quem chama
 
     python tests/test_amazon_sitestripe_sessao.py
 """
@@ -417,6 +421,107 @@ def test_09_ponta_a_ponta_oferta_nunca_se_perde(r):
             "publica a longa com a nossa tag, e só a nossa", publicada)
     r.check("th=1" in publicada and "psc=1" in publicada,
             "variação do produto preservada", publicada)
+
+
+# ── 11 ────────────────────────────────────────────────────────────
+class _Relogio11:
+    def __init__(self):
+        self.t = 5000.0
+
+    def monotonic(self):
+        return self.t
+
+
+def test_11_sonda_uma_linha_por_chamada(r):
+    relogio = _Relogio11()
+    amazon.time = types.SimpleNamespace(monotonic=relogio.monotonic)
+    amazon._ultima_chamada = 0.0
+    longa = ("https://www.amazon.com.br/Produto/dp/B0CK2MD3F7?th=1&psc=1"
+             f"&linkId=SEGREDO-LINK&tag={TAG}")
+    pagina = (b"<html><head><title>\n  Amazon.com.br  </title></head>"
+              b"<body>SEGREDO-CORPO<form action='/errors/validateCaptcha'>"
+              b"</form></body></html>")
+    respostas = [
+        _Resposta(200, {"content-type": "application/json",
+                        "x-amz-rid": "RID200"}, dados=JSON_OK),
+        _Resposta(503, {"content-type": "text/html", "x-amz-rid": "RID503"},
+                  corpo=pagina),
+        _Resposta(302, {"location": "https://www.amazon.com.br/ap/signin?"
+                                    "openid.return_to=SEGREDO-QUERY"}),
+    ]
+    saidas = []
+
+    class _Sessao:
+        def get(self, *a, **k):
+            if not respostas:
+                raise TimeoutError()
+            return respostas.pop(0)
+
+    async def obter():
+        return _Sessao()
+
+    async def corpo():
+        amazon.config._SEM_HTTP = asyncio.Semaphore(1)
+        try:
+            for _ in range(4):
+                try:
+                    saidas.append(await _HTTP_REAL({"longUrl": longa}))
+                except TimeoutError:
+                    saidas.append("timeout")
+                relogio.t += 37.0
+        finally:
+            amazon.config._SEM_HTTP = None
+
+    original = amazon._obter_sessao
+    amazon._obter_sessao = obter
+    try:
+        with _Captura() as cap:
+            _rodar(corpo())
+    finally:
+        amazon._obter_sessao = original
+
+    linhas = cap.com("[AMZ_SONDA]", "INFO")
+    r.check(len(linhas) == 4, "uma linha por chamada, inclusive exceção",
+            linhas)
+    if len(linhas) != 4:
+        return
+    ok, bloqueio, login, excecao = linhas
+    r.check("status=200" in ok and "intervalo=primeira" in ok
+            and "ok=True/True" in ok and "rid=RID200" in ok, "sucesso", ok)
+    r.check("status=503" in bloqueio and "intervalo=37s" in bloqueio
+            and "marca=captcha" in bloqueio
+            and 'titulo="Amazon.com.br"' in bloqueio
+            and "rid=RID503" in bloqueio, "503 com marca e título",
+            bloqueio)
+    r.check("status=302" in login
+            and "destino=www.amazon.com.br/ap/signin" in login,
+            "302 com destino", login)
+    r.check("status=EXC:TimeoutError" in excecao, "exceção registrada",
+            excecao)
+    r.check(all("alvo=produto params=4" in m and f"tam={len(longa)}" in m
+                for m in linhas), "forma do alvo", linhas[0])
+    vazou = [m for m in linhas if "SEGREDO" in m]
+    r.check(not vazou, "nada de query, cookie ou corpo", vazou)
+    r.check(saidas[1] == (503, "text/html", None, "captcha")
+            and saidas[3] == "timeout", "contrato da costura intacto",
+            saidas)
+
+
+# ── 12 ────────────────────────────────────────────────────────────
+def test_12_json_fora_do_contrato(r):
+    lista = _costura(_Resposta(
+        200, {"content-type": "application/json"}, dados=["inesperado"]))
+    r.check(lista == (200, "application/json", None, ""),
+            "lista vira dados=None", lista)
+    rede = _Rede(lista)
+    _cenario(rede)
+    with _Captura():
+        try:
+            saida = _rodar(amazon._sitestripe(CANONICA))
+            erro = None
+        except Exception as e:                  # noqa: BLE001
+            saida, erro = None, e
+    r.check(erro is None and saida == "", "falha, sem exceção", repr(erro))
 
 
 if __name__ == "__main__":

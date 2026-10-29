@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import html
 import os
 import re
 import time
@@ -513,6 +514,89 @@ async def _ler_inicio(resposta, limite: int = _LIMITE_PISTA) -> bytes:
     return b"".join(partes)
 
 
+# Marcas da página HTML que a Amazon devolve no lugar do JSON, da mais
+# específica para a mais genérica. Só o NOME da marca vai para o log.
+_MARCAS_PAGINA = (
+    ("captcha", b"captcha"),
+    ("automacao", b"api-services-support"),
+    ("robo", b"robot"),
+    ("robo", "robô".encode()),
+)
+_RE_TITULO = re.compile(rb"<title[^>]*>(.*?)</title>", re.I | re.S)
+
+_ultima_chamada = 0.0
+
+
+def _ler_pagina(corpo: bytes) -> tuple:
+    """(marca, título) de uma página HTML — nunca o corpo."""
+    baixo = corpo.lower()
+    marca = next((nome for nome, trecho in _MARCAS_PAGINA
+                  if trecho in baixo), "")
+    titulo = ""
+    achado = _RE_TITULO.search(corpo)
+    if achado:
+        titulo = html.unescape(achado.group(1).decode("utf-8", "ignore"))
+        titulo = re.sub(r"\s+", " ", titulo).strip().replace('"', "'")
+    return marca, titulo[:60]
+
+
+async def _ler_resposta(resposta) -> tuple:
+    """((status, content_type, dados|None, pista), sonda)."""
+    status = resposta.status
+    tipo = (resposta.headers.get("content-type") or "").lower()
+    sonda = {"rid": (resposta.headers.get("x-amz-rid")
+                     or resposta.headers.get("x-amzn-requestid") or "")}
+    if 300 <= status < 400:
+        destino = urlparse(resposta.headers.get("location") or "")
+        pista = f"{destino.netloc}{destino.path}"[:80]
+        sonda["destino"] = pista
+        return (status, tipo, None, pista), sonda
+    if status != 200 or "json" not in tipo:
+        try:
+            corpo = await _ler_inicio(resposta)
+        except Exception:
+            corpo = b""
+        marca, titulo = _ler_pagina(corpo)
+        sonda.update(marca=marca, titulo=titulo)
+        return (status, tipo, None, marca), sonda
+    dados = await resposta.json(content_type=None)
+    if not isinstance(dados, dict):
+        # JSON fora do contrato não pode chegar ao `.get` de quem chama.
+        return (status, tipo, None, ""), sonda
+    sonda["ok"] = f"{dados.get('ok')}/{dados.get('isOk')}"
+    return (status, tipo, dados, ""), sonda
+
+
+def _sondar(longa: str, status, sonda: dict, ms: int,
+            intervalo: Optional[float]) -> None:
+    """SONDA PASSIVA: uma linha por chamada ao SiteStripe, sucesso ou
+    falha — o que a Amazon respondeu às chamadas que o bot JÁ faz,
+    nenhuma a mais. Sem query, cookie ou corpo: da página HTML, só a
+    marca e o título.
+
+    Os campos existem para separar hipóteses sobre o 503 que só os
+    dados separam: rajada (intervalo), forma da URL enviada (alvo,
+    params, tam) e natureza da página (marca, título).
+    """
+    alvo = urlparse(longa)
+    if _P_PROMO.search(alvo.path):
+        tipo_alvo = "promo"
+    elif any(p.search(alvo.path) for p in _P_ASIN[:2]):
+        tipo_alvo = "produto"
+    else:
+        tipo_alvo = "pagina"
+    n_params = len([p for p in alvo.query.split("&") if p])
+    log_nrm.info(
+        f"🔬 [AMZ_SONDA] sitestripe status={status} ms={ms} "
+        f"intervalo={'primeira' if intervalo is None else f'{int(intervalo)}s'} "
+        f"alvo={tipo_alvo} params={n_params} tam={len(longa)} "
+        f"marca={sonda.get('marca') or '-'} "
+        f"titulo=\"{sonda.get('titulo') or '-'}\" "
+        f"destino={sonda.get('destino') or '-'} "
+        f"ok={sonda.get('ok') or '-'} rid={sonda.get('rid') or '-'}"
+    )
+
+
 async def _http_getshorturl(params: dict) -> tuple:
     """Costura de I/O: devolve (status, content_type, dados|None, pista).
 
@@ -521,32 +605,31 @@ async def _http_getshorturl(params: dict) -> tuple:
     cache testáveis sem acesso externo.
 
     `pista` só existe na falha e nunca carrega query, cookie ou
-    corpo: é host+caminho do redirecionamento, ou "captcha" quando a
-    página devolvida é o desafio anti-robô. Sem ela, "HTTP 302" não
+    corpo: é host+caminho do redirecionamento, ou a marca da página
+    HTML ("captcha", "automacao", "robo"). Sem ela, "HTTP 302" não
     distingue login de captcha — e foi tudo o que o log disse por dias.
     """
+    global _ultima_chamada
     sessao = await _obter_sessao()
     async with config._SEM_HTTP:
-        async with sessao.get(
-            _ENDPOINT_SHORT, params=params,
-            timeout=aiohttp.ClientTimeout(total=_TIMEOUT_SHORT),
-            allow_redirects=False,
-        ) as resposta:
-            tipo = (resposta.headers.get("content-type") or "").lower()
-            if 300 <= resposta.status < 400:
-                destino = urlparse(resposta.headers.get("location") or "")
-                pista = f"{destino.netloc}{destino.path}"[:80]
-                return resposta.status, tipo, None, pista
-            if resposta.status != 200 or "json" not in tipo:
-                try:
-                    corpo = await _ler_inicio(resposta)
-                except Exception:
-                    corpo = b""
-                pista = "captcha" if b"captcha" in corpo.lower() else ""
-                return resposta.status, tipo, None, pista
-            return resposta.status, tipo, await resposta.json(
-                content_type=None,
-            ), ""
+        inicio = time.monotonic()
+        intervalo = inicio - _ultima_chamada if _ultima_chamada else None
+        _ultima_chamada = inicio
+        longa = params.get("longUrl") or ""
+        try:
+            async with sessao.get(
+                _ENDPOINT_SHORT, params=params,
+                timeout=aiohttp.ClientTimeout(total=_TIMEOUT_SHORT),
+                allow_redirects=False,
+            ) as resposta:
+                resultado, sonda = await _ler_resposta(resposta)
+        except Exception as e:
+            _sondar(longa, f"EXC:{type(e).__name__}", {},
+                    int((time.monotonic() - inicio) * 1000), intervalo)
+            raise
+    _sondar(longa, resultado[0], sonda,
+            int((time.monotonic() - inicio) * 1000), intervalo)
+    return resultado
 
 
 def _classe_falha(status: int, pista: str) -> str:

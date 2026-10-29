@@ -22,6 +22,7 @@ import os
 import random
 import re
 import time
+from urllib.parse import urlparse
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -83,6 +84,41 @@ def _res_entrada(depth: int) -> None:
         for k in sorted(_res_t)
     )
     log_nrm.debug(f"📊 RES perf | {contas} | media {medias}")
+
+
+# ── Destino que responde erro ─────────────────────────────────────
+# A resolução segue a cadeia e devolve a URL mesmo quando o DESTINO
+# respondeu erro — correto para a identidade, que só precisa da URL,
+# mas invisível. E o erro do destino é sinal de rede: a loja que
+# responde 503 ao GET anônimo da expansão está dizendo algo sobre o IP
+# inteiro, inclusive sobre as chamadas autenticadas que saem dele
+# (caso Amazon, 29/10: SiteStripe com 503 intermitente, e todo amzn.to
+# expandido por GET até a página de produto). Rastro limitado: o
+# primeiro erro de cada (via, host) e depois um a cada
+# _FINAIS_A_CADA, com o total de respostas do host para dar a razão.
+# Host e caminho; nunca query.
+_FINAIS_A_CADA = 25
+_finais: dict = {}
+
+
+def _observar_final(r, via: str) -> None:
+    try:
+        status = int(r.status)
+        destino = urlparse(str(r.url))
+    except Exception:
+        return
+    conta = _finais.setdefault((via, destino.netloc), [0, 0])
+    conta[0] += 1
+    if status < 400:
+        return
+    conta[1] += 1
+    if conta[1] == 1 or conta[1] % _FINAIS_A_CADA == 0:
+        log_nrm.warning(
+            f"🔬 [RES_FINAL_ERRO] via={via} status={status} "
+            f"host={destino.netloc} caminho={destino.path[:60]} "
+            f"saltos={len(getattr(r, 'history', None) or ())} "
+            f"erros={conta[1]}/{conta[0]}"
+        )
 
 
 # ── Composição de hosts que exigem GET ────────────────────────────
@@ -235,6 +271,7 @@ async def desencurtar(
                     max_redirects=_MAX_REDIRECTS,
                 ) as r:
                     _res_marca("head", _t)
+                    _observar_final(r, "head")
                     final = str(r.url)
                     if final != url:
                         _set_raw(url, final)
@@ -273,6 +310,7 @@ async def desencurtar(
             max_redirects=_MAX_REDIRECTS,
         ) as r:
             _res_marca("get", _t)
+            _observar_final(r, "get")
             pos = str(r.url)
             if pos != url:
                 _set_raw(url, pos)
