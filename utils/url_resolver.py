@@ -89,33 +89,40 @@ def _res_entrada(depth: int) -> None:
 # ── Destino que responde erro ─────────────────────────────────────
 # A resolução segue a cadeia e devolve a URL mesmo quando o DESTINO
 # respondeu erro — correto para a identidade, que só precisa da URL,
-# mas invisível. E o erro do destino é sinal de rede: a loja que
-# responde 503 ao GET anônimo da expansão está dizendo algo sobre o IP
-# inteiro, inclusive sobre as chamadas autenticadas que saem dele
-# (caso Amazon, 29/10: SiteStripe com 503 intermitente, e todo amzn.to
-# expandido por GET até a página de produto). Rastro limitado: o
-# primeiro erro de cada (via, host) e depois um a cada
+# mas invisível. O rastro abaixo só observa; a resolução não muda.
+# (Caso que motivou: Amazon, 29/10 — SiteStripe com 503 intermitente
+# enquanto todo amzn.to é expandido por GET até a página de produto;
+# o rastro mostra se a expansão também recebe erro.)
+#
+# Limitado: o primeiro erro de cada (via, host) e depois um a cada
 # _FINAIS_A_CADA, com o total de respostas do host para dar a razão.
-# Host e caminho; nunca query.
+# Só o SITE: os três últimos rótulos do hostname, validados — sem
+# caminho nem query (podem carregar token), sem a credencial que um
+# netloc `usuario:senha@host` traria, sem subdomínio (rastreador que
+# gera um por clique poria o token ali). `www.amazon.com.br` sai como
+# `amazon.com.br`.
 _FINAIS_A_CADA = 25
+_RE_HOST = re.compile(r"[a-z0-9.-]{1,253}")
 _finais: dict = {}
 
 
 def _observar_final(r, via: str) -> None:
     try:
         status = int(r.status)
-        destino = urlparse(str(r.url))
+        host = urlparse(str(r.url)).hostname or ""
     except Exception:
         return
-    conta = _finais.setdefault((via, destino.netloc), [0, 0])
+    host = ".".join(host.split(".")[-3:])
+    if not _RE_HOST.fullmatch(host):
+        host = "?"
+    conta = _finais.setdefault((via, host), [0, 0])
     conta[0] += 1
     if status < 400:
         return
     conta[1] += 1
     if conta[1] == 1 or conta[1] % _FINAIS_A_CADA == 0:
         log_nrm.warning(
-            f"🔬 [RES_FINAL_ERRO] via={via} status={status} "
-            f"host={destino.netloc} caminho={destino.path[:60]} "
+            f"🔬 [RES_FINAL_ERRO] via={via} status={status} host={host} "
             f"saltos={len(getattr(r, 'history', None) or ())} "
             f"erros={conta[1]}/{conta[0]}"
         )

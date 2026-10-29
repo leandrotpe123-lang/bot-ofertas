@@ -28,7 +28,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
-import html
 import os
 import re
 import time
@@ -480,25 +479,30 @@ async def _obter_sessao() -> aiohttp.ClientSession:
     return _sessao_amz
 
 
-_RE_NOME_COOKIE = re.compile(r"[A-Za-z0-9_.-]{1,32}")
+# Nomes de cookie da Amazon que podem aparecer no log. Lista FECHADA:
+# o que se imprime é sempre uma destas constantes, nunca texto vindo da
+# variável. Filtrar pela forma não bastava — em cookie malformado
+# (Base64 que não decodificou, valor com `;`) um pedaço do VALOR chega
+# na posição do nome e tem forma de nome.
+_COOKIES_CONHECIDOS = frozenset({
+    "session-id", "session-id-time", "session-token", "ubid-acbbr",
+    "at-acbbr", "sess-at-acbbr", "x-acbbr", "sst-acbbr", "lc-acbbr",
+    "i18n-prefs", "csm-hit", "sp-cdn", "skin",
+})
 
 
 def _nomes_para_log(cookies: dict) -> str:
-    """Os NOMES, nunca os valores: nome de cookie da Amazon é o mesmo
-    para todo cliente e não autentica nada. É ele que separa, sem
-    gastar requisição, captura incompleta (sem os cookies de
-    autenticação, que são HttpOnly e escapam de captura por script)
-    de sessão recusada pelo servidor.
+    """Os NOMES conhecidos, nunca os valores; o resto só é contado.
 
-    Só sai o que tem forma de nome. Base64 que não decodificou —
-    painel que quebra a linha, padding faltando — chega aqui inteiro
-    na posição do nome, e imprimi-lo seria imprimir o segredo.
+    Nome de cookie da Amazon é o mesmo para todo cliente e não
+    autentica nada. É ele que separa, sem gastar requisição, captura
+    incompleta de sessão recusada pelo servidor.
     """
-    nomes = sorted(n for n in cookies if _RE_NOME_COOKIE.fullmatch(n))
-    estranhos = len(cookies) - len(nomes)
-    if estranhos:
-        nomes.append(f"<{estranhos} sem forma de nome>")
-    return ", ".join(nomes)
+    nomes = sorted(n for n in cookies if n in _COOKIES_CONHECIDOS)
+    fora = len(cookies) - len(nomes)
+    if fora:
+        nomes.append(f"+{fora} fora da lista")
+    return ", ".join(nomes) or "-"
 
 
 async def _ler_inicio(resposta, limite: int = _LIMITE_PISTA) -> bytes:
@@ -514,41 +518,81 @@ async def _ler_inicio(resposta, limite: int = _LIMITE_PISTA) -> bytes:
     return b"".join(partes)
 
 
+# ── Classificação controlada para o log ───────────────────────────
+# Nada que venha da Amazon vai para o log como texto: título, caminho
+# de redirecionamento, header e valor de JSON são conteúdo de terceiro
+# — podem trazer dado pessoal, token ou caractere de controle, e
+# truncar não resolve. Cada campo dinâmico vira um rótulo de
+# vocabulário fechado; o log só recebe constantes deste módulo e
+# números.
+
 # Marcas da página HTML que a Amazon devolve no lugar do JSON, da mais
-# específica para a mais genérica. Só o NOME da marca vai para o log.
+# específica para a mais genérica.
 _MARCAS_PAGINA = (
     ("captcha", b"captcha"),
     ("automacao", b"api-services-support"),
     ("robo", b"robot"),
     ("robo", "robô".encode()),
+    ("login", b"ap_email"),
+    ("login", b"/ap/signin"),
 )
-_RE_TITULO = re.compile(rb"<title[^>]*>(.*?)</title>", re.I | re.S)
 
 _ultima_chamada = 0.0
 
 
-def _ler_pagina(corpo: bytes) -> tuple:
-    """(marca, título) de uma página HTML — nunca o corpo."""
+def _classe_pagina(corpo: bytes) -> str:
+    """captcha | automacao | robo | login | vazia | outra."""
+    if not corpo.strip():
+        return "vazia"
     baixo = corpo.lower()
-    marca = next((nome for nome, trecho in _MARCAS_PAGINA
-                  if trecho in baixo), "")
-    titulo = ""
-    achado = _RE_TITULO.search(corpo)
-    if achado:
-        titulo = html.unescape(achado.group(1).decode("utf-8", "ignore"))
-        titulo = re.sub(r"\s+", " ", titulo).strip().replace('"', "'")
-    return marca, titulo[:60]
+    return next((nome for nome, trecho in _MARCAS_PAGINA
+                 if trecho in baixo), "outra")
+
+
+def _classe_destino(location: str) -> str:
+    """login | captcha | outro | ausente — o caminho nunca sai daqui."""
+    if not location:
+        return "ausente"
+    caminho = urlparse(location).path.lower()
+    if "captcha" in caminho:
+        return "captcha"
+    if (caminho.startswith("/ap/") or "signin" in caminho
+            or "sign-in" in caminho):
+        return "login"
+    return "outro"
+
+
+def _classe_tipo(tipo: str) -> str:
+    """json | html | vazio | outro — o header nunca sai daqui."""
+    if not tipo:
+        return "vazio"
+    if "json" in tipo:
+        return "json"
+    if "html" in tipo:
+        return "html"
+    return "outro"
+
+
+def _classe_bool(valor) -> str:
+    """sim | nao | outro — o valor do JSON nunca sai daqui."""
+    if valor is True:
+        return "sim"
+    if valor is False:
+        return "nao"
+    return "outro"
 
 
 async def _ler_resposta(resposta) -> tuple:
-    """((status, content_type, dados|None, pista), sonda)."""
+    """((status, content_type, dados|None, pista), sonda).
+
+    `pista` e todo valor de `sonda` são rótulos das classificações
+    acima — nunca texto da resposta.
+    """
     status = resposta.status
     tipo = (resposta.headers.get("content-type") or "").lower()
-    sonda = {"rid": (resposta.headers.get("x-amz-rid")
-                     or resposta.headers.get("x-amzn-requestid") or "")}
+    sonda = {"tipo": _classe_tipo(tipo)}
     if 300 <= status < 400:
-        destino = urlparse(resposta.headers.get("location") or "")
-        pista = f"{destino.netloc}{destino.path}"[:80]
+        pista = _classe_destino(resposta.headers.get("location") or "")
         sonda["destino"] = pista
         return (status, tipo, None, pista), sonda
     if status != 200 or "json" not in tipo:
@@ -556,14 +600,15 @@ async def _ler_resposta(resposta) -> tuple:
             corpo = await _ler_inicio(resposta)
         except Exception:
             corpo = b""
-        marca, titulo = _ler_pagina(corpo)
-        sonda.update(marca=marca, titulo=titulo)
-        return (status, tipo, None, marca), sonda
+        pista = _classe_pagina(corpo)
+        sonda["marca"] = pista
+        return (status, tipo, None, pista), sonda
     dados = await resposta.json(content_type=None)
     if not isinstance(dados, dict):
         # JSON fora do contrato não pode chegar ao `.get` de quem chama.
         return (status, tipo, None, ""), sonda
-    sonda["ok"] = f"{dados.get('ok')}/{dados.get('isOk')}"
+    sonda["ok"] = (f"{_classe_bool(dados.get('ok'))}/"
+                   f"{_classe_bool(dados.get('isOk'))}")
     return (status, tipo, dados, ""), sonda
 
 
@@ -571,12 +616,13 @@ def _sondar(longa: str, status, sonda: dict, ms: int,
             intervalo: Optional[float]) -> None:
     """SONDA PASSIVA: uma linha por chamada ao SiteStripe, sucesso ou
     falha — o que a Amazon respondeu às chamadas que o bot JÁ faz,
-    nenhuma a mais. Sem query, cookie ou corpo: da página HTML, só a
-    marca e o título.
+    nenhuma a mais. Só números e rótulos de vocabulário fechado: sem
+    query, cookie, header, corpo ou título.
 
     Os campos existem para separar hipóteses sobre o 503 que só os
     dados separam: rajada (intervalo), forma da URL enviada (alvo,
-    params, tam) e natureza da página (marca, título).
+    params, tam — contagens da NOSSA URL, nunca o conteúdo) e natureza
+    da resposta (tipo, marca, destino).
     """
     alvo = urlparse(longa)
     if _P_PROMO.search(alvo.path):
@@ -590,10 +636,10 @@ def _sondar(longa: str, status, sonda: dict, ms: int,
         f"🔬 [AMZ_SONDA] sitestripe status={status} ms={ms} "
         f"intervalo={'primeira' if intervalo is None else f'{int(intervalo)}s'} "
         f"alvo={tipo_alvo} params={n_params} tam={len(longa)} "
+        f"tipo={sonda.get('tipo') or '-'} "
         f"marca={sonda.get('marca') or '-'} "
-        f"titulo=\"{sonda.get('titulo') or '-'}\" "
         f"destino={sonda.get('destino') or '-'} "
-        f"ok={sonda.get('ok') or '-'} rid={sonda.get('rid') or '-'}"
+        f"ok={sonda.get('ok') or '-'}"
     )
 
 
@@ -604,10 +650,11 @@ async def _http_getshorturl(params: dict) -> tuple:
     a rede, o que mantém a política de validação, o disjuntor e o
     cache testáveis sem acesso externo.
 
-    `pista` só existe na falha e nunca carrega query, cookie ou
-    corpo: é host+caminho do redirecionamento, ou a marca da página
-    HTML ("captcha", "automacao", "robo"). Sem ela, "HTTP 302" não
-    distingue login de captcha — e foi tudo o que o log disse por dias.
+    `pista` só existe na falha e é sempre um rótulo fechado: a classe
+    do destino do redirecionamento (login, captcha, outro, ausente) ou
+    a da página HTML (captcha, automacao, robo, login, vazia, outra).
+    Sem ela, "HTTP 302" não distingue login de captcha — e foi tudo o
+    que o log disse por dias.
     """
     global _ultima_chamada
     sessao = await _obter_sessao()
@@ -723,14 +770,15 @@ async def _sitestripe(canonica: str) -> str:
         return ""
 
     if dados is None:
-        motivo = f"HTTP {status} tipo={tipo!r}"
+        motivo = f"HTTP {status} tipo={_classe_tipo(tipo)}"
         if pista:
             motivo += f" → {pista}"
         _registrar_falha(motivo, _classe_falha(status, pista))
         return ""
     if dados.get("ok") is not True or dados.get("isOk") is not True:
         _registrar_falha(
-            f"ok={dados.get('ok')} isOk={dados.get('isOk')}"
+            f"ok={_classe_bool(dados.get('ok'))} "
+            f"isOk={_classe_bool(dados.get('isOk'))}"
         )
         return ""
 

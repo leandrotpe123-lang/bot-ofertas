@@ -18,7 +18,7 @@ em 6 h na reprodução contra o código anterior), sem alerta, e o log
 não separava login de captcha.
 
   01  caso 23/10: 302 para o login → UM alerta [AMZ_SESSAO_RECUSADA]
-      com o destino; 72 ofertas em 6 h → UMA chamada; sondagem a cada
+      com a classe do destino; 72 ofertas em 6 h → UMA chamada; sondagem a cada
       6 h, sem repetir o alerta
   02  sondagem que volta a responder → short oficial, [AMZ_SESSAO_OK]
       e fim da pausa
@@ -29,21 +29,28 @@ não separava login de captcha.
       403, 429 e 5xx são transitórias
   06  a primeira resposta boa aparece no log uma vez, não a cada short
   07  o boot registra os NOMES dos cookies e nunca os valores
-  08  costura de I/O: pista sem query, sem cookie e sem corpo
+  08  costura de I/O: a pista é sempre rótulo fechado — nada da
+      resposta (caminho, query, corpo) passa por ela
   09  ponta a ponta: sessão recusada nunca perde a oferta — publica a
       longa com a nossa tag, e só a nossa
-  10  Base64 que não decodifica não põe o segredo no log no lugar do
-      nome do cookie
+  10  cookie malformado (Base64 que não decodifica, valor com `;`) não
+      põe pedaço do segredo no log no lugar do nome: só nomes da lista
+      fechada são impressos, o resto é contado
   11  SONDA PASSIVA: uma linha [AMZ_SONDA] por chamada — sucesso, 503,
-      302 e exceção —, com intervalo, forma do alvo, marca e título, e
-      nada de query, cookie ou corpo
+      302 e exceção —, com intervalo, forma do alvo e classes fechadas
+      de tipo, página, destino e ok
   12  JSON fora do contrato (lista) não derruba quem chama
+  13  ADVERSARIAL: título com dado pessoal e escape ANSI, caminho com
+      token, header e valores de JSON arbitrários, credencial no host —
+      nada disso chega ao log; toda linha obedece ao CONTRATO DE FORMATO
+      (cada campo é número ou rótulo de vocabulário fechado)
 
     python tests/test_amazon_sitestripe_sessao.py
 """
 import asyncio
 import logging
 import os
+import re
 import sys
 import types
 
@@ -68,9 +75,36 @@ JSON_OK = {
     "shortUrl": "https://link.amazon/B0abWqUsA",
     "longUrl": CANONICA,
 }
-LOGIN = (302, "", None, "www.amazon.com.br/ap/signin")
+LOGIN = (302, "", None, "login")
 CAPTCHA_503 = (503, "text/html", None, "captcha")
 SUCESSO = (200, "application/json", JSON_OK, "")
+
+
+# CONTRATO DE FORMATO: cada campo das linhas novas é número ou rótulo
+# de vocabulário fechado. Campo dinâmico novo quebra estes padrões.
+_CONTRATO_SONDA = re.compile(
+    r"🔬 \[AMZ_SONDA\] sitestripe "
+    r"status=(\d{3}|EXC:[A-Za-z_][A-Za-z0-9_]*) ms=\d+ "
+    r"intervalo=(primeira|\d+s) alvo=(produto|promo|pagina) "
+    r"params=\d+ tam=\d+ tipo=(json|html|vazio|outro|-) "
+    r"marca=(captcha|automacao|robo|login|vazia|outra|-) "
+    r"destino=(login|captcha|outro|ausente|-) "
+    r"ok=((sim|nao|outro)/(sim|nao|outro)|-)"
+)
+_MOTIVO = (r"(HTTP \d{3} tipo=(json|html|vazio|outro)"
+           r"( → (login|captcha|outro|ausente|automacao|robo|vazia|outra))?"
+           r"|ok=(sim|nao|outro) isOk=(sim|nao|outro)"
+           r"|[A-Za-z_][A-Za-z0-9_]*"
+           r"|shortUrl fora dos domínios oficiais"
+           r"|longUrl de resposta sem a nossa tag)")
+_CONTRATO_FALHAS = [
+    re.compile(r"⚠️ AMZ SiteStripe falhou \(\d+/\d+\): " + _MOTIVO),
+    re.compile(r"🔐 \[AMZ_SESSAO_RECUSADA\] SiteStripe recusou a sessão "
+               r"\(" + _MOTIVO + r"\) — renovar AMAZON_COOKIE; publicando "
+               r"URL longa, nova sondagem em \d+h"),
+    re.compile(r"⚠️ AMZ sessão segue recusada \(" + _MOTIVO +
+               r"\) — nova sondagem em \d+h"),
+]
 
 
 # ── infraestrutura mínima ─────────────────────────────────────────
@@ -155,7 +189,7 @@ def test_01_caso_real_sessao_recusada_nao_martela(r):
         alertas = cap.com("[AMZ_SESSAO_RECUSADA]", "ERROR")
         r.check(len(alertas) == 1, "um alerta, não um por oferta",
                 f"{len(alertas)}")
-        r.check(alertas and "www.amazon.com.br/ap/signin" in alertas[0],
+        r.check(alertas and "HTTP 302 tipo=vazio → login" in alertas[0],
                 "o alerta diz para onde a Amazon mandou", alertas)
         r.check(alertas and "AMAZON_COOKIE" in alertas[0],
                 "o alerta diz o que fazer", alertas)
@@ -234,14 +268,14 @@ def test_04_contador_sem_teto_nao_estoura(r):
 def test_05_classificacao(r):
     recusa, trans = amazon._SESSAO_RECUSADA, amazon._TRANSITORIA
     casos = [
-        (301, "www.amazon.com.br/ap/signin", recusa),
-        (302, "www.amazon.com.br/ap/signin", recusa),
-        (302, "", recusa),
-        (303, "/gp/sign-in.html", recusa),
-        (307, "www.amazon.com.br/ap/signin", recusa),
-        (308, "www.amazon.com.br/ap/signin", recusa),
+        (301, "login", recusa),
+        (302, "login", recusa),
+        (302, "ausente", recusa),
+        (303, "outro", recusa),
+        (307, "login", recusa),
+        (308, "login", recusa),
         (401, "", recusa),
-        (302, "www.amazon.com.br/errors/validateCaptcha", trans),
+        (302, "captcha", trans),
         (403, "", trans),
         (429, "", trans),
         (500, "", trans),
@@ -252,6 +286,18 @@ def test_05_classificacao(r):
     for status, pista, esperado in casos:
         obtido = amazon._classe_falha(status, pista)
         r.check(obtido == esperado, f"{status} {pista!r}", obtido)
+
+    destinos = [
+        ("https://www.amazon.com.br/ap/signin?openid=x", "login"),
+        ("/ap/mfa/new-otp", "login"),
+        ("https://www.amazon.com.br/gp/sign-in.html", "login"),
+        ("https://www.amazon.com.br/errors/validateCaptcha?a=1", "captcha"),
+        ("https://outro.exemplo/qualquer/coisa", "outro"),
+        ("", "ausente"),
+    ]
+    for location, esperado in destinos:
+        obtido = amazon._classe_destino(location)
+        r.check(obtido == esperado, f"destino {location!r}", obtido)
 
     rede = _Rede(TimeoutError())
     _cenario(rede)
@@ -329,9 +375,24 @@ def test_10_base64_que_nao_decodifica_nao_vaza(r):
     linha = amazon._nomes_para_log(cookies)
     r.check(len(cookies) == 1, "o defeito de captura continua visível",
             len(cookies))
-    r.check(linha == "<1 sem forma de nome>", "nada do blob no log", linha)
+    r.check(linha == "+1 fora da lista", "nada do blob no log", linha)
     r.check(bloco[:20] not in linha and bloco[30:50] not in linha,
             "nenhum trecho do segredo", linha)
+
+    # Valor com `;` (fora da RFC, mas é o que um painel ou uma captura
+    # defeituosa entrega): o pedaço depois do `;` tem FORMA de nome.
+    os.environ["AMAZON_COOKIE"] = (
+        'session-token="AAAA;FRAGMENTOSECRETO==; at-acbbr=VALOR'
+    )
+    try:
+        cookies = amazon._cookies_iniciais()
+    finally:
+        os.environ.pop("AMAZON_COOKIE", None)
+    linha = amazon._nomes_para_log(cookies)
+    r.check("FRAGMENTOSECRETO" in cookies, "o fragmento chega como nome",
+            sorted(cookies))
+    r.check(linha == "at-acbbr, session-token, +1 fora da lista"
+            and "FRAGMENTO" not in linha, "só nomes da lista fechada", linha)
 
 
 # ── 08 ────────────────────────────────────────────────────────────
@@ -387,8 +448,8 @@ def test_08_costura_pista_sem_segredo(r):
         "location": "https://www.amazon.com.br/ap/signin?"
                     "openid.return_to=SEGREDO&session=SEGREDO",
     }))
-    r.check(login == (302, "", None, "www.amazon.com.br/ap/signin"),
-            "302: host+caminho, sem query", login)
+    r.check(login == (302, "", None, "login"),
+            "302: só a classe do destino", login)
 
     pagina = (b"<html><title>Amazon.com.br</title>" + b"x" * 500 +
               b'<form action="/errors/validateCaptcha">SEGREDO</form>')
@@ -399,7 +460,11 @@ def test_08_costura_pista_sem_segredo(r):
 
     outra = _costura(_Resposta(
         503, {"content-type": "text/html"}, corpo=b"<html>erro</html>"))
-    r.check(outra == (503, "text/html", None, ""), "503 sem captcha", outra)
+    r.check(outra == (503, "text/html", None, "outra"), "503 sem marca",
+            outra)
+    vazia = _costura(_Resposta(503, {"content-type": "text/html"}))
+    r.check(vazia == (503, "text/html", None, "vazia"), "503 sem corpo",
+            vazia)
 
     ok = _costura(_Resposta(
         200, {"content-type": "application/json"}, dados=JSON_OK))
@@ -487,21 +552,23 @@ def test_11_sonda_uma_linha_por_chamada(r):
         return
     ok, bloqueio, login, excecao = linhas
     r.check("status=200" in ok and "intervalo=primeira" in ok
-            and "ok=True/True" in ok and "rid=RID200" in ok, "sucesso", ok)
+            and "tipo=json" in ok and "ok=sim/sim" in ok, "sucesso", ok)
     r.check("status=503" in bloqueio and "intervalo=37s" in bloqueio
-            and "marca=captcha" in bloqueio
-            and 'titulo="Amazon.com.br"' in bloqueio
-            and "rid=RID503" in bloqueio, "503 com marca e título",
-            bloqueio)
-    r.check("status=302" in login
-            and "destino=www.amazon.com.br/ap/signin" in login,
-            "302 com destino", login)
+            and "tipo=html" in bloqueio and "marca=captcha" in bloqueio,
+            "503 com classe da página", bloqueio)
+    r.check("status=302" in login and "tipo=vazio" in login
+            and "destino=login" in login, "302 com classe do destino",
+            login)
+    r.check(all(_CONTRATO_SONDA.fullmatch(m) for m in linhas),
+            "contrato de formato", [m for m in linhas
+                                    if not _CONTRATO_SONDA.fullmatch(m)])
     r.check("status=EXC:TimeoutError" in excecao, "exceção registrada",
             excecao)
     r.check(all("alvo=produto params=4" in m and f"tam={len(longa)}" in m
                 for m in linhas), "forma do alvo", linhas[0])
-    vazou = [m for m in linhas if "SEGREDO" in m]
-    r.check(not vazou, "nada de query, cookie ou corpo", vazou)
+    vazou = [m for m in linhas if any(x in m for x in
+                                       ("SEGREDO", "RID", "Amazon.com.br"))]
+    r.check(not vazou, "nada de query, header, título ou corpo", vazou)
     r.check(saidas[1] == (503, "text/html", None, "captcha")
             and saidas[3] == "timeout", "contrato da costura intacto",
             saidas)
@@ -522,6 +589,85 @@ def test_12_json_fora_do_contrato(r):
         except Exception as e:                  # noqa: BLE001
             saida, erro = None, e
     r.check(erro is None and saida == "", "falha, sem exceção", repr(erro))
+
+
+# ── 13 ────────────────────────────────────────────────────────────
+def test_13_adversarial_nada_da_resposta_chega_ao_log(r):
+    """Conteúdo de terceiro hostil em cada campo que a resposta tem."""
+    relogio = _Relogio11()
+    amazon.time = types.SimpleNamespace(monotonic=relogio.monotonic)
+    amazon._ultima_chamada = 0.0
+    hostil = ("Olá, Leandro Fulano — leandro@exemplo.com \x1b[31mVERMELHO"
+              "\x1b[0m \u202eTXET")
+    pagina = (f"<html><title>{hostil}</title><body>CORPO-SECRETO"
+              f"</body></html>").encode()
+    respostas = [
+        # título com dado pessoal, escape ANSI e bidi; header arbitrário
+        _Resposta(503, {"content-type": "text/html; X-HOSTIL=1"},
+                  corpo=pagina),
+        # 200 HTML com o mesmo título (página logada no lugar do JSON)
+        _Resposta(200, {"content-type": "text/html"}, corpo=pagina),
+        # redirecionamento com token no CAMINHO e credencial no host
+        _Resposta(302, {"location": "https://usuario:SENHA@www.amazon.com.br"
+                                    "/ap/signin/TOKEN-NO-CAMINHO?q=QUERY"}),
+        _Resposta(302, {"location": "https://www.amazon.com.br/x/"
+                                    "TOKEN-NO-CAMINHO"}),
+        # valores de JSON arbitrários, e content-type estranho
+        _Resposta(200, {"content-type": "application/json; x=HEADER"},
+                  dados={"ok": "VALOR-JSON-ARBITRARIO", "isOk": 1,
+                         "shortUrl": "https://link.amazon/x"}),
+    ]
+
+    class _Sessao:
+        def get(self, *a, **k):
+            return respostas.pop(0)
+
+    async def obter():
+        return _Sessao()
+
+    async def corpo():
+        amazon.config._SEM_HTTP = asyncio.Semaphore(1)
+        try:
+            for _ in range(5):
+                await amazon._sitestripe(CANONICA)
+                relogio.t = max(relogio.t + 1.0, amazon._disjuntor_ate)
+        finally:
+            amazon.config._SEM_HTTP = None
+
+    rede = _HTTP_REAL
+    _cenario(rede)
+    amazon.time = types.SimpleNamespace(monotonic=relogio.monotonic)
+    original = amazon._obter_sessao
+    amazon._obter_sessao = obter
+    try:
+        with _Captura() as cap:
+            _rodar(corpo())
+    finally:
+        amazon._obter_sessao = original
+
+    todas = [m for _, m in cap.linhas]
+    proibidos = ("Leandro", "leandro@", "\x1b", "\u202e", "VERMELHO",
+                 "CORPO-SECRETO", "SENHA", "usuario", "TOKEN", "QUERY",
+                 "X-HOSTIL", "HEADER", "VALOR-JSON", "text/html",
+                 "application/json")
+    vazou = [m for m in todas if any(x in m for x in proibidos)]
+    r.check(not vazou, "nenhum conteúdo da resposta no log", vazou)
+
+    sondas = [m for m in todas if "[AMZ_SONDA]" in m]
+    r.check(len(sondas) == 5, "uma sonda por chamada", len(sondas))
+    fora = [m for m in sondas if not _CONTRATO_SONDA.fullmatch(m)]
+    r.check(not fora, "sonda obedece ao contrato de formato", fora)
+
+    falhas = [m for m in todas if "AMZ SiteStripe falhou" in m
+              or "SESSAO_RECUSADA" in m or "segue recusada" in m]
+    fora = [m for m in falhas
+            if not any(c.fullmatch(m) for c in _CONTRATO_FALHAS)]
+    r.check(falhas and not fora, "falhas obedecem ao contrato", fora)
+    r.check(any("ok=outro isOk=outro" in m for m in falhas),
+            "valor de JSON vira classe", falhas)
+    r.check(any("→ login" in m for m in falhas)
+            and any("→ outro" in m for m in falhas),
+            "destino vira classe", falhas)
 
 
 if __name__ == "__main__":
