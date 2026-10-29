@@ -139,8 +139,9 @@ _LIMITE_PISTA = 65536
 # Caso real (23/10 13:30 → 29/10): sessão recusada desde a primeira
 # chamada de cada processo, e a pausa fixa de 5 min igual ao
 # intervalo entre ofertas fazia TODA oferta Amazon bater no endpoint
-# com o cookie morto — 84 recusas seguidas em 4,5 dias, sem alerta,
-# até a Amazon passar a responder 503 (desafio anti-robô).
+# com o cookie morto — 84 recusas seguidas em 4,5 dias, sem alerta;
+# em 29/10 vieram também 503 em HTML. Com o cookie renovado (29/10
+# 14:19) os 302 sumiram e os shorts voltaram, entremeados de 503.
 _LIMITE_FALHAS = 3
 _PAUSA_DISJUNTOR = 300.0
 _PAUSA_TETO = 7200.0

@@ -6,7 +6,9 @@ nunca respondeu. Cada processo recusado desde a PRIMEIRA chamada
 (23/10 13:30:21, 0,2 s depois de "🔐 AMZ sessão SiteStripe iniciada
 (3 cookies)"); o contador de falhas subiu de 1 a 84 sem um único
 sucesso em 4,5 dias, sempre "HTTP 302 tipo=''". Em 29/10 11:29 a
-Amazon passou a responder "HTTP 503 tipo='text/html'".
+Amazon passou a responder também "HTTP 503 tipo='text/html'". Com o
+cookie renovado (redeploy de 29/10 14:15, mesmo commit) os 302 sumiram
+e o contador voltou a zerar — sucessos — entremeado de 503.
 
 DEFEITO: o 302 do endpoint XHR é a sessão recusada — nenhuma nova
 tentativa a ressuscita —, mas era tratado como falha transitória com
