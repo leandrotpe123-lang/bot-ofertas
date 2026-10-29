@@ -116,16 +116,43 @@ _ENDPOINT_SHORT = (
 )
 _MARKETPLACE_ID = "526970"
 _TIMEOUT_SHORT = 15
+_LIMITE_PISTA = 65536
 
 # Disjuntor: sessão vencida ou desafio de WAF falha em série. Sem
 # isto, cookie morto vira centenas de tentativas por hora contra a
 # Amazon com sessão inválida — que é como uma conta de associado
 # entra na mira. Aberto o circuito, publica-se a longa direto.
+#
+# Duas classes de falha, porque só uma delas passa sozinha:
+#
+#   TRANSITÓRIA — 5xx, 429, desafio de WAF, timeout, resposta fora
+#     do contrato. Pausa exponencial a partir do limite: 5 min, 10,
+#     20… teto de 2 h. O sucesso zera.
+#
+#   SESSÃO RECUSADA — redirecionamento (para o login) ou 401. O
+#     endpoint é XHR: com sessão válida responde JSON, nunca
+#     redireciona. Nenhuma nova tentativa ressuscita o cookie; só o
+#     dono renovando AMAZON_COOKIE, e a troca da variável reinicia o
+#     processo, que nasce com o estado limpo. Por isso: UM alerta e
+#     uma sondagem a cada 6 h (salvaguarda contra falso positivo).
+#
+# Caso real (23/10 13:30 → 29/10): sessão recusada desde a primeira
+# chamada de cada processo, e a pausa fixa de 5 min igual ao
+# intervalo entre ofertas fazia TODA oferta Amazon bater no endpoint
+# com o cookie morto — 84 recusas seguidas em 4,5 dias, sem alerta,
+# até a Amazon passar a responder 503 (desafio anti-robô).
 _LIMITE_FALHAS = 3
 _PAUSA_DISJUNTOR = 300.0
+_PAUSA_TETO = 7200.0
+_PAUSA_SESSAO_RECUSADA = 21600.0
+
+_TRANSITORIA = "transitoria"
+_SESSAO_RECUSADA = "sessao_recusada"
 
 _falhas_seguidas = 0
 _disjuntor_ate = 0.0
+_sessao_recusada = False
+_ja_respondeu = False
 
 _sessao_amz: Optional[aiohttp.ClientSession] = None
 _lock_sessao = asyncio.Lock()
@@ -446,17 +473,56 @@ async def _obter_sessao() -> aiohttp.ClientSession:
             )
             log_nrm.info(
                 f"🔐 AMZ sessão SiteStripe iniciada "
-                f"({len(cookies)} cookies)"
+                f"({len(cookies)} cookies: {_nomes_para_log(cookies)})"
             )
     return _sessao_amz
 
 
+_RE_NOME_COOKIE = re.compile(r"[A-Za-z0-9_.-]{1,32}")
+
+
+def _nomes_para_log(cookies: dict) -> str:
+    """Os NOMES, nunca os valores: nome de cookie da Amazon é o mesmo
+    para todo cliente e não autentica nada. É ele que separa, sem
+    gastar requisição, captura incompleta (sem os cookies de
+    autenticação, que são HttpOnly e escapam de captura por script)
+    de sessão recusada pelo servidor.
+
+    Só sai o que tem forma de nome. Base64 que não decodificou —
+    painel que quebra a linha, padding faltando — chega aqui inteiro
+    na posição do nome, e imprimi-lo seria imprimir o segredo.
+    """
+    nomes = sorted(n for n in cookies if _RE_NOME_COOKIE.fullmatch(n))
+    estranhos = len(cookies) - len(nomes)
+    if estranhos:
+        nomes.append(f"<{estranhos} sem forma de nome>")
+    return ", ".join(nomes)
+
+
+async def _ler_inicio(resposta, limite: int = _LIMITE_PISTA) -> bytes:
+    """Até `limite` bytes do corpo — o bastante para reconhecer a
+    página, sem deixar uma resposta anômala crescer na memória."""
+    partes, total = [], 0
+    while total < limite:
+        bloco = await resposta.content.read(limite - total)
+        if not bloco:
+            break
+        partes.append(bloco)
+        total += len(bloco)
+    return b"".join(partes)
+
+
 async def _http_getshorturl(params: dict) -> tuple:
-    """Costura de I/O: devolve (status, content_type, dados|None).
+    """Costura de I/O: devolve (status, content_type, dados|None, pista).
 
     Isolada de propósito — é o único ponto deste módulo que fala com
     a rede, o que mantém a política de validação, o disjuntor e o
     cache testáveis sem acesso externo.
+
+    `pista` só existe na falha e nunca carrega query, cookie ou
+    corpo: é host+caminho do redirecionamento, ou "captcha" quando a
+    página devolvida é o desafio anti-robô. Sem ela, "HTTP 302" não
+    distingue login de captcha — e foi tudo o que o log disse por dias.
     """
     sessao = await _obter_sessao()
     async with config._SEM_HTTP:
@@ -466,27 +532,85 @@ async def _http_getshorturl(params: dict) -> tuple:
             allow_redirects=False,
         ) as resposta:
             tipo = (resposta.headers.get("content-type") or "").lower()
+            if 300 <= resposta.status < 400:
+                destino = urlparse(resposta.headers.get("location") or "")
+                pista = f"{destino.netloc}{destino.path}"[:80]
+                return resposta.status, tipo, None, pista
             if resposta.status != 200 or "json" not in tipo:
-                return resposta.status, tipo, None
+                try:
+                    corpo = await _ler_inicio(resposta)
+                except Exception:
+                    corpo = b""
+                pista = "captcha" if b"captcha" in corpo.lower() else ""
+                return resposta.status, tipo, None, pista
             return resposta.status, tipo, await resposta.json(
                 content_type=None,
-            )
+            ), ""
 
 
-def _registrar_falha(motivo: str) -> None:
-    """Contabiliza a falha e abre o disjuntor no limite."""
-    global _falhas_seguidas, _disjuntor_ate
+def _classe_falha(status: int, pista: str) -> str:
+    """Sessão recusada ou falha transitória — ver o disjuntor, acima.
+
+    Redirecionamento para o desafio anti-robô não é sessão recusada:
+    é a Amazon segurando a porta, e isso passa com pausa.
+    """
+    if status == 401:
+        return _SESSAO_RECUSADA
+    if 300 <= status < 400 and "captcha" not in pista.lower():
+        return _SESSAO_RECUSADA
+    return _TRANSITORIA
+
+
+def _registrar_falha(motivo: str, classe: str = _TRANSITORIA) -> None:
+    """Contabiliza a falha e abre o disjuntor conforme a classe."""
+    global _falhas_seguidas, _disjuntor_ate, _sessao_recusada
     _falhas_seguidas += 1
+
+    if classe == _SESSAO_RECUSADA:
+        _disjuntor_ate = time.monotonic() + _PAUSA_SESSAO_RECUSADA
+        horas = int(_PAUSA_SESSAO_RECUSADA // 3600)
+        if not _sessao_recusada:
+            _sessao_recusada = True
+            log_nrm.error(
+                f"🔐 [AMZ_SESSAO_RECUSADA] SiteStripe recusou a sessão "
+                f"({motivo}) — renovar AMAZON_COOKIE; publicando URL "
+                f"longa, nova sondagem em {horas}h"
+            )
+        else:
+            log_nrm.warning(
+                f"⚠️ AMZ sessão segue recusada ({motivo}) — nova "
+                f"sondagem em {horas}h"
+            )
+        return
+
     log_nrm.warning(
         f"⚠️ AMZ SiteStripe falhou ({_falhas_seguidas}/"
         f"{_LIMITE_FALHAS}): {motivo}"
     )
     if _falhas_seguidas >= _LIMITE_FALHAS:
-        _disjuntor_ate = time.monotonic() + _PAUSA_DISJUNTOR
+        # Expoente limitado: em falha persistente o contador não tem
+        # teto, e 2**n grande demais estoura a conversão para float.
+        excesso = min(_falhas_seguidas - _LIMITE_FALHAS, 16)
+        pausa = min(_PAUSA_TETO, _PAUSA_DISJUNTOR * 2 ** excesso)
+        _disjuntor_ate = time.monotonic() + pausa
         log_nrm.error(
             f"🔌 AMZ SiteStripe suspenso por "
-            f"{int(_PAUSA_DISJUNTOR)}s — publicando URL longa"
+            f"{int(pausa)}s — publicando URL longa"
         )
+
+
+def _registrar_sucesso() -> None:
+    """Zera o disjuntor. A primeira resposta boa — no boot ou depois
+    de falha — fica visível: é a prova de que a sessão vale, que
+    antes só se deduzia pela ausência de erro."""
+    global _falhas_seguidas, _sessao_recusada, _ja_respondeu
+    if _falhas_seguidas or _sessao_recusada or not _ja_respondeu:
+        log_nrm.info(
+            "✅ [AMZ_SESSAO_OK] SiteStripe respondeu — short oficial ativo"
+        )
+    _falhas_seguidas = 0
+    _sessao_recusada = False
+    _ja_respondeu = True
 
 
 async def _sitestripe(canonica: str) -> str:
@@ -498,7 +622,6 @@ async def _sitestripe(canonica: str) -> str:
     de WAF, página de login, captcha, 4xx, 5xx, timeout — é falha, e
     falha nunca inventa short.
     """
-    global _falhas_seguidas
     if time.monotonic() < _disjuntor_ate:
         return ""
     if not _AMZ_TAG:
@@ -510,13 +633,16 @@ async def _sitestripe(canonica: str) -> str:
         "storeId": _AMZ_STORE_ID,
     }
     try:
-        status, tipo, dados = await _http_getshorturl(params)
+        status, tipo, dados, pista = await _http_getshorturl(params)
     except Exception as e:
         _registrar_falha(type(e).__name__)
         return ""
 
     if dados is None:
-        _registrar_falha(f"HTTP {status} tipo={tipo!r}")
+        motivo = f"HTTP {status} tipo={tipo!r}"
+        if pista:
+            motivo += f" → {pista}"
+        _registrar_falha(motivo, _classe_falha(status, pista))
         return ""
     if dados.get("ok") is not True or dados.get("isOk") is not True:
         _registrar_falha(
@@ -532,7 +658,7 @@ async def _sitestripe(canonica: str) -> str:
         _registrar_falha("longUrl de resposta sem a nossa tag")
         return ""
 
-    _falhas_seguidas = 0
+    _registrar_sucesso()
     return curta
 
 
