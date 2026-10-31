@@ -334,6 +334,11 @@ def test_07_boot_registra_nomes_nunca_valores(r):
     )
 
     class _Jar:
+        criados = []
+
+        def __init__(self, **k):
+            _Jar.criados.append(k)
+
         def update_cookies(self, *a, **k):
             pass
 
@@ -362,6 +367,9 @@ def test_07_boot_registra_nomes_nunca_valores(r):
             in linhas[0], "nomes ordenados", linhas)
     vazou = [m for _, m in cap.linhas if any(s in m for s in segredos)]
     r.check(not vazou, "nenhum valor de cookie no log", vazou)
+    r.check(_Jar.criados == [{"quote_cookie": False}],
+            "jar manda os valores como o navegador (sem aspas a mais)",
+            _Jar.criados)
 
 
 # ── 10 ────────────────────────────────────────────────────────────
