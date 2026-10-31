@@ -116,16 +116,49 @@ _ENDPOINT_SHORT = (
 )
 _MARKETPLACE_ID = "526970"
 _TIMEOUT_SHORT = 15
+_LIMITE_PISTA = 65536
 
 # Disjuntor: sessão vencida ou desafio de WAF falha em série. Sem
 # isto, cookie morto vira centenas de tentativas por hora contra a
 # Amazon com sessão inválida — que é como uma conta de associado
 # entra na mira. Aberto o circuito, publica-se a longa direto.
+#
+# Duas classes de falha, porque só uma delas passa sozinha:
+#
+#   TRANSITÓRIA — 5xx, 429, desafio de WAF, timeout, resposta fora
+#     do contrato. Política de antes, inalterada: no limite, pausa
+#     fixa de 5 min; o sucesso zera. Mudar a pausa do 503 muda quantas
+#     ofertas saem curtas (29/10: das 271 longas desde 14:19, só 38
+#     foram recusa; as demais caíram na pausa) e por isso só com os
+#     dados da sonda — não por hipótese.
+#
+#   SESSÃO RECUSADA — 401, ou redirecionamento PARA O LOGIN. O
+#     endpoint é XHR: com sessão válida responde JSON, nunca
+#     redireciona. Redirecionamento para destino desconhecido ou sem
+#     destino não prova que a sessão morreu: é transitória — pausar
+#     6 h e mandar renovar o cookie sem prova custaria shorts à toa.
+#     Recusada, nenhuma nova tentativa ressuscita o cookie; só o
+#     dono renovando AMAZON_COOKIE, e a troca da variável reinicia o
+#     processo, que nasce com o estado limpo. Por isso: UM alerta e
+#     uma sondagem a cada 6 h (salvaguarda contra falso positivo).
+#
+# Caso real (23/10 13:30 → 29/10): sessão recusada desde a primeira
+# chamada de cada processo, e a pausa fixa de 5 min igual ao
+# intervalo entre ofertas fazia TODA oferta Amazon bater no endpoint
+# com o cookie morto — 84 recusas seguidas em 4,5 dias, sem alerta;
+# em 29/10 vieram também 503 em HTML. Com o cookie renovado (29/10
+# 14:19) os 302 sumiram e os shorts voltaram, entremeados de 503.
 _LIMITE_FALHAS = 3
 _PAUSA_DISJUNTOR = 300.0
+_PAUSA_SESSAO_RECUSADA = 21600.0
+
+_TRANSITORIA = "transitoria"
+_SESSAO_RECUSADA = "sessao_recusada"
 
 _falhas_seguidas = 0
 _disjuntor_ate = 0.0
+_sessao_recusada = False
+_ja_respondeu = False
 
 _sessao_amz: Optional[aiohttp.ClientSession] = None
 _lock_sessao = asyncio.Lock()
@@ -446,37 +479,247 @@ async def _obter_sessao() -> aiohttp.ClientSession:
             )
             log_nrm.info(
                 f"🔐 AMZ sessão SiteStripe iniciada "
-                f"({len(cookies)} cookies)"
+                f"({len(cookies)} cookies: {_nomes_para_log(cookies)})"
             )
     return _sessao_amz
 
 
+# Nomes de cookie da Amazon que podem aparecer no log. Lista FECHADA:
+# o que se imprime é sempre uma destas constantes, nunca texto vindo da
+# variável. Filtrar pela forma não bastava — em cookie malformado
+# (Base64 que não decodificou, valor com `;`) um pedaço do VALOR chega
+# na posição do nome e tem forma de nome.
+_COOKIES_CONHECIDOS = frozenset({
+    "session-id", "session-id-time", "session-token", "ubid-acbbr",
+    "at-acbbr", "sess-at-acbbr", "x-acbbr", "sst-acbbr", "lc-acbbr",
+    "i18n-prefs", "csm-hit", "sp-cdn", "skin",
+})
+
+
+def _nomes_para_log(cookies: dict) -> str:
+    """Os NOMES conhecidos, nunca os valores; o resto só é contado.
+
+    Nome de cookie da Amazon é o mesmo para todo cliente e não
+    autentica nada. É ele que separa, sem gastar requisição, captura
+    incompleta de sessão recusada pelo servidor.
+    """
+    nomes = sorted(n for n in cookies if n in _COOKIES_CONHECIDOS)
+    fora = len(cookies) - len(nomes)
+    if fora:
+        nomes.append(f"+{fora} fora da lista")
+    return ", ".join(nomes) or "-"
+
+
+async def _ler_inicio(resposta, limite: int = _LIMITE_PISTA) -> bytes:
+    """Até `limite` bytes do corpo — o bastante para reconhecer a
+    página, sem deixar uma resposta anômala crescer na memória."""
+    partes, total = [], 0
+    while total < limite:
+        bloco = await resposta.content.read(limite - total)
+        if not bloco:
+            break
+        partes.append(bloco)
+        total += len(bloco)
+    return b"".join(partes)
+
+
+# ── Classificação controlada para o log ───────────────────────────
+# Nada que venha da Amazon vai para o log como texto: título, caminho
+# de redirecionamento, header e valor de JSON são conteúdo de terceiro
+# — podem trazer dado pessoal, token ou caractere de controle, e
+# truncar não resolve. Cada campo dinâmico vira um rótulo de
+# vocabulário fechado; o log só recebe constantes deste módulo e
+# números.
+
+# Marcas da página HTML que a Amazon devolve no lugar do JSON, da mais
+# específica para a mais genérica.
+_MARCAS_PAGINA = (
+    ("captcha", b"captcha"),
+    ("automacao", b"api-services-support"),
+    ("robo", b"robot"),
+    ("robo", "robô".encode()),
+    ("login", b"ap_email"),
+    ("login", b"/ap/signin"),
+)
+
+_ultima_chamada = 0.0
+
+
+def _classe_pagina(corpo: bytes) -> str:
+    """captcha | automacao | robo | login | vazia | outra."""
+    if not corpo.strip():
+        return "vazia"
+    baixo = corpo.lower()
+    return next((nome for nome, trecho in _MARCAS_PAGINA
+                 if trecho in baixo), "outra")
+
+
+def _classe_destino(location: str) -> str:
+    """login | captcha | outro | ausente — o caminho nunca sai daqui."""
+    if not location:
+        return "ausente"
+    caminho = urlparse(location).path.lower()
+    if "captcha" in caminho:
+        return "captcha"
+    if (caminho.startswith("/ap/") or "signin" in caminho
+            or "sign-in" in caminho):
+        return "login"
+    return "outro"
+
+
+def _classe_tipo(tipo: str) -> str:
+    """json | html | vazio | outro — o header nunca sai daqui."""
+    if not tipo:
+        return "vazio"
+    if "json" in tipo:
+        return "json"
+    if "html" in tipo:
+        return "html"
+    return "outro"
+
+
+def _classe_bool(valor) -> str:
+    """sim | nao | outro — o valor do JSON nunca sai daqui."""
+    if valor is True:
+        return "sim"
+    if valor is False:
+        return "nao"
+    return "outro"
+
+
+async def _ler_resposta(resposta) -> tuple:
+    """((status, content_type, dados|None, pista), sonda).
+
+    `pista` e todo valor de `sonda` são rótulos das classificações
+    acima — nunca texto da resposta.
+    """
+    status = resposta.status
+    tipo = (resposta.headers.get("content-type") or "").lower()
+    sonda = {"tipo": _classe_tipo(tipo)}
+    if 300 <= status < 400:
+        pista = _classe_destino(resposta.headers.get("location") or "")
+        sonda["destino"] = pista
+        return (status, tipo, None, pista), sonda
+    if status != 200 or "json" not in tipo:
+        try:
+            corpo = await _ler_inicio(resposta)
+        except Exception:
+            corpo = b""
+        pista = _classe_pagina(corpo)
+        sonda["marca"] = pista
+        return (status, tipo, None, pista), sonda
+    dados = await resposta.json(content_type=None)
+    if not isinstance(dados, dict):
+        # JSON fora do contrato não pode chegar ao `.get` de quem chama.
+        return (status, tipo, None, ""), sonda
+    sonda["ok"] = (f"{_classe_bool(dados.get('ok'))}/"
+                   f"{_classe_bool(dados.get('isOk'))}")
+    return (status, tipo, dados, ""), sonda
+
+
+def _sondar(longa: str, status, sonda: dict, ms: int,
+            intervalo: Optional[float]) -> None:
+    """SONDA PASSIVA: uma linha por chamada ao SiteStripe, sucesso ou
+    falha — o que a Amazon respondeu às chamadas que o bot JÁ faz,
+    nenhuma a mais. Só números e rótulos de vocabulário fechado: sem
+    query, cookie, header, corpo ou título.
+
+    Os campos existem para separar hipóteses sobre o 503 que só os
+    dados separam: rajada (intervalo), forma da URL enviada (alvo,
+    params, tam — contagens da NOSSA URL, nunca o conteúdo) e natureza
+    da resposta (tipo, marca, destino).
+    """
+    alvo = urlparse(longa)
+    if _P_PROMO.search(alvo.path):
+        tipo_alvo = "promo"
+    elif any(p.search(alvo.path) for p in _P_ASIN[:2]):
+        tipo_alvo = "produto"
+    else:
+        tipo_alvo = "pagina"
+    n_params = len([p for p in alvo.query.split("&") if p])
+    log_nrm.info(
+        f"🔬 [AMZ_SONDA] sitestripe status={status} ms={ms} "
+        f"intervalo={'primeira' if intervalo is None else f'{int(intervalo)}s'} "
+        f"alvo={tipo_alvo} params={n_params} tam={len(longa)} "
+        f"tipo={sonda.get('tipo') or '-'} "
+        f"marca={sonda.get('marca') or '-'} "
+        f"destino={sonda.get('destino') or '-'} "
+        f"ok={sonda.get('ok') or '-'}"
+    )
+
+
 async def _http_getshorturl(params: dict) -> tuple:
-    """Costura de I/O: devolve (status, content_type, dados|None).
+    """Costura de I/O: devolve (status, content_type, dados|None, pista).
 
     Isolada de propósito — é o único ponto deste módulo que fala com
     a rede, o que mantém a política de validação, o disjuntor e o
     cache testáveis sem acesso externo.
+
+    `pista` só existe na falha e é sempre um rótulo fechado: a classe
+    do destino do redirecionamento (login, captcha, outro, ausente) ou
+    a da página HTML (captcha, automacao, robo, login, vazia, outra).
+    Sem ela, "HTTP 302" não distingue login de captcha — e foi tudo o
+    que o log disse por dias.
     """
+    global _ultima_chamada
     sessao = await _obter_sessao()
     async with config._SEM_HTTP:
-        async with sessao.get(
-            _ENDPOINT_SHORT, params=params,
-            timeout=aiohttp.ClientTimeout(total=_TIMEOUT_SHORT),
-            allow_redirects=False,
-        ) as resposta:
-            tipo = (resposta.headers.get("content-type") or "").lower()
-            if resposta.status != 200 or "json" not in tipo:
-                return resposta.status, tipo, None
-            return resposta.status, tipo, await resposta.json(
-                content_type=None,
-            )
+        inicio = time.monotonic()
+        intervalo = inicio - _ultima_chamada if _ultima_chamada else None
+        _ultima_chamada = inicio
+        longa = params.get("longUrl") or ""
+        try:
+            async with sessao.get(
+                _ENDPOINT_SHORT, params=params,
+                timeout=aiohttp.ClientTimeout(total=_TIMEOUT_SHORT),
+                allow_redirects=False,
+            ) as resposta:
+                resultado, sonda = await _ler_resposta(resposta)
+        except Exception as e:
+            _sondar(longa, f"EXC:{type(e).__name__}", {},
+                    int((time.monotonic() - inicio) * 1000), intervalo)
+            raise
+    _sondar(longa, resultado[0], sonda,
+            int((time.monotonic() - inicio) * 1000), intervalo)
+    return resultado
 
 
-def _registrar_falha(motivo: str) -> None:
-    """Contabiliza a falha e abre o disjuntor no limite."""
-    global _falhas_seguidas, _disjuntor_ate
+def _classe_falha(status: int, pista: str) -> str:
+    """Sessão recusada ou falha transitória — ver o disjuntor, acima.
+
+    Recusa exige prova: 401, ou redirecionamento cuja classe de
+    destino é `login`. Para o captcha, para destino desconhecido
+    (`outro`) ou sem `location` (`ausente`) é transitória.
+    """
+    if status == 401:
+        return _SESSAO_RECUSADA
+    if 300 <= status < 400 and pista == "login":
+        return _SESSAO_RECUSADA
+    return _TRANSITORIA
+
+
+def _registrar_falha(motivo: str, classe: str = _TRANSITORIA) -> None:
+    """Contabiliza a falha e abre o disjuntor conforme a classe."""
+    global _falhas_seguidas, _disjuntor_ate, _sessao_recusada
     _falhas_seguidas += 1
+
+    if classe == _SESSAO_RECUSADA:
+        _disjuntor_ate = time.monotonic() + _PAUSA_SESSAO_RECUSADA
+        horas = int(_PAUSA_SESSAO_RECUSADA // 3600)
+        if not _sessao_recusada:
+            _sessao_recusada = True
+            log_nrm.error(
+                f"🔐 [AMZ_SESSAO_RECUSADA] SiteStripe recusou a sessão "
+                f"({motivo}) — renovar AMAZON_COOKIE; publicando URL "
+                f"longa, nova sondagem em {horas}h"
+            )
+        else:
+            log_nrm.warning(
+                f"⚠️ AMZ sessão segue recusada ({motivo}) — nova "
+                f"sondagem em {horas}h"
+            )
+        return
+
     log_nrm.warning(
         f"⚠️ AMZ SiteStripe falhou ({_falhas_seguidas}/"
         f"{_LIMITE_FALHAS}): {motivo}"
@@ -489,6 +732,20 @@ def _registrar_falha(motivo: str) -> None:
         )
 
 
+def _registrar_sucesso() -> None:
+    """Zera o disjuntor. A primeira resposta boa — no boot ou depois
+    de falha — fica visível: é a prova de que a sessão vale, que
+    antes só se deduzia pela ausência de erro."""
+    global _falhas_seguidas, _sessao_recusada, _ja_respondeu
+    if _falhas_seguidas or _sessao_recusada or not _ja_respondeu:
+        log_nrm.info(
+            "✅ [AMZ_SESSAO_OK] SiteStripe respondeu — short oficial ativo"
+        )
+    _falhas_seguidas = 0
+    _sessao_recusada = False
+    _ja_respondeu = True
+
+
 async def _sitestripe(canonica: str) -> str:
     """Devolve o short oficial da Amazon, ou cadeia vazia.
 
@@ -498,7 +755,6 @@ async def _sitestripe(canonica: str) -> str:
     de WAF, página de login, captcha, 4xx, 5xx, timeout — é falha, e
     falha nunca inventa short.
     """
-    global _falhas_seguidas
     if time.monotonic() < _disjuntor_ate:
         return ""
     if not _AMZ_TAG:
@@ -510,17 +766,21 @@ async def _sitestripe(canonica: str) -> str:
         "storeId": _AMZ_STORE_ID,
     }
     try:
-        status, tipo, dados = await _http_getshorturl(params)
+        status, tipo, dados, pista = await _http_getshorturl(params)
     except Exception as e:
         _registrar_falha(type(e).__name__)
         return ""
 
     if dados is None:
-        _registrar_falha(f"HTTP {status} tipo={tipo!r}")
+        motivo = f"HTTP {status} tipo={_classe_tipo(tipo)}"
+        if pista:
+            motivo += f" → {pista}"
+        _registrar_falha(motivo, _classe_falha(status, pista))
         return ""
     if dados.get("ok") is not True or dados.get("isOk") is not True:
         _registrar_falha(
-            f"ok={dados.get('ok')} isOk={dados.get('isOk')}"
+            f"ok={_classe_bool(dados.get('ok'))} "
+            f"isOk={_classe_bool(dados.get('isOk'))}"
         )
         return ""
 
@@ -532,7 +792,7 @@ async def _sitestripe(canonica: str) -> str:
         _registrar_falha("longUrl de resposta sem a nossa tag")
         return ""
 
-    _falhas_seguidas = 0
+    _registrar_sucesso()
     return curta
 
 

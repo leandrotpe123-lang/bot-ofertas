@@ -85,6 +85,55 @@ def _res_entrada(depth: int) -> None:
     log_nrm.debug(f"📊 RES perf | {contas} | media {medias}")
 
 
+# ── Destino que responde erro ─────────────────────────────────────
+# A resolução segue a cadeia e devolve a URL mesmo quando o DESTINO
+# respondeu erro — correto para a identidade, que só precisa da URL,
+# mas invisível. O rastro abaixo só observa; a resolução não muda.
+# (Caso que motivou: Amazon, 29/10 — SiteStripe com 503 intermitente
+# enquanto todo amzn.to é expandido por GET até a página de produto;
+# o rastro mostra se a expansão também recebe erro.)
+#
+# Limitado: o primeiro erro de cada (via, plataforma) e depois um a cada
+# _FINAIS_A_CADA, com o total de respostas para dar a razão.
+#
+# NADA do host vai para o log: nem caminho, query, porta ou credencial,
+# nem o próprio hostname — "os últimos rótulos" ainda vazavam host de
+# três rótulos (`token.exemplo.com`), subdomínio de rastreio e IP. O
+# rótulo é o identificador da plataforma que reconhece o destino
+# (constante do catálogo, via registry.resolver) ou "outra".
+_FINAIS_A_CADA = 25
+_finais: dict = {}
+
+
+def _rotulo_destino(url: str) -> str:
+    try:
+        from plataformas import registry  # lazy: evita ciclo de import
+        plataforma = registry.resolver(url)
+    except Exception:
+        return "?"
+    return plataforma.identificador if plataforma is not None else "outra"
+
+
+def _observar_final(r, via: str) -> None:
+    try:
+        status = int(r.status)
+        rotulo = _rotulo_destino(str(r.url))
+    except Exception:
+        return
+    conta = _finais.setdefault((via, rotulo), [0, 0])
+    conta[0] += 1
+    if status < 400:
+        return
+    conta[1] += 1
+    if conta[1] == 1 or conta[1] % _FINAIS_A_CADA == 0:
+        log_nrm.warning(
+            f"🔬 [RES_FINAL_ERRO] via={via} status={status} "
+            f"plataforma={rotulo} "
+            f"saltos={len(getattr(r, 'history', None) or ())} "
+            f"erros={conta[1]}/{conta[0]}"
+        )
+
+
 # ── Composição de hosts que exigem GET ────────────────────────────
 # Conjunto local de encurtadores genéricos do core, não atribuídos
 # a nenhuma plataforma específica do projeto. Hosts cujos servidores
@@ -235,6 +284,7 @@ async def desencurtar(
                     max_redirects=_MAX_REDIRECTS,
                 ) as r:
                     _res_marca("head", _t)
+                    _observar_final(r, "head")
                     final = str(r.url)
                     if final != url:
                         _set_raw(url, final)
@@ -273,6 +323,7 @@ async def desencurtar(
             max_redirects=_MAX_REDIRECTS,
         ) as r:
             _res_marca("get", _t)
+            _observar_final(r, "get")
             pos = str(r.url)
             if pos != url:
                 _set_raw(url, pos)
