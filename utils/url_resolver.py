@@ -22,7 +22,6 @@ import os
 import random
 import re
 import time
-from urllib.parse import urlparse
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -94,35 +93,42 @@ def _res_entrada(depth: int) -> None:
 # enquanto todo amzn.to é expandido por GET até a página de produto;
 # o rastro mostra se a expansão também recebe erro.)
 #
-# Limitado: o primeiro erro de cada (via, host) e depois um a cada
-# _FINAIS_A_CADA, com o total de respostas do host para dar a razão.
-# Só o SITE: os três últimos rótulos do hostname, validados — sem
-# caminho nem query (podem carregar token), sem a credencial que um
-# netloc `usuario:senha@host` traria, sem subdomínio (rastreador que
-# gera um por clique poria o token ali). `www.amazon.com.br` sai como
-# `amazon.com.br`.
+# Limitado: o primeiro erro de cada (via, plataforma) e depois um a cada
+# _FINAIS_A_CADA, com o total de respostas para dar a razão.
+#
+# NADA do host vai para o log: nem caminho, query, porta ou credencial,
+# nem o próprio hostname — "os últimos rótulos" ainda vazavam host de
+# três rótulos (`token.exemplo.com`), subdomínio de rastreio e IP. O
+# rótulo é o identificador da plataforma que reconhece o destino
+# (constante do catálogo, via registry.resolver) ou "outra".
 _FINAIS_A_CADA = 25
-_RE_HOST = re.compile(r"[a-z0-9.-]{1,253}")
 _finais: dict = {}
+
+
+def _rotulo_destino(url: str) -> str:
+    try:
+        from plataformas import registry  # lazy: evita ciclo de import
+        plataforma = registry.resolver(url)
+    except Exception:
+        return "?"
+    return plataforma.identificador if plataforma is not None else "outra"
 
 
 def _observar_final(r, via: str) -> None:
     try:
         status = int(r.status)
-        host = urlparse(str(r.url)).hostname or ""
+        rotulo = _rotulo_destino(str(r.url))
     except Exception:
         return
-    host = ".".join(host.split(".")[-3:])
-    if not _RE_HOST.fullmatch(host):
-        host = "?"
-    conta = _finais.setdefault((via, host), [0, 0])
+    conta = _finais.setdefault((via, rotulo), [0, 0])
     conta[0] += 1
     if status < 400:
         return
     conta[1] += 1
     if conta[1] == 1 or conta[1] % _FINAIS_A_CADA == 0:
         log_nrm.warning(
-            f"🔬 [RES_FINAL_ERRO] via={via} status={status} host={host} "
+            f"🔬 [RES_FINAL_ERRO] via={via} status={status} "
+            f"plataforma={rotulo} "
             f"saltos={len(getattr(r, 'history', None) or ())} "
             f"erros={conta[1]}/{conta[0]}"
         )

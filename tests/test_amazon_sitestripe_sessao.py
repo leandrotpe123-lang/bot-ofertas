@@ -27,8 +27,9 @@ não separava login de captcha.
       fixa de 5 min (mudá-la muda quantas ofertas saem curtas; só com
       os dados da sonda)
   04  falha transitória em série longa continua com a pausa da main
-  05  classificação: 3xx e 401 recusam a sessão; 3xx para o captcha,
-      403, 429 e 5xx são transitórias
+  05  classificação: só 401 e 3xx para o LOGIN recusam a sessão; 3xx
+      para destino desconhecido, sem destino ou para o captcha, 403,
+      429 e 5xx são transitórias (recusa exige prova)
   06  a primeira resposta boa aparece no log uma vez, não a cada short
   07  o boot registra os NOMES dos cookies e nunca os valores
   08  costura de I/O: a pista é sempre rótulo fechado — nada da
@@ -272,11 +273,13 @@ def test_05_classificacao(r):
     casos = [
         (301, "login", recusa),
         (302, "login", recusa),
-        (302, "ausente", recusa),
-        (303, "outro", recusa),
         (307, "login", recusa),
         (308, "login", recusa),
         (401, "", recusa),
+        (302, "ausente", trans),
+        (302, "outro", trans),
+        (303, "outro", trans),
+        (302, "", trans),
         (302, "captcha", trans),
         (403, "", trans),
         (429, "", trans),

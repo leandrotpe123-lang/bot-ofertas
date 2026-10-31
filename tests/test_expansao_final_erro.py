@@ -11,14 +11,15 @@ havia como saber se a expansão também estava sendo barrada.
 A mudança só OBSERVA; o comportamento da resolução não muda.
 
   01  GET que termina em 503 → URL final devolvida como antes, e um
-      [RES_FINAL_ERRO] com via, status, site, saltos e erros/total
+      [RES_FINAL_ERRO] com via, status, plataforma, saltos e erros/total
   02  destino 2xx não registra nada, mas entra no total do host
   03  erro repetido não inunda o log: o 1º e um a cada 25
   04  HEAD (link.amazon não exige GET) também deixa rastro
   05  ADVERSARIAL: credencial no netloc (`usuario:senha@`), porta, token
-      no caminho, na query e em subdomínio, host com caractere fora do
-      padrão — só o site (3 últimos rótulos, validado) chega ao log, e
-      toda linha obedece ao CONTRATO DE FORMATO
+      no caminho, na query, em subdomínio e em host de 3 rótulos, IP,
+      caractere fora do padrão — nada do host chega ao log: só o
+      identificador da plataforma que reconhece o destino (constante do
+      catálogo) ou "outra"; toda linha obedece ao CONTRATO DE FORMATO
 
     python tests/test_expansao_final_erro.py
 """
@@ -46,7 +47,8 @@ FINAL = ("https://www.amazon.com.br/Produto-X/dp/B0CK2MD3F7"
 # CONTRATO DE FORMATO: só números, rótulos fechados e hostname validado.
 _CONTRATO = re.compile(
     r"🔬 \[RES_FINAL_ERRO\] via=(head|get) status=\d{3} "
-    r"host=([a-z0-9.-]+|\?) saltos=\d+ erros=\d+/\d+"
+    r"plataforma=(amazon|magalu|mercadolivre|netshoes|shopee|outra|\?) "
+    r"saltos=\d+ erros=\d+/\d+"
 )
 
 
@@ -115,7 +117,7 @@ def test_01_get_em_503_deixa_rastro_sem_mudar_resultado(r):
     if linhas:
         m = linhas[0]
         r.check(_CONTRATO.fullmatch(m) is not None
-                and "via=get status=503 host=amazon.com.br" in m
+                and "via=get status=503 plataforma=amazon" in m
                 and "saltos=1" in m and "erros=1/1" in m, "campos", m)
         r.check("SEGREDO" not in m and "Produto-X" not in m,
                 "sem caminho e sem query", m)
@@ -160,24 +162,26 @@ def test_05_adversarial_so_hostname_validado(r):
         "https://WWW.Amazon.COM.BR/TOKEN-CAMINHO#FRAG",
         "https://exemplo\u202e.com/TOKEN",
         "https://tok3nsecreto.trk.exemplo.com/x",
+        "https://segredo123.exemplo.com/x",
+        "https://10.20.30.40/x",
     ]
     with _Captura() as cap:
         for i, final in enumerate(hostis):
             _expandir(f"https://amzn.to/caso05-{i}", _Sessao(503, final))
     linhas = cap.com("[RES_FINAL_ERRO]")
-    r.check(len(linhas) == 3, "três sites distintos após normalizar",
-            linhas)
+    r.check(len(linhas) == 2, "dois rótulos: amazon e outra", linhas)
     fora = [m for m in linhas if not _CONTRATO.fullmatch(m)]
     r.check(not fora, "contrato de formato", fora)
     proibidos = ("SENHA", "usuario", "TOKEN", "QUERY", "FRAG", "8443",
-                 "\u202e", "tok3n", "www.")
+                 "\u202e", "tok3n", "www.", "exemplo", "segredo123", "trk",
+                 "20.30.40", "amazon.com")
     vazou = [m for m in linhas if any(x in m for x in proibidos)]
     r.check(not vazou, "nada além do hostname", vazou)
-    r.check(any("host=amazon.com.br" in m and "erros=1/1" in m
+    r.check(any("plataforma=amazon" in m and "erros=1/1" in m
                 for m in linhas)
-            and any("host=?" in m for m in linhas)
-            and any("host=trk.exemplo.com" in m for m in linhas),
-            "site normalizado; fora do padrão vira '?'", linhas)
+            and any("plataforma=outra" in m and "erros=1/1" in m
+                    for m in linhas),
+            "só rótulos do catálogo", linhas)
 
 
 if __name__ == "__main__":

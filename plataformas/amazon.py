@@ -132,9 +132,12 @@ _LIMITE_PISTA = 65536
 #     foram recusa; as demais caíram na pausa) e por isso só com os
 #     dados da sonda — não por hipótese.
 #
-#   SESSÃO RECUSADA — redirecionamento (para o login) ou 401. O
+#   SESSÃO RECUSADA — 401, ou redirecionamento PARA O LOGIN. O
 #     endpoint é XHR: com sessão válida responde JSON, nunca
-#     redireciona. Nenhuma nova tentativa ressuscita o cookie; só o
+#     redireciona. Redirecionamento para destino desconhecido ou sem
+#     destino não prova que a sessão morreu: é transitória — pausar
+#     6 h e mandar renovar o cookie sem prova custaria shorts à toa.
+#     Recusada, nenhuma nova tentativa ressuscita o cookie; só o
 #     dono renovando AMAZON_COOKIE, e a troca da variável reinicia o
 #     processo, que nasce com o estado limpo. Por isso: UM alerta e
 #     uma sondagem a cada 6 h (salvaguarda contra falso positivo).
@@ -684,12 +687,13 @@ async def _http_getshorturl(params: dict) -> tuple:
 def _classe_falha(status: int, pista: str) -> str:
     """Sessão recusada ou falha transitória — ver o disjuntor, acima.
 
-    Redirecionamento para o desafio anti-robô não é sessão recusada:
-    é a Amazon segurando a porta, e isso passa com pausa.
+    Recusa exige prova: 401, ou redirecionamento cuja classe de
+    destino é `login`. Para o captcha, para destino desconhecido
+    (`outro`) ou sem `location` (`ausente`) é transitória.
     """
     if status == 401:
         return _SESSAO_RECUSADA
-    if 300 <= status < 400 and "captcha" not in pista.lower():
+    if 300 <= status < 400 and pista == "login":
         return _SESSAO_RECUSADA
     return _TRANSITORIA
 
