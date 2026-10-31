@@ -32,7 +32,7 @@ import os
 import re
 import time
 from typing import Optional
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 
 import aiohttp
 from yarl import URL
@@ -165,7 +165,7 @@ _lock_sessao = asyncio.Lock()
 
 _CABECALHOS_SHORT = {
     "accept": "application/json, text/javascript, */*; q=0.01",
-    "accept-language": "pt-BR",
+    "accept-language": "pt-BR,pt;q=0.9",   # como o navegador (31/10)
     "user-agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
@@ -462,13 +462,21 @@ async def _obter_sessao() -> aiohttp.ClientSession:
     verificado em produção: a Amazon devolve session-id, sst-acbbr e
     companhia a cada chamada, e a segunda chamada na mesma sessão
     responde em fração do tempo da primeira.
+
+    COOKIES COMO O NAVEGADOR OS ENVIA: o jar padrão do aiohttp
+    (quote_cookie=True) põe aspas em todo valor com `+ / = ? @` e
+    duplica as aspas de valor já entre aspas — justamente o formato dos
+    cookies de autenticação da Amazon (at-, sess-at-, session-token,
+    sst-, x-). Valia para os da variável e para os que a Amazon renova
+    por Set-Cookie. O navegador manda cada valor como está guardado
+    (captura de 31/10); quote_cookie=False faz o mesmo.
     """
     global _sessao_amz
     if _sessao_amz is not None and not _sessao_amz.closed:
         return _sessao_amz
     async with _lock_sessao:
         if _sessao_amz is None or _sessao_amz.closed:
-            jar = aiohttp.CookieJar()
+            jar = aiohttp.CookieJar(quote_cookie=False)
             cookies = _cookies_iniciais()
             if cookies:
                 jar.update_cookies(
@@ -489,10 +497,12 @@ async def _obter_sessao() -> aiohttp.ClientSession:
 # variável. Filtrar pela forma não bastava — em cookie malformado
 # (Base64 que não decodificou, valor com `;`) um pedaço do VALOR chega
 # na posição do nome e tem forma de nome.
+# Os 14 nomes que o navegador autenticado envia ao getShortUrl no
+# amazon.com.br (captura de 31/10).
 _COOKIES_CONHECIDOS = frozenset({
-    "session-id", "session-id-time", "session-token", "ubid-acbbr",
-    "at-acbbr", "sess-at-acbbr", "x-acbbr", "sst-acbbr", "lc-acbbr",
-    "i18n-prefs", "csm-hit", "sp-cdn", "skin",
+    "at-acbbr", "cmc", "csm-hit", "i18n-prefs", "lc-acbbr", "rxc",
+    "sess-at-acbbr", "session-id", "session-id-time", "session-token",
+    "sso-state-acbbr", "sst-acbbr", "ubid-acbbr", "x-acbbr",
 })
 
 
@@ -648,6 +658,24 @@ def _sondar(longa: str, status, sonda: dict, ms: int,
     )
 
 
+# Caracteres que encodeURIComponent não codifica, além de A-Z a-z 0-9
+# e `-_.~` (que quote já preserva).
+_SEGUROS_URI = "!*'()"
+
+
+def _url_como_navegador(params: dict) -> URL:
+    """A URL do pedido como o SiteStripe do navegador a monta: cada
+    valor codificado por inteiro, como encodeURIComponent
+    (`longUrl=https%3A%2F%2Fwww.amazon.com.br%2F…`), na ordem dos
+    parâmetros. Com `params=` o aiohttp deixava `:` `/` `?` crus na
+    query — mesmos valores, linha diferente da do navegador (captura de
+    31/10). `encoded=True`: a URL segue sem nova codificação.
+    """
+    consulta = "&".join(f"{k}={quote(str(v), safe=_SEGUROS_URI)}"
+                        for k, v in params.items())
+    return URL(f"{_ENDPOINT_SHORT}?{consulta}", encoded=True)
+
+
 async def _http_getshorturl(params: dict) -> tuple:
     """Costura de I/O: devolve (status, content_type, dados|None, pista).
 
@@ -670,7 +698,7 @@ async def _http_getshorturl(params: dict) -> tuple:
         longa = params.get("longUrl") or ""
         try:
             async with sessao.get(
-                _ENDPOINT_SHORT, params=params,
+                _url_como_navegador(params),
                 timeout=aiohttp.ClientTimeout(total=_TIMEOUT_SHORT),
                 allow_redirects=False,
             ) as resposta:
