@@ -132,7 +132,7 @@ _LIMITE_PISTA = 65536
 #     (`_TENTATIVAS_503`). Com os dados da sonda (01/11): contando
 #     chamadas, 3 falhas seguidas eram rotina com 65% de 503, e a
 #     pausa publicou 69 das 101 longas SEM sequer tentar. Contando
-#     ofertas, 3 seguidas sem short (12 chamadas) só acontecem com a
+#     ofertas, 3 seguidas sem short (30 chamadas) só acontecem com a
 #     Amazon de fato fora — que é para o que a pausa existe.
 #
 #   SESSÃO RECUSADA — 401, ou redirecionamento PARA O LOGIN. O
@@ -162,12 +162,15 @@ _PAUSA_SESSAO_RECUSADA = 21600.0
 # 200, também em 65%: cada chamada é um sorteio independente da
 # anterior. 200 e 503 se alternam no mesmo segundo, com os MESMOS
 # cookies (o 503 não renova nada) — não é sessão, cookie nem URL.
-# Contra sorteio independente, tentar de novo funciona: com 35% por
-# chamada, 4 tentativas dão ~82% de short. Só esta página é repetida:
+# Contra sorteio independente, tentar de novo funciona. Reproduzindo
+# as 118 ofertas reais da janela com 35% por chamada: 1 tentativa dá
+# 13% de short (observado: 14%), 4 dão 78%, 10 dão 99% — com só ~2,8
+# chamadas por oferta, porque quase todas acertam nas primeiras. Pior
+# caso: 10 chamadas e 24 s de espera. Só esta página é repetida:
 # captcha, robô, login e qualquer outra resposta seguem com UMA
 # chamada, como antes — repetir desafio de WAF é martelar.
-_TENTATIVAS_503 = 4
-_PAUSAS_503 = (1.0, 2.0, 4.0)
+_TENTATIVAS_503 = 10
+_PAUSAS_503 = (1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0)
 _PISTA_REPETIVEL = "algo_errado"
 
 _TRANSITORIA = "transitoria"

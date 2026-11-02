@@ -15,9 +15,10 @@ Caso real (sonda do #39 em produção, 01/11 17:49 → 02/11 04:17 UTC):
     contra 35% de sucesso por chamada.
 
   01  caso real: 503, 503, 200 → short na 3ª tentativa, sem falha no
-      disjuntor, pausas de 1 s e 2 s
-  02  as 4 tentativas falham → UMA falha no disjuntor, pausas 1-2-4 s
-  03  disjuntor conta OFERTAS: só 3 ofertas seguidas sem short (12
+      disjuntor, pausas de 1 s e 1 s
+  02  as 10 tentativas falham → UMA falha no disjuntor, pausas
+      1-1-2-2-3-3-4-4-4 s
+  03  disjuntor conta OFERTAS: só 3 ofertas seguidas sem short (30
       chamadas) abrem a pausa de 5 min; a 4ª oferta não chama
   04  só o 503 "Algo deu errado" é repetido: captcha, robô, automação,
       login, outra página, 503 da borda, 429, 500, 200 em HTML, JSON
@@ -26,7 +27,7 @@ Caso real (sonda do #39 em produção, 01/11 17:49 → 02/11 04:17 UTC):
   06  a espera acontece FORA do semáforo de HTTP (costura real)
   07  com a Amazon respondendo de primeira: nenhuma linha nova
   08  contrato de formato das linhas novas (só números e rótulos)
-  09  orçamento: no máximo 4 chamadas e 7 s de espera por oferta
+  09  orçamento: no máximo 10 chamadas e 24 s de espera por oferta
 
     python tests/test_amazon_503_nova_tentativa.py
 """
@@ -63,9 +64,9 @@ ALGO_ERRADO = (503, "text/html;charset=UTF-8", None, "algo_errado")
 
 # CONTRATO DE FORMATO das linhas novas: só números e constantes.
 _CONTRATO = [
-    re.compile(r"🔁 \[AMZ_NOVA_TENTATIVA\] [2-9]/\d+ em \d+s — "
+    re.compile(r"🔁 \[AMZ_NOVA_TENTATIVA\] (?:[2-9]|10)/10 em \d+s — "
                r"HTTP 503 → algo_errado"),
-    re.compile(r"✅ \[AMZ_SHORT_NA_TENTATIVA\] [2-9]/\d+"),
+    re.compile(r"✅ \[AMZ_SHORT_NA_TENTATIVA\] (?:[2-9]|10)/10"),
 ]
 
 
@@ -152,10 +153,10 @@ def test_01_caso_real_short_na_terceira(r):
         curta = _rodar(amazon._sitestripe(CANONICA))
     r.check(curta == JSON_OK["shortUrl"], "short oficial na 3ª", curta)
     r.check(rede.chamadas == 3, "3 chamadas", rede.chamadas)
-    r.check(sono.pausas == [1.0, 2.0], "pausas de 1 s e 2 s", sono.pausas)
+    r.check(sono.pausas == [1.0, 1.0], "pausas de 1 s e 1 s", sono.pausas)
     r.check(len(cap.com("[AMZ_NOVA_TENTATIVA]", "INFO")) == 2,
             "uma linha por nova tentativa", cap.linhas)
-    r.check(cap.com("[AMZ_SHORT_NA_TENTATIVA] 3/4", "INFO"),
+    r.check(cap.com("[AMZ_SHORT_NA_TENTATIVA] 3/10", "INFO"),
             "o sucesso diz em qual tentativa veio", cap.linhas)
     r.check(not cap.com("AMZ SiteStripe falhou"),
             "503 repetido com sucesso não conta falha", cap.linhas)
@@ -170,8 +171,9 @@ def test_02_todas_falham_conta_uma(r):
     with _Captura() as cap:
         curta = _rodar(amazon._sitestripe(CANONICA))
     r.check(curta == "", "falha nunca inventa short", curta)
-    r.check(rede.chamadas == 4, "4 chamadas", rede.chamadas)
-    r.check(sono.pausas == [1.0, 2.0, 4.0], "pausas 1-2-4 s", sono.pausas)
+    r.check(rede.chamadas == 10, "10 chamadas", rede.chamadas)
+    r.check(sono.pausas == [1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0],
+            "pausas 1-1-2-2-3-3-4-4-4 s", sono.pausas)
     falhas = cap.com("AMZ SiteStripe falhou", "WARNING")
     r.check(len(falhas) == 1 and "(1/3): HTTP 503 tipo=html → algo_errado"
             in falhas[0], "UMA falha, com o motivo de sempre", falhas)
@@ -190,19 +192,19 @@ def test_03_disjuntor_conta_ofertas(r):
             r.check(amazon._disjuntor_ate == 0.0,
                     f"oferta {i + 1} sem short ainda não pausa")
         _rodar(amazon._sitestripe(CANONICA))
-        r.check(rede.chamadas == 12, "3 ofertas × 4 chamadas", rede.chamadas)
+        r.check(rede.chamadas == 30, "3 ofertas × 10 chamadas",
+                rede.chamadas)
         r.check(round(amazon._disjuntor_ate - relogio.t) == 300,
                 "3ª oferta sem short abre a pausa de 5 min",
                 amazon._disjuntor_ate - relogio.t)
         r.check(len(cap.com("suspenso por 300s", "ERROR")) == 1,
                 "um aviso de pausa")
         _rodar(amazon._sitestripe(CANONICA))
-        r.check(rede.chamadas == 12, "com a pausa aberta, nenhuma chamada",
+        r.check(rede.chamadas == 30, "com a pausa aberta, nenhuma chamada",
                 rede.chamadas)
 
     # Um sucesso entre as falhas zera a contagem, como antes.
-    rede = _Rede(ALGO_ERRADO, ALGO_ERRADO, ALGO_ERRADO, ALGO_ERRADO,
-                 SUCESSO, ALGO_ERRADO)
+    rede = _Rede(*([ALGO_ERRADO] * 10), SUCESSO, ALGO_ERRADO)
     _cenario(rede)
     with _Captura():
         _rodar(amazon._sitestripe(CANONICA))
@@ -359,11 +361,11 @@ def test_08_contrato_de_formato(r):
 
 # ── 09 ────────────────────────────────────────────────────────────
 def test_09_orcamento_por_oferta(r):
-    r.check(amazon._TENTATIVAS_503 == 4, "no máximo 4 chamadas",
+    r.check(amazon._TENTATIVAS_503 == 10, "no máximo 10 chamadas",
             amazon._TENTATIVAS_503)
     espera = sum(amazon._PAUSAS_503[min(k, len(amazon._PAUSAS_503)) - 1]
                  for k in range(1, amazon._TENTATIVAS_503))
-    r.check(espera == 7.0, "no máximo 7 s de espera", espera)
+    r.check(espera == 24.0, "no máximo 24 s de espera", espera)
     r.check(amazon._PISTA_REPETIVEL == "algo_errado",
             "só a página medida em produção")
     r.check(_DORMIR_REAL is asyncio.sleep, "em produção, espera real")
