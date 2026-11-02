@@ -14,8 +14,9 @@ Todo cenário passa pelo caminho REAL — etapa de cache do core
 (normalizacao_links._normalizar_um) e depois amazon.afilia — com SQLite
 de verdade; só a fronteira de rede do SiteStripe é falsa.
 
-  a  SiteStripe 503: a oferta recebe a forma canônica mínima
-     (/dp/ASIN?tag=nossa, sem smid) e NADA é gravado
+  a  SiteStripe 503: ao SiteStripe foi a URL da fonte com só a tag
+     trocada; a oferta recebe o fallback /dp/ASIN?tag=nossa (sem smid,
+     th, psc) e NADA é gravado
   b  a mesma URL volta: tenta o SiteStripe de novo (reprodução do caso
      real — na main, a 2ª passagem devolvia a longa sem chamar)
   c  registro legado longo no SQLite (sob a origem e sob a identidade)
@@ -27,9 +28,9 @@ de verdade; só a fronteira de rede do SiteStripe é falsa.
   h  concorrência no mesmo ASIN: nunca duas chamadas simultâneas
   i  nenhum fallback longo vira url_conv — produto, busca, promoção,
      amzn.to expandido e caminho sem afiliação
-  j  url_canon longa legítima preservada quando pertence a short válido
-     (registro de antes da forma canônica mínima, com th/psc/smid e a
-     nossa tag); o sucesso novo grava a canônica mínima
+  j  url_canon de sucesso = a URL efetivamente enviada ao SiteStripe
+     (th/psc/smid preservados, com a nossa tag); longa legítima,
+     preservada e servida intacta junto do short válido
   k  afiliacao_vigente: tabela de casos e declaração no PLATAFORMA
   l  o caminho de falha não espera: nenhuma pausa nas funções do fluxo
 
@@ -71,11 +72,13 @@ ASIN = "B0FG1PV5C3"
 FONTE_A = f"https://www.amazon.com.br/dp/{ASIN}?tag=fonte-20"
 FONTE_B = (f"https://www.amazon.com.br/dp/{ASIN}"
            f"?th=1&psc=1&smid=A1ZZFT5FULY4LN&tag=outrogrupo-20")
+# FONTE_A já é /dp/ASIN: ao SiteStripe e no fallback, a mesma forma.
 LONGA_A = f"https://www.amazon.com.br/dp/{ASIN}?tag={TAG}"
-# Canônica gravada pela versão anterior (fast path: toda a query da
-# origem com a nossa tag). Short válido com ela continua valendo.
-CANON_ANTIGA_B = (f"https://www.amazon.com.br/dp/{ASIN}"
-                  f"?th=1&psc=1&smid=A1ZZFT5FULY4LN&tag={TAG}")
+# O que vai ao SiteStripe para FONTE_B: a URL da fonte com só a tag
+# trocada (fast path). No sucesso, é a url_canon gravada com o short.
+# Na falha, publica-se LONGA_A (fallback mínimo), nunca esta.
+ENVIADA_B = (f"https://www.amazon.com.br/dp/{ASIN}"
+             f"?th=1&psc=1&smid=A1ZZFT5FULY4LN&tag={TAG}")
 CHAVE = f"https://www.amazon.com.br/dp/{ASIN}?tag={TAG}"
 SHORT = "https://link.amazon/B0curtoOK"
 ERRO_503 = (503, "text/html;charset=UTF-8", None, "algo_errado")
@@ -177,9 +180,10 @@ def test_a_503_publica_longa_e_nao_grava(r):
     _limpar()
     rede = _Rede(ERRO_503)
     conv = _norm(FONTE_B, rede)
-    r.check(conv == LONGA_A, "forma canônica mínima: /dp/ASIN e a nossa "
-            "tag, sem smid/th/psc, nada inventado", conv)
-    r.check(len(rede.chamadas) == 1, "uma chamada", rede.chamadas)
+    r.check(rede.chamadas == [ENVIADA_B], "SiteStripe recebe a URL da fonte "
+            "com só a tag trocada (th/psc/smid preservados)", rede.chamadas)
+    r.check(conv == LONGA_A, "falha publica o fallback /dp/ASIN?tag=nossa, "
+            "sem smid/th/psc, nada inventado", conv)
     r.check(_linhas_amazon() == [], "nada gravado no SQLite",
             _linhas_amazon())
     r.check(consultar_link(FONTE_B) is None and consultar_link(CHAVE) is None,
@@ -238,22 +242,23 @@ def test_c_legado_longo_e_removido(r):
 # ── d ─────────────────────────────────────────────────────────────
 def test_d_200_grava_identidade_e_origem(r):
     _limpar()
-    rede = _Rede(_ok(LONGA_A))
+    rede = _Rede(_ok(ENVIADA_B))
     conv = _norm(FONTE_B, rede)
+    r.check(rede.chamadas == [ENVIADA_B], "o SiteStripe recebe a URL da "
+            "fonte com só a tag trocada", rede.chamadas)
     r.check(isinstance(conv, Afiliacao) and conv.publicada == SHORT
-            and conv.canonica == LONGA_A, "Afiliacao(short, canônica)", conv)
-    r.check(rede.chamadas == [LONGA_A], "o SiteStripe recebe a canônica "
-            "mínima", rede.chamadas)
-    r.check(_linha(CHAVE)[:2] == (SHORT, LONGA_A), "short sob a identidade",
+            and conv.canonica == ENVIADA_B, "Afiliacao(short, URL enviada)",
+            conv)
+    r.check(_linha(CHAVE)[:2] == (SHORT, ENVIADA_B), "short sob a identidade",
             _linha(CHAVE))
-    r.check(_linha(FONTE_B)[:2] == (SHORT, LONGA_A),
+    r.check(_linha(FONTE_B)[:2] == (SHORT, ENVIADA_B),
             "short associado à URL de origem", _linha(FONTE_B))
 
 
 # ── e ─────────────────────────────────────────────────────────────
 def test_e_outra_fonte_reaproveita(r):
     _limpar()
-    rede = _Rede(_ok(LONGA_A))
+    rede = _Rede(_ok(ENVIADA_B))
     _norm(FONTE_B, rede)
     conv = _norm(FONTE_A, rede)
     r.check(len(rede.chamadas) == 1, "outra fonte, mesmo ASIN: sem nova "
@@ -376,7 +381,7 @@ def test_i_nenhum_fallback_longo_vira_url_conv(r):
             _linhas_amazon())
 
     # E quando há sucesso, toda linha gravada é short oficial vigente.
-    _norm(FONTE_B, _Rede(_ok(LONGA_A)))
+    _norm(FONTE_B, _Rede(_ok(ENVIADA_B)))
     linhas = _linhas_amazon()
     r.check(linhas and all(
         amazon.afiliacao_vigente(Afiliacao(publicada=c, canonica=k))
@@ -386,30 +391,31 @@ def test_i_nenhum_fallback_longo_vira_url_conv(r):
 
 # ── j ─────────────────────────────────────────────────────────────
 def test_j_canonica_longa_legitima_preservada(r):
-    # Registro de antes da forma canônica mínima: short validado pelo
-    # SiteStripe, canônica longa (th, psc, smid) com a nossa tag. É
-    # conversão válida — continua servida, intacta, sem nova chamada.
+    # Sucesso: url_canon = a URL efetivamente enviada ao SiteStripe
+    # (th, psc, smid, com a nossa tag) — longa legítima de um short
+    # válido.
+    _limpar()
+    rede = _Rede(_ok(ENVIADA_B))
+    _norm(FONTE_B, rede)
+    _so_memoria_limpa()
+    guardado = consultar_link(FONTE_B)
+    r.check(rede.chamadas == [ENVIADA_B] and isinstance(guardado, Afiliacao)
+            and guardado.publicada == SHORT and guardado.canonica == ENVIADA_B,
+            "url_canon do sucesso = URL enviada ao SiteStripe", guardado)
+    # Já gravada (memória limpa, ts antigo): servida intacta, sem chamada.
     for papel, chave in (("origem", FONTE_B), ("identidade", CHAVE)):
         _limpar()
-        registrar_link(chave, Afiliacao(publicada=SHORT,
-                                        canonica=CANON_ANTIGA_B), "amazon")
+        registrar_link(chave, Afiliacao(publicada=SHORT, canonica=ENVIADA_B),
+                       "amazon")
         _envelhecer(chave)
         _so_memoria_limpa()
         rede = _Rede(ERRO_503)
         conv = _norm(FONTE_B, rede)
         r.check(isinstance(conv, Afiliacao) and conv.publicada == SHORT
-                and conv.canonica == CANON_ANTIGA_B and not rede.chamadas,
+                and conv.canonica == ENVIADA_B and not rede.chamadas,
                 f"{papel}: short com canônica longa servido intacto", conv)
-        r.check(_linha(chave)[:2] == (SHORT, CANON_ANTIGA_B),
+        r.check(_linha(chave)[:2] == (SHORT, ENVIADA_B),
                 f"{papel}: linha preservada", _linha(chave))
-    # Sucesso novo: grava a canônica mínima.
-    _limpar()
-    _norm(FONTE_B, _Rede(_ok(LONGA_A)))
-    _so_memoria_limpa()
-    guardado = consultar_link(FONTE_B)
-    r.check(isinstance(guardado, Afiliacao) and guardado.publicada == SHORT
-            and guardado.canonica == LONGA_A,
-            "sucesso novo grava a canônica mínima", guardado)
 
 
 # ── k ─────────────────────────────────────────────────────────────
@@ -418,7 +424,7 @@ def test_k_afiliacao_vigente(r):
     casos = [
         ("short link.amazon + nossa tag", Afiliacao(SHORT, LONGA_A), True),
         ("short amzn.to + nossa tag", Afiliacao("https://amzn.to/x",
-                                                CANON_ANTIGA_B), True),
+                                                ENVIADA_B), True),
         ("short a.co + nossa tag", Afiliacao("https://a.co/d/x", LONGA_A),
          True),
         ("longa como publicada", Afiliacao(LONGA_A, LONGA_A), False),

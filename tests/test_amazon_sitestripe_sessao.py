@@ -34,9 +34,9 @@ não separava login de captcha.
   07  o boot registra os NOMES dos cookies e nunca os valores
   08  costura de I/O: a pista é sempre rótulo fechado — nada da
       resposta (caminho, query, corpo) passa por ela
-  09  ponta a ponta: sessão recusada nunca perde a oferta — publica a
-      longa com a nossa tag, e só a nossa, na forma canônica mínima
-      (/dp/<ASIN>?tag=nossa)
+  09  ponta a ponta: sessão recusada nunca perde a oferta. Duas URLs:
+      ao SiteStripe vai a da fonte com só a tag trocada (variação
+      th/psc preservada); publicada é o fallback /dp/<ASIN>?tag=nossa
   10  cookie malformado (Base64 que não decodifica, valor com `;`) não
       põe pedaço do segredo no log no lugar do nome: só nomes da lista
       fechada são impressos, o resto é contado
@@ -497,23 +497,33 @@ def test_08_costura_pista_sem_segredo(r):
 def test_09_ponta_a_ponta_oferta_nunca_se_perde(r):
     rede = _Rede(LOGIN)
     _cenario(rede)
+    enviadas = []
+
+    async def registra(params):
+        enviadas.append(params["longUrl"])
+        return await rede(params)
+
+    amazon._http_getshorturl = registra
     entrada = ("https://www.amazon.com.br/Acer-Aspire-Go-15/dp/B0GQMVCQQ5"
                "?_encoding=UTF8&th=1&psc=1&tag=outroafiliado-20")
     with _Captura():
         saida = _rodar(amazon.afilia(entrada, None))
     publicada = str(getattr(saida, "publicada", saida))
     r.check(rede.chamadas == 1, "tentou o SiteStripe uma vez")
+    # Ao SiteStripe: a URL da fonte com SÓ a tag trocada — a variação
+    # (th, psc) chega preservada, como sempre chegou.
+    r.check(enviadas == [entrada.replace("tag=outroafiliado-20",
+                                         f"tag={TAG}")],
+            "SiteStripe recebe a URL da fonte, só com a tag trocada",
+            enviadas)
+    # Publicada na falha (regra do dono, 02/11): o fallback mínimo. A
+    # variação segue garantida pelo ASIN do caminho (B0GQMVCQQ5 é a
+    # própria variação).
     r.check(publicada.startswith("https://www.amazon.com.br/") and
             amazon._tag_unica_nossa(publicada),
             "publica a longa com a nossa tag, e só a nossa", publicada)
-    # Regra do dono (02/11): o fallback de produto conserva SOMENTE o
-    # domínio, /dp/<ASIN> e a nossa tag. A variação continua garantida
-    # pelo ASIN do caminho (B0GQMVCQQ5 é a própria variação); th, psc,
-    # _encoding e o caminho descritivo, que a regra antiga preservava,
-    # não atravessam.
     r.check(publicada == f"https://www.amazon.com.br/dp/B0GQMVCQQ5?tag={TAG}",
-            "fallback na forma canônica mínima, com o ASIN da variação",
-            publicada)
+            "falha publica o fallback /dp/<ASIN>?tag=nossa", publicada)
 
 
 # ── 11 ────────────────────────────────────────────────────────────

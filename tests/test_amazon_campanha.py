@@ -30,9 +30,7 @@ canônica REAL (amazon._construir_url_afiliada) como no pipeline.
       psp diferentes → posts diferentes
   05  /dp/<ASIN> → âncora de produto idêntica; duas fontes, um post
   06  primevideo.com continua campanha; registry só perdeu amazon.com.br
-  07  produto sai na forma canônica mínima (regra do dono, 02/11):
-      /dp/<ASIN>?tag=<nossa> — nada da query de origem atravessa
-      (smid, th, psc, linkCode, ref_...), nem o caminho descritivo
+  07  fast-path da tag intacto: /dp/ preserva tudo e troca só a tag
   08  /deals ESTÁVEL entre fontes: rastreamentos diferentes (ref_,
       linkCode, barra final, tag alheia) → mesma âncora, um post
 
@@ -182,20 +180,12 @@ def test_06_primevideo_continua_campanha(r):
             "06.primevideo_ancora_campanha", str(chaves(p)))
 
 
-def test_07_produto_sai_na_forma_canonica_minima(r):
-    # Antes (fast path) a /dp/ preservava toda a query e trocava só a
-    # tag. Regra de negócio do dono (02/11): produto sai SÓ com
-    # domínio, /dp/<ASIN> e a nossa tag — é o que vai ao SiteStripe e
-    # o que é publicado quando ele falha.
+def test_07_fast_path_da_tag_intacto(r):
     entrada = (f"https://www.amazon.com.br/Produto/dp/{ASIN}"
-               "?th=1&psc=1&linkCode=ll1&tag=outra-20&ref_=as_li_ss_tl"
-               "&smid=A1ZZFT5FULY4LN")
+               "?th=1&psc=1&linkCode=ll1&tag=outra-20&ref_=as_li_ss_tl")
     saida = amazon._construir_url_afiliada(entrada)
-    r.check(saida == f"https://www.amazon.com.br/dp/{ASIN}?tag={TAG}",
-            "07.so_dominio_dp_e_a_nossa_tag", saida)
-    r.check(not any(x in saida for x in ("smid", "th=", "psc", "linkCode",
-                                         "ref_", "outra-20", "Produto")),
-            "07.nada_da_origem_atravessa", saida)
+    r.check(saida == entrada.replace("tag=outra-20", f"tag={TAG}"),
+            "07.troca_so_a_tag", saida)
 
 
 def test_08_deals_estavel_entre_fontes(r):
