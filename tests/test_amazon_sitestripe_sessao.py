@@ -35,7 +35,8 @@ não separava login de captcha.
   08  costura de I/O: a pista é sempre rótulo fechado — nada da
       resposta (caminho, query, corpo) passa por ela
   09  ponta a ponta: sessão recusada nunca perde a oferta — publica a
-      longa com a nossa tag, e só a nossa
+      longa com a nossa tag, e só a nossa, na forma canônica mínima
+      (/dp/<ASIN>?tag=nossa)
   10  cookie malformado (Base64 que não decodifica, valor com `;`) não
       põe pedaço do segredo no log no lugar do nome: só nomes da lista
       fechada são impressos, o resto é contado
@@ -505,8 +506,14 @@ def test_09_ponta_a_ponta_oferta_nunca_se_perde(r):
     r.check(publicada.startswith("https://www.amazon.com.br/") and
             amazon._tag_unica_nossa(publicada),
             "publica a longa com a nossa tag, e só a nossa", publicada)
-    r.check("th=1" in publicada and "psc=1" in publicada,
-            "variação do produto preservada", publicada)
+    # Regra do dono (02/11): o fallback de produto conserva SOMENTE o
+    # domínio, /dp/<ASIN> e a nossa tag. A variação continua garantida
+    # pelo ASIN do caminho (B0GQMVCQQ5 é a própria variação); th, psc,
+    # _encoding e o caminho descritivo, que a regra antiga preservava,
+    # não atravessam.
+    r.check(publicada == f"https://www.amazon.com.br/dp/B0GQMVCQQ5?tag={TAG}",
+            "fallback na forma canônica mínima, com o ASIN da variação",
+            publicada)
 
 
 # ── 11 ────────────────────────────────────────────────────────────

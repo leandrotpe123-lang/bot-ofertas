@@ -274,13 +274,35 @@ def limpa_url(url: str) -> str:
         return url
 
 
-# ── Troca cirúrgica da identidade de afiliado ─────────────────────
-# A URL longa que chega dos grupos JÁ é a URL final da Amazon. O
-# único campo que carrega identidade de afiliado é `tag`. Trocar o
-# valor de `tag` e preservar todo o resto byte a byte é a operação
-# correta: não reconstrói rota, não inventa campo, não descarta
-# parâmetro desconhecido — `th` e `psc`, que selecionam a variação
-# do produto, sobrevivem. Mesma doutrina já aplicada na Magalu.
+# ── Forma afiliada canônica ───────────────────────────────────────
+# Regra de negócio (dono, 02/11): produto sai SÓ com o domínio Amazon
+# Brasil, o caminho /dp/{ASIN} e a nossa tag; promoção PSP, só com
+# /promotion/psp/{ID} e a nossa tag. Nada da URL de origem atravessa —
+# smid, m, linkCode, linkId, ref_, ascsubtag, btn_type, btn_ref, th,
+# psc: rastreamento de outro afiliado ou seleção de vendedor.
+#
+# É a forma enviada ao SiteStripe E a publicada quando ele falha, e
+# coincide com a chave da identidade (_chave_identidade): o short
+# guardado sob o ASIN aponta exatamente para a página que a chave
+# representa, qualquer que seja o grupo de origem — antes, o short de
+# um ASIN apontava para o vendedor (smid) do primeiro grupo que o
+# encurtou, e todos os outros grupos herdavam esse vendedor.
+#
+# Caso real (31/10 09:28, B0G5SDXLWV): o SiteStripe falhou e foi ao ar
+# a URL inteira da fonte, com smid, linkCode, linkId, ref_, ascsubtag
+# e btn_ref de outro afiliado.
+_HOST_BR = "www.amazon.com.br"
+_DOMINIO_BR = frozenset({"amazon.com.br"})
+
+
+def _host_canonico(parsed) -> str:
+    """Amazon Brasil sai sempre como www.amazon.com.br. Outro domínio
+    Amazon reconhecido (amazon.com) mantém o host: trocar de loja
+    apontaria o ASIN para um catálogo que pode não tê-lo."""
+    host = (parsed.hostname or "").lower()
+    return _HOST_BR if _bate_dominio(host, _DOMINIO_BR) else host
+
+
 def _partir_url(url: str) -> tuple:
     """Separa (base, query) por corte de cadeia, sem reserializar.
 
@@ -291,32 +313,6 @@ def _partir_url(url: str) -> tuple:
     """
     base, _, query = url.split("#", 1)[0].partition("?")
     return base, query
-
-
-def _aplicar_tag(query: str) -> str:
-    """Query com EXATAMENTE uma `tag`, a nossa, na posição original
-    quando já existia, ao final quando não existia. Todo parâmetro
-    que não é `tag` atravessa intacto: sem decodificar, sem
-    recodificar, sem reordenar."""
-    if not query:
-        return f"tag={_AMZ_TAG}"
-    saida, achou = [], False
-    for parte in query.split("&"):
-        if parte.split("=", 1)[0].lower() == "tag":
-            if not achou:
-                saida.append(f"tag={_AMZ_TAG}")
-                achou = True
-            continue
-        saida.append(parte)
-    if not achou:
-        saida.append(f"tag={_AMZ_TAG}")
-    return "&".join(p for p in saida if p)
-
-
-def _trocar_tag(url: str) -> str:
-    """Fast path: URL Amazon longa entra, sai idêntica exceto a tag."""
-    base, query = _partir_url(url)
-    return f"{base}?{_aplicar_tag(query)}"
 
 
 def _tag_unica_nossa(url: str) -> bool:
@@ -946,20 +942,16 @@ def _construir_url_afiliada(url: str) -> Optional[str]:
         if _PATHS_SEM_AFILIACAO.match(parsed.path):
             return urlunparse(parsed._replace(query="", fragment=""))
 
+        # Produto e promoção PSP: forma canônica mínima (ver "Forma
+        # afiliada canônica", acima) — nada da query de origem passa.
         asin = _extrair_asin(parsed)
         if asin:
-            # FAST PATH — a URL longa já é a URL final da Amazon:
-            # preserva tudo, troca só o valor da tag.
-            rapida = _trocar_tag(url)
-            if _tag_unica_nossa(rapida):
-                return rapida
-            # Guard reprovou (forma anômala de query): cai para a
-            # construção canônica, nunca para a entrada crua.
-            return urlunparse(parsed._replace(
-                path=f"/dp/{asin}",
-                query=f"tag={_AMZ_TAG}",
-                fragment="",
-            ))
+            return f"https://{_host_canonico(parsed)}/dp/{asin}?tag={_AMZ_TAG}"
+
+        promo = _P_PROMO.search(parsed.path)
+        if promo:
+            return (f"https://{_host_canonico(parsed)}/promotion/psp/"
+                    f"{promo.group(1)}?tag={_AMZ_TAG}")
 
         if "/promotion/" in parsed.path:
             return urlunparse(parsed._replace(
