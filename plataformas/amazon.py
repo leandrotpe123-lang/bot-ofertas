@@ -126,11 +126,14 @@ _LIMITE_PISTA = 65536
 # Duas classes de falha, porque só uma delas passa sozinha:
 #
 #   TRANSITÓRIA — 5xx, 429, desafio de WAF, timeout, resposta fora
-#     do contrato. Política de antes, inalterada: no limite, pausa
-#     fixa de 5 min; o sucesso zera. Mudar a pausa do 503 muda quantas
-#     ofertas saem curtas (29/10: das 271 longas desde 14:19, só 38
-#     foram recusa; as demais caíram na pausa) e por isso só com os
-#     dados da sonda — não por hipótese.
+#     do contrato. No limite, pausa fixa de 5 min; o sucesso zera.
+#     O limite conta OFERTAS que falharam, não chamadas: o 503
+#     "Algo deu errado" só conta depois de esgotar as tentativas
+#     (`_TENTATIVAS_503`). Com os dados da sonda (01/11): contando
+#     chamadas, 3 falhas seguidas eram rotina com 65% de 503, e a
+#     pausa publicou 69 das 101 longas SEM sequer tentar. Contando
+#     ofertas, 3 seguidas sem short (12 chamadas) só acontecem com a
+#     Amazon de fato fora — que é para o que a pausa existe.
 #
 #   SESSÃO RECUSADA — 401, ou redirecionamento PARA O LOGIN. O
 #     endpoint é XHR: com sessão válida responde JSON, nunca
@@ -152,6 +155,21 @@ _LIMITE_FALHAS = 3
 _PAUSA_DISJUNTOR = 300.0
 _PAUSA_SESSAO_RECUSADA = 21600.0
 
+# Nova tentativa do 503 "Algo deu errado". Caso real (01/11 17:49 →
+# 02/11 04:17, sonda do #39): 49 chamadas, 17 com 200 e 32 com 503 —
+# todos `servidor=server marca=algo_errado`, em ~80 ms contra ~240 ms
+# do 200. O 503 depois de um 503 veio em 65% das vezes; depois de um
+# 200, também em 65%: cada chamada é um sorteio independente da
+# anterior. 200 e 503 se alternam no mesmo segundo, com os MESMOS
+# cookies (o 503 não renova nada) — não é sessão, cookie nem URL.
+# Contra sorteio independente, tentar de novo funciona: com 35% por
+# chamada, 4 tentativas dão ~82% de short. Só esta página é repetida:
+# captcha, robô, login e qualquer outra resposta seguem com UMA
+# chamada, como antes — repetir desafio de WAF é martelar.
+_TENTATIVAS_503 = 4
+_PAUSAS_503 = (1.0, 2.0, 4.0)
+_PISTA_REPETIVEL = "algo_errado"
+
 _TRANSITORIA = "transitoria"
 _SESSAO_RECUSADA = "sessao_recusada"
 
@@ -162,6 +180,9 @@ _ja_respondeu = False
 
 _sessao_amz: Optional[aiohttp.ClientSession] = None
 _lock_sessao = asyncio.Lock()
+
+# Espera entre tentativas. Costura de teste; fora de qualquer semáforo.
+_dormir = asyncio.sleep
 
 _CABECALHOS_SHORT = {
     "accept": "application/json, text/javascript, */*; q=0.01",
@@ -876,6 +897,11 @@ async def _sitestripe(canonica: str) -> str:
     resposta carregando a nossa tag. Qualquer outra coisa — desafio
     de WAF, página de login, captcha, 4xx, 5xx, timeout — é falha, e
     falha nunca inventa short.
+
+    O 503 "Algo deu errado" é repetido até `_TENTATIVAS_503` vezes,
+    com as pausas de `_PAUSAS_503` (dados no topo do módulo); conta
+    UMA falha no disjuntor só se todas falharem. A espera fica fora
+    do semáforo de HTTP e para se outra oferta abrir o disjuntor.
     """
     if time.monotonic() < _disjuntor_ate:
         return ""
@@ -887,11 +913,25 @@ async def _sitestripe(canonica: str) -> str:
         "marketplaceId": _MARKETPLACE_ID,
         "storeId": _AMZ_STORE_ID,
     }
-    try:
-        status, tipo, dados, pista = await _http_getshorturl(params)
-    except Exception as e:
-        _registrar_falha(type(e).__name__)
-        return ""
+    tentativa = 1
+    while True:
+        try:
+            status, tipo, dados, pista = await _http_getshorturl(params)
+        except Exception as e:
+            _registrar_falha(type(e).__name__)
+            return ""
+        if not _repetivel(status, dados, pista) \
+                or tentativa >= _TENTATIVAS_503:
+            break
+        pausa = _PAUSAS_503[min(tentativa, len(_PAUSAS_503)) - 1]
+        tentativa += 1
+        log_nrm.info(
+            f"🔁 [AMZ_NOVA_TENTATIVA] {tentativa}/{_TENTATIVAS_503} "
+            f"em {pausa:g}s — HTTP 503 → {_PISTA_REPETIVEL}"
+        )
+        await _dormir(pausa)
+        if time.monotonic() < _disjuntor_ate:
+            return ""
 
     if dados is None:
         motivo = f"HTTP {status} tipo={_classe_tipo(tipo)}"
@@ -914,8 +954,17 @@ async def _sitestripe(canonica: str) -> str:
         _registrar_falha("longUrl de resposta sem a nossa tag")
         return ""
 
+    if tentativa > 1:
+        log_nrm.info(
+            f"✅ [AMZ_SHORT_NA_TENTATIVA] {tentativa}/{_TENTATIVAS_503}"
+        )
     _registrar_sucesso()
     return curta
+
+
+def _repetivel(status: int, dados, pista: str) -> bool:
+    """Só o 503 "Algo deu errado" — o sorteio medido em produção."""
+    return status == 503 and dados is None and pista == _PISTA_REPETIVEL
 
 
 # ── Capacidade obrigatória: afiliação ─────────────────────────────
