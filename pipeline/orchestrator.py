@@ -34,7 +34,7 @@ from __future__ import annotations
 import eventos
 from config import _MAX_IDADE_NOVA_S
 from logger import log_sys, _idade_str, _idade_seg
-from pipeline import ingestao
+from pipeline import curadoria, ingestao
 from pipeline.completude import EventoRecuperado
 from pipeline.identidade import username_de
 from pipeline.orchestrator_fila import _enfileirar, _iniciar_orchestrator
@@ -86,9 +86,12 @@ async def processar(event, is_edit: bool = False) -> None:
             # Mensagem nova com idade > _MAX_IDADE_NOVA_S (120s) é oferta velha
             # ressurgida → descarta na entrada. NÃO atrasa nada novo: a rajada
             # acontece em segundos, MUITO abaixo de 120s, então passa inteira.
+            # [Curadoria] Única exceção: a segurada que o aval soltou volta
+            # pelo MESMO ponto de entrada com alguns minutos — passou por esta
+            # trava quando chegou; curadoria.reinjecao() exige a prova no banco.
             if not is_edit:
                 idade = _idade_seg(event.message.date)
-                if idade > _MAX_IDADE_NOVA_S:
+                if idade > _MAX_IDADE_NOVA_S and not curadoria.reinjecao(event):
                     log_sys.info(
                         f"🧭 TL | id={event.message.id} chat={event.chat_id} | "
                         f"DESCARTE | motivo=NOVA_ANTIGA "

@@ -12,7 +12,10 @@ GRUPOS_ORIGEM  = [
     "promotom", "fumotom", "ofertasconvertidas", "fadadoscupons",
     "SamuelF3lipePromo", "fadapromos",
 ]
-    
+# Canais só de AVAL (pipeline.curadoria): o bot LÊ, nunca publica nada que
+# venha deles. Mesma forma de GRUPOS_ORIGEM (o @ do canal público).
+GRUPOS_AVAL    = ["nerdofertas"]
+
 GRUPO_DESTINO  = "fullpromotion"
 
 # ── Encurtador próprio ────────────────────────────────────────────
@@ -168,3 +171,29 @@ CUPOM_RAJADA_S = {"mercadolivre": 8 * 60, "shopee": 8 * 60}
 # série horária (próximas liberações chegaram a 55–60 min). Entre a RAJADA e
 # o SUPERIOR o tempo sozinho não decide: zona cinzenta (CUPOM_INCERTO).
 CUPOM_LIMITE_SUPERIOR_S = 30 * 60
+
+
+# ── CURADORIA: hardware só passa com aval (pipeline.curadoria) ──────
+# Decisão do Léo (03/11/2026). Placa de vídeo, fonte, cooler/fans, monitor
+# gamer, processador, placa-mãe, memória, SSD e gabinete
+# (pipeline.curadoria_categoria) de qualquer fonte que NÃO seja curadora só
+# vão ao canal quando o MESMO produto (mesma identidade: ASIN, MLB, item da
+# Shopee…) sai num canal curador até CURADORIA_JANELA_S antes ou depois. Sem
+# aval, a mensagem fica segurada; o aval que chega dentro da janela a solta.
+# Notebook, PC gamer e os outros monitores passam normal.
+#
+# Medido nas prévias públicas (27/10 → 03/11): quando o Nerd posta o mesmo
+# produto que Promotom/Fumotom, é quase sempre o mesmo anúncio, de 0 a 8 min
+# depois. "Esses grupos são relâmpago": 5 min.
+#
+# Constantes de CÓDIGO, sem variável de ambiente: mudar é PR aprovado pelo
+# dono (mesmo idioma de CUPOM_MODO).
+#   ATIVO     — a regra decide: sem aval, segura.
+#   SOMBRA    — só registra o que seguraria/soltaria; publica como antes.
+#   DESLIGADO — nada roda (nem aval, nem varredura).
+CURADORIA_MODO = "ATIVO"
+CURADORIA_JANELA_S = 5 * 60
+# Curadores: o post DELES sai normal e é o aval. Fada Promoções é fonte
+# comum (publica); Nerd Ofertas é só aval (GRUPOS_AVAL). @ em minúsculas.
+CURADORES = frozenset({"fadapromos", "nerdofertas"})
+

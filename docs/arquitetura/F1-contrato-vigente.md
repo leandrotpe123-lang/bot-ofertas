@@ -85,10 +85,12 @@ pelo dono só neste ponto: a raiz EXCLUSAO mediu 347–594 ns"). No resto vale
 | EXCLUSÃO | PR #12: `origem.apagada`, raiz EXCLUSAO, via B5 e raiz MANUTENCAO (1 LOCAL). Já sai com a linhagem corrigida |
 | Linhagem das tasks | PR #13 (o título do PR diz "F1.2-A2-O"; ver §5): remoção da fusão e espelho de cupons nascem em `contextvars.Context()` vazio |
 | Documento do contrato | PR #14: este arquivo |
+| CURADORIA | hardware só com aval (`pipeline/curadoria.py`): 2 TIPOS novos (`curadoria.retida`, terminal DESCARTADA, dentro da execução da mensagem segurada; `curadoria.aval`), o valor `CURADORIA` em `via` (a segurada que o aval soltou volta ao ponto de entrada) e 2 LOCAIS. O catálogo sem esse delta tem o hash da `main` anterior (`cc6d521b1ee65714`) |
 
 Números (conferidos em `eventos/catalogo.py` e no código da `main`):
-- catálogo `VERSAO 1`, 43 TIPOS e 29 LOCAIS (A1 1 + A2-E 16 + A2-R 11 + EXCLUSÃO 1);
-- **13 tipos com emissor real hoje:**
+- catálogo `VERSAO 1`, 45 TIPOS e 31 LOCAIS (A1 1 + A2-E 16 + A2-R 11 + EXCLUSÃO 1
+  + CURADORIA 2);
+- **15 tipos com emissor real hoje** (os 13 abaixo e os 2 `curadoria.*`):
   - os 8 de `origem.*` e `post.*` da tabela acima (6 `origem.*` e 2 `post.*`),
     por `emitir_de`;
   - `execucao.fim`, pela própria coleta (`eventos/coleta.py`);

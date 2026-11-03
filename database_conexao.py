@@ -261,12 +261,21 @@ def _init_db():
         CREATE TABLE IF NOT EXISTS completude_canal(
             chat INTEGER PRIMARY KEY, maior INTEGER NOT NULL,
             pendentes TEXT NOT NULL DEFAULT '[]', ts REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS curadoria_aval(
+            chave TEXT NOT NULL, fonte TEXT NOT NULL, msg_id INTEGER NOT NULL,
+            ts REAL NOT NULL, PRIMARY KEY(chave, fonte, msg_id));
+        CREATE TABLE IF NOT EXISTS curadoria_retida(
+            chat TEXT NOT NULL, msg_id INTEGER NOT NULL, chaves TEXT NOT NULL,
+            categoria TEXT NOT NULL, ts REAL NOT NULL, estado TEXT NOT NULL,
+            ts_estado REAL NOT NULL, PRIMARY KEY(chat, msg_id));
         CREATE INDEX IF NOT EXISTS idx_lc_plat     ON links_cache(plat);
         CREATE INDEX IF NOT EXISTS idx_lc_ts       ON links_cache(ts);
         CREATE INDEX IF NOT EXISTS idx_sl_code     ON short_links(code);
         CREATE INDEX IF NOT EXISTS idx_oi_dest     ON oferta_index(msg_id_dest);
         CREATE INDEX IF NOT EXISTS idx_ci_lookup   ON cupom_idx(plat,codigo,ts);
         CREATE INDEX IF NOT EXISTS idx_px_identity ON post_exibida(identity);
+        CREATE INDEX IF NOT EXISTS idx_ca_chave    ON curadoria_aval(chave, ts);
+        CREATE INDEX IF NOT EXISTS idx_cr_estado   ON curadoria_retida(estado, ts);
     """)
     for tabela, col, tipo in [
         ("links_cache",   "url_canon",        "TEXT"),

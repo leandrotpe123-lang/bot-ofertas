@@ -29,7 +29,7 @@ from pipeline.identidade import checar_e_marcar
 from pipeline.ingestao import ingerir
 from pipeline.montagem import montar
 from pipeline.normalizacao import normalizar
-from pipeline import origem_apagada
+from pipeline import curadoria, origem_apagada
 from pipeline.publicacao import destino_vivo_de_origem, enviar
 
 
@@ -73,7 +73,10 @@ async def _pipeline(event, is_edit: bool = False) -> None:
         return
 
     # ── Idempotência (somente novas) — chave (chat canônico, msg_id) ──
-    if not is_edit and await checar_e_marcar(f"{bruta.chat}:{msg_id}"):
+    #    [Curadoria] A segurada que o aval soltou já foi marcada quando
+    #    chegou; a reinjeção dela (prova no banco) não é repetição.
+    if (not is_edit and not curadoria.reinjecao(event)
+            and await checar_e_marcar(f"{bruta.chat}:{msg_id}")):
         log_sys.info(
             f"🧭 TL | id={msg_id} chat={bruta.chat} | DESCARTE | "
             f"motivo=JA_PROCESSADO")
@@ -138,6 +141,13 @@ async def _pipeline(event, is_edit: bool = False) -> None:
     # ambos os caminhos; enriquecer() adiciona o efeito de memória de
     # cupom, exclusivo da publicação nova (P9).
     enr = enriquecer_edicao(norm) if is_edit else enriquecer(norm)
+
+    # ── Curadoria: hardware só com aval (Fada Promoções / Nerd Ofertas) ──
+    #    Antes da deduplicação, para a segurada não gastar a reserva de
+    #    reativação. Vale também na edição: a edição de mensagem nunca
+    #    publicada vira post novo. O log e o evento saem de lá.
+    if not curadoria.portao(norm, enr, is_edit, getattr(event.message, "date", None)):
+        return
     if not is_edit:
         try:
             if not await deve_enviar_async(enr):

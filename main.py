@@ -63,6 +63,7 @@ from pipeline.orchestrator import processar, _iniciar_orchestrator
 from pipeline.identidade import precarregar_usernames
 from pipeline import completude
 from pipeline import convergencia
+from pipeline import curadoria
 from pipeline import origem_apagada
 from pipeline import post_apagado
 from pipeline import sucessao
@@ -288,6 +289,13 @@ async def _encerrar() -> None:
     except Exception as e:
         log_sys.error(f"❌ encerrar frente M: {e}")
 
+    # [Curadoria] varredura do canal de aval e liberações em curso — antes
+    # do canal de cupons, do HTTP, do Telegram e do banco.
+    try:
+        await curadoria.encerrar()
+    except Exception as e:
+        log_sys.error(f"❌ encerrar curadoria: {e}")
+
     # [F1.1] sinal de vida dos eventos — cancela e aguarda. A porta da
     # API privada é solta adiante, depois do web e antes do banco.
     t = _TASKS_FUNDO.get("api_privada")
@@ -389,6 +397,11 @@ async def _preparar_processo() -> bool:
     if not fontes:
         log_sys.error("❌ Nenhuma fonte de origem resolvida — encerrando.")
         return False
+    # [Curadoria] Canais só de AVAL (config.GRUPOS_AVAL — Nerd Ofertas):
+    # resolvidos pela mesma função, mas NUNCA entram nos handlers das fontes
+    # — nada deles vai ao canal. Sem o canal resolvido, só o aval dele falta.
+    avais = (await precarregar_usernames(client, config.GRUPOS_AVAL)
+             if config.GRUPOS_AVAL else [])
 
     # [S6.1] Sonda de ENTREGA — diagnóstico temporário, DESLIGADO por
     # padrão. Sem SONDA_ENTREGA=1 o módulo nem é importado. Registrada
@@ -454,6 +467,14 @@ async def _preparar_processo() -> bool:
         post_apagado.instalar(client, await client.get_entity(GRUPO_DESTINO))
     except Exception as e:
         log_sys.error(f"❌ handler do destino (frente M): {e}")
+    # [Curadoria] Hardware só com aval (Fada Promoções / Nerd Ofertas): o
+    # portão roda no pipeline; aqui liga a leitura do canal de aval e a
+    # liberação das seguradas pelo MESMO ponto de entrada (processar).
+    # UMA varredura por processo; encerrada em _encerrar.
+    try:
+        _TASKS_FUNDO["curadoria"] = curadoria.instalar(client, fontes, avais, processar)
+    except Exception as e:
+        log_sys.error(f"❌ curadoria: {e}")
 
     # 6. Tarefas de fundo — UMA instância de cada por processo.
     # _iniciar_orchestrator é aguardado, não posto em task: ele apenas
