@@ -64,17 +64,17 @@ from pipeline import papel
 # é tocada. Papel sem entrada aqui não recebe emoji nem negrito.
 # ─────────────────────────────────────────────────────────────────
 _EMOJI_POR_PAPEL: Dict[str, str] = {
-    papel.TITULO:   "🔥",
-    papel.PRECO:    "✅",
+    papel.TITULO:   "🚨",
+    papel.PRECO:    "💵",
     papel.CUPOM:    "🎟",
-    papel.RESGATE:  "📌",
+    papel.RESGATE:  "✅",
     papel.PARCELA:  "⭐",
-    papel.LINK:     "🎯",
+    papel.LINK:     "🔗",
     papel.VARIANTE: "🔹",
     papel.CARRINHO: "🛒",
     papel.FRETE:    "🚚",
     papel.AVISO:    "⚠️",
-    papel.GATILHO:  "",
+    papel.GATILHO:  "✔️",
 }
 
 
