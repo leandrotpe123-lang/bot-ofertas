@@ -200,6 +200,23 @@ def db_curadoria_desfecho(chat: str, msg_id: int, estado: str, agora: float) -> 
         return False
 
 
+def db_curadoria_passou(chat: str, msg_id: int, agora: float) -> bool:
+    """A mensagem que estava segurada (ou expirada, ou sendo reinjetada)
+    seguiu o pipeline por outro motivo — a edição dela trouxe uma exceção
+    ("Ainda ativo!", lista, retorno): passa a `liberada`, para nenhum aval
+    posterior a reinjetar de novo e nenhum log dizer que expirou. True =
+    havia linha para fechar."""
+    try:
+        with _db() as db:
+            cur = db.execute(
+                "UPDATE curadoria_retida SET estado=?, ts_estado=?"
+                " WHERE chat=? AND msg_id=? AND estado IN (?,?,?)",
+                (LIBERADA, agora, chat, int(msg_id), RETIDA, EXPIRADA, LIBERANDO))
+        return cur.rowcount > 0
+    except Exception:
+        return False
+
+
 def db_curadoria_expirar(limite: float, agora: float) -> List[Tuple[str, int, str]]:
     """As seguradas com data anterior a `limite` (janela fechada sem aval)
     passam a `expirada`. Devolve [(chat, msg_id, categoria)] para o log."""

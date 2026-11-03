@@ -146,7 +146,8 @@ async def _pipeline(event, is_edit: bool = False) -> None:
     #    Antes da deduplicação, para a segurada não gastar a reserva de
     #    reativação. Vale também na edição: a edição de mensagem nunca
     #    publicada vira post novo. O log e o evento saem de lá.
-    if not curadoria.portao(norm, enr, is_edit, getattr(event.message, "date", None)):
+    if not curadoria.portao(norm, enr, is_edit, getattr(event.message, "date", None),
+                            getattr(bruta, "texto", "") or ""):
         return
     if not is_edit:
         try:

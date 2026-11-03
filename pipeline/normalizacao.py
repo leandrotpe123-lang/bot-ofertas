@@ -70,7 +70,7 @@ from utils.cupom import extrair_todos_cupons
 # ── API pública do módulo ─────────────────────────────────────────
 __all__ = [
     "MensagemNormalizada", "normalizar", "limpar_texto",
-    "_tem_emoji", "identificar_produtos",
+    "_tem_emoji",
 ]
 
 # ─────────────────────────────────────────────────────────────────
@@ -137,26 +137,6 @@ class MensagemNormalizada:
 # ─────────────────────────────────────────────────────────────────
 # ENTRYPOINT — NORMALIZAÇÃO
 # ─────────────────────────────────────────────────────────────────
-async def identificar_produtos(
-    links: List[str], msg_id: int = 0,
-) -> List[Tuple[str, str, str]]:
-    """[Curadoria] Identidade de PRODUTO de uma lista de links:
-    [(plataforma, id_produto, tipo_link)], o MESMO formato de
-    MensagemNormalizada.idents.
-
-    Mesma derivação de normalizar(), passos 2 e 3 — particionar, resolver
-    e afiliar, derivar_produto sobre as URLs afiliadas LONGAS — e nada
-    mais: sem texto, sem cupom, sem encurtamento. Serve ao aval de um canal
-    curador que só sinaliza (Nerd Ofertas): a chave do produto dele sai do
-    mesmo caminho que a da fonte, então as duas casam por construção."""
-    converter, _ = particionar_links(links)
-    if not converter:
-        return []
-    _, canonicas, _ = await resolver_e_afiliar(converter, msg_id)
-    _, idents, _ = derivar_produto(list(canonicas.values()))
-    return list(idents)
-
-
 def _cupons_no_texto(cupons: List[str], texto: str) -> List[str]:
     """Os cupons que continuam no texto publicado, na ordem original."""
     alvo = (texto or "").upper()

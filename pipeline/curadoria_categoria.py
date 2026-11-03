@@ -50,7 +50,7 @@ import re
 import unicodedata
 from typing import List, Optional, Tuple
 
-__all__ = ["CATEGORIAS", "categoria", "titulo", "regiao_titulo", "itens_com_preco"]
+__all__ = ["CATEGORIAS", "categoria", "titulo", "regiao_titulo", "produtos_com_preco"]
 
 PLACA_DE_VIDEO = "placa_de_video"
 FONTE = "fonte"
@@ -358,18 +358,91 @@ _PRECO = re.compile(r"r\$\s?\d")
 _NAO_ITEM = re.compile(
     r"\boff\b|cupo|desconto|cashback|moedas|frete|\bparcel|\bem\s+\d+\s?x\b"
     r"|\d+\s?x\s+sem|sem\s+juros|\bpix\b")
+# Linha que não nomeia produto (procurando o nome de um item só com preço).
+_LINHA_RUIDO = re.compile(
+    r"cupo|resgate|\blink\b|selecione|anuncio|clique|acesse|frete|^\W*$")
+
+# VARIANTE — o que NÃO faz de um item outro produto (decisão do Léo, 03/11:
+# "opções simples de cor/armazenamento não são produtos independentes"):
+# tamanho e número curto (23,8 / 27" / 24), medida e capacidade com unidade
+# (1TB, 512GB, 240mm, 750W, 144Hz, 3x120mm), cor, palavra de variante
+# (reverse, versão, modelo, tamanho) e a LOJA/VENDEDOR/ANÚNCIO (o mesmo
+# produto em dois vendedores não é lista).
+_TOKEN_VARIANTE = re.compile(
+    r"\d{1,2}|\d+(?:gb|tb|mb|mm|cm|m|w|hz|ml|l|kg|g|mah|v|a|rpm|cfm|mhz|ghz|ms|pol)"
+    r"|\d+x\d+(?:mm)?|\d{1,2}x")
+_PALAVRAS_NEUTRAS = frozenset("""
+    preto preta branco branca cinza prata azul vermelho vermelha verde rosa roxo roxa
+    amarelo amarela dourado dourada laranja marrom bege grafite black white gray grey
+    silver blue red green pink purple gold
+    reverse reversa reverso normal versao modelo cor cores tamanho capacidade opcao
+    opcoes unidade unidades und polegadas pol variacao
+    loja oficial vendedor vendido anuncio link outro outra mais barato barata menor
+    preco full gratis nacional internacional brasil envio importado mercado livre amazon
+    shopee magalu kabum pichau terabyte aliexpress
+    por de da do das dos com sem para pra e ou em no na nos nas a o os as um uma the
+    and with ate apenas so cada
+""".split())
 
 
-def itens_com_preco(texto: str) -> int:
-    """Quantas linhas do post são ITEM com preço próprio. Junto com a
-    contagem de produtos identificados, é o que separa LISTA ("Placas Mães
-    B550M em Oferta: Gigabyte R$ 556 / Asus R$ 588") de um produto só com
-    dois links (dois anúncios, "Resgate cupons" + "Link produto")."""
+def _nucleo(nome: str) -> frozenset:
+    """Os tokens que DIFERENCIAM um produto: marca, linha, modelo (palavra de
+    3+ letras ou código com letra e número, número de 3+ dígitos). Sem
+    tamanho, capacidade, medida, cor, vendedor nem palavra de ligação."""
+    out = set()
+    for tok in re.findall(r"[a-z0-9]+", nome):
+        if tok in _PALAVRAS_NEUTRAS or _TOKEN_VARIANTE.fullmatch(tok):
+            continue
+        tem_letra, tem_num = bool(re.search(r"[a-z]", tok)), bool(re.search(r"\d", tok))
+        if (tem_letra and not tem_num and len(tok) >= 3) or (tem_letra and tem_num) \
+                or (tem_num and len(tok) >= 3):
+            out.add(tok)
+    return frozenset(out)
+
+
+def _so_ligacao(nome: str) -> bool:
+    toks = re.findall(r"[a-z0-9]+", nome)
+    return all(t in _PALAVRAS_NEUTRAS and not t.isdigit() for t in toks)
+
+
+def produtos_com_preco(texto: str) -> int:
+    """Quantos produtos DISTINTOS, cada um com preço próprio, o post traz.
+
+    Cada linha com preço é um item; o nome dele é o trecho antes do "R$" —
+    ou, numa linha só de preço ("✅ R$ 599"), a linha de produto logo acima.
+    Um item só conta como OUTRO produto se o nome dele traz algo que os
+    anteriores não tinham (outra marca, outra linha, outro modelo). Variante
+    de tamanho, capacidade, medida, cor ou vendedor do mesmo produto
+    ("-27" por R$ 539", "-240mm = R$ 237", "-2TB = R$ 699", "Branco R$ 109",
+    "Outro vendedor = R$ 289") não conta. É o que separa LISTA ("Placas Mães
+    B550M em Oferta: Gigabyte R$ 556 / Asus R$ 588") de um produto só."""
+    linhas = [_normalizar(l) for l in (texto or "").splitlines()]
+    vistos: set = set()
     n = 0
-    for linha in (texto or "").splitlines():
-        t = _normalizar(linha)
-        if _PRECO.search(t) and not _NAO_ITEM.search(t):
+    for i, t in enumerate(linhas):
+        if not _PRECO.search(t) or _NAO_ITEM.search(t):
+            continue
+        nome = re.split(r"r\$", t, maxsplit=1)[0]
+        if _so_ligacao(nome):
+            nome = ""
+            for j in range(i - 1, max(-1, i - 6), -1):
+                ant = linhas[j]
+                if (not ant.strip() or re.fullmatch(r"\W*https?://\S+", ant)
+                        or _PRECO.search(ant) or _LINHA_RUIDO.search(ant)):
+                    continue
+                nome = ant
+                break
+        nucleo = _nucleo(nome)
+        # Sufixo curto de um modelo já citado é variante do mesmo post
+        # (7600 → 7600x, 5060 → 5060ti, 9070 → 9070xt): não é outro produto.
+        novos = {t for t in nucleo - vistos
+                 if not any(re.search(r"\d", v) and t.startswith(v) and len(t) - len(v) <= 3
+                            for v in vistos)}
+        if n == 0:
+            n = 1
+        elif novos:
             n += 1
+        vistos |= nucleo
     return n
 
 

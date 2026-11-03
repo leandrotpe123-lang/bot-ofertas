@@ -884,6 +884,7 @@ _INVENTARIO = {
     ("pipeline/curadoria.py", "_agendar", "add_done_callback"): "CALLBACK: _TAREFAS.discard",
     ("pipeline/curadoria.py", "encerrar", "wait"): "shutdown: liberações em curso (aguardado, com prazo)",
     ("pipeline/curadoria.py", "encerrar", "gather"): "shutdown: varredura e liberações canceladas (aguardado)",
+    ("pipeline/curadoria.py", "_identificar", "gather"): "AGUARDADA dentro da observação do aval (contexto vazio)",
     ("pipeline/post_apagado.py", "encerrar", "gather"): "shutdown: tasks da frente M canceladas (aguardado)",
 }
 

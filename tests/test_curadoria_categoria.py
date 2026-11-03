@@ -24,6 +24,9 @@ pegar outras categorias de produto."
       linhas contam; linha só de link é pulada; texto vazio/None
   06  o substantivo que vem PRIMEIRO decide (o resto do título é descrição)
   07  pureza: sem import de I/O, de banco, de Telegram ou de log
+  08  LISTA: produtos distintos com preço; variante de cor/armazenamento/
+      medida, sufixo de modelo e outro vendedor não contam
+  09  a região do título (cabeçalho + linha do produto)
 
 Execução (standalone, stdlib):  python3 tests/test_curadoria_categoria.py
 """
@@ -287,15 +290,56 @@ PIX = ("Redragon Water Cooler GamerStorm LE240 RD 240mm ARGB\n\nR$ 153 - PIX\n"
        "-CUPOM: DOMINGO40OF ou resgate cupom do anúncio\n\nhttps://link.amazon/B0emOVS43")
 
 
-def test_08_itens_com_preco(r):
-    casos = [(LISTA_SAMUEL, 2), (LISTA_NERD, 2), (VARIANTE, 2), (DOIS_ANUNCIOS, 1),
-             (SHOPEE, 1), (PIX, 0),
-             ("Jbl, Caixa de Som, PartyBox Encore Essential 2 Mic\n\nR$ 1289 - Sem Juros", 0),
-             ("Cupom Shopee\n\nR$ 50 OFF em R$ 249: ENORME50\n\n-Resgate aqui:", 0),
-             ("Placa X\n\nR$ 1.299 em 10x\nR$ 1.199 no Pix", 0)]
-    errados = [(t[:40], e, cc.itens_com_preco(t)) for t, e in casos
-               if cc.itens_com_preco(t) != e]
-    r.check(errados == [], "08.itens", str(errados))
+def test_08_produtos_distintos_com_preco(r):
+    """LISTA = produtos DISTINTOS, cada um com preço próprio. Variante de
+    tamanho/capacidade/medida/cor/quantidade, sufixo de modelo já citado e
+    outro vendedor do mesmo produto não contam como outro produto."""
+    casos = [
+        # reais
+        ("lista Samuel 124289 (Gigabyte × Asus)", LISTA_SAMUEL, 2),
+        ("lista Nerd 148143 (2 placas-mãe)", LISTA_NERD, 2),
+        ("variante Promotom 112298 (23,8\" + 27\")", VARIANTE, 1),
+        ("Promotom 112558 (dois anúncios)", DOIS_ANUNCIOS, 1),
+        ("Fumotom 44636 (Resgate cupons + Link produto)", SHOPEE, 1),
+        ("Promotom (preço só no Pix)", PIX, 0),
+        ("Kalkan 360 + 240mm (Promotom 112453)",
+         "Water Cooler Kalkan Aura 360mm\n\nR$ 299\n1 https://a\n2 https://b\n\n"
+         "-240mm = R$ 237\nhttps://c", 1),
+        ("Ryzen 7600 + 7600X (Promotom 112123)",
+         "Processador Amd Ryzen 5 7600, Am5\n\nR$ 781\nhttps://a\n\n-7600X = R$ 821\nhttps://b", 1),
+        ("Ventus NX + NX Reverse (Fumotom 42811)",
+         "Kit Ventoinha Pichau Ventus NX, ARGB, 3x120mm, Branco\n\nR$ 59\nhttps://a\n\n"
+         "-Kit Ventoinha Pichau Ventus NX Reverse = R$ 60\nhttps://b", 1),
+        ("2 monitores Nerd 148144",
+         "➡️ Monitor Gamer AOC AGON G50 27\" 144Hz 0,5ms IPS HDR10 27G50F\n\n✅ R$ 611 😱😱\n"
+         "🏷 Cupom: Do anuncio\n\n🛒 https://a\n\n➡️ Monitor Gamer Phillips 24 Evnia Ips 144hz "
+         "Wide Fullhd Preto\n\n✅ R$ 476 😱😱\n🏷 Cupom: Do anuncio\n\n🛒 https://b", 2),
+        # variantes simples (cor / armazenamento / medida / vendedor / quantidade)
+        ("SSD 1TB + 2TB", "SSD Kingston NV3 1TB NVMe\n\nR$ 399\nhttps://a\n\n-2TB = R$ 699\nhttps://b", 1),
+        ("memória 8GB + 16GB", "Memória RAM Kingston Fury DDR4 8GB\nR$ 99\nhttps://a\n-16GB = R$ 179", 1),
+        ("cor preto + branco", "Mouse Logitech G203 Preto - R$ 99\nhttps://a\n"
+                               "Mouse Logitech G203 Branco - R$ 109\nhttps://b", 1),
+        ("fonte 750W + 850W", "Fonte XPG Kyber 750W 80 Plus Gold\n\nR$ 399\nhttps://a\n-850W = R$ 499", 1),
+        ("loja oficial + outro vendedor", "Water Cooler Kalkan 360mm\n\n-Loja oficial = R$ 299\n"
+                                          "https://a\n-Outro vendedor = R$ 289\nhttps://b", 1),
+        ("kit 3 fans + kit 5 fans", "Kit 3 Fans ARGB 120mm - R$ 59\nhttps://a\n"
+                                    "Kit 5 Fans ARGB 120mm - R$ 89\nhttps://b", 1),
+        ("RTX 5060 + 5060 Ti", "Placa de Vídeo Gigabyte RTX 5060 Windforce\nR$ 2299\nhttps://a\n"
+                               "-5060 Ti = R$ 2799\nhttps://b", 1),
+        # produtos distintos de verdade
+        ("RTX 5060 Gigabyte + MSI", "Placa de Vídeo RTX 5060 Gigabyte - R$ 2299\nhttps://a\n"
+                                    "Placa de Vídeo RTX 5060 MSI - R$ 2399\nhttps://b", 2),
+        ("Ryzen 5 5600 + Ryzen 7 5700X", "Processador Ryzen 5 5600 - R$ 699\nhttps://a\n"
+                                         "Processador Ryzen 7 5700X - R$ 899\nhttps://b", 2),
+        # não são item
+        ("JBL sem juros", "Jbl, Caixa de Som, PartyBox Encore Essential 2 Mic\n\nR$ 1289 - Sem Juros", 0),
+        ("cupom", "Cupom Shopee\n\nR$ 50 OFF em R$ 249: ENORME50\n\n-Resgate aqui:", 0),
+        ("parcela + Pix", "Placa X\n\nR$ 1.299 em 10x\nR$ 1.199 no Pix", 0),
+        ("De/Por numa linha", "Monitor Gamer LG 27\n✅ De R$ 1.299 por R$ 899\nhttps://a", 1),
+    ]
+    errados = [(nome, e, cc.produtos_com_preco(t)) for nome, t, e in casos
+               if cc.produtos_com_preco(t) != e]
+    r.check(errados == [], "08.produtos_distintos", "\n".join(map(str, errados)))
 
 
 def test_09_regiao_do_titulo(r):

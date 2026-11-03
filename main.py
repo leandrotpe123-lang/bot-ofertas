@@ -402,6 +402,7 @@ async def _preparar_processo() -> bool:
     # — nada deles vai ao canal. Sem o canal resolvido, só o aval dele falta.
     avais = (await precarregar_usernames(client, config.GRUPOS_AVAL)
              if config.GRUPOS_AVAL else [])
+    fontes = curadoria.fontes_sem_aval(fontes, avais)
 
     # [S6.1] Sonda de ENTREGA — diagnóstico temporário, DESLIGADO por
     # padrão. Sem SONDA_ENTREGA=1 o módulo nem é importado. Registrada

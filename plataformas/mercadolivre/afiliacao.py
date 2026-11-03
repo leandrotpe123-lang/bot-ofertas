@@ -54,7 +54,7 @@ import aiohttp
 
 import config
 from logger import log_nrm
-from plataformas.contrato import AUSENTE, Afiliacao
+from plataformas.contrato import AUSENTE, Afiliacao, IdentidadeProduto, TipoLink
 from utils.cache_links import consultar_link, registrar_link
 from utils.url_resolver import desencurtar
 from utils.urls import _sanitizar_url
@@ -249,6 +249,28 @@ async def _reparar(
     _memorizar_falha(url)
     log_nrm.info("🛒 ML canônica não reparável — mantém a entrada anterior")
     return em_cache
+
+
+async def identifica(url: str, sessao_http: aiohttp.ClientSession) -> IdentidadeProduto:
+    """Identidade do produto SEM afiliar (contrato: `identifica`).
+
+    O MESMO `_resolver_alvo` da afiliação — expansão do `meli.la` e
+    descoberta da vitrine `/social/` de terceiro, anônima — e a identidade
+    do destino. A afiliação grava como canônica esse mesmo destino, então
+    as duas chegam ao mesmo MLB. NÃO chama o createLink, NÃO usa tag nem
+    credencial, NÃO lê nem grava o cache de links. Destino não
+    determinado: identidade INVALIDO (sem produto). Nunca levanta."""
+    try:
+        url = _sanitizar_url(url)
+        if not url or not links.reconhece(url):
+            return IdentidadeProduto(tipo_link=TipoLink.INVALIDO, id_produto=AUSENTE)
+        alvo = await _resolver_alvo(url, sessao_http)
+        if alvo is None:
+            return IdentidadeProduto(tipo_link=TipoLink.INVALIDO, id_produto=AUSENTE)
+        return links.extrai_identidade(alvo)
+    except Exception as exc:                            # noqa: BLE001
+        log_nrm.warning(f"🛒 ML identifica falhou: {type(exc).__name__}")
+        return IdentidadeProduto(tipo_link=TipoLink.INVALIDO, id_produto=AUSENTE)
 
 
 async def afilia(url: str, sessao_http: aiohttp.ClientSession) -> object:

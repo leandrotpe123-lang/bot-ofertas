@@ -11,7 +11,7 @@
 #
 # Este arquivo é FACHADA: sem lógica, sem SQL, sem estado.
 #
-# Reexporta as 44 FUNÇÕES. _db_conn e _db_lock NÃO são reexportados:
+# Reexporta as 45 FUNÇÕES. _db_conn e _db_lock NÃO são reexportados:
 # nenhum consumidor os acessa, e reexportá-los seria bug — o import
 # liga por VALOR e capturaria o None anterior a _init_db().
 from __future__ import annotations
@@ -20,7 +20,8 @@ from database_conexao import _db, _fechar_db, _init_db
 from database_completude import db_completude_carregar, db_completude_gravar
 from database_curadoria import (db_curadoria_avaliar, db_curadoria_desfecho,
                                 db_curadoria_em_liberacao, db_curadoria_expirar,
-                                db_curadoria_registrar_aval, db_curadoria_retomar)
+                                db_curadoria_passou, db_curadoria_registrar_aval,
+                                db_curadoria_retomar)
 from database_espelho import (db_espelho_del, db_espelho_get,
                               db_espelho_mover, db_espelho_set)
 from database_cupons import (db_cupom_idx_buscar,
