@@ -236,6 +236,17 @@ class Plataforma:
                             None equivale a não declarar: toda entrada
                             em cache é reutilizada, como sempre.
 
+      - identifica : async (url, sessao) -> IdentidadeProduto | None.
+                     Identidade do produto SEM afiliar: só o que a
+                     plataforma precisa ler para saber QUAL produto a URL
+                     aponta (expandir o encurtador próprio, ler a página
+                     intermediária), sem gerar link, sem credencial e sem
+                     gravar o cache de links. Consumida pela curadoria
+                     (aval de um canal que não publica). Deve chegar à
+                     MESMA identidade que a afiliação usaria. None
+                     equivale a não declarar: o core expande o encurtador
+                     e aplica extrai_identidade, como sempre.
+
     """
     # Identidade
     identificador:   str
@@ -254,3 +265,4 @@ class Plataforma:
     sinais_cashback:      Optional[frozenset[str]] = None
     hosts_container:      Optional[frozenset[str]] = None
     afiliacao_vigente:    Optional[Callable[["Afiliacao"], bool]] = None
+    identifica:           Optional[Callable[..., Awaitable["IdentidadeProduto"]]] = None

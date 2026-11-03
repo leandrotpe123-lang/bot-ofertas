@@ -104,7 +104,7 @@ from __future__ import annotations
 
 from plataformas.contrato import CONTRACT_VERSION, Plataforma
 
-from .afiliacao import afilia, afiliacao_vigente
+from .afiliacao import afilia, afiliacao_vigente, identifica
 from .afiliado import IDENTIFICADOR
 from .links import (
     ENCURTADORES,
@@ -123,6 +123,7 @@ PLATAFORMA = Plataforma(
     encurtadores=ENCURTADORES,
     encurtadores_forca_get=ENCURTADORES_FORCA_GET,
     afiliacao_vigente=afiliacao_vigente,
+    identifica=identifica,
 )
 
 

@@ -12,7 +12,10 @@ GRUPOS_ORIGEM  = [
     "promotom", "fumotom", "ofertasconvertidas", "fadadoscupons",
     "SamuelF3lipePromo", "fadapromos",
 ]
-    
+# Canais só de AVAL (pipeline.curadoria): o bot LÊ, nunca publica nada que
+# venha deles. Mesma forma de GRUPOS_ORIGEM (o @ do canal público).
+GRUPOS_AVAL    = ["nerdofertas"]
+
 GRUPO_DESTINO  = "fullpromotion"
 
 # ── Encurtador próprio ────────────────────────────────────────────
@@ -168,3 +171,56 @@ CUPOM_RAJADA_S = {"mercadolivre": 8 * 60, "shopee": 8 * 60}
 # série horária (próximas liberações chegaram a 55–60 min). Entre a RAJADA e
 # o SUPERIOR o tempo sozinho não decide: zona cinzenta (CUPOM_INCERTO).
 CUPOM_LIMITE_SUPERIOR_S = 30 * 60
+
+
+# ── CURADORIA: hardware só passa com aval (pipeline.curadoria) ──────
+# Decisão do Léo (03/11/2026). Placa de vídeo, fonte, cooler/fans, monitor
+# gamer, processador, placa-mãe, memória, SSD e gabinete
+# (pipeline.curadoria_categoria) de TODA fonte monitorada que não seja
+# isenta só vão ao canal quando o MESMO produto, na MESMA loja (ASIN da
+# Amazon, código MLB do Mercado Livre, loja+item da Shopee), sai num canal
+# avalista até CURADORIA_JANELA_S antes ou depois — pelas DATAS originais
+# das mensagens no Telegram. Sem aval, a mensagem fica segurada; o aval que
+# chega dentro da janela a solta. Notebook, PC gamer e os outros monitores
+# passam normal. Passam sem aval: LISTA de produtos distintos com preço
+# próprio, frase de DESTAQUE no texto da mensagem ("Ainda ativo!", "Bom
+# preço!" — pipeline.destaque) e retorno de oferta ("Voltando!" —
+# pipeline.reativacao). Quem passa por exceção NUNCA vira aval.
+#
+# Medido nas prévias públicas (27/10 → 03/11): quando o Nerd posta o mesmo
+# produto que Promotom/Fumotom, é quase sempre o mesmo anúncio, de 0 a 8 min
+# depois. "Esses grupos são relâmpago": 5 min.
+#
+# Constantes de CÓDIGO, sem variável de ambiente: mudar é PR aprovado pelo
+# dono (mesmo idioma de CUPOM_MODO).
+#   ATIVO     — a regra decide: sem aval, segura.
+#   SOMBRA    — só registra o que seguraria/soltaria; publica como antes.
+#   DESLIGADO — nada roda (nem aval, nem leitura do canal de aval).
+CURADORIA_MODO = "ATIVO"
+CURADORIA_JANELA_S = 5 * 60
+
+# Os grupos, pelo ID REAL do chat (peer id do Telegram). Conferidos nos logs
+# de boot da Railway (🔖 identidade pré-aquecida) em 28/10, 29/10, 31/10,
+# 01/11 e 02/11/2026 — sempre os mesmos. A curadoria decide POR ESTE ID: o @
+# só serve para resolver o canal no boot, e o boot confere os dois.
+GRUPO_ID = {
+    "promotom":           -1001825680721,
+    "fumotom":            -1003775401737,
+    "SamuelF3lipePromo":  -1001768101197,
+    "fadapromos":         -1002389711530,
+    "fadadoscupons":      -1002050488946,
+    "ofertasconvertidas": -1003817694320,
+}
+# ISENTOS: publicam normal, nunca são segurados. Fada Promoções, Fada dos
+# Cupons e Oferta Convertida (seleção manual do Léo). Qualquer outra fonte de
+# GRUPOS_ORIGEM — hoje ou nova — passa pela curadoria.
+CURADORIA_ISENTOS = frozenset({
+    GRUPO_ID["fadapromos"], GRUPO_ID["fadadoscupons"], GRUPO_ID["ofertasconvertidas"],
+})
+# AVALISTAS entre as fontes: só o Fada Promoções (o post dele sai normal E é
+# aval). O outro avalista é o canal só de sinal GRUPOS_AVAL (Nerd Ofertas).
+# Fada dos Cupons e Oferta Convertida são isentos, mas NÃO dão aval.
+CURADORIA_AVALISTAS_FONTE = frozenset({GRUPO_ID["fadapromos"]})
+# Lojas em que o aval vale: só onde a identidade de produto é exata.
+CURADORIA_LOJAS_AVAL = frozenset({"amazon", "mercadolivre", "shopee"})
+

@@ -1,0 +1,1583 @@
+# Curadoria — títulos REAIS das prévias públicas t.me/s/<canal>, 26/10 → 03/11/2026.
+# Linha: categoria esperada <TAB> canal/id da mensagem <TAB> título como saiu no canal.
+# Categoria vazia = NÃO vigiada (passa normal). Conferida linha a linha, à mão.
+# Bloco 1: todo título dos 10.279 posts baixados (promotom, fumotom, SamuelF3lipePromo,
+#          fadapromos, fadadoscupons, nerdofertas, fullpromotion) que cita alguma palavra
+#          de hardware — vigiado ou não — mais os 2 monitores gamer sem a palavra "monitor".
+# Bloco 2: amostra aleatória (semente 20261103) de títulos sem palavra de hardware.
+# Lido por tests/test_curadoria_categoria.py.
+	fumotom/44123	2x Kit Cabo de extensão de fonte de alimentação Argb 5V de 24 pinos e 8 pinos
+	promotom/112162	Acer Aspire Go 15 Notebook 15.6" Intel Core i7 8GB Linux
+	fumotom/44782	Adaptador Fenvi m.2 para Ax200, Ax210, 8265, 7260Ac, WiFi e Bluetooth
+	fumotom/44773	Adaptador M2 Pciex X1 para M.2 NVMe M Key 2280, Cabo de Extensão 5cm
+	fumotom/44770	Adaptador PCIe X4 M.2 para um Ssd NVMe M.2 e um Ssd Sata M.2
+	fumotom/43254	Ainda ativo! Notebook Lenovo IdeaPad Slim 3 15.3" Luna Grey - Intel Core 3 100U, 8GB RAM, 256GB SSD, Windows 11
+	fumotom/42569	ARCTIC MX-4 (4 g) - Pasta térmica de desempenho premium para todos os processadores (CPU, GPU - PC), condutividade térmica muito alta, longa durabilidade, aplicação segura, não condutora
+	fumotom/42646	Bateria Moura Ma5-d Para Moto Titan Fan Biz Bros Fazer
+	fumotom/44369	Braço Articulado Monitor Rgb - 8 efeitos de iluminação 17" - 34" Polegadas
+	fumotom/44025	Cartão de Memória Flash de Alta Velocidade Movespeed Micro Sd T300 64GB
+	fumotom/44517	Cartão de Memória Flash de Alta Velocidade Movespeed Micro Sd T300 U3 Mini Sd 100Mb/s 128Gb Sdxc Tf para Câmeras e Drones
+	fumotom/44297	Cartão de Memória Flash de Alta Velocidade Movespeed Micro Sd T300 U3 Mini Sd 100Mb/s 64Gb Sdxc Tf para Câmeras e Drones
+	fumotom/43531	Champion CO200 Men's Hooded Packable Quarter-Zip Jacket, Lightweight Wind & Water-Resistant Pullover with Adjustable Hood
+	promotom/112433	Chocolate Ao Leite Caramelo E Flor De Sal Danke Memórias 90G
+	nerdofertas/147558	Comprei 2, deixar estoque pra vocês https://www.apple.com/br/shop/buy-mac/macbook-pro-proled-xdr/16-polegadas-space-black-tela-nano-texture-chip-m5-max-da-apple-cpu-de-18-n%C3%BAcleos-gpu-de-40-n%C3%BAcleos-128-gb-mem%C3%B3ria-16tb-armazenamento
+	fumotom/44554	Console Sony PlayStation 5, Ssd 825Gb, Controle Sem Fio DualSense + 2 Jogos Digitais, Edição Digital
+	fumotom/44615	Controle Gamer EasySMX M05 Tipo C compatível com Android, Cloud Gaming Xbox Game Pass, Stadia, xCloud, GeForce
+	promotom/112229	Cupom e placas saindo primeira aqui:
+	fumotom/44423	Cupom KaBuM em Memórias-ram selecionadas - 15% OFF
+	promotom/112561	Cupom KaBuM em Placas de Vídeo selecionadas - 10% OFF
+	fumotom/44420	Cupom KaBuM em Placas-mãe selecionadas - 10% OFF
+	fumotom/43452	Cupom KaBuM em Processador selecionado - 9% OFF
+	fumotom/43602	Cupom KaBuM em Processadores selecionados - 11% OFF
+	fumotom/43643	Cupom KaBuM em Processadores selecionados - 9% OFF
+	fumotom/44543	Cupom KaBuM em SSDs selecionados - 10% OFF
+	fumotom/44607	Câmera de segurança Wi-Fi, visão noturna, monitor, Icsee, Coibeu
+	fumotom/44719	Câmera Veicular Ddpai Mini Pro 3K Hdr 1620P com WiFi, Visão Noturna, Wdr, Controle por Voz e Monitoramento de Estacionamento 24H 143 ° Fov camera para carro
+	fumotom/43476	Dissipador Ssd M.2 2280 NVMe Delta-Cn510 Argb 5V 3 Pinos Aura Sync
+	promotom/112766	ELG Suporte Articulado de Parede para Monitor e TV 17 a 35 Polegadas | Telas de 2 a 9kg, VESA 75x75 e 100x100mm, Pistão a Gás, Altura até 25cm, Giro 360°, Já Vem Montado, NR17, Modelo F410
+	promotom/112760	ELG Suporte Articulado para Monitor 17 a 35 Polegadas Pistão a Gás Branco | Monitores de 2 a 9kg, VESA 75x75 e 100x100mm, Altura 14 a 42cm, Avanço 54,3cm, Giro 360°, NR17, Modelo F80W
+	fumotom/43831	Fones de ouvido Trn Mt5 com driver dinâmico duplo e monitores intra-auriculares
+	promotom/112706	Fonte de Água para Gatos e Cães Amicus Aqua First, Rosa, 1,2L | USB, Bivolt, Design Ergonômico, Portátil, Purificador
+	fumotom/44486	GameSir G7 Pro para Xbox Series X | Controle S com Joysticks Tmr, Gatilhos de Efeito Hall, Placas Frontais Magnéticas, Giroscópio, Base de Carregamento Inteligente
+	fumotom/44382	Hollyland Lark M2 Microfone S/ Fio P/ iPhone 15/16/17 E Android Usb-C Hl-Lark M2
+	fumotom/42901	Hollyland Lark M2 Microfone S/ Fio P/ iPhone e Android Usb-C
+	fumotom/44071	LightBar curva para Monitor, light bar rgb curvo
+	fumotom/44073	LightBar curvo para Monitor, light bar rgb curva
+	fumotom/43349	MacBook Pro de 14", M5, Cpu de 10 núcleos, Gpu de 10 núcleos, 16Gb Ram, Ssd 1Tb, Prateado - Mde54bz/A
+	fumotom/44026	Micro Sd Cartão de Memória Movespeed B300 256Gb 170Mb/s Tf A2 V30, Sdxc, para Câmeras, Filmadoras Dv, Câmeras Veiculares e Drones
+	fumotom/43755	Microfone Hollyland Lark M2 Duo Combo Duplo Para 2 Pessoas U
+	fumotom/44411	Microfone K688 dinâmico Xlr de gravação Fifine com monitoramento em tempo real
+	fumotom/44375	Monitor Acer 21,4" 100Hz Mk221q Bi Led/Va Full Hd 1ms Hdmi Vga Vesa
+	fumotom/42978	Monitor Alltek 21,5" Fhd, Tela Ultrafina, Painel Va, 100 Hz, 5Ms, Hdmi, Vga - Atk-215 Z Preto
+	promotom/112557	Monitor Alltek 21.5" 100Hz Atk-215 Hd Painel Va
+	fumotom/43363	Monitor Aoc 21" 22B30hm23 Fhd, 120Hz, 1Ms, Preto
+	fumotom/42987	Monitor Dr. Office, 15.4 Pol, HD, 75Hz, HDMI/VGA, MDR-0501-15
+	fumotom/43611	Monitor Fmaxx 19'' Led Com Hdmi Vga Vesa cor Preto MQ19V
+	fumotom/42764	Monitor Lg 24” Ips 100Hz Full Hd Hdmi 2x, Preto - 24Ms500
+	fumotom/43270	Monitor Lg UltraFine - Tela Ips Uhd 4K 27", Hdr10, Dci-P3 90%, Dynamic Action Sync, Branco– 27Us500
+	fumotom/42952	Monitor LG UltraWide - Tela IPS de 29", 21:9, HDR10, sRGB 99%, 100Hz, Preto- 29WQ500B
+	promotom/112456	Monitor Portatil 15,6pol Ips Jsc Ioway
+	fumotom/44395	Monitor Portatil 15,6pol Ips, full hd Ioway
+	fumotom/43785	Monitor Portátil 15,6" Tomate Mtm-1506 Full Hd Ips Ultra Slim Usb-C/Hdmi
+	fumotom/43610	Monitor Portátil 15.6&amp;quot&amp;quot Tela Externa Hdr Ips 1080p Ultrafino - R$ 390
+	fumotom/44381	Monitor Portátil 15.6'' Tela Externa Hdr Ips 1080p Ultrafino
+	fumotom/44472	Monitor Portátil Arzopa Z1c 16,1 Polegadas, 1080P 300cd/ ㎡ Tela Ips para Laptop Mac Pc Switch Ps Xbox Display Externo Z1 C Cinza 60hz
+	fumotom/44660	Monitor Portátil Zsus 2K de 14 Polegadas (2160×1440) 60Hz Para Laptop, XBox, Ps4/5, Switch, Caixa de Tv, Celular e Pc
+	fumotom/43731	Monitor Samsung Uj59 32" Uhd Tela Plana Painel Va 60Hz 4ms Hdmi FreeSync Game Mode Lu32j590uqlmzd
+	promotom/112241	MSI Notebook Prestige 16 AI EVO, Intel Ultra 7-155H, Intel Arc Graphics, 40.6 cm QHD+ 400nits Dispaly, 64 GB LPDDR5 RAM, 2 TB SSD, Wi-Fi 7, AI Engine, Windows 11 Pro, MS Office Lifetime License
+	fumotom/43565	Notebook Acer Aspire Go 15 Core i5 13gen 8GB 256GB SSD Linux AG15-71P-54PD
+	promotom/112122	Notebook Acer Aspire Go 15 Intel Core i5-1334U 8Gb Ram Ssd 256Gb Tela 15,3”
+	promotom/112256	Notebook Acer Aspire Go 15 Intel Core i5-1334U 8GB RAM SSD 256GB Tela 15,3” WUXGA Linux
+	promotom/112007	Notebook Acer Nitro 58mm C5 8gb Ram 512gb Ssd Rtx5060 Linux
+	fumotom/44740	Notebook Asus Tuf Gaming F16 Rl105 Intel Core 5 210H, Nvidia Rtx™ 3050, 8Gb, 512Gb Ssd, Keepos, 16" Lcd Led Fhd 144 Hz
+	fumotom/43285	Notebook Asus Vivobook Go 15 E1504fa Amd Ryzen 5 7520U 8Gb Ram 256Gb Ssd Linux 15,6" Fhd - Nj731
+	fumotom/44460	Notebook Asus Vivobook S14 S3407ca Intel Core Ultra 5 225H 16Gb Ram 512Gb Ssd Linux KeepOS Tela 14” Led Fhd Gray - Ly171
+	fumotom/42584	Notebook Gamer 15.6" Acer Nitro V 15 com Processador Amd Ryzen 7 7735Hs Placa de Vídeo Nvidia GeForce Rtx 4050 de 6Gb Memória Ram de 8Gb Ddr5 Ssd de 512Gb Tela Ips 165Hz Linux
+	fumotom/42539	Notebook Gamer Acer Nitro V15 ANV15-52-52VN Intel® Core™ i5-13420H 13ªG 512 GB SSD 16 GB RAM RTX 4060 15.6”
+	fumotom/44027	Notebook Gamer Acer Nitro V15 ANV15-52-57MC, Intel Core i5-13420H, 8GB RAM, SSD 512GB, 15.6" FHD, RTX 4050, Linux, Preto - NH.U1TAL.004
+	fumotom/44520	Notebook Gamer Lenovo LOQ 15IRX9, 15.6" Full HD 144Hz, Intel Core i5-13450HX, 16GB, 512GB SSD, NVIDIA RTX 4050, Linux - 83KHS00300
+	fumotom/42575	Notebook HP 200 HP 200 G2i Intel Core 3-100U 16" Intel Graphics RAM 8GB (1x8GB) DDR5 SSD 256GB PCIe4x4 Windows 11 Home SL - E30QDAT#AK4
+	fumotom/44606	Notebook Lenovo IdeaPad Slim 3 15.3" Luna Grey - Intel Core 3 100U, 8Gb Ram, 256Gb Ssd, Windows 11
+	fumotom/44028	Notebook Lenovo IdeaPad Slim 3 AMD Ryzen 5 7535HS, 8GB, AMD Radeon Graphics, SSD 512GB, 15.3" WUXGA 1920x1200, Linux - 83MMS00300
+	promotom/112001	Notebook Lenovo IdeaPad Slim 3 com AMD Ryzen 7 8840HS, 8GB de RAM e SSD de 512GB – Linux
+	promotom/112039	Notebook Lenovo Ideapad Slim 3 Ryzen 5 8gb 512gb Linux Cinza
+	promotom/112006	Notebook Lenovo IdeaPad Slim 3 Ryzen 7 8840HS 15.3" WUXGA AMD Radeon 780M 512GB SSD 8GB DDR5-5600 Linux - 83TYS00500
+	promotom/112148	Notebook Lenovo IdeaPad Slim 3i 15.3" - Intel Core i5-13420H, 8GB RAM, 256GB SSD, Linux
+	fumotom/44462	Notebook Positivo Vision R15 Amd® Ryzen 5-5500U Linux 16Gb Ram 256Gb Ssd Full Hd 15.6” Tela Ips
+	fumotom/42577	Notebook Positivo Vision R15M AMD Ryzen 5-5625U Linux 8GB RAM 256GB SSD Wi-Fi 6 Tela 15” Full HD IPS Antirreflexo - Minitela 1,54" - Lumina Bar com 3 Níveis Permite upgrade de memória RAM e SSD Preto
+	fumotom/44463	Notebook Vaio Fe16 Amd Ryzen 7 5825U, Linux, 8Gb Ram 256Gb M.2 NVMe 16" Ips - Cinza Grafite fe 16
+	fumotom/44776	Notebook Vaio Fe16 Amd Ryzen 7 5825U, Linux, 8Gb Ram 256Gb Ssd 16" Wuxga Ips - Cinza Grafite fe 16
+	fumotom/44464	Notebook Vaio Fe16 Amd Ryzen 7-5825U Linux 16Gb Ram 256Gb M.2 NVMe 16" Ips Antirreflexo - fe 16
+	fumotom/43816	Notebook Vaio Fe16 Ryzen 7 5825U
+	nerdofertas/147568	O novo MacBook Pro 16" com tela PROLED XDR, chip M5 Max, 128 GB de memória, 16 TB e tela nano-texture custa R$ 176.799 na loja oficial do Brasil.
+	fumotom/42937	Pasta Térmica Cooler Master Hight Performance, 0.8W, Branca - Htk-002-U1
+	fumotom/44237	Pasta Térmica Honeywell Ptm7950 80x160x0.2mm 8.5W/mk para Resfriamento de Laptop/Cpu/Gpu 80x160x0.2 Ptm 7950
+	fumotom/42940	Pasta Térmica Snowdog Husky 3g Para Processadores com Seringa
+	fumotom/44239	Pasta Térmica Wovibo Wb-5 4g 17 W/M-k para Cpu Gpu, Composto de Silicone para Refrigeração wb5
+	fumotom/42788	Pc Gamer Spectrum, Amd Ryzen 5 5500, Radeon Rx 7600 8Gb, 16Gb Ddr4, Ssd 480Gb, Fonte 500W 80 PLus
+	fumotom/43062	Pc Home Essential S, Intel Core i3, 8Gb De Ram, Ssd 120Gb
+	promotom/112739	PLACA 4X2" COM SUPORTE - SAÍDA DE FIO 10MM - HABITAT BLACK- FAME
+	fumotom/44255	Placa De Captura De Vídeo Ugreen 4K60Hz Usb C Hdmi Para Transmissão Ao Vivo
+	fumotom/44515	Placa de Captura ezcap 324B Live Gamer Raw Pciexpress
+	fumotom/44240	Placa de Captura ezcap324B Live Gamer Raw Pciexpress
+	promotom/112097	PRECIN NOS MONITORES
+	promotom/112632	Q-12 Interface de audio,placa de som profissional de canal USB 2.0 DC 5V de alta velocidade, função de monitor para estúdio/gravação musical/jogos/Equipamentos para Gravação Musical
+	fumotom/42525	Smart TV 4K 65" LG NANO UHD AI NU850 2026 Processador α7 Ger9 HDR10 Xbox Bluetooth Wi-Fi AI Search Google Gemini webOS 26 - 65NU850BPSA
+	fumotom/42619	Smart Tv Profissional 4K 55" Lg Uhd 55Au801 Processador α7 Ai Ger8 Super Upscaling Google Cast Alexa Integrado Controle Ai Smart Magic WebOS 25
+	fumotom/44570	Smartphone Xiaomi Poco X8 Pro Max 5G, 256Gb+12Gb Ram, Smartphone com Processador MediaTek Dimensity 9500s, Bateria de 8500 mAh, Versão Global
+	promotom/112302	Suporte Articulado Com Pistao a Gas Para 2 Monitores Zinnia Nimbo 200, 17 Pol. a 27 Pol., Branco, ZNO-ZNNBO200-WH01
+	fumotom/42683	Suporte Articulado Para 2 Monitores 13 a 32 Pistão a Gás Zinnia Nimbo 210 Branco
+	promotom/112153	Suporte Articulado Para Monitor 13 a 32 Pistão a Gás Ajustável Zinnia Nimbo 110 Preto
+	fumotom/44558	Suporte articulado para monitor 14-32 polegadas
+	fumotom/43077	Suporte Articulado Para Monitor Nbjohson Gs-Mrz05, 13 Pol a 32 Pol, Preto
+	fumotom/44569	Suporte de Mesa Articulado para 2 Monitores de 15" a 34" Dual Iron Lift Rise Mode, Ajuste de altura, Pistão a Gás
+	fumotom/44571	Suporte de Mesa Articulado para Monitor de 17" a 32" North Bayou, com Pistão a Gás, Vesa
+	fumotom/42566	Suporte de Mesa Ergonômico North Bayou Single Arm A5-B, Articulado, Para Monitores 17 Até 32 Pol, Preto
+	fumotom/42565	Suporte de Mesa North Bayou F80, Articulado, Com Pistão, Para Monitores 17 Até 30 Pol, Preto
+	promotom/112154	Suporte De Mesa Para Tv/monitor De 17 Até 30 Preto Nb F80
+	promotom/112471	Suporte de Monitor Elements Aice Branco - Duo
+	fumotom/44645	Suporte de Monitor Elements Aice Preto - Duo
+	fumotom/42927	Suporte de Parede Articulado para Monitor de 17" a 32" Ergofirst, Ajuste com Pistão a Gás, Branco - G16-111-W
+	fumotom/42825	Suporte de Parede Articulado para Monitor de 17" a 32" Ergofirst, Ajuste com Pistão a Gás, Preto - G16-111
+	promotom/112473	Suporte Monitor Articulado Elements Axion - Preto
+	promotom/112492	Suporte Monitor Articulado Elements Axion Duplo
+	fumotom/44579	Suporte Monitor Duplo Braço Articulado para dois monitores (Suporta 10kg cada braço)
+	fumotom/44137	Suporte Monitor， Braço Articulado Monitor
+	fumotom/43471	Suporte para Gpu Rise Mode, Argb, 500mm, Aura V2, Branco - Rm-Spvg-02-Argb-W
+	fumotom/43274	Tablet Positivo Vision Tab 7 - Processador Octa-Core 3Gb Ram 64Gb Armazenamento Tela 7” Ips Bateria 3100mAh, Android 14 Go, Wi-fi - Preto
+	fumotom/43502	Tela de Monitoramento Gamer Smart Screen Support Rise Mode, 9.2" Ips, Usb-C, Branco - Rm-Scp-W
+	fumotom/44657	Tela para gabinete Turzx 5.2 Polegadas Ips 1280x720
+	fumotom/44664	Xbox Series S Nova Geração 512GB SSD - 1 Controle Branco Microsoft
+	nerdofertas/149069	➡️ Adaptador Fenvi m.2 para Ax200, Ax210, 8265, 7260Ac, WiFi e Bluetooth
+	nerdofertas/149056	➡️ Adaptador M2 Pciex X1 para M.2 NVMe M Key 2280, Cabo de Extensão 5cm
+	nerdofertas/149053	➡️ Adaptador PCIe X4 M.2 para um Ssd NVMe M.2 e um Ssd Sata M.2
+	nerdofertas/147177	➡️ Bateria Moura Ma5-d Para Moto Titan Fan Biz Bros Fazer
+	nerdofertas/148525	➡️ Cartão de Memória Flash de Alta Velocidade Movespeed Micro Sd T300 64GB
+	nerdofertas/148755	➡️ Cartão de Memória Flash de Alta Velocidade Movespeed Micro Sd T300 U3 Mini Sd 100Mb/s 64Gb Sdxc Tf para Câmeras e Drones
+	nerdofertas/148857	➡️ Console Sony PlayStation 5, Ssd 825Gb, Controle Sem Fio DualSense + 2 Jogos Digitais, Edição Digital
+	nerdofertas/148906	➡️ Controle Gamer EasySMX M05 Tipo C compatível com Android, Cloud Gaming Xbox Game Pass, Stadia, xCloud, GeForce
+	nerdofertas/148899	➡️ Câmera de segurança Wi-Fi, visão noturna, monitor, ICSEE, Coibeu 🇧🇷
+	nerdofertas/147931	➡️ Dissipador SSD M.2 2280 NVMe Delta-CN510 ARGB 5V 3 Pinos Aura Sync
+	nerdofertas/148939	➡️ GameSir G7 Pro para Xbox Series X Controle S com Joysticks TMR, Gatilhos de Efeito Hall, Placas Frontais Magnéticas, Giroscópio, Base de Carregamento Inteligente
+	nerdofertas/148576	➡️ GameSir G7 Pro Xbox Series X | Controlador S com Joysticks TMR, Gatilhos de Efeito Hall, Placas Frontais Magnéticas, Giroscópio, Base de Carregamento Inteligente
+	nerdofertas/146965	➡️ Hollyland Microfone Sem Fio Duplo Lark M2 Usb-c
+	nerdofertas/148526	➡️ Micro Sd Cartão de Memória Movespeed B300 256Gb 170Mb/s Tf A2 V30, Sdxc, para Câmeras, Filmadoras Dv, Câmeras Veiculares e Drones
+	nerdofertas/148793	➡️ Monitor Alltek 21.5" 100Hz Atk-215 Hd Painel Va
+	nerdofertas/147939	➡️ MSI Notebook Prestige 16 AI EVO, Intel Ultra 7-155H, Intel Arc Graphics, 40.6 cm QHD+ 400nits Dispaly, 64 GB LPDDR5 RAM, 2 TB SSD, Wi-Fi 7, AI Engine, Windows 11 Pro, MS Office Lifetime License
+	nerdofertas/148075	➡️ Notebook Acer Aspire Go 15 Core i5 13gen 8GB 256GB SSD Linux AG15-71P-54PD
+	nerdofertas/147105	➡️ Notebook Acer Nitro 58mm C5 8gb Ram 512gb Ssd Rtx5060 Linux
+	nerdofertas/148030	➡️ Notebook ASUS Vivobook Go 15 E1504FA AMD Ryzen 5 7520U 8Gb Ram 256Gb Ssd Linux 15,6" FHD - NJ731
+	nerdofertas/147988	➡️ Notebook ASUS Vivobook Go 15 Ryzen 5 8GB 256GB
+	nerdofertas/147660	➡️ Notebook Lenovo IdeaPad Slim 3 15.3" Luna Grey Intel Core 3 100U, 8GB RAM, 256GB SSD, Windows 11
+	nerdofertas/148406	➡️ Notebook VAIO FE16 AMD Ryzen 7 5825U, Linux, 8GB RAM 256GB M.2 NVMe 16"  IPS - Cinza Grafite fe 16
+	nerdofertas/147121	➡️ Notebook VAIO FE16 Intel Core i5-1334U - 13ª Gen Linux Debian 12 - 8GB RAM 256GB SSD Tela 16" IPS WUXGA Antirreflexo - Cinza Grafite - VJFE62F11X-B0911H
+	nerdofertas/147360	➡️ Pasta Térmica Cooler Master Hight Performance, 0.8W, Branca Htk-002-U1
+	nerdofertas/148709	➡️ Pasta Térmica Honeywell Ptm7950 80x160x0.2mm 8.5W/mk para Resfriamento de Laptop/Cpu/Gpu 80x160x0.2 Ptm 7950
+	nerdofertas/147364	➡️ Pasta Térmica Snowdog Husky 3g Para Processadores com Seringa
+	nerdofertas/148710	➡️ Pasta Térmica Wovibo Wb-5 4g 17 W/M-k para Cpu Gpu, Composto de Silicone para Refrigeração wb5
+	nerdofertas/146863	➡️ Philips Walita Multiprocessador PowerChop 750, 4 Acessórios, 750W
+	nerdofertas/147147	➡️ Smart Tv Profissional 4K 55" Lg Uhd 55Au801 Processador α7 Ai Ger8 Super Upscaling Google Cast Alexa Integrado Controle Ai Smart Magic WebOS 25
+	nerdofertas/147280	➡️ Suporte Articulado Para Monitor 13 a 32 Pistão a Gás Ajustável Zinnia Nimbo 110 Preto
+	nerdofertas/147190	➡️ Suporte de Mesa Articulado para Monitor de 15" a 34" Iron Lift Rise Mode, Ajuste de altura, Pistão a Gás, Vesa, Branco - RM-IL-01-W
+	nerdofertas/147512	➡️ Suporte De Mesa Para Tv/monitor De 17 Até 30 Preto Nb F80
+	nerdofertas/148425	➡️ Suporte Monitor Articulado Elements Axion Duplo
+	nerdofertas/147928	➡️ Suporte para GPU Rise Mode, ARGB, 500mm, Aura V2, Branco RM-SPVG-02-ARGB-W
+	nerdofertas/147671	➡️ Tablet Positivo Vision Tab 7 Processador Octa-Core 3Gb Ram 64Gb Armazenamento Tela 7” Ips Bateria 3100mAh, Android 14 Go, Wi-fi Preto
+	nerdofertas/147948	➡️ Tela de Monitoramento Gamer Smart Screen Support Rise Mode, 9.2" Ips, Usb-C, Branco Rm-Scp-W
+	nerdofertas/148926	➡️ Xbox Series S Nova Geração 512GB SSD 1 Controle Branco Microsoft
+	nerdofertas/146795	➡️ Xiaomi 2026 Redmi Note 17 AMOLED 120Hz Processador Snapdragon 6s Gen 2 7700mAh Lacrado Original
+	fadapromos/14162	🔥 Acer Aspire Go 15 Notebook 15.6" Intel Core i7 8GB Linux
+	SamuelF3lipePromo/124837	🔥 Ainda Ativo - Cupom Kabum 10% OFF em Placas de Vídeo
+	SamuelF3lipePromo/124717	🔥 Braço Articulado Monitor Rgb 8 efeitos de iluminação 17" 34" Polegadas
+	fullpromotion/32977	🔥 Champion CO200 Men's Hooded Packable Quarter-Zip Jacket, Lightweight Wind & Water-Resistant Pullover with Adjustable Hood
+	fullpromotion/33299	🔥 Chocolate Ao Leite Caramelo E Flor De Sal Danke Memórias 90G
+	fadapromos/13584	🔥 Console Sony PlayStation 5 Edição Digital Slim, SSD 825GB, Controle DualSense, Astro's Playroom, Branco - CFI 2114B
+	fadapromos/14317	🔥 Console Sony PlayStation 5, SSD 825GB, Controle Sem Fio DualSense + 2 Jogos Digitais, Edição Digital
+	fullpromotion/32896	🔥 Dissipador Ssd M.2 2280 NVMe Delta-Cn510 Argb 5V 3 Pinos Aura Sync
+	fullpromotion/33949	🔥 ELG Suporte Articulado de Parede para Monitor e TV 17 a 35 Polegadas | Telas de 2 a 9kg, VESA 75x75 e 100x100mm, Pistão a Gás, Altura até 25cm, Giro 360°, Já Vem Montado, NR17, Modelo F410
+	fullpromotion/33943	🔥 ELG Suporte Articulado para Monitor 17 a 35 Polegadas Pistão a Gás Branco | Monitores de 2 a 9kg, VESA 75x75 e 100x100mm, Altura 14 a 42cm, Avanço 54,3cm, Giro 360°, NR17, Modelo F80W
+	SamuelF3lipePromo/124504	🔥 Fones de ouvido Trn Mt5 com driver dinâmico duplo e monitores intra-auriculares
+	fullpromotion/33878	🔥 Fonte de Água para Gatos e Cães Amicus Aqua First, Rosa, 1,2L | USB, Bivolt, Design Ergonômico, Portátil, Purificador
+	SamuelF3lipePromo/124869	🔥 GameSir G7 Pro para Xbox Series X Controle S com Joysticks Tmr, Gatilhos de Efeito Hall, Placas Frontais Magnéticas, Giroscópio, Base de Carregamento Inteligente
+	SamuelF3lipePromo/124811	🔥 Hollyland Lark M2 Microfone S/ Fio P/ iPhone 15/16/17 E Android Usb-C Hl-Lark M2
+	fadapromos/14034	🔥 Lançamento Xiaomi 2026 Redmi Note 17 AMOLED 120Hz Processador Snapdragon 6s Gen 2 7700mAh Lacrado Original
+	SamuelF3lipePromo/124438	🔥 Microfone Hollyland Lark M2 Duo Combo Duplo Para 2 Pessoas U
+	SamuelF3lipePromo/124619	🔥 Microfone K688 dinâmico Xlr de gravação Fifine com monitoramento em tempo real
+	SamuelF3lipePromo/124807	🔥 Monitor Acer 21,4" 100Hz Mk221q Bi Led/Va Full Hd 1ms Hdmi Vga Vesa
+	SamuelF3lipePromo/124819	🔥 Monitor Alltek 21.5" 100Hz Atk-215 Hd Painel Va
+	fullpromotion/33094	🔥 Monitor Fmaxx 19'' Led Com Hdmi Vga Vesa cor Preto MQ19V
+	SamuelF3lipePromo/124454	🔥 Monitor Portatil 15,6pol Ips Jsc Ioway
+	fullpromotion/33641	🔥 Monitor Portatil 15,6pol Ips, full hd Ioway
+	SamuelF3lipePromo/124810	🔥 Monitor Portátil 15.6'' Tela Externa Hdr Ips 1080p Ultrafino
+	SamuelF3lipePromo/124947	🔥 Monitor Portátil Zsus 2K de 14 Polegadas (2160×1440) 60Hz Para Laptop, XBox, Ps4/5, Switch, Caixa de Tv, Celular e Pc
+	SamuelF3lipePromo/124418	🔥 Monitor Samsung Uj59 32" Uhd Tela Plana Painel Va 60Hz 4ms Hdmi FreeSync Game Mode Lu32j590uqlmzd
+	fullpromotion/32905	🔥 MSI Notebook Prestige 16 AI EVO, Intel Ultra 7-155H, Intel Arc Graphics, 40.6 cm QHD+ 400nits Dispaly, 64 GB LPDDR5 RAM, 2 TB SSD, Wi-Fi 7, AI Engine, Windows 11 Pro, MS Office Lifetime License
+	SamuelF3lipePromo/124216	🔥 Notebook Acer Aspire Go 15 Core i5 13gen 8GB 256GB SSD Linux AG15-71P-54PD
+	fullpromotion/32969	🔥 Notebook Acer Aspire Go 15 Intel Core i5-1334U 8GB RAM SSD 256GB Tela 15,3” WUXGA Linux
+	fadapromos/14078	🔥 Notebook Acer Nitro 58mm C5 8gb Ram 512gb Ssd Rtx5060 Linux
+	SamuelF3lipePromo/124993	🔥 Notebook Asus Tuf Gaming F16 Rl105 Intel Core 5 210H, Nvidia Rtx™ 3050, 8GB, 512Gb Ssd, Keepos, 16" Lcd Led Fhd 144 Hz
+	fullpromotion/32974	🔥 Notebook ASUS Vivobook Go 15 E1504FA AMD Ryzen 5 7520U 8GB Ram 256GB Ssd Linux 15,6" FHD NJ731
+	fullpromotion/33672	🔥 Notebook Asus Vivobook S14 S3407ca Intel Core Ultra 5 225H 16Gb Ram 512Gb Ssd Linux KeepOS Tela 14” Led Fhd Gray - Ly171
+	SamuelF3lipePromo/124626	🔥 Notebook Gamer Acer Nitro V15 ANV15-52-57MC, Intel Core i5-13420H, 8GB RAM, SSD 512GB, 15.6" FHD, RTX 4050, Linux, Preto NH.U1TAL.004
+	fullpromotion/33744	🔥 Notebook Lenovo IdeaPad Slim 3 15.3" Luna Grey - Intel Core 3 100U, 8Gb Ram, 256Gb Ssd, Windows 11
+	fadapromos/13575	🔥 Notebook Lenovo IdeaPad Slim 3 15IRU10 Intel Core 3 100U 8GB 256GB SSD Linux 15.3"
+	SamuelF3lipePromo/124625	🔥 Notebook Lenovo IdeaPad Slim 3 AMD Ryzen 5 7535HS, 8GB, AMD Radeon Graphics, SSD 512GB, 15.3" WUXGA 1920x1200, Linux 83MMS00300
+	fadapromos/14158	🔥 Notebook Lenovo IdeaPad Slim 3i 15.3" - Intel Core i5-13420H, 8GB RAM, 256GB SSD, Linux
+	fadapromos/13796	🔥 Notebook Lenovo Slim3 R7 7735HS. 8gb 256GB Ssd 15.3 Fhd Linux
+	SamuelF3lipePromo/124847	🔥 Notebook Positivo Vision R15 Amd® Ryzen 5-5500U Linux 16Gb Ram 256Gb Ssd Full Hd 15.6” Tela Ips
+	fullpromotion/33675	🔥 Notebook Vaio Fe16 Amd Ryzen 7 5825U, Linux, 8Gb Ram 256Gb M.2 NVMe 16" Ips - Cinza Grafite fe 16
+	SamuelF3lipePromo/124848	🔥 Notebook Vaio Fe16 Amd Ryzen 7 5825U, Linux, 8Gb Ram 256Gb M.2 NVMe 16" Ips Cinza Grafite fe 16
+	fullpromotion/34004	🔥 Notebook Vaio Fe16 Amd Ryzen 7 5825U, Linux, 8Gb Ram 256Gb Ssd 16" Wuxga Ips - Cinza Grafite fe 16
+	SamuelF3lipePromo/125004	🔥 Notebook Vaio Fe16 Amd Ryzen 7 5825U, Linux, 8Gb Ram 256Gb Ssd 16" Wuxga Ips Cinza Grafite fe 16
+	fullpromotion/33676	🔥 Notebook Vaio Fe16 Amd Ryzen 7-5825U Linux 16Gb Ram 256Gb M.2 NVMe 16" Ips Antirreflexo - fe 16
+	SamuelF3lipePromo/124849	🔥 Notebook Vaio Fe16 Amd Ryzen 7-5825U Linux 16Gb Ram 256Gb M.2 NVMe 16" Ips Antirreflexo fe 16
+	SamuelF3lipePromo/124490	🔥 Notebook Vaio Fe16 Ryzen 7 5825U
+	fadapromos/14309	🔥 Notebook Vaio FE16 Ryzen 7 5825U (IPS, 8gb RAM, 256gb)
+	fullpromotion/33912	🔥 PLACA 4X2" COM SUPORTE - SAÍDA DE FIO 10MM - HABITAT BLACK- FAME
+	SamuelF3lipePromo/124978	🔥 Q-12 Interface de audio,placa de som profissional de canal USB 2.0 DC 5V de alta velocidade, função de monitor para estúdio/gravação musical/jogos/Equipamentos para Gravação Musical
+	SamuelF3lipePromo/124224	🔥 Suporte Articulado Para 2 Monitores 13 a 32 Pistão a Gás Zinnia Nimbo 210 Branco
+	fullpromotion/33422	🔥 Suporte de Monitor Elements Aice Branco - Duo
+	SamuelF3lipePromo/124484	🔥 Suporte de Monitor Elements Aice Branco Duo
+	SamuelF3lipePromo/124936	🔥 Suporte de Monitor Elements Aice Preto - Duo
+	fullpromotion/33424	🔥 Suporte Monitor Articulado Elements Axion - Preto
+	SamuelF3lipePromo/124649	🔥 Suporte Monitor Articulado Elements Axion Duplo
+	SamuelF3lipePromo/124487	🔥 Suporte Monitor Articulado Elements Axion Preto
+	fullpromotion/32891	🔥 Suporte para Gpu Rise Mode, Argb, 500mm, Aura V2, Branco - Rm-Spvg-02-Argb-W
+	fullpromotion/33762	🔥 Xbox Series S Nova Geração 512GB SSD - 1 Controle Branco Microsoft
+	SamuelF3lipePromo/124949	🔥 Xbox Series S Nova Geração 512GB SSD 1 Controle Branco Microsoft
+	nerdofertas/147989	🚨 Monitores previsão de preço para usar o cupom meia noite - Preço pode mudar
+cooler	fumotom/44412	2x Kit 3x de Fans Magnéticas Coolcirc (Adicione 2 unidades de Kit de fan com 3 Reverse ou forward)
+cooler	fumotom/44565	4x Kit Fans Prism 6 pro Argb Pwm (Normal e Reversa)
+cooler	fumotom/44295	Air Cooler Ag400 G2 DeepCool Argb
+cooler	promotom/112077	Air Cooler Cooler Master Hyper 212 Spectrum V3, Argb, Intel e Amd, 120mm, Preto - Rr-S4na-17Pa-R1
+cooler	fumotom/44591	Air cooler Deepcool Ak500s com Display
+cooler	fumotom/43788	Air Cooler Deepcool Ak620 Zero Dark Zoria 6 Heatpipes
+cooler	promotom/112175	Air Cooler Gamer Rise Mode Temp 8 White, ARGB, AMD e Intel, 120mm, Branco - RM-ACT8-ARGB-W
+cooler	fumotom/43379	Air Cooler GamerStorm X Redragon Ak400 Rd Preto 4 Heatpipes Fan 120 mm R-Ak400-Bknnmd-Ajg
+cooler	fumotom/43072	Air Cooler Husky Alisius 200 Argb 120Mm 220W Amd Intel
+cooler	fumotom/43895	Air Cooler Low Profile aRGB Wovibo 6 Heatpipes 120mm 180tdp 190tdp
+cooler	fumotom/44711	Air Cooler Low Profile aRGB Wovibo 6 Heatpipes 120mm 190tdp Branco
+cooler	fumotom/43472	Air Cooler Mach1 Artic, Argb, Amd e Intel, 120mm, Preto - A40
+cooler	fumotom/42921	Air Cooler MACH1 BOREAL, Digital, AMD e Intel, 120mm, Preto - B40 DIG V2
+cooler	fumotom/43473	Air Cooler Mach1 Boreal, Digital, Argb, Amd e Intel, 120mm, Preto - B40-Dig-Argb V2
+cooler	fumotom/42922	Air Cooler MACH1 STORM DIGITAL, AMD e Intel, 120mm, Branco - B40 DIG WH V2
+cooler	fumotom/42925	Air Cooler MACH1 TYPHOON ARGB, AMD e Intel, 120mm, Branco - A60-H-ARGB
+cooler	fumotom/42818	Air Cooler MACH1 WIND, ARGB, AMD e Intel, 120mm, Preto - A60 ARGB
+cooler	fumotom/44138	Air Cooler Metalfish Zh-1400 argb, 4 Heatpipes, 1700 1200 1150 1155 1156 1366 2011 Am5 Am4 Am3 x99 x79
+cooler	fumotom/44596	Air Cooler Montech Nx600, Argb, Dual Tower, 120mm, Intel e Amd, Branco - Nx600argbw nx 600
+cooler	fumotom/44121	AirCooler Upsiren Walrus Assassin 90, com tela de monitoramento
+cooler	fumotom/44584	Cooler Líquido Aio Proflow 360 Tela Lcd Magnética 5,5" Argb 360mm 2000Rpm
+cooler	fumotom/44592	Cpu Air Cooler Pa120 Se Thermalright Peerless Assassin 120 black preto white branco Pa 120 Se v2 ps120 preto branco pa120se aRGB
+cooler	fumotom/44590	Cpu cooler Wovibo 4A 120mm (ótimo para X99)
+cooler	fumotom/44116	Cpu cooler Wovibo Low profile 6 heatpipes
+cooler	fumotom/44118	Kit 3 fans Jumpeak Cs120 mageticas Argb
+cooler	fumotom/43886	Kit 3 fans Magnéticas Jungle Leopard Galaxy v2 aRGB 5v reverse ou normal 360mm magnetica, contador Rpm no meio das fan
+cooler	fumotom/44314	Kit 3 fans UniFan Magnética Jumpeak Cs120 aRGB 5v reverse ou normal 360mm cs 120
+cooler	fumotom/43878	Kit 5 Fan Upsiren Uf-1 Prism 4 Pro Argb 5V Uf1 45,2Cfm/600-1500Rpm
+cooler	fumotom/44513	Kit Fan Prism 4Rs aRGB fans 4 rs 5v white ou black
+cooler	fumotom/43478	Kit Ventoinha Pichau Ventus Nx Reverse, Argb, 3x120mm, Branco, Pch-Vtnxr3-Wh01
+cooler	fumotom/42811	Kit Ventoinha Pichau Ventus NX, ARGB, 3x120mm, Branco
+cooler	fumotom/42838	Kit Ventoinhas Acegeek Neon, Argb, 5x120mm, Preto, Ag-Neon5x1-Bk
+cooler	fumotom/42837	Kit Ventoinhas Acegeek Silverline, Argb, 5x120mm, Branco, Ag-Silverline5x1-Wh
+cooler	fumotom/42574	Kit Ventoinhas NZXT F120RGB DUO, 3x120mm, Branco, RF-D12TF-W1
+cooler	fumotom/42813	Kit Ventoinhas Pichau Ventus NX, ARGB, 3x120mm, Preto, PCH-VTNX3-BK01
+cooler	fumotom/43619	Kit Ventoinhas Pichau Ventus Nx, Argb, 5x120mm, Preto, Pch-Vtnx5-Bk01 1,6 mm H₂O ±10%
+cooler	fumotom/43475	Kit Ventoinhas Tgt Striker, Rainbow, 5x120mm, Tgt-Stk5-Blrbw
+cooler	promotom/112590	Redragon Water Cooler GamerStorm LE240 RD 240mm ARGB
+cooler	promotom/112166	Redragon Water Cooler GamerStorm Le240 Rd 240mm Rgb
+cooler	promotom/112509	Redragon Water Cooler GamerStorm LE240 RD 240mm RGB Compatível c/ Intel LGA 1851/1700/1200/1151 e AMD AM4/AM5 Preto - R-LE240RD-BKAMMN-A-1
+cooler	fumotom/43361	Ventoinha Rise Mode Galaxy Motherboard, 120mm, ARGB, Preto - RM-MB-01-5V
+cooler	promotom/112251	Voltou! Redragon Water Cooler GamerStorm Le240 Rd 240mm Rgb
+cooler	fumotom/44400	Water Cooler 240mm Pcyes Sangue Frio 3 Black Vulcan Wcsf3120br Tdp 200w
+cooler	fumotom/43096	Water Cooler 360mm Cooler Master Elite Liquid Branco Argb Elw-D36m-A21da-Rw Cpu Intel Amd
+cooler	fumotom/44597	Water Cooler Aio Jungle Leopard ProFlow 360 Se Com tela Lcd de 4 Polegadas 360mm, pro flow
+cooler	fumotom/42954	Water Cooler Arctic Liquid Freezer Iii Pro 360, 360mm, Intel-Amd, Preto, Acfre00180a
+cooler	fumotom/44380	Water Cooler Cooler Master Elite Liquid 360mm Rgb p/ Cpu
+cooler	fumotom/44383	Water Cooler Deepcool Le360 V2 Zero Black 3400 Rpm 360mm
+cooler	fumotom/43052	Water Cooler Digital Iceburg 360 N2WLS Bk
+cooler	fumotom/42809	Water Cooler Gamemax Digital Iceburg 360 N2wls Bk 360mm
+cooler	fumotom/44384	Water Cooler Gamer Kalkan Delta 360mm Wireless Argb Preto Klk00051 360
+cooler	fumotom/44669	Water Cooler Geometric Future Eskimo 36 Rgb Preto
+cooler	fumotom/42779	Water Cooler Gigabyte Eagle 360 Ice Argb 360Mm Branco
+cooler	fumotom/42777	Water Cooler Gigabyte Gaming 360, Argb, 360mm, Amd e Intel, Preto - Gp-Gigabyte Gme 360
+cooler	fumotom/42836	Water Cooler Husky Freezy Argb 120Mm Amd Intel Branco
+cooler	fumotom/42903	Water Cooler Husky Freezy, Iluminação Argb, 360mm, Amd e Intel
+cooler	fumotom/42791	Water Cooler Husky Freezy, Iluminação ARGB, 360mm, AMD e Intel, Preto - HWT300PT
+cooler	fumotom/44658	Water Cooler Jungle Leopard AstroBeat Com Sensor de Temperatura WaterCooler 240/360mm
+cooler	fumotom/44655	Water Cooler Jungle Leopard AstroShel V2g Tela personalizável de 2,8 polegadas
+cooler	fumotom/44600	Water Cooler Jungle Leopard Chill Arc 360 6,67 Polegadas Curva Amoled Tela Magnética, Preto e Branco
+cooler	fumotom/44656	Water Cooler Jungle Leopard Star Realm com Display Digital de Temperatura Led, Ventiladores Pwm com Sincronização Argb
+cooler	fumotom/43309	Water Cooler Kalkan Alpha 360 Argb Display Temperatura Branco Intel Amd Klk00049
+cooler	promotom/112558	Water Cooler Kalkan Aura Com Tela Lcd 360mm Argb Intel Amd
+cooler	fumotom/43376	Water Cooler Kalkan Aura Digital 360mm Preto Argb Display Lcd para Monitoramento Bomba 2900 Rpm Fans 120mm 71.4 Cfm 2.25 mmH2O Amd Am5 Intel Lga1851 Klk00101
+cooler	fumotom/43649	Water Cooler Kalkan Aura Lite 240, 240mm, ARGB, Intel-AMD, Preto, KLK00098
+cooler	fumotom/43634	Water Cooler Kalkan Iota V2 360, Rainbow, 360mm, Intel-AMD, Preto, KLK00069
+cooler	fumotom/43129	Water Cooler Mach1 Logic Rgb 120mm Amd E Intel Preto Preto
+cooler	fumotom/42781	Water Cooler Mach1 Logic, Rgb, 360mm, Amd e Intel, Branco - Gk360w
+cooler	fumotom/43496	Water Cooler Mach1 Polar Argb, 360mm, Amd e Intel, Preto - Irv360bk
+cooler	fumotom/43346	Water Cooler NZXT Kraken Plus 360 RGB Branco Fan F360 Core Tripla Corpo Único 3x360mm Tela LCD 1.54” Bomba 2800RPM AMD AM4 / AM5 Intel LGA 1851/1700
+cooler	fumotom/43782	Water Cooler Obsid Pro 360 C/ Display Lcd E Argb Amd E Intel
+cooler	fumotom/43647	Water Cooler Round 5 Eurus Preto de 360mm Com Argb Para Cpu
+cooler	fumotom/42568	Water Cooler SuperFrame ISENGARD MAGIC, 240mm, Bomba Infinit, Display LCD Customizável, ARGB, Intel-AMD, White, SF-W240-MW
+cooler	fumotom/42807	Water Cooler Thermalright Frozen Infinity 360, Argb, 360mm, Branco, Tr-Fi-360-Wh-Argb
+cooler	fumotom/44593	Water Cooler Wovibo aRGB para Processador Amd Ryzen Intel e Xeon
+cooler	fumotom/43784	Watercooler Deepcool Le360 V2 Argb Preto 360mm Preto
+cooler	promotom/112454	Watercooler Digital Kalkan 360mm 3x Fans Argb 360mm Preto
+cooler	fumotom/43181	Watercooler Kalkan 360mm Argb Aura Lcd 360 Preto
+cooler	nerdofertas/148932	➡️ 4x Fans ARGB Prism 4RS 120MM
+cooler	nerdofertas/148865	➡️ 4x unidades Kit Fans Prism 6 pro Argb Pwm (Normal e Reversa)
+cooler	nerdofertas/148600	➡️ AirCooler Upsiren Walrus Assassin 90, com tela de monitoramento
+cooler	nerdofertas/148599	➡️ Kit 3 fans Jumpeak CS120 mageticas ARGB
+cooler	nerdofertas/148466	➡️ Kit 3 fans Magnéticas Jungle Leopard Galaxy v2 aRGB 5v reverse ou normal 360mm magnetica, contador Rpm no meio das fan
+cooler	nerdofertas/148764	➡️ Kit 3 fans UniFan Magnética Jumpeak Cs120 aRGB 5v reverse ou normal 360mm cs 120
+cooler	nerdofertas/148187	➡️ KIT 4 FAN ARGB GAMEMAX NEVIHTA FN12A-S8I-BK
+cooler	nerdofertas/148500	➡️ Kit 4 unidades PRISM 4RS aRGB fans 4 rs 5v white ou black
+cooler	nerdofertas/148461	➡️ Kit 5 Fan Upsiren Uf-1 Prism 4 Pro Argb 5V Uf1 45,2Cfm/600-1500Rpm
+cooler	nerdofertas/148826	➡️ Kit Fan Prism 4Rs aRGB fans 4 rs 5v white ou black
+cooler	nerdofertas/148033	➡️ Kit Ventoinha Pichau Ventus NX Reverse, ARGB, 3x120mm, Branco, PCH-VTNXR3-WH01
+cooler	nerdofertas/146856	➡️ Kit Ventoinhas Acegeek Neon Argb 3x120mm Preto Ag-neon3x1-bk
+cooler	nerdofertas/148211	➡️ Kit Ventoinhas Acegeek Neon, ARGB, 3x120mm, Preto, AG-NEON3X1-BK
+cooler	nerdofertas/147307	➡️ Kit Ventoinhas Acegeek Neon, Argb, 5x120mm, Preto, Ag-Neon5x1-Bk
+cooler	nerdofertas/147305	➡️ Kit Ventoinhas Acegeek Silverline, Argb, 5x120mm, Branco, Ag-Silverline5x1-Wh
+cooler	nerdofertas/147299	➡️ Kit Ventoinhas Pichau Ventus NX Reverse, ARGB, 3x120mm, Preto, PCH-VTNXR3-BK01
+cooler	nerdofertas/148209	➡️ Kit Ventoinhas TGT Striker, Rainbow, 5x120mm, TGT-STK5-BLRBW
+cooler	nerdofertas/148635	➡️ Redragon Water Cooler GamerStorm LE240 RD 240mm RGB Compatível c/ Intel LGA 1851/1700/1200/1151 e AMD AM4/AM5 Preto - R-LE240RD-BKAMMN-A-1
+cooler	nerdofertas/148210	➡️ Ventoinha Pichau Ventus NX Reverse, ARGB, 120mm, Preto, PCH-VTNR-BK01
+cooler	nerdofertas/147755	➡️ Ventoinha Rise Mode Galaxy Motherboard, 120mm, ARGB, Preto RM-MB-01-5V
+cooler	nerdofertas/146909	➡️ Water Cooler Geometric Future Eskimo 36 RGB Preto
+cooler	nerdofertas/148795	➡️ Water Cooler Kalkan Aura Com Tela Lcd 360mm Argb Intel Amd
+cooler	SamuelF3lipePromo/124876	🔥 4x Fans ARGB Prism 4rs 120mm
+cooler	SamuelF3lipePromo/124892	🔥 4x Kit Fans Prism 6 pro Argb Pwm (Normal e Reversa)
+cooler	SamuelF3lipePromo/124333	🔥 Air Cooler Cooler Master Hyper 212 Spectrum V3, ARGB, INTEL e AMD, 120mm, Preto
+cooler	SamuelF3lipePromo/124469	🔥 Air Cooler Deepcool Ak620 Zero Dark Zoria 6 Heatpipes
+cooler	fullpromotion/32892	🔥 Air Cooler Mach1 Artic, Argb, Amd e Intel, 120mm, Preto - A40
+cooler	fullpromotion/32989	🔥 Air Cooler MACH1 ARTIC, ARGB, AMD e Intel, 120mm, Preto A40
+cooler	fullpromotion/32893	🔥 Air Cooler Mach1 Boreal, Digital, Argb, Amd e Intel, 120mm, Preto - B40-Dig-Argb V2
+cooler	SamuelF3lipePromo/124674	🔥 AirCooler Upsiren Walrus Assassin 90, com tela de monitoramento
+cooler	SamuelF3lipePromo/124670	🔥 Cpu cooler Wovibo Low profile 6 heatpipes
+cooler	SamuelF3lipePromo/124593	🔥 Kit Fan Prism 4Rs aRGB fans 4 rs 5v white ou black
+cooler	fullpromotion/32898	🔥 Kit Ventoinha Pichau Ventus Nx Reverse, Argb, 3x120mm, Branco, Pch-Vtnxr3-Wh01
+cooler	fullpromotion/32895	🔥 Kit Ventoinhas Tgt Striker, Rainbow, 5x120mm, Tgt-Stk5-Blrbw
+cooler	SamuelF3lipePromo/124914	🔥 Redragon Water Cooler GamerStorm LE240 RD 240mm ARGB
+cooler	SamuelF3lipePromo/124868	🔥 Redragon Water Cooler GamerStorm Le240 Rd 240mm Rgb
+cooler	fullpromotion/33685	🔥 Redragon Water Cooler GamerStorm Le240 Rd 240mm Rgb Compatível c/ Intel Lga 1851/1700/1200/1151 e Amd Am4/Am5 Preto - R-Le240rd-Bkammn-A-1
+cooler	SamuelF3lipePromo/124690	🔥 Redragon Water Cooler GamerStorm LE240 RD 240mm RGB Compatível c/ Intel LGA 1851/1700/1200/1151 e AMD AM4/AM5 Preto R-LE240RD-BKAMMN-A-1
+cooler	fullpromotion/32929	🔥 Voltou! Redragon Water Cooler GamerStorm Le240 Rd 240mm Rgb
+cooler	fullpromotion/33645	🔥 Water Cooler 240mm Pcyes Sangue Frio 3 Black Vulcan Wcsf3120br Tdp 200w
+cooler	fullpromotion/33630	🔥 Water Cooler Cooler Master Elite Liquid 360mm Rgb p/ Cpu
+cooler	SamuelF3lipePromo/124812	🔥 Water Cooler Deepcool Le360 V2 Zero Black 3400 Rpm 360mm
+cooler	SamuelF3lipePromo/124813	🔥 Water Cooler Gamer Kalkan Delta 360mm Wireless Argb Preto Klk00051 360
+cooler	SamuelF3lipePromo/124953	🔥 Water Cooler Geometric Future Eskimo 36 Rgb Preto
+cooler	SamuelF3lipePromo/124946	🔥 Water Cooler Jungle Leopard AstroShel V2g Tela personalizável de 2,8 polegadas
+cooler	SamuelF3lipePromo/124820	🔥 Water Cooler Kalkan Aura Com Tela Lcd 360mm Argb Intel Amd
+cooler	SamuelF3lipePromo/124466	🔥 Water Cooler Obsid Pro 360 C/ Display Lcd E Argb Amd E Intel
+cooler	SamuelF3lipePromo/124290	🔥 Water Cooler Round 5 Eurus Preto de 360mm Com Argb Para Cpu
+cooler	SamuelF3lipePromo/124468	🔥 Watercooler Deepcool Le360 V2 Argb Preto 360mm Preto
+cooler	SamuelF3lipePromo/124586	🔥 Watercooler Digital Kalkan 360mm 3x Fans Argb 360mm Preto
+fonte	fumotom/44385	750w Fonte Cooler Master Mwe Gold 750 V3 Atx 3.1 80 Plus Gold
+fonte	fumotom/43751	Fonte Asrock Pro 750w 80 Plus Bronze Atx 3.1 Pro-750b
+fonte	fumotom/44389	Fonte ASRock Pro-650B 650W Atx 80 Plus Bronze Pfc Ativo Bivolt
+fonte	fumotom/42997	Fonte BRX Gamer Ampereon, 750W, 80 Plus Bronze, PFC Ativo, B-GM750
+fonte	fumotom/42804	Fonte Cooler Master Atx 3.1 750W Mwe Gold 750 V3 Pfc Ativo 80 Plus Gold Sem/Cabo
+fonte	fumotom/43650	Fonte Corsair RM850e, 850W, Full-Modular, ATX 3.1, PCIe 5.1, Cybenetics Gold, Preto, CP-9020296-BR
+fonte	fumotom/43632	Fonte De Alimentacao 750w Gp750 80 Plus Bronze Gamemax Cor Preto
+fonte	fumotom/43051	FONTE DE ALIMENTACAO DUEX PULSE PRO 850W DXFOPRO850WG3
+fonte	fumotom/42814	Fonte de Alimentação Duex Pulse White 1000W Dxfopro1000wg3w
+fonte	fumotom/42812	Fonte Duex Pulse Pro, 850W, Cybenetics Gold, TecLab, Pfc Ativo, Atx 3.1, Pcie5, Full Modular, Preto
+fonte	promotom/112003	Fonte Gamer Redragon Charge 850w 80 plus Bronze
+fonte	fumotom/44372	Fonte Gamer Rise Mode Elektra 650w Bronze Full Modular Pfc
+fonte	fumotom/42898	Fonte Gamer Rise Mode Elektra, 650W, Bronze, Full Modular, Pfc Ativo, Branco - Rm-Psu-Elkm-650-W
+fonte	fumotom/42885	Fonte Gamer Rise Mode Elektra, 650W, Bronze, Full Modular, Pfc Ativo, Preto
+fonte	fumotom/43549	Fonte Gamer Rise Mode Elektra, 650W, Bronze, Full Modular, Pfc Ativo, Preto - Rm-Psu-Elkm-650-B
+fonte	promotom/112073	Fonte Gamer Rise Mode Zeus, 500W, Pfc Ativo, Preto
+fonte	fumotom/42686	Fonte Gamer Rise Mode Zeus, 500W, Pfc Ativo, Preto - Rm-Psu-01-Wt-500
+fonte	promotom/112171	Fonte Gamer Rise Mode Zeus, 500W, Pfc Ativo, Selo Teclab
+fonte	promotom/112271	Fonte Gamer Rise Mode Zeus, 500W, PFC Ativo, Selo Teclab, Preto - RM-PSU-01-WT-500
+fonte	fumotom/44654	Fonte Gigabyte P650g Pg5, 650W, 80 Plus Gold, Pfc Ativo, Preto - 28200-P65g5-1Cbrr
+fonte	fumotom/44653	Fonte Husky Sledger 650W, 80 Plus Bronze, Cybenetics Bronze, Pfc ativo, Bivolt - Hfn650pt
+fonte	fumotom/44672	Fonte Mach1 Steady 750W 80 Plus Bronze Pfc Ativo - 750Steady
+fonte	promotom/112552	Fonte Mach1 Steady 750w 80 Plus Bronze Pfc Ativo Preto
+fonte	fumotom/43487	Fonte Montech Beta 2, 650W, 80 Plus, Preto - Beta2650w
+fonte	fumotom/43488	Fonte Montech Beta 2, 850W, Preto - Beta2850w
+fonte	fumotom/42902	Fonte Msi Mag Bn65a, 650W, 80 Plus Bronze, Pfc Ativo, Com Cabo, Preto - Mag Bn65a
+fonte	fumotom/44757	Fonte Pichau Stardust, 650W, Full Modular, Cybenetics Bronze
+fonte	fumotom/43624	Fonte SuperFrame Leadex III Powered By Super Flower, 850W, 80 Plus Gold, Cybenetics Gold, Full Modular, ATX 3.1, SF-850F14GE
+fonte	fumotom/42662	Fonte Vingar Energy 650W Bronze, 650W, 80 Plus Bronze, Com Cabo, Preto – Br Testado Teclab
+fonte	fumotom/44652	Fonte Xpg Core Reactor Ii Ve 850W Fonte de Alimentação Atx – Certificação Gold 80 Plus e Cybenetics, totalmente modular, compatível com Atx 3.1/PCIe 5.1, conector 12V-2x6 dedicado
+fonte	fumotom/43227	Fonte Xpg Core Reactor Ii Ve 850W Modular 80 Plus Gold
+fonte	fumotom/44371	Fonte Xpg Kyber 850W 80 Plus Gold com Cabo Kyber850g-Bkcbr Preto
+fonte	fumotom/42567	Fonte XPG Kyber, 750W, 80 Plus Gold, Cybenetics Gold, ATX 3.1, PFC Ativo, KYBER750G-BKCTW
+fonte	nerdofertas/148101	➡️ Fonte Gamer Rise Mode Zeus, 500W, PFC Ativo, Selo Teclab, Preto RM-PSU-01-WT-500
+fonte	SamuelF3lipePromo/124814	🔥 750w Fonte Cooler Master Mwe Gold 750 V3 Atx 3.1 80 Plus Gold
+fonte	SamuelF3lipePromo/124436	🔥 Fonte Asrock Pro 750w 80 Plus Bronze Atx 3.1 Pro-750b
+fonte	SamuelF3lipePromo/124435	🔥 Fonte ASRock Pro-650B 650W Atx 80 Plus Bronze Pfc Ativo Bivolt
+fonte	SamuelF3lipePromo/124285	🔥 Fonte De Alimentacao 750w Gp750 80 Plus Bronze Gamemax Cor Preto
+fonte	SamuelF3lipePromo/124804	🔥 Fonte Gamer Rise Mode Elektra 650w Bronze Full Modular Pfc
+fonte	fullpromotion/33010	🔥 Fonte Gamer Rise Mode Elektra, 650W, Bronze, Full Modular, Pfc Ativo, Preto - Rm-Psu-Elkm-650-B
+fonte	fullpromotion/32993	🔥 Fonte Gamer Rise Mode Elektra, 650W, Bronze, Full Modular, PFC Ativo, Preto RM-PSU-ELKM-650-B
+fonte	fullpromotion/32979	🔥 Fonte Gamer Rise Mode Zeus, 500W, Pfc Ativo, Selo Teclab
+fonte	fullpromotion/33024	🔥 Fonte Gamer Rise Mode Zeus, 500W, PFC Ativo, Selo Teclab, Preto - RM-PSU-01-WT-500
+fonte	SamuelF3lipePromo/124210	🔥 Fonte Gamer Rise Mode Zeus, 500W, PFC Ativo, Selo Teclab, Preto RM-PSU-01-WT-500
+fonte	fullpromotion/33760	🔥 Fonte Gigabyte P650g Pg5, 650W, 80 Plus Gold, Pfc Ativo, Preto - 28200-P65g5-1Cbrr
+fonte	SamuelF3lipePromo/124944	🔥 Fonte Gigabyte P650g Pg5, 650W, 80 Plus Gold, Pfc Ativo, Preto 28200-P65g5-1Cbrr
+fonte	fullpromotion/33759	🔥 Fonte Husky Sledger 650W, 80 Plus Bronze, Cybenetics Bronze, Pfc ativo, Bivolt - Hfn650pt
+fonte	SamuelF3lipePromo/124943	🔥 Fonte Husky Sledger 650W, 80 Plus Bronze, Cybenetics Bronze, Pfc ativo, Bivolt Hfn650pt
+fonte	fullpromotion/33767	🔥 Fonte Mach1 Steady 750W 80 Plus Bronze Pfc Ativo - 750Steady
+fonte	SamuelF3lipePromo/124955	🔥 Fonte Mach1 Steady 750W 80 Plus Bronze Pfc Ativo 750Steady
+fonte	SamuelF3lipePromo/124568	🔥 Fonte Mach1 Steady 750w 80 Plus Bronze Pfc Ativo Preto
+fonte	SamuelF3lipePromo/124942	🔥 Fonte Xpg Core Reactor Ii Ve 850W Fonte de Alimentação Atx Certificação Gold 80 Plus e Cybenetics, totalmente modular, compatível com Atx 3.1/PCIe 5.1, conector 12V-2x6 dedicado
+fonte	fullpromotion/33758	🔥 Fonte Xpg Core Reactor Ii Ve 850W Fonte de Alimentação Atx – Certificação Gold 80 Plus e Cybenetics, totalmente modular, compatível com Atx 3.1/PCIe 5.1, conector 12V-2x6 dedicado
+fonte	SamuelF3lipePromo/124803	🔥 Fonte Xpg Kyber 850W 80 Plus Gold com Cabo Kyber850g-Bkcbr Preto
+gabinete	fumotom/42742	Gabinete Gamer Acegeek Stratus Mesh, Mid-Tower, Lateral de Vidro, Preto, Ag-Stratus-Mesh-Bk
+gabinete	fumotom/42691	Gabinete Gamer Aigo Darkflash Durin D275m, Rainbow, Mid-Tower,L.Vidro, 3Fans, Preto / Branco
+gabinete	fumotom/42696	Gabinete Gamer Aquário Aigo Apollo A275, Mini-Tower, Lateral de Vidro, Preto, Ac-A275-B-Hq1
+gabinete	fumotom/42841	Gabinete Gamer Aquário Mancer Cv100, Mid-Tower, Lateral De Vidro, Branco, Mcr-Cv100-Wh
+gabinete	promotom/112071	Gabinete Gamer Aquário Mancer CV700L, Mid Tower, Lateral De Vidro, Preto, MCR-CV700L-BK
+gabinete	fumotom/42722	Gabinete Gamer Aquário Pichau Atom X, Mini-Tower, Lateral de Vidro, Com 2 Fans, Preto, Pg-Atomx-Bk
+gabinete	fumotom/43638	Gabinete Gamer BRX Xtreme Glacier, Mini Tower, Lateral e Frontal de Vidro, Com 3 Fans, Preto, R41B
+gabinete	fumotom/43397	Gabinete Gamer Gamdias Argus E4 Elite, Rgb, Preto
+gabinete	fumotom/43482	Gabinete Gamer Gb1790 Hayom 4 Fans Rgb Micro-atx Vidro Temp Cor Preto
+gabinete	fumotom/43425	Gabinete Gamer Geometric Future Model 5 Vent Preto e Amarelo Sem Fans GEO-M5V-BY
+gabinete	fumotom/44758	Gabinete Gamer Hayom GB1784, Aquario, Mini Tower, Vidro Temperado, m-ATX, Sem Fonte, Com 3 Fans, Preto
+gabinete	promotom/112074	Gabinete Gamer Mancer Cv100 Purple Edition, Mid-Tower, Com 3 Fans
+gabinete	fumotom/42721	Gabinete Gamer Mancer Cv100 Purple Edition, Mid-Tower, Com 3 Fans, Branco, Mcr-Cv100-Pew
+gabinete	fumotom/42945	Gabinete Gamer Mancer Cv450 Mini-Tower Lateral de Vidro Preto
+gabinete	fumotom/42904	Gabinete Gamer Mancer Cv450, Mini-Tower, Lateral de Vidro, Com 9 Fans, Preto
+gabinete	fumotom/43209	Gabinete Gamer Mancer Cv450, Mini-Tower, Lateral de Vidro, Com 9 Fans, Preto, Mcr-Cv4509f-Bk
+gabinete	promotom/112072	Gabinete Gamer Mancer CV450, Mini-Tower, Lateral de Vidro, Preto, MCR-CV450-BK
+gabinete	fumotom/42702	Gabinete Gamer Mancer Cv550, Mid-Tower, Lateral de Vidro, Branco, Mcr-Cv550-Wh
+gabinete	fumotom/42929	Gabinete Gamer Mancer Cv700l Mid Tower Vidro
+gabinete	fumotom/43459	Gabinete Gamer Mancer Grimore, Mini-Tower, Lateral de Vidro, 2 Fans Rainbow, Preto, MCR-GRM-BK
+gabinete	fumotom/42829	Gabinete Gamer Mancer Hemlok, Mid-Tower, Lateral de Vidro, Preto, MCR-HEMLOK-BK
+gabinete	fumotom/42708	Gabinete Gamer Mancer Mugen, Full-Tower, Lateral de Vidro, Preto, Mcr-Mgn-Bk
+gabinete	fumotom/42735	Gabinete Gamer Mancer Narok V2, Rainbow, Mid-Tower, Lateral de Vidro, Com 3 Fans, Preto, Mcr-Nrk-V2
+gabinete	fumotom/43637	Gabinete Gamer Ninja Akyra X2, Mid Tower, Vidro Temperado, M-ATX, Com 2 Fans, Sem Fonte, Preto, GN-CS-MAB2FAKYRA
+gabinete	fumotom/43768	Gabinete Gamer Obsid Frame Preto Vidro Mid Tower S/ Fan
+gabinete	fumotom/43276	Gabinete Gamer Pcyes Forcefield Mini Black Vulcan - Gffmnbv
+gabinete	fumotom/42856	Gabinete Gamer Pichau Magpie 4Xb, Mini-Tower, Lateral de Vidro, Com 3 Fans, Preto, Pg-Mag4xb-Bk3f
+gabinete	fumotom/42933	Gabinete Gamer Pichau Osiris Pro Mid-Tower Lateral de Vidro Preto
+gabinete	fumotom/42731	Gabinete Gamer Pichau Osiris Pro, Mid-Tower, Lateral de Vidro, Preto, Pg-Osip-Bk
+gabinete	promotom/112183	Gabinete Gamer Redragon Reflect Pro Mid Tower Sem Fans Preto CA-607B
+gabinete	fumotom/43407	Gabinete Gamer Rise Mode Glass 06x, Mid Tower, Atx, Lateral em Vidro Fumê e Frontal em Vidro Temperado, Sem FANs, Preto - Rm-Ca-06x-Fb
+gabinete	promotom/112200	Gabinete Gamer Rise Mode Wave White, Mid Tower, Lateral em Vidro Fumê, ARGB, ATX, 3 Cooler Fan ARGB, Branco - RM-WA-BW-ARGB
+gabinete	fumotom/43563	Gabinete Gamer Rise Mode Z3 Glass, Lateral em Vidro Fumê, Sem FANs, Atx, M-Atx, Preto - Rm-Z03-03-Fb
+gabinete	fumotom/43557	Gabinete Gamer Rise Mode Zeus Glass 02, Mid Tower, Argb, Frontal e Lateral em Vidro, 2 Fans 200mm Argb, Preto - Rm-Ca-Ze-02-Argb
+gabinete	fumotom/43673	Gabinete Gamer Round5 Stinger Black, Aquário, Mini Tower, Vidro Temperado, mATX, Com 3 Fans, Preto, R5-STINGER-W-2302
+gabinete	fumotom/43667	Gabinete Gamer TGT Legion, Mini-Tower, Lateral de Vidro, Branco, TGT-LGN-WH
+gabinete	nerdofertas/147240	➡️ Gabinete Gamer Acegeek Stratus Mesh, Mid-Tower, Lateral de Vidro, Preto, Ag-Stratus-Mesh-Bk
+gabinete	nerdofertas/147812	➡️ Gabinete Gamer Gamdias Argus E4 Elite, RGB, Preto
+gabinete	nerdofertas/147841	➡️ Gabinete Gamer Rise Mode Glass 06x, Mid Tower, Atx, Lateral em Vidro Fumê e Frontal em Vidro Temperado, Sem FANs, Preto Rm-Ca-06x-Fb
+gabinete	nerdofertas/147842	➡️ Gabinete Gamer Rise Mode Wave White, Mid Tower, Lateral em Vidro Fumê, ARGB, ATX, 3 Cooler Fan ARGB, Branco RM-WA-BW-ARGB
+gabinete	nerdofertas/147840	➡️ Gabinete Gamer Rise Mode Z3 Glass, Lateral em Vidro Fumê, Sem FANs, Atx, M-Atx, Preto Rm-Z03-03-Fb
+gabinete	nerdofertas/148102	➡️ Gabinete Gamer Rise Mode Zeus Glass 02, Mid Tower, Argb, Frontal e Lateral em Vidro, 2 Fans 200mm Argb, Preto Rm-Ca-Ze-02-Argb
+gabinete	SamuelF3lipePromo/124223	🔥 Gabinete Gamer Aquário Aigo Apollo A275, Mini-Tower, Lateral de Vidro, Preto, AC-A275-B-HQ1
+gabinete	fullpromotion/32902	🔥 Gabinete Gamer Gb1790 Hayom 4 Fans Rgb Micro-atx Vidro Temp Cor Preto
+gabinete	fullpromotion/32831	🔥 Gabinete Gamer Geometric Future Model 5 Vent Preto e Amarelo Sem Fans GEO-M5V-BY
+gabinete	SamuelF3lipePromo/124452	🔥 Gabinete Gamer Obsid Frame Preto Vidro Mid Tower S/ Fan
+gabinete	fullpromotion/32806	🔥 Gabinete Gamer Rise Mode Glass 06x, Mid Tower, Atx, Lateral em Vidro Fumê e Frontal em Vidro Temperado, Sem FANs, Preto - Rm-Ca-06x-Fb
+gabinete	fullpromotion/33461	🔥 Gabinete Gamer Rise Mode Wave White, Mid Tower, Lateral em Vidro Fumê, Argb, Atx, 3 Cooler Fan Argb, Branco - Rm-Wa-Bw-Argb
+gabinete	SamuelF3lipePromo/124213	🔥 Gabinete Gamer Rise Mode Wave White, Mid Tower, Lateral em Vidro Fumê, ARGB, ATX, 3 Cooler Fan ARGB, Branco RM-WA-BW-ARGB
+gabinete	fullpromotion/33033	🔥 Gabinete Gamer Rise Mode Z3 Glass, Lateral em Vidro Fumê, Sem FANs, Atx, M-Atx, Preto - Rm-Z03-03-Fb
+gabinete	fullpromotion/33022	🔥 Gabinete Gamer Rise Mode Zeus Glass 02, Mid Tower, Argb, Frontal e Lateral em Vidro, 2 Fans 200mm Argb, Preto - Rm-Ca-Ze-02-Argb
+memoria	fumotom/44124	8Gb Ddr3 Memoria Ram 1600Mhz
+memoria	promotom/112088	Memoria Colorful, 8Gb, 5200 Mhz, Ddr5, Cl40 - Battle-ax
+memoria	promotom/112303	Memoria Mancer Astrion, 32GB (1x32GB) DDR4, 3200MHz, C19, Preto, MCR-ASTN-32GB
+memoria	fumotom/43445	Memoria Notebook Mancer Damon, 4GB (1x4GB), DDR4, 2666MHz, C19, MCR-DMN-4GB
+memoria	fumotom/42462	Memoria Pc Macrovip 8Gb 5600mhz Ddr5 288pin Udimm Mv56n46/8
+memoria	fumotom/43921	Memoria Ram Cusu, 2x8GB ddr4 3200mhz
+memoria	fumotom/43035	Memoria Ram DDR5 8GB 5600MHZ 4800MHZ SK HYNIX/SAMSUNG/ZILIA/CRUCIAL 1RX16 SODIMM
+memoria	fumotom/43040	Memoria Ram DDR5 8GB LAPTOP SODIMM 4800MHZ 5600MHZ NOTEBOOK ADATA/XPG/CRUCIAL/SAMSUNG/SK HYNIX LACRADA
+memoria	promotom/112041	Memória Colorful, 8GB, 2666MHz, DDR4, CL19, Para Notebook
+memoria	fumotom/44417	Memória Corsair Ddr5 16Gb 1X16gb Pc5200 Vengeance
+memoria	fumotom/42949	Memória Corsair DDR5 16GB 1X16GB PC5200 Vengeance CMK16GX5M1B5200C40
+memoria	fumotom/42661	Memória Ddr4 16Gb Hiksemi Future 3200Mt/s Cl18 Dissipador Térmico 1.35V Branco Hsc416u32f2 16G
+memoria	fumotom/43628	Memória DDR4 Spectrum Blitz, 8GB, 3200MHz, Preto, ST-RM-BZ8G32C16WD4
+memoria	fumotom/44266	Memória Juhor Ddr4 8Gb 3200MHz Cl16
+memoria	fumotom/44482	Memória Juhor Ddr4 8Gb 3200MHz Cl16 Ruivinha
+memoria	fumotom/44209	Memória Netac 16Gb Ddr4 Shadow Ill 3200MHz
+memoria	fumotom/44682	Memória Netac 8G 16Gb Ddr4 Shadow Ill 3200MHz
+memoria	fumotom/44350	Memória Netac 8G Ddr4 Shadow Ill 3200MHz
+memoria	fumotom/44473	Memória Para Notebook Adata Xpg, 16Gb, 5600MHz, Ddr5, Cl46 - Ad5s560016g-S
+memoria	fumotom/43769	Memória Pc Ddr4 16gb 2666 4bit Infinity Memory
+memoria	fumotom/42926	Memória PCYes 8GB, DDR3, 1600MHz, UDIMM - PM081600D3
+memoria	fumotom/43575	Memória Ram 8gb 3200mhz Pro Gamer Para Pc Desktop
+memoria	fumotom/43275	Memória Ram Adata Lancer Blade Ddr5, 6000 Mhz, 16 Gb Branca
+memoria	fumotom/44122	Memória Ram Corsair Vengeance Ddr5 16Gb 1x16GB 5200MHz Cinza
+memoria	fumotom/42763	Memória Ram Corsair Vengeance Rgb 32Gb 2x16GB Ddr5 6000MHz Cl38 Branca Cmh32gx5m2d6000z38w
+memoria	fumotom/43949	Memória Ram Cusu 8Gb 3200MHz Ddr4
+memoria	fumotom/44309	Memória Ram Cusu Ddr4 8Gb 16Gb 3200Mhz Xmp 1.35V
+memoria	fumotom/44479	Memória Ram Cusu Ddr4 8Gb 3200Mhz Xmp 1.35V
+memoria	fumotom/43789	Memória Ram Ddr4 16gb 3200mhz 1x16gb Up Gamer
+memoria	fumotom/43229	Memória Ram Ddr4 Hiksemi Future Branco 3200Mt/s Cl18 8Gb Hsc408u32f2 8G
+memoria	fumotom/44480	Memória Ram Envinda 8Gb 2133mhz Ddr4 Ecc, Exclusiva para xeon X99
+memoria	fumotom/44282	Memória Ram Gudga Ddr4 8Gb 2666MHz
+memoria	fumotom/42666	Memória RAM Hiksemi Future 16GB DDR4 3200MHz Preta
+memoria	fumotom/43036	Memória RAM Impact DDR4 preto 16GB 1 HyperX HX426S15IB2/16
+memoria	fumotom/44477	Memória ram kllisre Ddr4
+memoria	fumotom/43819	Memória Ram Latumab Black Ddr4 8Gb 3200mhz preta
+memoria	fumotom/44416	Memória Ram Samsung 16gb, Ddr5, 5600mhz M321r2ga3pb0-cwm
+memoria	nerdofertas/147533	➡️ Memória Pc Ddr4 16gb 2666 4bit Infinity Memory
+memoria	nerdofertas/148099	➡️ Memória Ram 8gb 3200mhz Pro Gamer Para Pc Desktop
+memoria	nerdofertas/148427	➡️ Memória Ram Envinda 8Gb 2133mhz Ddr4 Ecc, Exclusiva para xeon X99
+memoria	nerdofertas/148429	➡️ Memória Ram Latumab Black Ddr4 8Gb 3200mhz preta
+memoria	SamuelF3lipePromo/124675	🔥 8Gb Ddr3 Memoria Ram 1600Mhz
+memoria	SamuelF3lipePromo/124854	🔥 CORSAIR Memória Vengeance DDR5 RAM 16GB (1x16GB) 5200MHz
+memoria	SamuelF3lipePromo/124902	🔥 MEMORIA DDR4 REDRAGON FLAME 16GB 3200MHz PRETO
+memoria	SamuelF3lipePromo/124301	🔥 Memoria Mancer Astrion, 32GB (1x32GB) DDR4, 3200MHz, C19, Preto, MCR-ASTN-32GB
+memoria	fullpromotion/32976	🔥 Memoria Ram DDR5 8GB 5600mhz 4800mhz Sk HYNIX/SAMSUNG/ZILIA/CRUCIAL 1rx16 Sodimm
+memoria	fullpromotion/33658	🔥 Memória Corsair Ddr5 16Gb 1X16gb Pc5200 Vengeance
+memoria	SamuelF3lipePromo/124751	🔥 Memória Juhor Ddr4 8Gb 3200MHz Cl16
+memoria	SamuelF3lipePromo/124720	🔥 Memória Netac 16GB DDR4 Shadow Ill 3200MHz
+memoria	SamuelF3lipePromo/124789	🔥 Memória Netac 8G Ddr4 Shadow Ill 3200MHz
+memoria	SamuelF3lipePromo/124451	🔥 Memória Pc Ddr4 16gb 2666 4bit Infinity Memory
+memoria	SamuelF3lipePromo/124238	🔥 Memória Ram 8gb 3200mhz Pro Gamer Para Pc Desktop
+memoria	fullpromotion/33480	🔥 Memória Ram Corsair Vengeance Ddr5 16Gb 1x16GB 5200MHz Cinza
+memoria	SamuelF3lipePromo/124571	🔥 Memória Ram Cusu 8Gb 3200MHz Ddr4
+memoria	SamuelF3lipePromo/124765	🔥 Memória Ram Cusu Ddr4 8Gb 16Gb 3200Mhz Xmp 1.35V
+memoria	SamuelF3lipePromo/124861	🔥 Memória Ram Cusu Ddr4 8Gb 3200Mhz Xmp 1.35V
+memoria	SamuelF3lipePromo/124470	🔥 Memória Ram Ddr4 16gb 3200mhz 1x16gb Up Gamer
+memoria	SamuelF3lipePromo/124862	🔥 Memória Ram Envinda 8Gb 2133mhz Ddr4 Ecc, Exclusiva para xeon X99
+memoria	SamuelF3lipePromo/124671	🔥 Memória Ram Gudga Ddr4 8Gb 2666MHz
+memoria	SamuelF3lipePromo/124866	🔥 Memória ram kllisre Ddr4
+memoria	SamuelF3lipePromo/124493	🔥 Memória Ram Latumab Black Ddr4 8Gb 3200mhz preta
+memoria	fullpromotion/33657	🔥 Memória Ram Samsung 16gb, Ddr5, 5600mhz M321r2ga3pb0-cwm
+monitor_gamer	fumotom/43269	27", Qhd, 220Hz Monitor Gamer Asus Rog Strix, 0.3ms, Fast Ips, Vrr, G-Sync, FreeSync, Hdr 400, Altura Ajustável - Xg27acsr
+monitor_gamer	promotom/112445	Ainda ativo! Monitor Gamer Philips Evnia 23.8" 144Hz 0, 5Ms 24M2n3200nf
+monitor_gamer	promotom/112103	Ainda ativo! Monitor Gamer Tcl 25 Polegadas Qd-Mini Led Full Hd G64 300hz 1ms (Gtg) Freesync Hdr 600 Nits 25g64
+monitor_gamer	fumotom/43298	Lg UltraGear Monitor Gamer 27" Ips 240Hz 1ms (GtG) Full Hd (1920x1080) sRGB 99% Hdmi 2.0 Nvidia G-Sync Amd FreeSync Premium, Preto - 27G440a
+monitor_gamer	fumotom/44732	Lg UltraGear Monitor Gamer 27" Ips, 144Hz Nativo, 1ms (Mbr), Full Hd (1920x1080), Hdr10, Nvidia G-Sync, Amd FreeSync, Preto - 27G411b
+monitor_gamer	fumotom/43618	LG UltraGear Monitor Gamer 32"- VA 165Hz 1ms (MBR) QHD 2K (2560x1440) HDR10 AMD FreeSync, Preto - 32GN600
+monitor_gamer	fumotom/43150	Monitor 27 Aoc Gamer 27b30h3/57 Full Hd Ips 120hz, 1ms Preto Preto 127/220v
+monitor_gamer	fumotom/43779	Monitor 27 Aoc Gamer 27b30h3/57, Full Hd, Ips, 120hz, 1ms Cor Preto
+monitor_gamer	fumotom/43244	Monitor 27" Aoc Gamer 27b30h3/57 Full Hd Ips 120hz, 1ms Preto B30
+monitor_gamer	fumotom/43313	Monitor Acer Gamer Nitro Kg243y G0bi 23.8” Full Hd 120 Hz 1ms 24"
+monitor_gamer	fumotom/44640	Monitor Acer Nitro ED343CUR J0BMIIPPX 34C, 34" Tela Curva, QuadHD QHD 120Hz 1ms LED VA Tecnologia Acer Vision Care, AMD FreeSync DisplayPort(1.4) saída de áudio
+monitor_gamer	fumotom/43627	Monitor Acer Nitro Kg243y P1bip Ips 23.8 144hz
+monitor_gamer	fumotom/43615	Monitor Aoc 23,8" 100Hz 1ms Gaming Hdmi 24B30hm2
+monitor_gamer	fumotom/43692	Monitor Aoc Agon G42 27" 200Hz 0,3Ms Ips Hdr10 Nvidia G-Sync 27G42he
+monitor_gamer	fumotom/44365	Monitor Arzopa Gamer 27" Qhd Fast Ips 180Hz 1Ms Hdmi Dp
+monitor_gamer	fumotom/42910	Monitor Arzopa M1rc, 27" 2K Qhd 180Hz Ips, 1Ms, 115% Srgb, Usb-C, Hdmi, Display Port
+monitor_gamer	fumotom/42892	Monitor Asus Tuf Gaming Series 5, 27", Full Hd, Fast Ips, 260Hz, 0.3ms, Hdr10, FreeSync, Preto - Vg279qm5f
+monitor_gamer	fumotom/42711	Monitor Asus Tuf Gaming, 27", Ips, Full Hd, 146Hz, 1ms, FreeSync, Hdr10, Hdmi, DisplayPort, Preto - Vg279qe5a
+monitor_gamer	promotom/112098	Monitor Gamer 23.8" Acer Nitro VG0 com Tela Full HD 200Hz IPS Resposta de 1ms GtoG AMD FreeSync Premium HDR10 Cores 99% sRGB Design ZeroFrame 2 Entradas HDMI e DisplayPort VG240Y X1biip
+monitor_gamer	fumotom/42573	Monitor Gamer 24 Pol, Full HD, 1ms, 180Hz, IPS, FreeSync, HDMI/DP, DXMO24F180
+monitor_gamer	fumotom/43679	Monitor Gamer 27" Acer Nitro Kg0 com Tela Full Hd 144Hz Va Resposta de 1ms GtoG Amd FreeSync Game Mode 8 Modos Cores 99% sRGB Design ZeroFrame Conexões Hdmi e Vga Kg270 P0bi
+monitor_gamer	fumotom/42827	Monitor Gamer 34" Curvo 1ms, 165Hz, UltraWide (QHD) - 3440x1440 AMD FreeSync, HDMI, DP, HQ Premium HQ34C16
+monitor_gamer	fumotom/42980	Monitor Gamer 34" Curvo Branco 1ms, 165Hz, UltraWide (Qhd) - 3440x1440 Amd FreeSync, Hdmi, Dp, Hq Premium Hqw34c16
+monitor_gamer	fumotom/44376	Monitor Gamer Acer Nitro 23.8 200hz 2ms Fhd Hdmi Va Kg241y-X3Bip Preto
+monitor_gamer	fumotom/42893	Monitor Gamer Acer Nitro Kg241y 23.8" Full Hd Va 200Hz
+monitor_gamer	fumotom/43544	Monitor Gamer Acer Nitro Kg243y P1bip 23, 8″ | Full Hd • 144Hz • 1ms Vrb • Ips • Hdmi • DisplayPort • ZeroFrame
+monitor_gamer	fumotom/43135	Monitor Gamer Acer Nitro KG243Y P1bip 23,8″
+monitor_gamer	fumotom/43953	Monitor Gamer Acer Nitro Kg273 G0bi 27" Full Hd Ips 120Hz 1ms (Versão 27 Polegadas)
+monitor_gamer	promotom/112551	Monitor Gamer Aoc 21.5" B30 120Hz 22B30hm23 Fhd, 1Ms, Preto 22"
+monitor_gamer	promotom/112132	Monitor Gamer Aoc 23,8 Full Hd 144hz Agon G50 0,5ms
+monitor_gamer	promotom/112066	Monitor Gamer AOC 23,8" Full HD 144Hz Agon G50 IPS 0,5ms 24G50F/57 HDMI DisplayPort G-Sync
+monitor_gamer	fumotom/42833	Monitor Gamer Aoc 24" 180Hz 0,5ms Ips Ajuste de Altura 24G4/P
+monitor_gamer	fumotom/42831	Monitor Gamer Aoc 27" 180Hz 0,5ms Ips Ajuste de Altura 27G4/P
+monitor_gamer	promotom/112591	Monitor Gamer AOC AGON G42 27" 200Hz 0,3ms IPS HDR10 NVIDIA G-Sync 27G42HE
+monitor_gamer	fumotom/43691	Monitor Gamer Aoc Agon G4s 25" 310Hz 0.3ms Hdr10 Ips Base Ajustável 25G4s/P
+monitor_gamer	fumotom/42687	Monitor Gamer Aoc Agon G50 (Versão 24 Polegadas)
+monitor_gamer	fumotom/43612	Monitor Gamer AOC AGON G50 27" 144Hz 0,5ms IPS HDR10 G-SYNC 27G50F
+monitor_gamer	fumotom/43211	Monitor Gamer Aoc Agon Quad 27" Qhd 180Hz 0,5ms Ips Hdr10 Base Ajustável Q27g4f
+monitor_gamer	fumotom/43074	Monitor Gamer Aoc Agon Quad 27" Qhd 180Hz 0,5ms Ips Hdr10 Base Ajustável Q27g4f Preto
+monitor_gamer	fumotom/43248	Monitor Gamer Aoc Agon Quad 27'' 180hz Base Ajustável Q27g4f
+monitor_gamer	promotom/112075	Monitor gamer Aoc Série B30 21.5'' Full Hd Gaming 120hz 1ms 22b30hm23 cor preto
+monitor_gamer	fumotom/43220	Monitor Gamer Arzopa M1rc, 27" 2K Qhd 180Hz Ips, 1ms, 115% sRGB, Usb-C, Hdmi, Display Port
+monitor_gamer	fumotom/43601	Monitor Gamer ASRock Phantom Gaming PG27QRT1B, 27 Pol, Curvo, QHD, 1ms, 180hz, 132% sRGB, VA, FreeSync, HDMI/DP
+monitor_gamer	fumotom/42989	Monitor Gamer ASRock Phantom Gaming PGO27QFS, 27 Pol, WOLED, QHD, 0.03ms, 240hz, 129% sRGB, FreeSync Premium Pro, HDMI/DP, 90LXA0P0-A0B1A0C
+monitor_gamer	fumotom/42988	Monitor Gamer Asus ROG Strix OLED XG27ACDMS, 26.5 Pol, QHD, 0.03ms, 280Hz, HDR, G-Sync Comp, HDMI/DP/USB-C
+monitor_gamer	fumotom/42991	Monitor Gamer Asus ROG Strix XG27ACS, 27 Pol, WQHD, Fast IPS, 180Hz, 1ms, 133% sRGB, G-Sync Comp, FreeSync, HDMI/DP/USB-C, 90LM09Q0-B011X1
+monitor_gamer	fumotom/43497	Monitor Gamer Asus Tuf 27", Qhd, 255Hz, 0.3ms, Fast Ips, G-Sync Comp, FreeSync Premium, Hdr10, Som Integrado - Vg27aqme5f
+monitor_gamer	promotom/112050	Monitor Gamer Asus TUF Gaming VG27AQME5F, 27 Pol, Quad HD, 255Hz, Fast IPS, 0.3ms, G-Sync/FreeSync, HDMI/DP
+monitor_gamer	fumotom/43226	Monitor Gamer Curvo 32" Redragon Tassos Qhd 170Hz Va 1ms Mprt G-Sync FreeSync Gm32h2q
+monitor_gamer	fumotom/42826	MONITOR GAMER CURVO 34 SAMSUNG ODYSSEY ULTRA WQHD 165HZ
+monitor_gamer	promotom/112446	Monitor Gamer Curvo Aoc Agon G4z 27" 300Hz 0,3ms Hdr10 Base Ajustável C27g4z/P
+monitor_gamer	fumotom/44035	Monitor Gamer Curvo Aoc Agon Quad 32" 180Hz 0,5ms Hdr10 Cq32g4e
+monitor_gamer	fumotom/43727	Monitor Gamer Curvo Aoc Agon Quad 34" Ultrawide Wqhd 180Hz 0,5ms Base Ajustável U34g4c
+monitor_gamer	fumotom/42457	Monitor Gamer Curvo Husky Boreal 34", Wqhd, Ultrawide, 200Hz, 1ms, Adaptive Sync, DisplayPort e Hdmi, Hdr - Hmg00234pt
+monitor_gamer	fumotom/43722	Monitor Gamer Curvo Samsung Odyssey 34" G5 165 Hz 1ms Ultrawide Preto
+monitor_gamer	promotom/112307	Monitor Gamer Curvo Samsung Odyssey G5, 27", Qhd, 165hz Cor Preto
+monitor_gamer	promotom/112135	Monitor Gamer Curvo Tcl 34 Polegadas Qd-Mini Led Wqhd R83q 180hz 1ms (Gtg) Hdr 1400 Nits 34r83q
+monitor_gamer	fumotom/43097	Monitor Gamer Duex Pro 27 Qhd 180Hz 05Ms 2Hdmi 2Dp Preto
+monitor_gamer	fumotom/42947	Monitor Gamer Gigabyte 25", Fhd, 200Hz, 1ms, Ips, Vrr, FreeSync Premium, Hdr 10, Alto-falante Embutido - Gs25f2-Sa
+monitor_gamer	promotom/112260	Monitor Gamer Haiz 25'' Ips Fhd 144hz 0.5ms Hdmi Dp Vesa Preto
+monitor_gamer	fumotom/43059	Monitor Gamer LG 24" Full Hd 100Hz 5Ms Hdmi 24Ms500-B.Awzm
+monitor_gamer	fumotom/42743	Monitor Gamer Lg 25" Fhd UltraGear 200Hz 1ms 25G523b-B
+monitor_gamer	promotom/112309	Monitor Gamer LG UltraGear 24" 24GS60F-B IPS Full HD 180Hz 1ms (GtG) NVIDIA G-SYNC AMD FreeSync HDR10 sRGB 99% HDMI DisplayPort
+monitor_gamer	fumotom/44373	Monitor Gamer Lg UltraGear 24" Ips 144Hz nativo, 1ms (Mbr), Full Hd (1920x1080), Hdr10, Nvidia G-Sync, Amd FreeSync sRGB, Preto - 24G411b
+monitor_gamer	fumotom/44325	Monitor Gamer Lg UltraGear 24", Full Hd, 144Hz, 1ms, Ips, G-Sync, FreeSync, Hdr10, Preto - 24G411a-B
+monitor_gamer	promotom/112218	Monitor Gamer LG UltraGear 24” IPS, Full HD, 180Hz, 1ms (GtG), HDMI, DisplayPort, HDR10, sRGB 99%, NVIDIA® G-SYNC®, AMD FreeSync™, Preto - 24GS60F-B
+monitor_gamer	fumotom/42950	Monitor Gamer LG UltraGear 24”IPS Full HD 180Hz 1ms (GtG) NVIDIA G-SYNC AMD FreeSync HDR10 sRGB 99% HDMI DisplayPort, Preto- 24GS60F
+monitor_gamer	fumotom/43622	Monitor Gamer Mancer Horizon Z2, 27 Pol, VA, FHD, 100Hz, 1ms, HDMI/VGA, MCR-HZN27-BL2
+monitor_gamer	fumotom/43665	Monitor Gamer Mancer Valak UZ3, 31.5 Pol, VA, Curvo, FHD, 1ms, 165Hz, HDMI/DP, MCR-VLKUZ3-BL01
+monitor_gamer	fumotom/43231	Monitor Gamer Msi Mag 242C 23.6'' Full Hd 180Hz 9S6-3Bc31t-004
+monitor_gamer	fumotom/43653	Monitor Gamer MSI MAG 275QF E20, 27 Pol, WQHD, Rapid IPS, 0.5ms, 200Hz, HDR, 115% sRGB, FreeSync/G-Sync, HDMI/DP
+monitor_gamer	fumotom/43658	Monitor Gamer Ninja Tenseigan, 21.5 Pol, Full HD, 1ms, 120Hz, VA, 98% sRGB, VGA/HDMI, GN-MN-TSG21FSVFC1B
+monitor_gamer	fumotom/43218	Monitor Gamer Philips 27 Polegadas Evnia
+monitor_gamer	promotom/112134	Monitor Gamer Philips Evnia 23,8'' 144hz 0,5ms Ips Full Hd
+monitor_gamer	promotom/112298	Monitor Gamer Philips Evnia 23.8" 144Hz 0, 5Ms 24M2n3200nf
+monitor_gamer	promotom/112297	Monitor Gamer Philips Evnia 23.8" 200Hz 0, 3Ms 24M2n3200fq
+monitor_gamer	fumotom/44622	Monitor Gamer Philips Evnia 23.8" 200Hz 0,3Ms 24M2n3200fq
+monitor_gamer	fumotom/43312	Monitor Gamer Philips Evnia 23.8" 200Hz 0,3Ms 24M2n3200fq 24"
+monitor_gamer	fumotom/43545	Monitor Gamer Philips Evnia 27'' 144hz 0, 5ms Ips Full Hd Preto 127/220v
+monitor_gamer	fumotom/43730	Monitor Gamer Philips Evnia 27'' 144hz 0,5ms Ips Full Hd
+monitor_gamer	fumotom/43139	Monitor Gamer Philips Evnia 27'' Ips 144Hz 0.5ms
+monitor_gamer	fumotom/43314	Monitor Gamer Philips Evnia 27'' Ips 144Hz 0.5ms Fhd27m2n3200nf Preto
+monitor_gamer	promotom/112556	Monitor Gamer Phillips 24 Evnia Ips 144hz 0.5ms Wide Fullhd Preto 127/220v
+monitor_gamer	fumotom/42835	Monitor Gamer Phillips De 23.8 Full Hd Ips Com 200hz Preto
+monitor_gamer	fumotom/43140	Monitor Gamer Phillips de 23.8" Full HD IPS com 200Hz
+monitor_gamer	fumotom/44407	Monitor Gamer Portátil 15.6 1080p Fhd Ips Com Hdmi Usb
+monitor_gamer	fumotom/44702	Monitor Gamer Portátil Arzopa 16.1" 100% sRGB 144Hz Type C
+monitor_gamer	promotom/112174	Monitor Gamer Redragon Ombra 32" 165Hz QHD IPS 1ms MPRT DisplayPort HDMI 2.1 GMQ3222SUC
+monitor_gamer	fumotom/43011	Monitor Gamer Samsung 24" Fhd 100 Hz Hdmi Vga Preto S3
+monitor_gamer	fumotom/44386	Monitor Gamer Samsung Essential S3, 24" FHD, 120 Hz, HDMI, Preto
+monitor_gamer	fumotom/43293	Monitor Gamer Samsung Odyssey G40 27", 240 Hz, 1ms, ajuste de altura, Gsync, Freesync,Hdmi, Dp, Fhd, Preto
+monitor_gamer	fumotom/43022	Monitor Gamer Samsung Odyssey G40, 27" Fhd, 240Hz, 1ms, G-Sync, Ajuste de Altura, Preto - Ls27bg400elmzd
+monitor_gamer	fumotom/42499	Monitor Gamer Samsung Odyssey G5 32, Resolução Qhd, Taxa de atualização de 165Hz & 1ms de tempo de resposta (Mprt), Curvatura com 1000R, Hdr 10, Amd FreeSync, Eye Saver Mode & Flic
+monitor_gamer	fumotom/42466	Monitor Gamer Samsung Odyssey G5, 27, Qhd, 165hz Cor Preto
+monitor_gamer	fumotom/43684	Monitor Gamer Samsung Odyssey G5, 32, Qhd, 165hz
+monitor_gamer	fumotom/43629	Monitor Gamer SuperFrame Ace Pro, 27 Pol, Dual Mode, 4K Ultra HD 160Hz / Full HD 320Hz, IPS, 1ms, HDMI/DP, SF-MN-ACE27DLSIF2A
+monitor_gamer	fumotom/43659	Monitor Gamer SuperFrame Ace, 23.8 Pol, Full HD, IPS, 144Hz, 1ms, Flicker-Free, HDMI/VGA, SF-MN-ACE24FSIFD1B
+monitor_gamer	fumotom/42992	Monitor Gamer SuperFrame Enterprise, 49 Pol, Curvo, UltraWide, Dual Quad HD, VA, 1ms, 120Hz, FreeSync/G-Sync, SF-MN-ENT49QDVCC2C
+monitor_gamer	fumotom/44453	Monitor Gamer Superframe Precision 24 Ips 180hz Preto
+monitor_gamer	fumotom/42603	Monitor Gamer SuperFrame Precision Ultra V4, 23.6 Pol, Curvo, Full HD, VA, 180Hz, RGB, FreeSync/G-Sync, HDMI/DP, SFPCCB-24180-FHD
+monitor_gamer	fumotom/43719	Monitor Gamer SuperFrame Precision Ultra V4, 23.6" Pol, Curvo, Full Hd, Va, 180Hz, Rgb, FreeSync/G-Sync, Hdmi/Dp, Sfpccb-24180-Fhd 24"
+monitor_gamer	fumotom/42994	Monitor Gamer SuperFrame Precision, 23.8 Pol, Flat, Full HD, IPS, 1ms, 180Hz, 99% sRGB, FreeSync/G-Sync, HDMI/DP, SF-MN-PRE24FSIFD1B
+monitor_gamer	fumotom/42601	Monitor Gamer SuperFrame Vision, 23.8 Pol, Full Hd, Fast Ips, 240Hz, Hdr, FreeSync/G-Sync, Hdmi/Dp, Sfvsfb-24240-Fhd-Pro
+monitor_gamer	fumotom/43598	Monitor Gamer SuperFrame Wing, 27 Pol, RGB, Quad HD, MiniLED, 180Hz, FreeSync/G-Sync, HDMI/DP, SFWGFB-27180-QHD
+monitor_gamer	fumotom/43212	Monitor Gamer Tcl 24 Polegadas Mini Led Full Hd G54 100Hz Hdr400 92% Dci-P3 450 nits 24G54
+monitor_gamer	promotom/112078	Monitor Gamer Tcl 25 Polegadas Qd-Mini Led Full Hd G64 300hz 1ms (Gtg) Freesync Hdr 600 Nits 25g64
+monitor_gamer	fumotom/42908	Monitor Gamer Tcl 25 Qd Mini Led Full Hd 300hz 2 Hdmi 25g64
+monitor_gamer	promotom/111987	Monitor Gamer Tcl 25" Polegadas Qd-Mini Led Full Hd G64 300hz 1ms (Gtg) Freesync Hdr 600 Nits 25g64
+monitor_gamer	promotom/112129	Monitor Gamer Tcl Mini Led 25", 300Hz, 1ms, Hdr 600, Altura Ajustável - 25G64
+monitor_gamer	promotom/112131	Monitor Gigabyte Gs24f14 23.8 Pol Full Hd Ips 144hz 1ms
+monitor_gamer	promotom/112560	Monitor LG FHD Gamer & Office com telaIPS 24”, 1ms (MBR), 144Hz nativo, FreeSync, HDR10, sRGB, Modo leitura, Flicker Safe, HDMI, Black Stabilizer, Dynamic Action Sync, Preto -24U411B
+monitor_gamer	fumotom/43184	Monitor LG Gamer 32' Ultragear 32gx850a-b Oled 4k Uhd
+monitor_gamer	fumotom/43702	Monitor Lg UltraGear - Tela Va Fhd 32”, 144Hz nativo, 1ms (Mbr), Amd FreeSync, Hdr10, sRGB 99%, Preto - 32G403b
+monitor_gamer	fumotom/43365	Monitor Lg UltraGear -Tela Ips de 25”, 200Hz, 1ms (GtG), Nvidia G-Sync e Amd FreeSync Premium, Hdr10, sRGB 99%, Preto - 25G523b
+monitor_gamer	fumotom/43724	Monitor Lg UltraGear 27" Ips, 144Hz Nativo, 1ms (Mbr), Full Hd (1920x1080), Hdr10, Nvidia G-Sync, Amd FreeSync, Preto - 27G411
+monitor_gamer	fumotom/44004	Monitor Lg Ultragear 27, 144hz, 1ms(mbr), Preto - 27g411b
+monitor_gamer	fumotom/42550	Monitor Lg UltraGear Curvo 34"- QuadHD 2K, UltraWide 1800R, 160Hz, 1ms (Mbr), Amd FreeSync Premium, Hdr10, MaxxAudio, Preto -34G600a
+monitor_gamer	fumotom/44639	Monitor Lg UltraGear Oled 27Gx704a-B 27" QuadHD, 0.03ms (GtG), 240Hz, Nvidia G-Sync, Amd FreeSync Premium Pro, Vesa Cle Qhd 2k
+monitor_gamer	promotom/112130	Monitor Lg Ultragear™ 24G411a-B 24",Fhd, 144Hz, 1Ms (Mbr), Nvidia G-Sync, Amd Freesync, Hdr10
+monitor_gamer	fumotom/43709	Monitor Lg UltraGear™ Oled 27Gx704a-B 27" QuadHD, 0.03ms (GtG), 240Hz
+monitor_gamer	fumotom/43599	Monitor MSI PRO MP242 E14A, 24 Pol, Full HD, IPS, 1ms, 144Hz, 121% sRGB, Adaptive-Sync, HDMI/VGA
+monitor_gamer	fumotom/43039	Monitor Philips Evnia 27 Polegadas 144Hz Widescreen 27M2n3200nf/57
+monitor_gamer	fumotom/43243	Monitor Philips Evnia 27'' 144hz 0,5ms Ips Full Hd
+monitor_gamer	fumotom/44465	Monitor Portátil Arzopa Z1fc 16.1" Full Hd 144hz Ips portatil 100% sRGB Tipo C Mini Hdmi Para Ps4/5 Steam Deck Switch Xbox Pc Mac, Z1 Fc portatil
+monitor_gamer	promotom/112482	Monitor Portátil Arzopa Z3fc 16.1" Quad Hd 2.5K 180Hz 107% sRGB
+monitor_gamer	fumotom/44377	Monitor Portátil Gamer Bettdow de 15.6" Full Hd Ips Antirreflexo com Capa
+monitor_gamer	fumotom/44243	Monitor Portátil para Jogos Arzopa de 16,1 Polegadas, 1080P 300cd/ ㎡ Tela Ips para Laptop Mac Pc Switch Ps Xbox Display Externo Z1c Cinza
+monitor_gamer	fumotom/44468	Monitor Portátil Qhd Arzopa Z3fc 16,1 polegadas 2,5 K 180 Hz 2560x1440 16:9 107% sRGB 400cd/m2 Z3 Fc Quad Hd 2k
+monitor_gamer	fumotom/43723	Monitor Samsung Odyssey Oled G5 27", Qhd, 180Hz, 0.03ms, G-sync, FreeSync, Dp, Hdmi
+monitor_gamer	fumotom/44451	Monitor Tcl 25 Polegadas Qd-Mini Led Full Hd G64 300hz 1ms (Gtg) Freesync Hdr 600 Nits 25g64
+monitor_gamer	nerdofertas/148159	Precinho ➡️ Monitor Gamer Philips Evnia 23.8" 144Hz 0, 5Ms 24M2n3200nf
+monitor_gamer	promotom/112176	Rise Mode Monitor Gamer Curvo 32" Full HD 165Hz VA DisplayPort/HDMI, Preto
+monitor_gamer	nerdofertas/148554	➡️ Monitor Arzopa Gamer Z1FC 16.1" FHD 144HZ IPS
+monitor_gamer	nerdofertas/147535	➡️ Monitor Gamer 23.8" Acer Nitro VG0 com Tela Full HD 200Hz IPS Resposta de 1ms GtoG AMD FreeSync Premium HDR10 Cores 99% sRGB Design ZeroFrame 2 Entradas HDMI e DisplayPort VG240Y X1biip
+monitor_gamer	nerdofertas/147243	➡️ Monitor Gamer AOC 23,8" Full HD 144Hz Agon G50 IPS 0,5ms 24G50F/57 HDMI DisplayPort G-Sync
+monitor_gamer	nerdofertas/147304	➡️ Monitor Gamer AOC 24" 180Hz 0,5ms IPS Ajuste de Altura 24G4/P
+monitor_gamer	nerdofertas/148797	➡️ Monitor Gamer Aoc Agon G42 27" 200Hz 0,3Ms Ips Hdr10 Nvidia G-Sync 27G42he
+monitor_gamer	nerdofertas/148144	➡️ Monitor Gamer AOC AGON G50 27" 144Hz 0,5ms IPS HDR10 G-SYNC 27G50F
+monitor_gamer	nerdofertas/147246	➡️ Monitor Gamer Aoc Agon Quad 27" Qhd 180Hz 0,5ms Ips Hdr10 Base Ajustável Q27g4f
+monitor_gamer	nerdofertas/146954	➡️ Monitor Gamer Aoc Agon Quad 27'' 180hz Base Ajustável Q27g4f
+monitor_gamer	nerdofertas/148097	➡️ Monitor Gamer ARZOPA M1RC, 27” 2K QHD 180Hz IPS, 1ms, 115% sRGB, USB-C, HDMI, Display Port
+monitor_gamer	nerdofertas/148012	➡️ Monitor Gamer Asus ROG Strix XG27ACS, 27 Pol, Fast IPS, 180Hz,1ms,133%,HDMI/DP/USB-C,90LM09Q0-B011X1
+monitor_gamer	nerdofertas/148034	➡️ Monitor Gamer Curvo AOC AGON G4Z 27" 300Hz 0,3ms HDR10 Base Ajustável C27G4Z/P
+monitor_gamer	nerdofertas/147652	➡️ Monitor Gamer Haiz 25'' Ips Fhd 144hz 0.5ms Hdmi Dp Vesa Preto
+monitor_gamer	nerdofertas/148794	➡️ Monitor Gamer Phillips 24 Evnia Ips 144hz 0.5ms Wide Fullhd Preto 127/220v
+monitor_gamer	nerdofertas/146956	➡️ Monitor Gamer Tcl 25" Polegadas Qd-Mini Led Full Hd G64 300hz 1ms (Gtg) Freesync Hdr 600 Nits 25g64
+monitor_gamer	nerdofertas/147534	➡️ Monitor LG UltraGear™ 24G411A-B 24",FHD, 144Hz, 1ms (MBR), NVIDIA G-SYNC, AMD FreeSync, HDR10
+monitor_gamer	nerdofertas/148137	➡️ Monitor MSI PRO MP242 E14A, 24 Pol, Full HD, IPS, 1ms, 144Hz, 121% sRGB, Adaptive-Sync, HDMI/VGA
+monitor_gamer	nerdofertas/147419	➡️ Monitor Samsung Odyssey Oled G5 27", Qhd, 180Hz, 0.03ms, G-sync, FreeSync, Dp, Hdmi
+monitor_gamer	nerdofertas/146906	➡️ Monitor WOLED QHD 240Hz XG27AQDMGR
+monitor_gamer	fullpromotion/33330	🔥 Ainda ativo! Monitor Gamer Philips Evnia 23.8" 144Hz 0, 5Ms 24M2n3200nf
+monitor_gamer	fullpromotion/33968	🔥 Lg UltraGear Monitor Gamer 27" Ips, 144Hz Nativo, 1ms (Mbr), Full Hd (1920x1080), Hdr10, Nvidia G-Sync, Amd FreeSync, Preto - 27G411b
+monitor_gamer	SamuelF3lipePromo/124990	🔥 Lg UltraGear Monitor Gamer 27" Ips, 144Hz Nativo, 1ms (Mbr), Full Hd (1920x1080), Hdr10, Nvidia G-Sync, Amd FreeSync, Preto 27G411b
+monitor_gamer	fullpromotion/33099	🔥 LG UltraGear Monitor Gamer 32"- VA 165Hz 1ms (MBR) QHD 2K (2560x1440) HDR10 AMD FreeSync, Preto - 32GN600
+monitor_gamer	SamuelF3lipePromo/124278	🔥 LG UltraGear Monitor Gamer 32"- VA 165Hz 1ms (MBR) QHD 2K (2560x1440) HDR10 AMD FreeSync, Preto 32GN600
+monitor_gamer	SamuelF3lipePromo/124464	🔥 Monitor 27 Aoc Gamer 27b30h3/57, Full Hd, Ips, 120hz, 1ms Cor Preto
+monitor_gamer	SamuelF3lipePromo/124932	🔥 Monitor Acer Nitro ED343CUR J0BMIIPPX 34C, 34" Tela Curva, QuadHD QHD 120Hz 1ms LED VA Tecnologia Acer Vision Care, AMD FreeSync DisplayPort(1.4) saída de áudio
+monitor_gamer	fullpromotion/33106	🔥 Monitor Acer Nitro Kg243y P1bip Ips 23.8 144hz
+monitor_gamer	SamuelF3lipePromo/124275	🔥 Monitor Aoc 23,8" 100Hz 1ms Gaming Hdmi 24B30hm2
+monitor_gamer	fullpromotion/33152	🔥 Monitor Aoc Agon G42 27" 200Hz 0,3Ms Ips Hdr10 Nvidia G-Sync 27G42he
+monitor_gamer	SamuelF3lipePromo/124860	🔥 Monitor Arzopa Gamer 27" QHD Fast IPS 180Hz 1ms HDMI DP
+monitor_gamer	SamuelF3lipePromo/124302	🔥 Monitor Gamer 27" Acer Nitro Kg0 com Tela Full Hd 144Hz Va Resposta de 1ms GtoG Amd FreeSync Game Mode 8 Modos Cores 99% sRGB Design ZeroFrame Conexões Hdmi e Vga Kg270 P0bi
+monitor_gamer	SamuelF3lipePromo/124808	🔥 Monitor Gamer Acer Nitro 23.8 200hz 2ms Fhd Hdmi Va Kg241y-X3Bip Preto
+monitor_gamer	SamuelF3lipePromo/124198	🔥 Monitor Gamer Acer Nitro Kg243y P1bip 23, 8″ Full Hd • 144Hz • 1ms Vrb • Ips • Hdmi • DisplayPort • ZeroFrame
+monitor_gamer	fullpromotion/33006	🔥 Monitor Gamer Acer Nitro Kg243y P1bip 23, 8″ | Full Hd • 144Hz • 1ms Vrb • Ips • Hdmi • DisplayPort • ZeroFrame
+monitor_gamer	SamuelF3lipePromo/124575	🔥 Monitor Gamer Acer Nitro Kg273 G0bi 27" Full Hd Ips 120Hz 1ms (Versão 27 Polegadas)
+monitor_gamer	SamuelF3lipePromo/124806	🔥 Monitor Gamer Aoc 21.5" B30 120Hz 22B30hm23 Fhd, 1Ms, Preto 22"
+monitor_gamer	SamuelF3lipePromo/124453	🔥 Monitor Gamer Aoc 22'' 22b35hm23 120hz 1ms Hdmi Vga Full Hd
+monitor_gamer	fullpromotion/32971	🔥 Monitor Gamer AOC 23,8" Full HD 144Hz Agon G50 IPS 0,5ms 24G50F/57 HDMI DisplayPort G-Sync
+monitor_gamer	SamuelF3lipePromo/124721	🔥 Monitor Gamer AOC AGON G42 27" 200Hz 0,3ms IPS HDR10
+monitor_gamer	fadapromos/14355	🔥 Monitor Gamer AOC AGON G42 27" 200Hz 0,3ms IPS HDR10 NVIDIA G-Sync 27G42HE
+monitor_gamer	SamuelF3lipePromo/124313	🔥 Monitor Gamer Aoc Agon G4s 25" 310Hz 0.3ms Hdr10 Ips Base Ajustável 25G4s/P
+monitor_gamer	SamuelF3lipePromo/124273	🔥 Monitor Gamer AOC AGON G50 27" 144Hz 0,5ms IPS HDR10 G-SYNC 27G50F
+monitor_gamer	fadapromos/14026	🔥 Monitor gamer Aoc Série B30 21.5'' Full Hd Gaming 120hz 1ms
+monitor_gamer	SamuelF3lipePromo/124276	🔥 Monitor gamer Aoc Série B30 21.5'' Full Hd Gaming 120hz 1ms 22b30hm23 cor preto
+monitor_gamer	fullpromotion/32951	🔥 Monitor Gamer Arzopa M1rc, 27” 2k QHD 180Hz IPS, 1ms, 115% sRGB, USB-C, HDMI, Display Port
+monitor_gamer	fullpromotion/32957	🔥 Monitor Gamer ASUS ROG Strix 27” (QHD, 180HZ, IPS, 1ms)
+monitor_gamer	fullpromotion/32956	🔥 Monitor Gamer Asus ROG Strix XG27ACS, 27 Pol, Fast IPS, 180Hz,1ms,133%,HDMI/DP/USB-C,90LM09Q0-B011X1
+monitor_gamer	fullpromotion/32961	🔥 Monitor Gamer Asus Tuf Gaming Series 5, 27", Full Hd, Fast IPS, 260Hz, 0.3ms, HDR10, FreeSync, Preto VG279QM5F
+monitor_gamer	SamuelF3lipePromo/124580	🔥 Monitor Gamer Curvo Aoc Agon G4z 27" 300Hz 0,3ms Hdr10 Base Ajustável C27g4z/P
+monitor_gamer	SamuelF3lipePromo/124632	🔥 Monitor Gamer Curvo Aoc Agon Quad 32" 180Hz 0,5ms Hdr10 Cq32g4e
+monitor_gamer	SamuelF3lipePromo/124413	🔥 Monitor Gamer Curvo Aoc Agon Quad 34" Ultrawide Wqhd 180Hz 0,5ms Base Ajustável U34g4c
+monitor_gamer	SamuelF3lipePromo/124406	🔥 Monitor Gamer Curvo Samsung Odyssey 34" G5 165 Hz 1ms Ultrawide Preto
+monitor_gamer	SamuelF3lipePromo/124409	🔥 Monitor Gamer Curvo Samsung Odyssey G5, 27", Qhd, 165hz Cor Preto
+monitor_gamer	fullpromotion/32987	🔥 Monitor Gamer Haiz 25'' Ips Fhd 144hz 0.5ms Hdmi Dp Vesa Preto
+monitor_gamer	SamuelF3lipePromo/124317	🔥 Monitor Gamer LG UltraGear 24" 24GS60F-B IPS Full HD 180Hz 1ms (GtG) NVIDIA G-SYNC AMD FreeSync HDR10 sRGB 99% HDMI DisplayPort
+monitor_gamer	fullpromotion/33623	🔥 Monitor Gamer Lg UltraGear 24" Ips 144Hz nativo, 1ms (Mbr), Full Hd (1920x1080), Hdr10, Nvidia G-Sync, Amd FreeSync sRGB, Preto - 24G411b
+monitor_gamer	SamuelF3lipePromo/124805	🔥 Monitor Gamer Lg UltraGear 24" Ips 144Hz nativo, 1ms (Mbr), Full Hd (1920x1080), Hdr10, Nvidia G-Sync, Amd FreeSync sRGB, Preto 24G411b
+monitor_gamer	fullpromotion/33597	🔥 Monitor Gamer Lg UltraGear 24", Full Hd, 144Hz, 1ms, Ips, G-Sync, FreeSync, Hdr10, Preto - 24G411a-B
+monitor_gamer	SamuelF3lipePromo/124775	🔥 Monitor Gamer Lg UltraGear 24", Full Hd, 144Hz, 1ms, Ips, G-Sync, FreeSync, Hdr10, Preto 24G411a-B
+monitor_gamer	fullpromotion/32843	🔥 Monitor Gamer LG UltraGear 24” IPS, Full HD, 180Hz, 1ms (GtG), HDMI, DisplayPort, HDR10, sRGB 99%, NVIDIA® G-SYNC®, AMD FreeSync™, Preto - 24GS60F-B
+monitor_gamer	fadapromos/14247	🔥 Monitor Gamer Philips Evnia 23.8" 144HZ 0, 5MS 24M2N3200NF
+monitor_gamer	SamuelF3lipePromo/124293	🔥 Monitor Gamer Philips Evnia 23.8" 200Hz 0, 3Ms 24M2n3200fq
+monitor_gamer	fullpromotion/33747	🔥 Monitor Gamer Philips Evnia 23.8" 200Hz 0,3Ms 24M2n3200fq
+monitor_gamer	fadapromos/14246	🔥 Monitor Gamer Philips EVNIA 27" IPS FHD, 144Hz, 0, 5ms, NVIDIA G-Sync - 27M2N3200NF
+monitor_gamer	SamuelF3lipePromo/124199	🔥 Monitor Gamer Philips Evnia 27'' 144hz 0, 5ms Ips Full Hd Preto 127/220v
+monitor_gamer	fullpromotion/33329	🔥 Monitor Gamer Philips Evnia 27'' 144hz 0,5ms Ips Full Hd
+monitor_gamer	SamuelF3lipePromo/124991	🔥 Monitor Gamer Phillips 24 Evnia Ips 144hz 0.5ms Wide Fullhd Preto 127/220v
+monitor_gamer	SamuelF3lipePromo/124824	🔥 Monitor Gamer Portátil 15.6 1080p Fhd Ips Com Hdmi Usb
+monitor_gamer	SamuelF3lipePromo/124815	🔥 Monitor Gamer Samsung Essential S3, 24" FHD, 120 Hz, HDMI, Preto
+monitor_gamer	fullpromotion/32952	🔥 Monitor Gamer Samsung Odyssey G5
+monitor_gamer	SamuelF3lipePromo/124306	🔥 Monitor Gamer Samsung Odyssey G5, 27, Qhd, 165hz
+monitor_gamer	SamuelF3lipePromo/124308	🔥 Monitor Gamer Samsung Odyssey G5, 32, Qhd, 165hz
+monitor_gamer	fullpromotion/33670	🔥 Monitor Gamer Superframe Precision 24 Ips 180hz Preto
+monitor_gamer	fullpromotion/32964	🔥 Monitor Gamer TCL 24" Polegadas Mini LED Full HD G54 100Hz HDR400 92% DCI-P3 450 nits 24G54
+monitor_gamer	fullpromotion/32946	🔥 Monitor Gamer TCL 25 Qd Mini Led Full Hd 300Hz 2 HDMI 25g64
+monitor_gamer	SamuelF3lipePromo/124233	🔥 Monitor Gamer Tcl 25 Qd Mini Led Full Hd 300hz 2 Hdmi 25g64, 25 POL, 1ms
+monitor_gamer	SamuelF3lipePromo/124281	🔥 Monitor Gigabyte Gs24f14 23.8 Pol Full Hd Ips 144hz 1ms
+monitor_gamer	SamuelF3lipePromo/124827	🔥 Monitor Lg Fhd Gamer & Office com telaIPS 24”, 1ms (Mbr), 144Hz nativo, FreeSync, Hdr10, sRGB
+monitor_gamer	SamuelF3lipePromo/124828	🔥 Monitor LG FHD Gamer & Office com telaIPS 24”, 1ms (MBR), 144Hz nativo, FreeSync, HDR10, sRGB, Modo leitura, Flicker Safe, HDMI, Black Stabilizer, Dynamic Action Sync, Preto -24U411B
+monitor_gamer	fullpromotion/33163	🔥 Monitor Lg UltraGear - Tela Va Fhd 32”, 144Hz nativo, 1ms (Mbr), Amd FreeSync, Hdr10, sRGB 99%, Preto - 32G403b
+monitor_gamer	fullpromotion/33323	🔥 Monitor Lg UltraGear 27" Ips, 144Hz Nativo, 1ms (Mbr), Full Hd (1920x1080), Hdr10, Nvidia G-Sync, Amd FreeSync, Preto - 27G411
+monitor_gamer	SamuelF3lipePromo/124410	🔥 Monitor Lg UltraGear 27" Ips, 144Hz Nativo, 1ms (Mbr), Full Hd (1920x1080), Hdr10, Nvidia G-Sync, Amd FreeSync, Preto 27G411
+monitor_gamer	fullpromotion/33456	🔥 Monitor Lg Ultragear 27, 144hz, 1ms(mbr), Preto - 27g411b
+monitor_gamer	SamuelF3lipePromo/124611	🔥 Monitor Lg Ultragear 27, 144hz, 1ms(mbr), Preto 27g411b
+monitor_gamer	fadapromos/13763	🔥 Monitor LG UltraGear G4 24'' 24GS60F (IPS, 180HZ, 1MS, 99%srgb)
+monitor_gamer	SamuelF3lipePromo/124933	🔥 Monitor Lg UltraGear Oled 27Gx704a-B 27" QuadHD, 0.03ms (GtG), 240Hz, Nvidia G-Sync, Amd FreeSync Premium Pro, Vesa Cle Qhd 2k
+monitor_gamer	SamuelF3lipePromo/124323	🔥 Monitor Lg UltraGear Tela Va Fhd 32”, 144Hz nativo, 1ms (Mbr), Amd FreeSync, Hdr10, sRGB 99%, Preto 32G403b
+monitor_gamer	SamuelF3lipePromo/124340	🔥 Monitor Lg UltraGear™ Oled 27Gx704a-B 27" QuadHD, 0.03ms (GtG), 240Hz
+monitor_gamer	fadapromos/13561	🔥 Monitor Philips 27" 120Hz 1ms Gaming Alto-falantes 271V8LAB3
+monitor_gamer	SamuelF3lipePromo/124551	🔥 Monitor Portátil Arzopa Z3fc 16.1" Quad Hd 2.5K 180Hz 107% sRGB
+monitor_gamer	fullpromotion/33627	🔥 Monitor Portátil Gamer Bettdow de 15.6" Full Hd Ips Antirreflexo com Capa
+monitor_gamer	SamuelF3lipePromo/124911	🔥 Monitor Portátil para Jogos Arzopa de 16,1 Polegadas, 1080P 300cd/ ㎡ Tela Ips para Laptop Mac Pc Switch Ps Xbox Display Externo Z1c Cinza
+monitor_gamer	SamuelF3lipePromo/124407	🔥 Monitor Samsung Odyssey Oled G5 27", Qhd, 180Hz, 0.03ms, G-sync, FreeSync, Dp, Hdmi
+monitor_gamer	SamuelF3lipePromo/124850	🔥 Monitor Superframe Precision 24 Ips 180Hz 1ms Full Hd Preto
+monitor_gamer	SamuelF3lipePromo/124845	🔥 Monitor Tcl 25 Polegadas Qd-Mini Led Full Hd G64 300hz 1ms (Gtg) Freesync Hdr 600 Nits 25g64
+placa_de_video	fumotom/43366	Gigabyte Placa de vídeo Radeon Rx 9050 Gaming Oc 8G 8Gb Gddr6 Windforce Cooling with Hawk Fan Boost Clock 2760MHz
+placa_de_video	promotom/112286	INNO3D GPU Geforce Rtx 5060 Twin X2 8GB 128BITS GDDR7 N50602-08D7-195071N
+placa_de_video	promotom/112012	Open Box Nvidia Msi Rtx 5060 Ventus 2x 8Gb Gddr7 Oc
+placa_de_video	fumotom/42606	Open Box Placa De Vídeo Msi Rtx 5060 Ti Ventus 2x 8Gb Gddr7 (caixa aberta)
+placa_de_video	fumotom/42554	Palit RTX 5070 Infinity 3 12 GB GDDR7 12.288 MB (Seminovo)
+placa_de_video	fumotom/43307	PLACA DE VIDEO BRX GEFORCE GTX 750 4GB DDR5 128 BITS HDMI/VGA/DVI NVIDIA-GTX750-4G-640SP
+placa_de_video	fumotom/43644	Placa de Video Gigabyte GeForce RTX 3060 Windforce OC, 12GB, GDDR6, 192-bit, GV-N3060WF2OC-12GD-REV2.0
+placa_de_video	fumotom/43648	Placa de Video Gigabyte GeForce Rtx 5060 Ti Eagle Ice Oc, 8Gb, Gddr7, 128-bit, Gv-N506teagleoc-Ice-8Gd
+placa_de_video	fumotom/43655	Placa de Video Gigabyte Radeon RX 9050 Gaming OC, 8GB, GDDR6, 128-bit, GV-R9050GAMING-OC-8GD
+placa_de_video	fumotom/42906	Placa de Video Inno3d GeForce Rtx 5050 Twin X2, 8Gb, Gddr6, 128-bit, N50502-08D6-174071N
+placa_de_video	fumotom/42733	Placa de Video Inno3d Geforce Rtx 5060 Twin X2 8Gb 128Bits Gddr7 N50602-08D7-195071N - Inno3d
+placa_de_video	promotom/112564	Placa de Video Palit GeForce RTX 5060 8GB INFINITY 2 OC GDDR7 128bits - NE75060V19P1-GB2063L
+placa_de_video	promotom/112567	Placa de Video Palit GeForce RTX 5060 WHITE OC 8GB GDDR7 128bit 3-DP e HDMI - NE75060U19P1-GB2063M
+placa_de_video	fumotom/44457	Placa de Video Palit GeForce RTX 5070 Ti 16GB GamingPro-S GDDR7 256bits - NE7507T019T2-GB2031U
+placa_de_video	fumotom/44439	Placa de Video Palit RTX 5070 INFINITY 3 NVIDIA GeForce, 12GB, GDDR7, 192bit 3-DP e HDMI - NE75070019K9-GB2050S
+placa_de_video	fumotom/43671	Placa de Video PNY GeForce RTX 5050 Single Fan, 8GB, GDDR6, 128-bit, VCG50508SFXPB1
+placa_de_video	fumotom/42957	Placa de Video PowerColor Radeon Rx 9060 Xt Reaper White, 16Gb, Gddr6, 128-bit, Rx9060xt-16G-A-White
+placa_de_video	fumotom/44002	Placa de Video PowerColor Radeon Rx 9060 Xt Reaper, 16Gb, Gddr6, 128-bit, Rx9060xt-16G-A-Nac
+placa_de_video	promotom/112290	Placa de video rtx5060 8gb gdddr7 128bits inno3d twin x2
+placa_de_video	fumotom/43896	Placa de video Rx 580 8G 8Pin Rx580
+placa_de_video	fumotom/43614	Placa de Video Sapphire Radeon RX 9060 XT Pulse, 16GB, GDDR6, 128-bit, 11350-03-20G
+placa_de_video	fumotom/42597	Placa de Vídeo ASRock Radeon Rx 7600 8Gb Challenger Oc
+placa_de_video	fumotom/44020	Placa de Vídeo ASRock Radeon Rx 7600 8Gb Challenger Oc Gddr6 Hdmi 2.1
+placa_de_video	fumotom/44442	Placa de Vídeo ASRock Radeon RX 9070 XT Challenger, AMD, 16GB - 90-GA61ZZ-00UANF
+placa_de_video	promotom/112563	Placa de Vídeo ASRock RX 7600 Challenger PRO OC AMD Radeon, 8GB, GDDR6, Triple Fan - 90-GA62ZZ-00UANF
+placa_de_video	promotom/111994	Placa de Vídeo ASRock RX 9070 Challenger AMD Radeon, LED, 16GB, GDDR6, FidelityFX, RDNA - 90-GA5NZZ-00UANF
+placa_de_video	fumotom/44459	Placa de Vídeo ASRock RX 9070 XT Steel Legend AMD Radeon, ARGB, 16GB, GDDR6, 2970MHz, FidelityFX, RDNA - 90-GA5DZZ-00UANF
+placa_de_video	fumotom/43536	Placa de Vídeo Asus Amd Radeon Rx 9060 Xt Dual, 16Gb, Gddr6, Fsr, Ray Tracing, 90Yv0lg2-M0na00
+placa_de_video	fumotom/44435	Placa de Vídeo ASUS DUAL RTX 5060 TI O16G NVIDIA GeForce, 16GB GDDR7, 2602MHz, 128 bits, OpenGL4.6, DLSS 4, Ray Tracing - 90YV0MH0-M0NA00
+placa_de_video	promotom/112568	Placa de Vídeo ASUS RTX 5060 TI DUAL O8G NVIDIA GeForce, 8GB, GDDR7, DLSS, Ray Tracing - 90YV0MP2-M0NA00
+placa_de_video	fumotom/44458	Placa de Vídeo ASUS RTX5090 ROG Astral Gaming OC NVIDIA GeForce, 32GB, GDDR7, ARGB, G-Sync, Ray Tracing, DLSS 4, HDR - 90YV0LW0-MVAA00
+placa_de_video	fumotom/42558	Placa de Vídeo Gainward Phoenix Rtx 5080 16Gb Gddr7 8K Ray Tracing
+placa_de_video	fumotom/43015	Placa de Vídeo Gigabyte GeForce Rtx 5060 Gaming Oc, 8Gb, Gddr7, 128-bit
+placa_de_video	fumotom/44100	Placa de Vídeo Gigabyte GeForce RTX 5080 Gaming OC, 16GB, GDDR7 - GV-N5080GAMING OC-16GD
+placa_de_video	fumotom/44429	Placa de Vídeo Gigabyte RTX 5050 WINDFORCE 2 OC 8GB NVIDIA GeForce, 8GB GDDR6, 128bit,  DLSS, Ray Tracing - GV-N5050WF2OC-8GD
+placa_de_video	promotom/112566	Placa de Vídeo Gigabyte RTX 5060 EAGLE MAX OC 8GB NVIDIA GeForce, 8GB GDDR7, 128bit, Triple Fan, Ray Tracing - GV-N5060EAGLEMAX OC-8GD
+placa_de_video	fumotom/44433	Placa de Vídeo Gigabyte RTX 5060 Ti EAGLE OC 8G NVIDIA GeForce, 8GB GDDR7, 128bits, DLSS, Ray Tracing - GV-N506TEAGLE OC-8GD
+placa_de_video	promotom/112000	Placa De Vídeo Gigabyte Rtx 5060 Windforce Max Oc 8gb Gddr7
+placa_de_video	fumotom/44440	Placa de Vídeo Gigabyte RTX 5070 EAGLE OC SFF 12G NVIDIA GeForce, 12GB GDDR7, 192bits, RGB, DLSS, Ray Tracing - GV-N5070EAGLE OC-12GD
+placa_de_video	fumotom/44456	Placa de Vídeo Gigabyte RTX 5070 GAMING OC 12G NVIDIA GeForce, 12GB GDDR7, 192bits, RGB, DLSS, Ray Tracing - 9VN5070GO-00-G10
+placa_de_video	fumotom/44455	Placa de Vídeo Gigabyte RTX 5070 Ti WINDFORCE OC SFF 16G NVIDIA GeForce, 16GB GDDR7, 256bits, DLSS, Ray Tracing - 9VN507TWO-00-G10
+placa_de_video	fumotom/42805	Placa de Vídeo Gigabyte RTX 5070 WINDFORCE OC SFF 12G NVIDIA GeForc 12GB GDDR7
+placa_de_video	fumotom/44438	Placa de Vídeo Gigabyte RTX 5070 WINDFORCE OC SFF 12G NVIDIA GeForce, 12GB GDDR7, 192bits, DLSS, Ray Tracing - 9VN5070WO-00-G10
+placa_de_video	promotom/112562	Placa de Vídeo Gigabyte RX 9050 GAMING OC 8GB AMD Radeon, 8GB GDDR6, 128bit - GV-R9050GAMING OC-8GD
+placa_de_video	fumotom/44015	Placa De Vídeo Gigabyte Rx 9050 Gaming Oc 8gb Gddr6 128bit
+placa_de_video	fumotom/44430	Placa De Vídeo Husky Alpha RTX 3060 TI, NVIDIA, 8GB, GDDR6, 256-Bit, HDMI, DisplayPort - HVG3060TI
+placa_de_video	fumotom/44426	Placa De Vídeo Husky Alpha RTX 3060, Nvidia, 12GB, GDDR6, 192-Bit, Dual Fan, HDMI, 3x DisplayPort - HVG023060
+placa_de_video	fumotom/44431	Placa de Vídeo Husky Alpha RTX 3070, NVIDIA, 8GB, GDDR6, 256-Bit, Dual Fan, HDMI, 3x DisplayPort - HVG3070
+placa_de_video	fumotom/44424	Placa De Vídeo Husky Alpha RX 580, AMD, 8GB, GDDR5, 256-Bit, HDMI, DVI, DisplayPort - HVG580
+placa_de_video	fumotom/44441	Placa de Vídeo MSI GeForce RTX 5070 12G VENTUS 2X OC,12 GB GDDR7, 28Gbps, NVIDIA GeForce RTX 5070- G5070-12V2C
+placa_de_video	fumotom/44009	Placa De Vídeo Msi Nvidia Geforce Rtx 5080 Gaming Trio Oc, 16gb, Gddr7, Dlss, Ray Tracing, G5080-16gtc
+placa_de_video	fumotom/44432	Placa de Vídeo MSI RTX 5060 8G SHADOW 2X OC Geforce NVIDIA, 8GB GDDR7, 128 bits, 2535 MHz, DLSS 4, Ray Tracing - G5060-8S2C
+placa_de_video	promotom/112565	Placa de Vídeo MSI RTX 5060 8G VENTUS 2X OC Geforce NVIDIA, 8GB, GDDR7, 128 bits, 2535 MHz, DLSS 4, Ray Tracing - G5060-8V2C
+placa_de_video	fumotom/42802	Placa de Vídeo Nvidia Geforce Inno3d Rtx 5070 12Gb Twin X2 Gddr7 N50702-12D7-195064N
+placa_de_video	fumotom/42555	Placa De Vídeo Nvidia Geforce Palit Rtx5060 8gb Infinity2 Oc
+placa_de_video	promotom/112570	Placa de Vídeo Nvidia PcYes RTX 5060 TI 16GB GDDR7 128BITS DUAL FAN PVRTX5060TIB2F16G
+placa_de_video	fumotom/44434	Placa de Vídeo Palit GeForce RTX5060Ti INFINITY 3 NVIDIA GeForce, 16GB GDDR7, 128bit, FP4 e DLSS 4, Ray Tracing - NE7506T019T1-GB2061S
+placa_de_video	fumotom/44444	Placa de Vídeo Palit RTX5080 INFINITY 3 16GB GDDR7 - NE75080019T2-GB2035S
+placa_de_video	fumotom/43372	Placa De Vídeo Pcyes Rtx 5060 8Gb Gddr7 128bit Gamer
+placa_de_video	fumotom/42576	Placa De Vídeo Peladn Rtx 5060 Armour, 8gb, Gddr7, 128-bit
+placa_de_video	fumotom/42589	Placa De Vídeo Pny Rtx 5050 8Gb Gddr6 Singlefan
+placa_de_video	fumotom/44428	Placa de Vídeo PNY RTX 5050 STD 8GB GDDR6 SingleFan NVIDIA GeForce - VCG50508SFXPB1
+placa_de_video	promotom/112569	Placa de Vídeo PNY RTX 5060 Ti OC NVIDIA Geforce, 8GB GDDR7, Dual-Fan, Ray Tracing, DLSS 4 - VCG5060T8DFXPB1-O-TF
+placa_de_video	fumotom/42754	Placa de Vídeo PowerColor Radeon Rx 9060 Xt Reaper 16Gb Gddr6 128-bit PCIe 5.0 16G-A - Reembalado
+placa_de_video	fumotom/44427	Placa de Vídeo RTX 3060 Windforce OC 12G (rev. 2.0) Gigabyte NVIDIA GeForce, 12GB GDDR6, 192bits, Ray Tracing - GV-N3060WF2OC-12GD
+placa_de_video	promotom/112571	Placa de Vídeo RTX 5060 Ti EAGLEOC ICE 8G Gigabyte NVIDIA GeForce, 8GB GDDR7, 128bits, DLSS, Ray Tracing - GV-N506TEAGLEOC ICE-8GD
+placa_de_video	fumotom/44437	Placa de Vídeo Zotac RTX 5070 NVIDIA Geforce, 12GB 192 BITS GDDR7 TWIN EDGE OC - ZT-B50700H-10A
+placa_de_video	fumotom/42592	Placa Gráfica Gigabyte Radeon Rx 9050 Gaming Oc 8Gb Gddr6
+placa_de_video	fumotom/42983	Rtx 5060 Placa De Video Msi Rtx5060 Ventus 2x Oc 8Gb Gddr7 128bits - 912-v537-017
+placa_de_video	fumotom/42593	Rtx 5060 Ti 16Gb Placa De Vídeo Gainward Rtx5060ti 16Gb Python Iii Gddr7
+placa_de_video	fumotom/43902	Rtx 5060 Ti 16Gb Placa de Vídeo Pcyes Nvidia Geforce Rtx5060ti, 16Gb, Gddr7, Dlss, Ray Tracing, Pvrtx5060tib2f16g
+placa_de_video	fumotom/44470	Rtx 5090 32Gb Placa De Video Palit Rtx5090 Gamerock Oc, 32G, Gddr7
+placa_de_video	fumotom/44720	Rx 580 8Gb Placa de Vídeo Amd Radeon Veineda Rx580 (usada)
+placa_de_video	fumotom/44505	Rx 590 8Gb 2304Sp Mllse Gddr5 256Bit Pci-E 3.0 ×16 6Pin (Usada) - geralmente vem com Chip de Rx 580 2304sp
+placa_de_video	fumotom/43686	Zotac Rtx 5060 Twin Edge Placa Vídeo 8gb Gddr7 Cooling Ar
+placa_de_video	nerdofertas/146894	➡️ GPU NV RTX5060TI 16GB GDDR7 128BITS VENTUS 2X OC BLACK PLUS MSI 912-V535-088
+placa_de_video	nerdofertas/148130	➡️ INNO3D GPU Geforce Rtx 5060 Twin X2 8GB 128BITS GDDR7 N50602-08D7-195071N
+placa_de_video	nerdofertas/148807	➡️ Placa de Vídeo RTX 5060 Ti EAGLEOC ICE 8G Gigabyte NVIDIA GeForce, 8GB GDDR7, 128bits, DLSS, Ray Tracing GV-N506TEAGLEOC ICE-8GD
+placa_de_video	nerdofertas/147119	➡️ Placa Gráfica Gigabyte Radeon Rx 9050 Gaming Oc 8GB Gddr6
+placa_de_video	nerdofertas/148927	➡️ RX 5500XT 8GB Veineda 🇧🇷 Envio do Brasil
+placa_de_video	nerdofertas/148919	➡️ RX 580 8GB Veineda
+placa_de_video	SamuelF3lipePromo/124259	🔥 INNO3D GPU Geforce Rtx 5060 Twin X2 8GB 128BITS GDDR7 N50602-08D7-195071N
+placa_de_video	SamuelF3lipePromo/124296	🔥 Placa de Video Gigabyte Radeon RX 9050 Gaming OC, 8GB, GDDR6, 128-bit, GV-R9050GAMING-OC-8GD
+placa_de_video	fullpromotion/32944	🔥 Placa de Video INNO3D GeForce RTX 5060 Twin X2 8GB 128bits GDDR7
+placa_de_video	SamuelF3lipePromo/124234	🔥 Placa de Video INNO3D GeForce RTX 5060 Twin X2 8GB 128BITS GDDR7 N50602-08D7-195071N - INNO3D
+placa_de_video	SamuelF3lipePromo/124831	🔥 Placa de Video Palit GeForce RTX 5060 8GB INFINITY 2 OC
+placa_de_video	SamuelF3lipePromo/124833	🔥 Placa de Video Palit GeForce RTX 5060 WHITE OC 8GB GDDR7 128bit 3-DP e HDMI NE75060U19P1-GB2063M
+placa_de_video	fadapromos/13853	🔥 Placa de Video PCYes Radeon RX 7600, 8GB
+placa_de_video	fullpromotion/33455	🔥 Placa de Video PowerColor Radeon Rx 9060 Xt Reaper, 16Gb, Gddr6, 128-bit, Rx9060xt-16G-A-Nac
+placa_de_video	fadapromos/14241	🔥 Placa de video rtx5060 8gb gdddr7 128bits inno3d twin x2
+placa_de_video	SamuelF3lipePromo/124548	🔥 Placa de video Rx 580 8G 8Pin Rx580
+placa_de_video	fullpromotion/33466	🔥 Placa de Vídeo ASRock Radeon Rx 7600 8Gb Challenger Oc Gddr6 Hdmi 2.1
+placa_de_video	SamuelF3lipePromo/124830	🔥 Placa de Vídeo ASRock RX 7600 Challenger PRO OC AMD Radeon, 8GB, GDDR6, Triple Fan 90-GA62ZZ-00UANF
+placa_de_video	fullpromotion/32986	🔥 Placa de Vídeo Asus Amd Radeon Rx 9060 Xt Dual, 16Gb, Gddr6, Fsr, Ray Tracing, 90Yv0lg2-M0na00
+placa_de_video	SamuelF3lipePromo/124841	🔥 Placa de Vídeo ASUS RTX 5060 TI DUAL O8G NVIDIA GeForce, 8GB, GDDR7, DLSS, Ray Tracing 90YV0MP2-M0NA00
+placa_de_video	fullpromotion/33477	🔥 Placa de Vídeo Gigabyte GeForce RTX 5080 Gaming OC, 16GB, GDDR7 - GV-N5080GAMING OC-16GD
+placa_de_video	SamuelF3lipePromo/124843	🔥 Placa de Vídeo Gigabyte RTX 5050 WINDFORCE 2 OC 8GB NVIDIA GeForce, 8GB GDDR6, 128bit, DLSS, Ray Tracing GV-N5050WF2OC-8GD
+placa_de_video	SamuelF3lipePromo/124834	🔥 Placa de Vídeo Gigabyte RTX 5060 EAGLE MAX OC 8GB NVIDIA GeForce, 8GB GDDR7, 128bit, Triple Fan, Ray Tracing GV-N5060EAGLEMAX OC-8GD
+placa_de_video	fullpromotion/33612	🔥 Placa de Vídeo Gigabyte Rx 9050 Gaming Oc 8Gb Amd Radeon, 8Gb Gddr6, 128Bit - Gv-R9050gaming Oc-8Gd
+placa_de_video	SamuelF3lipePromo/124839	🔥 Placa de Vídeo Gigabyte RX 9050 GAMING OC 8GB AMD Radeon, 8GB GDDR6, 128bit GV-R9050GAMING OC-8GD
+placa_de_video	fullpromotion/33465	🔥 Placa De Vídeo Gigabyte Rx 9050 Gaming Oc 8gb Gddr6 128bit
+placa_de_video	fullpromotion/33460	🔥 Placa De Vídeo Msi Nvidia Geforce Rtx 5080 Gaming Trio Oc, 16gb, Gddr7, Dlss, Ray Tracing, G5080-16gtc
+placa_de_video	SamuelF3lipePromo/124832	🔥 Placa de Vídeo MSI RTX 5060 8G VENTUS 2X OC Geforce NVIDIA, 8GB, GDDR7, 128 bits, 2535 MHz, DLSS 4, Ray Tracing G5060-8V2C
+placa_de_video	SamuelF3lipePromo/124842	🔥 Placa de Vídeo Nvidia PcYes RTX 5060 TI 16GB GDDR7 128BITS DUAL FAN PVRTX5060TIB2F16G
+placa_de_video	SamuelF3lipePromo/124852	🔥 Placa de Vídeo PALIT GeForce RTX 5060 8GB INFINITY 2 OC GDDR7 128bits
+placa_de_video	SamuelF3lipePromo/124835	🔥 Placa de Vídeo PNY RTX 5060 Ti OC NVIDIA Geforce, 8GB GDDR7, Dual-Fan, Ray Tracing, DLSS 4 VCG5060T8DFXPB1-O-TF
+placa_de_video	SamuelF3lipePromo/124844	🔥 Placa de Vídeo RTX 5060 Ti EAGLEOC ICE 8G Gigabyte NVIDIA GeForce, 8GB GDDR7, 128bits, DLSS, Ray Tracing GV-N506TEAGLEOC ICE-8GD
+placa_de_video	fullpromotion/32959	🔥 Placa de Vídeo RX 7600 Challenger ASRock AMD Radeon, 8GB GDDR6 - 90-GA41ZZ-00UANF
+placa_de_video	fullpromotion/33679	🔥 Rtx 5090 32Gb Placa De Video Palit Rtx5090 Gamerock Oc, 32G, Gddr7
+placa_de_video	SamuelF3lipePromo/124874	🔥 Rx 580 8GB Placa de Vídeo Amd Radeon Veineda Rx580
+placa_de_video	SamuelF3lipePromo/124533	🔥 Rx 580 8GB Placa de Vídeo Amd Radeon Veineda Rx580 (usada)
+placa_de_video	SamuelF3lipePromo/124937	🔥 RX 580 8GB Veineda
+placa_de_video	SamuelF3lipePromo/124873	🔥 Rx 590 8GB 2304Sp Mllse Gddr5 256Bit Pci-E 3.0 ×16 6Pin (Usada) geralmente vem com Chip de Rx 580 2304sp
+placa_de_video	SamuelF3lipePromo/124197	🔥 Zotac Rtx 5060 Twin Edge Placa Vídeo 8GB Gddr7 Cooling Ar
+placa_de_video	nerdofertas/147901	🚨 Placas de Vídeo com Cupom 10% OFF
+placa_mae	fumotom/43742	Asus B650m-Ayw Wifi Placa Mãe Am5 Ddr5 Hdmi M.2 Usb 3.2
+placa_mae	fumotom/44286	B650m Pro Jginyue Placa Mãe Am5 Ddr5 white branca
+placa_mae	fumotom/42956	Gigabyte B850m Aorus Elite Ice Wifi6e Placa-Mãe Micro-Atx, Socket Am5, Ddr5, para Amd Ryzen Série 7000/8000/9000
+placa_mae	fumotom/43821	Kit X99 Placa Mãe Soyo D4 + Xeon E5 2630 V4
+placa_mae	fumotom/43980	Machinist B450m Placa Mãe Ddr4 Am4 branca white Ryzen 1000 à 5000
+placa_mae	fumotom/43796	Placa Mae Asuss Tuf Gaming A620am-Plus, DDR5e, Socket Amd Am5, M-Atx, Chipsetl Amd A620a, Tuf-Gaming-A620am-PLUSb
+placa_mae	promotom/112293	Placa Mae Gigabyte B550m Aorus Elite Am4 Ddr4 Hdmi M-atx Cor Preto
+placa_mae	promotom/112301	Placa Mae MSI Pro A620AM-B Evo, DDR5, Socket AMD AM5, M-ATX, Chipset AMD A620A, PRO-A620AM-B-EVO
+placa_mae	fumotom/44399	Placa Mae Msi Pro B840m-B, Ddr5, Socket Amd Am5, M-Atx, Chipset Amd B840, Pro-B840m-B
+placa_mae	fumotom/43776	Placa Mae Pichau Danuri B550m-px, Ddr4, Socket Am4, M-atx Cor Preto
+placa_mae	fumotom/44390	Placa Mãe A520m K V2 Amd Am4 Matx Ddr4 Gigabyte
+placa_mae	fumotom/43893	Placa Mãe Am4 Asrock B550 Pg Riptide Usada
+placa_mae	fumotom/43890	Placa Mãe Am4 Asrock B550 Phantom Gaming 4 Usada
+placa_mae	fumotom/44038	Placa Mãe Am4 Jginyue B350i Itx Plus Argb
+placa_mae	fumotom/43159	Placa Mãe Asrock B450m Steel Legend Amd Am4 Matx Ddr4 Preto
+placa_mae	fumotom/42595	Placa Mãe ASRock B450M-HDV R4.0, Chipset B450, AMD AM4, mATX, DDR4
+placa_mae	fumotom/44388	Placa Mãe Asrock B550m-Hdv Am4 Ddr4 Matx Chipset Amd B550 Pcie 3.0
+placa_mae	fumotom/42843	Placa Mãe ASRock B850m Rock WiFi, Chipset B850, Amd Am5, mATX, Ddr5 B850
+placa_mae	fumotom/43882	Placa Mãe Asrock X570 Phantom Gaming Usada
+placa_mae	fumotom/43249	Placa Mãe Asus B650m Ayw Wi-fi B650 Amd Am5 Ddr5 Matx Preto Cinza-escuro
+placa_mae	fumotom/42973	Placa Mãe Asus B850m Ayw Gaming Wifi Am5 2Xddr5 Amd B850 Matx
+placa_mae	promotom/112451	Placa Mãe Asus Prime A520m-r Am4
+placa_mae	promotom/112553	Placa Mãe Asus Prime A520m-r Am4 Ddr4 Micro-atx
+placa_mae	promotom/112294	Placa Mãe Asus Tuf Gaming B550m-plus Ddr4 AMD Am4 mATX RGB
+placa_mae	fumotom/43286	Placa Mãe Asus Tuf Gaming B650m-e Wifi Amd Am5 Ddr5 Preto
+placa_mae	fumotom/44642	Placa mãe B450m Machinist Branca Ryzen 1000 à 5000
+placa_mae	fumotom/44663	Placa Mãe B550m Soyo Dragon Pci 4.0 Argb
+placa_mae	fumotom/44308	Placa mãe B550m Soyo White Argb+ 2x Nvme Pcie 4.0
+placa_mae	fumotom/42560	Placa Mãe Biostar Z890 Valkyrie, Chipset Z890, Intel LGA 1851, ATX, DDR5, IZ89AADT-R01-BS215D
+placa_mae	promotom/112136	Placa Mãe Gigabyte B550m Aorus Elite, Ddr4, Amd Am4
+placa_mae	fumotom/44410	Placa Mãe Gigabyte B550m Ds3h Ac R2, Amd Am4, Micro Atx, Ddr4, Rgb, Wi-Fi, Bluetooth, Preto - B550m Ds3h Ac R2
+placa_mae	promotom/111986	Placa Mãe Gigabyte Intel 1700 B760m Aorus Elite 4x Ddr5 Matx Cor Preto
+placa_mae	fumotom/43250	Placa mãe Gigabyte Ultra Durable A520m K V2
+placa_mae	fumotom/43911	Placa Mãe Intel Lga1151 Biostar B250 Mining Expert Usada
+placa_mae	fumotom/43900	Placa Mãe Intel Lga1200 Biostar Tz590 Btc Nova
+placa_mae	fumotom/43871	Placa mãe Jieshuo X99 Js11 Argb Ddr3, C612, Quad Channel, Secure Boot, Tpm 2.0 Msi 14pin
+placa_mae	fumotom/44158	Placa Mãe Lga1700 Asrock B660m Phantom Gaming 4 Ddr4 Usada
+placa_mae	fumotom/44157	Placa Mãe Lga1700 Asrock B660m Pro Rs Ddr4 Usada
+placa_mae	fumotom/44165	Placa Mãe Lga1700 Asrock Z690 Pg Velocita Ddr5 Usada
+placa_mae	fumotom/44177	Placa Mãe Lga1700 Asrock Z690 Steel Legend Ddr5 Usada
+placa_mae	fumotom/44563	Placa mãe Machinist X99 D4/D3, 2x ddr3 e 2x Ddr4, Argb, C612, Secure Boot e suporte Tpm 2.0 Asus 14 pinos
+placa_mae	fumotom/43364	Placa Mãe Maxsun B450m Ms-Challenger, Chipset B450, Amd Am4, mATX, Ddr4, Preta
+placa_mae	fumotom/42931	Placa Mãe Maxsun Terminator B850m Pro Dark WiFi, Chipset B850, Amd Am5, mATX, Ddr5
+placa_mae	fumotom/44409	Placa Mãe Msi A520m-A Pro + Processador Amd Ryzen 5 5500F + Air Cooler Mach1 Artic
+placa_mae	fumotom/42675	Placa Mãe Msi B550m-A Pro - Amd Ryzen Am4 - Ddr4 - Matx - M.2 - Hdmi/dvi
+placa_mae	fumotom/43947	Placa Mãe Msi Pro B760 M - P, Lga 1700, Ddr5, Matx Preto
+placa_mae	fumotom/43439	Placa Mãe Pro A620am-B Evo
+placa_mae	fumotom/44500	Placa Mãe Qiyida X99 Dual Cpu, Chipset C612
+placa_mae	fumotom/44509	Placa mãe Qiyida X99 H9s (Quad Channel) Chipset C612. Tem suporte ao Tpm 2.0 da Msi
+placa_mae	fumotom/44588	Placa mãe Qiyida x99 K9s (suporte ao Tpm 2.0 Asus 14pin)
+placa_mae	fumotom/44024	Placa Mãe Szsjkj X99 Xd4, Chipset C612, Quad Channel, Secure Boot, Tpm 2.0 Msi 14 pinos
+placa_mae	fumotom/44140	Placa Mãe X99 Machinist Pr9
+placa_mae	fumotom/44005	Placa-mãe Am4 Msi B550m A Pro Msi
+placa_mae	fumotom/44641	Placa-Mãe Asrock B450 B450m B450m-Hdv R4.0
+placa_mae	fumotom/42465	Placa-Mãe ASRock B850m Challenger, Amd Am5, Micro Atx, Ddr5 - 90-Mxbu40-A0uayz
+placa_mae	fumotom/44172	Placa-Mãe Asrock Z690 Pg Velocita Lga 1700 Suporta Ddr5 Cpu I5-13600K I7-13700K I9-12900K I7-12700K M.2 Atx Sata3 Pcie 5.0X16
+placa_mae	fumotom/43957	Placa-mãe Asus P/amd Am4 B550m-plus Tuf Gaming 4xddr4 Matx P Preto
+placa_mae	fumotom/43256	Placa-Mãe Asus Tuf Gaming A520m-Plus Ii, Am4, Matx, Ddr4
+placa_mae	promotom/112258	Placa-mãe Asus Tuf Gaming B550m-Plus Am4 4xDDR4 mATX
+placa_mae	fumotom/43417	Placa-Mãe Asus Tuf Gaming B550m-Plus Am4 mATX — Suporte Ryzen, PCIe 4.0, M.2 NVMe, Ddr4, Hdmi/Dp, Lan Gigabit, Durabilidade Militar para Pc Gamer
+placa_mae	fumotom/44408	Placa-Mãe Asus Tuf Gaming B550m-Plus, mATX, Ddr4 + Processador Amd Ryzen 7 5700x + Water Cooler Mach1 Logic, Rgb, 240mm
+placa_mae	fumotom/44507	Placa-mãe Mini Itx Jginyue B760i Gaming Lga1700 Suporta CPUs Intel de 12ª, 13ª e 14ª Geração Ddr4 Dual M.2 PCIe4.0 2.5G Lan Sff Gaming
+placa_mae	fumotom/44360	Placa-mãe Msi A520m-a Pro Am4 Matx Ddr4
+placa_mae	promotom/112450	Placa-mãe Msi A520m-a Pro Am4 Matx Ddr4 Preto
+placa_mae	fumotom/43233	Placa-Mãe Msi A520m-a Pro, Amd Am4, Matx, Ddr4, Preto - A520m-a Pro
+placa_mae	fumotom/42866	Placa-Mãe Msi B550 Gaming WiFi6E, Amd Am4, Atx, Ddr4, Wi-Fi 6E, Bluetooth 5.3, Preto e Prata - B550 Gaming Wifi6e
+placa_mae	promotom/112147	Placa-Mãe Msi B550m Gaming Plus WiFi6E, Amd Am4, Ddr4, Wi-Fi 6E, Bluetooth 5.2, Preto e Prata - B550m Gaming Plus Wifi6e
+placa_mae	fumotom/42913	Placa-mãe Msi Pro B760m-a Wifi Lga 1700 Micro-atx Ddr5
+placa_mae	fumotom/43266	Placa-mãe Msi Pro B760m-a Wifi Lga 1700 Micro-atx Ddr5 D5
+placa_mae	fumotom/42706	Placa-Mãe Msi Pro B760m-a Wifi, Intel, Lga 1700, Micro-Atx, Ddr5, Wi-Fi - Prob760mawifi
+placa_mae	fumotom/44683	Szsjkj X99 Kit de placa-mãe Ddr4 Lga2011-3 Slot C612 Chipset Ddr4 com Xeon E5 2680 V4 Tpm2.0
+placa_mae	nerdofertas/148428	➡️ Kit X99 Placa Mãe Soyo D4 + Xeon E5 2630 V4
+placa_mae	nerdofertas/148143	➡️ Placa Mãe Asus Tuf Gaming B550m-plus Ddr4 AMD Am4 mATX RGB
+placa_mae	nerdofertas/147210	➡️ Placa Mãe Msi B550m-A Pro Amd Ryzen Am4 Ddr4 Matx M.2 Hdmi/dvi
+placa_mae	nerdofertas/148020	➡️ Placa-mãe Asus p/AMD AM4 B550M-Plus TUF Gaming 4xDDR4 mATX 90MB14A0-C1BAY0
+placa_mae	nerdofertas/146814	➡️ Placa-Mãe ASUS TUF Gaming B550M-Plus, mATX, DDR4 + Processador AMD Ryzen 7 5700X + Air Cooler MACH1 WIND
+placa_mae	nerdofertas/146815	➡️ Placa-Mãe Husky Nexus A520 + Processador AMD Ryzen 5 5500F + Air Cooler Gamer Rise Mode X2
+placa_mae	fullpromotion/33345	🔥 Asus B650m-Ayw Wifi Placa Mãe Am5 Ddr5 Hdmi M.2 Usb 3.2
+placa_mae	fullpromotion/32962	🔥 B550M TUF Placa Mãe Asus TUF B550M Gaming Plus
+placa_mae	SamuelF3lipePromo/124506	🔥 B650m Pro Jginyue Placa Mãe Am5 Ddr5 white branca
+placa_mae	SamuelF3lipePromo/124494	🔥 Kit X99 Placa Mãe Soyo D4 + Xeon E5 2630 V4
+placa_mae	SamuelF3lipePromo/124594	🔥 Machinist B450m Placa Mãe Ddr4 Am4 branca white Ryzen 1000 à 5000
+placa_mae	SamuelF3lipePromo/124271	🔥 Placa Mae Gigabyte B550m Aorus Elite Am4 Ddr4 Hdmi M-atx Cor Preto
+placa_mae	SamuelF3lipePromo/124297	🔥 Placa Mae MSI Pro A620AM-B Evo, DDR5, Socket AMD AM5, M-ATX, Chipset AMD A620A, PRO-A620AM-B-EVO
+placa_mae	SamuelF3lipePromo/124457	🔥 Placa Mae Msi Pro B840m-B, Ddr5, Socket Amd Am5, M-Atx, Chipset Amd B840, Pro-B840m-B
+placa_mae	SamuelF3lipePromo/124460	🔥 Placa Mae Pichau Danuri B550m-px, Ddr4, Socket Am4, M-atx Cor Preto
+placa_mae	SamuelF3lipePromo/124326	🔥 Placa Mãe A520m K V2 Amd Am4 Matx Ddr4 Gigabyte
+placa_mae	SamuelF3lipePromo/124817	🔥 Placa Mãe Asrock B550m-Hdv Am4 Ddr4 Matx Chipset Amd B550 Pcie 3.0
+placa_mae	SamuelF3lipePromo/124431	🔥 Placa Mãe Asus Prime A520m-r Am4
+placa_mae	SamuelF3lipePromo/124799	🔥 Placa Mãe Asus Prime A520m-r Am4 Ddr4 Micro-atx
+placa_mae	SamuelF3lipePromo/124274	🔥 Placa Mãe Asus Tuf Gaming B550m-plus Ddr4 AMD Am4 mATX RGB
+placa_mae	SamuelF3lipePromo/124948	🔥 Placa Mãe B550m Soyo Dragon Pci 4.0 Argb
+placa_mae	SamuelF3lipePromo/124764	🔥 Placa mãe B550m Soyo White Argb+ 2x Nvme Pcie 4.0
+placa_mae	fullpromotion/33653	🔥 Placa Mãe Gigabyte B550m Ds3h Ac R2, Amd Am4, Micro Atx, Ddr4, Rgb, Wi-Fi, Bluetooth, Preto - B550m Ds3h Ac R2
+placa_mae	SamuelF3lipePromo/124825	🔥 Placa Mãe Gigabyte B550m Ds3h Ac R2, Amd Am4, Micro Atx, Ddr4, Rgb, Wi-Fi, Bluetooth, Preto B550m Ds3h Ac R2
+placa_mae	SamuelF3lipePromo/124856	🔥 Placa Mãe Msi A520m-A Pro + Processador Amd Ryzen 5 5500F + Air Cooler Mach1 Artic
+placa_mae	fullpromotion/33445	🔥 Placa Mãe Msi Pro B760 M - P, Lga 1700, Ddr5, Matx Preto
+placa_mae	fullpromotion/32853	🔥 Placa Mãe Pro A620am-B Evo
+placa_mae	SamuelF3lipePromo/124610	🔥 Placa-mãe Am4 Msi B550m A Pro Msi
+placa_mae	fadapromos/13754	🔥 Placa-Mãe AMD AM4 Asus TUF GAMING B550M-Plus - 90MB14A0-C1BAY0
+placa_mae	SamuelF3lipePromo/124579	🔥 Placa-mãe Asus P/amd Am4 B550m-plus Tuf Gaming 4xddr4 Matx P Preto
+placa_mae	fullpromotion/32821	🔥 Placa-Mãe Asus Tuf Gaming B550m-Plus Am4 mATX — Suporte Ryzen, PCIe 4.0, M.2 NVMe, Ddr4, Hdmi/Dp, Lan Gigabit, Durabilidade Militar para Pc Gamer
+placa_mae	SamuelF3lipePromo/124857	🔥 Placa-Mãe Asus Tuf Gaming B550m-Plus, mATX, Ddr4 + Processador Amd Ryzen 7 5700x + Water Cooler Mach1 Logic, Rgb, 240mm
+placa_mae	SamuelF3lipePromo/124795	🔥 Placa-mãe Msi A520m-a Pro Am4 Matx Ddr4
+placa_mae	SamuelF3lipePromo/124430	🔥 Placa-mãe Msi A520m-a Pro Am4 Matx Ddr4 Preto
+placa_mae	fullpromotion/32990	🔥 Placa-Mãe MSI A520M-A PRO, AMD AM4, mATX, DDR4, Preto A520M-A PRO
+placa_mae	fullpromotion/33075	🔥 Placa-Mãe Msi B550m Gaming Plus WiFi6E, Amd Am4, Ddr4, Wi-Fi 6E, Bluetooth 5.2, Preto e Prata - B550m Gaming Plus Wifi6e
+placa_mae	SamuelF3lipePromo/124252	🔥 Placa-Mãe Msi B550m Gaming Plus WiFi6E, Amd Am4, Ddr4, Wi-Fi 6E, Bluetooth 5.2, Preto e Prata B550m Gaming Plus Wifi6e
+placa_mae	SamuelF3lipePromo/124289	🔥 Placas Mães B550M AM4 em Oferta
+processador	fumotom/44493	2x Xeon E5 2680v4 2680 v4 x99 Processador Cpu
+processador	fumotom/44502	2x Xeon E5 2697v3 x99 Processador Cpu 2697 v3
+processador	fumotom/43606	Ainda ativo! Processador Amd Ryzen 7 9800X3d, 8-Core, 16-Threads, 4.7GHz (5.2GHz Turbo), Cache 104Mb, Am5, 100-100001084Wof
+processador	fumotom/44636	Amd Ryzen 5 5500x3D Processador, 4.0GHz Max Turbo, Cache 96Mb, Am4, (Novo S/Box) Ddr4
+processador	fumotom/43790	Ativa meia-noite - Cpu Ryzen 7 5700x Ddr4 Am4 Processador Amd R7 Novo
+processador	fumotom/43791	Ativa meia-noite - Ryzen 5 5500x3D Ddr4 Am4 Processador Amd R5 Cpu Novo
+processador	fumotom/43793	Ativa meia-noite - Ryzen 5 5600x Ddr4 Am4 Processador Amd R5 Cpu Novo
+processador	fumotom/43792	Ativa meia-noite - Ryzen 7 9700x 8/16 Amd Ryzen Am5 Ddr5 processador r7 Cpu
+processador	fumotom/44335	Cpu Ryzen 7 5700x Ddr4 Am4 Processador Amd R7 Novo
+processador	fumotom/43294	Kit Ryzen Placa-Mãe Msi B550m Gaming Plus WiFi6E + Processador Amd Ryzen 7 5700x + Water Cooler Mach1 Logic, Rgb, 240mm
+processador	fumotom/44128	Kit Upgrade Ryzen 7 5700X + Placa Mãe Chipset A520M
+processador	fumotom/44059	Kit X99 Jieshuo Js11 Argb + Xeon 2676 V3 + 16Gb Ddr3
+processador	fumotom/43946	Kit X99 Soyo D4 + Xeon E5 2630 V4 (Sem Ram)
+processador	fumotom/44512	Kit X99 Szsjkj Xd3 + Xeon E5 2676 V3 + 16G Ddr3, Chipset C612, Quad Channel, Tpm 2.0
+processador	fumotom/43818	Kit X99 Szsjkj Xd4 + Xeon 2682 V4, C612, Quad Channel, Secure Boot, Tpm 2.0 Msi 14 Pin
+processador	fumotom/44541	Kit X99 Szsjkj Xd4 + Xeon 2682V4, Chipset C612, Quad Channel, Secure Boot, Tpm 2.0 Msi 14 pinos
+processador	fumotom/43875	Kit Xeon x99 2676v3 Jieshuo Js11 aRGB + E5-2676 v3 + 16Gb, Compatível com Ddr3, Chipset C612, Módulo WiFi e Tpm 2.0
+processador	promotom/112472	Processador Amd Am4 Ryzen 7 5700x Novo
+processador	fumotom/43246	Processador Amd Ryzen 5 5500
+processador	promotom/112554	Processador Amd Ryzen 5 5500 3.6GHz 4.2GHz Max Turbo Cache 16Mb Am4
+processador	promotom/112292	Processador Amd Ryzen 5 5500 Am4 3.6ghz 6c 12t Cache 19mb
+processador	fumotom/43137	Processador Amd Ryzen 5 5500, 6-core, 12-threads, 3.6ghz
+processador	fumotom/42701	Processador Amd Ryzen 5 5500, 6-Core, 12-Threads, 3.6GHz (4.2GHz Turbo), Cache 19 Mb, Am4 Novo S/Caixa
+processador	fumotom/43729	Processador Amd Ryzen 5 5500X3d (oem)
+processador	fumotom/43683	Processador Amd Ryzen 5 5500x3d (oem) sem cooler box
+processador	fumotom/42998	Processador Amd Ryzen 5 5600 Am4 6 Núcleos 12 Threads
+processador	fumotom/42678	Processador Amd Ryzen 5 7500F, (4GHz Max Turbo), Cache 99Mb, 6 Núcleos, 12 Threads, Am5, Sem Vídeo Integrado Oem
+processador	promotom/112123	Processador Amd Ryzen 5 7600, 3.8GHz (5.1GHz Max Turbo), Cache 38Mb, 6 Núcleos, 12 Threads, Am5, Com Vídeo Integrado
+processador	promotom/112031	Processador Amd Ryzen 5 7600x, 4.7GHz (5.3GHz Max Turbo), Cache 38Mb, 6 Núcleos, 12 Threads, Am5, Com Vídeo Integrado
+processador	fumotom/43604	Processador AMD Ryzen 5 7600X3D, 4.1GHz (4.7GHz Max Turbo), Cache 96MB, 6 Núcleos, 12 Threads, AM5, Com Vídeo Integrado - 100-100001721WOF
+processador	fumotom/44394	Processador Amd Ryzen 5 7600X3d, 4.7GHz (5.6GHz Turbo), Cache 96Mb, Am5, 6 Cores, 12 Threads, Vídeo Integrado, Wof - 100-100001721Wof
+processador	fumotom/43504	Processador Amd Ryzen 5 8500G, 3.5 GHz (5.0GHz Max Turbo), Cache 22Mb, 6 Núcleos, 12 Threads, Am5, Com Vídeo Integrado - 100-100000931Box
+processador	fumotom/43675	Processador AMD Ryzen 5 8500G, 3.5GHz (5.0GHz Turbo), 6-Cores 12-Threads, AM5, Com Cooler AMD Wraith Stealth, 100-100000931BOX
+processador	fumotom/44638	Processador Amd Ryzen 5 9600x, 3.9GHz (5.4GHz Turbo), 6-Cores 12-Threads, Am5 Novo (Sem Caixa ou Cooler)
+processador	fumotom/43754	Processador Amd Ryzen 7 5700 4.6GHz 8 Núcleos 16 Threads Am4
+processador	fumotom/42548	Processador Amd Ryzen 7 5700, 8-cores 16-threads 3.7ghz Am4
+processador	fumotom/44006	Processador Amd Ryzen 7 5700x 3.4Ghz (Turbo 4.6Ghz) 36Mb Cache Am4 100-100000926Wof, Cerâmica Cinza
+processador	fumotom/43741	Processador Amd Ryzen 7 5700x Oem Sem Cooler
+processador	fumotom/44398	Processador Amd Ryzen 7 5800Xt, 3.8 GHz (4.8 GHz Max Turbo), Cache 32 Mb, 8 Núcleos, 16 Threads, Am4 - 100-100001582Wof
+processador	fumotom/44397	Processador Amd Ryzen 7 7800X3d, 4.2GHz (5.0GHz Max Turbo), Cache 104Mb, 8 Núcleos, 16 Threads, Am5, Com Vídeo Integrado - 100-100000910Wof
+processador	fumotom/43204	Processador Amd Ryzen 7 9700x 3.8GHz (5.5GHz Turbo) 8 Cores 16 Threads Am5 40Mb Novo (Sem Caixa ou Cooler)
+processador	fumotom/44624	Processador Amd Ryzen 7 9700x Novo
+processador	fumotom/43490	Processador Amd Ryzen 7 9800X3d
+processador	fumotom/43370	Processador AMD Ryzen 7 9800X3D (AM5/ 8 Cores/ 16 Threads/ 5.2 GHz/ 104Mb Cache/Radeon Graphics/Sem Cooler)
+processador	fumotom/43489	Processador Amd Ryzen 7 9800X3d, 4.7GHz (5.2GHz Max Turbo), Cache 104Mb, 8 Núcleos, 16 Threads, Am5, Com Vídeo Integrado - 100-100001084Wof
+processador	promotom/112141	Processador Amd Ryzen 7 9800X3d, 8-Core, 16-Threads, 4.7GHz (5.2GHz Turbo), Cache 104Mb, Am5, 100-100001084Wof
+processador	fumotom/44396	Processador Intel Core i3-12100F, 3.3GHz (4.3GHz Max Turbo), Cache 12Mb, 4 Núcleos, 8 Threads, Lga 1700, Sem Vídeo Integrado - Bx8071512100f
+processador	fumotom/43500	Processador Intel Core i5-12400F, 2.5GHz (4.4GHz Max Turbo), Cache 18Mb, 6 Núcleos, 12 Threads, Lga 1700, Sem Vídeo Integrado - Bx8071512400f
+processador	fumotom/44403	Processador Intel Core i5-14600K, 3.5GHz (5.3 GHz Max Turbo), Cache 24Mb, 14 Núcleos, 20 Threads, Lga 1700, Com Vídeo Integrado - Bx8071514600k
+processador	fumotom/44393	Processador Intel Core i5-14600Kf, 3.5GHz (5.3 GHz Max Turbo), Cache 24Mb, 14 Núcleos, 20 Threads, Lga 1700, Sem Vídeo Integrado - Bx8071514600kf
+processador	fumotom/43499	Processador Intel Core Ultra 5 245Kf, 4.2GHz (5.2GHz Turbo), Cache 24Mb, 14 Núcleos, 14 Threads, Lga 1851, Sem Vídeo Integrado - Bx80768245kf
+processador	fumotom/44268	Processador Libretx Ryzen 5 5600x Cpu Am4
+processador	promotom/112481	Processador Ryzen 3 2200G Cpu R3 Ddr4 Am4
+processador	fumotom/44578	Processador Ryzen 5 2600 Ddr4 Am4 (usado)
+processador	fumotom/44625	Processador Ryzen 5700x
+processador	fumotom/43198	Processador Ryzen 7 5700x 3.4ghz (4.6ghz Max) - Novo S/Box
+processador	fumotom/44272	Ryzen 5 2600x
+processador	fumotom/44337	Ryzen 5 5500x3D Ddr4 Am4 Processador Amd R5 Cpu Novo
+processador	promotom/112469	Ryzen 5 5600x
+processador	fumotom/44338	Ryzen 5 5600x Ddr4 Am4 Processador Amd R5 Cpu Novo
+processador	fumotom/44469	Ryzen 7 5700x (4.6ghz Max) - Novo (sem Caixa Box Ou Cooler)
+processador	promotom/112474	Ryzen 7 9700x 8/16 Amd Ryzen Am5 Ddr5 processador r7 Cpu
+processador	fumotom/44498	Xeon E5 1650v3 x99 Processador Cpu Intel 1650 v3 (faz overclock)
+processador	fumotom/44504	Xeon E5 2667v4 x99 Processador Cpu Intel 2667 v4
+processador	fumotom/44497	Xeon E5 2690v4 x99 Processador Cpu 2690 v4
+processador	nerdofertas/147209	➡️ Processador Amd Ryzen 7 9700x 3.8GHz (5.5GHz Turbo) 8 Cores 16 Threads Am5 40Mb Novo (Sem Caixa ou Cooler)
+processador	nerdofertas/148555	➡️ Processador Ryzen 7 9700X / 5700X CPU AM5 Estoque no Brasil
+processador	nerdofertas/148579	➡️ Ryzen 5 5600X
+processador	SamuelF3lipePromo/124660	🔥 2x Xeon E5 2680v4 2680 v4 x99 Processador Cpu
+processador	SamuelF3lipePromo/124931	🔥 Amd Ryzen 5 5500x3D Processador, 4.0GHz Max Turbo, Cache 96Mb, Am4, (Novo S/Box) Ddr4
+processador	SamuelF3lipePromo/124646	🔥 Cpu Ryzen 7 5700x Ddr4 Am4 Processador Amd R7 Novo
+processador	SamuelF3lipePromo/124730	🔥 Processador Amd Am4 Ryzen 7 5700x Novo
+processador	SamuelF3lipePromo/124796	🔥 Processador Amd Ryzen 5 5500 3.6GHz 4.2GHz Max Turbo Cache 16Mb Am4
+processador	SamuelF3lipePromo/124270	🔥 Processador Amd Ryzen 5 5500 Am4 3.6ghz 6c 12t Cache 19mb
+processador	SamuelF3lipePromo/124415	🔥 Processador Amd Ryzen 5 5500X3d (oem)
+processador	SamuelF3lipePromo/124307	🔥 Processador Amd Ryzen 5 5500x3d (oem) sem cooler box
+processador	fullpromotion/32949	🔥 Processador AMD Ryzen 5 7600, 3.8GHz (5.1GHz Max Turbo), Cache 38mb, 6 Núcleos, 12 Threads, AM5, Com Vídeo Integrado
+processador	SamuelF3lipePromo/124268	🔥 Processador AMD Ryzen 5 7600X3D, 4.1GHz (4.7GHz Max Turbo), Cache 96MB, 6 Núcleos, 12 Threads, AM5, Com Vídeo Integrado 100-100001721WOF
+processador	SamuelF3lipePromo/124583	🔥 Processador Amd Ryzen 5 7600X3d, 4.7GHz (5.6GHz Turbo), Cache 96Mb, Am5, 6 Cores, 12 Threads, Vídeo Integrado, Wof 100-100001721Wof
+processador	SamuelF3lipePromo/124934	🔥 Processador Amd Ryzen 5 9600x, 3.9GHz (5.4GHz Turbo), 6-Cores 12-Threads, Am5 Novo (Sem Caixa ou Cooler)
+processador	SamuelF3lipePromo/124439	🔥 Processador Amd Ryzen 7 5700 4.6GHz 8 Núcleos 16 Threads Am4
+processador	fullpromotion/32958	🔥 Processador AMD Ryzen 7 5700, 3.7 GHz (4.6GHz Max Turbo), Cache 4MB, 8 Núcleos, 16 Threads, AM4
+processador	SamuelF3lipePromo/124615	🔥 Processador Amd Ryzen 7 5700x 3.4Ghz (Turbo 4.6Ghz) 36Mb Cache Am4 100-100000926Wof, Cerâmica Cinza
+processador	SamuelF3lipePromo/124425	🔥 Processador Amd Ryzen 7 5700x Oem Sem Cooler
+processador	SamuelF3lipePromo/124235	🔥 Processador AMD Ryzen 7 5700X, 3.4GHz, Cache 32MB, 8 Núcleos, 16 Threads, Sem Vídeo Integrado
+processador	SamuelF3lipePromo/124858	🔥 Processador Amd Ryzen 7 7800X3d
+processador	SamuelF3lipePromo/124547	🔥 Processador Ryzen 3 2200G Cpu R3 Ddr4 Am4
+processador	SamuelF3lipePromo/124928	🔥 Processador Ryzen 5700x
+processador	fullpromotion/32947	🔥 Processador Ryzen 7 5700x 3.4ghz (4.6ghz Max) - Novo S/Box
+processador	SamuelF3lipePromo/124750	🔥 Ryzen 5 2600x
+processador	SamuelF3lipePromo/124729	🔥 Ryzen 5 5600x
+processador	fullpromotion/33678	🔥 Ryzen 7 5700x (4.6ghz Max) - Novo (sem Caixa Box Ou Cooler)
+processador	SamuelF3lipePromo/124855	🔥 Ryzen 7 5700x (4.6ghz Max) Novo (sem Caixa Box Ou Cooler)
+processador	SamuelF3lipePromo/124489	🔥 Ryzen 7 9700x 8/16 Amd Ryzen Am5 Ddr5 processador r7 Cpu
+processador	SamuelF3lipePromo/124576	🔥 Xeon E5 2667v4 x99 Processador Cpu Intel 2667 v4
+processador	SamuelF3lipePromo/124572	🔥 Xeon E5 2690v4 x99 Processador Cpu 2690 v4
+ssd	fumotom/43820	Kootion Ssd Sata Iii 3 2.5 Polegada 240Gb 256Gb 480Gb 512Gb 1 Tb
+ssd	fumotom/43817	Kootion Ssd Sata Iii 3 2.5 Polegada 256Gb
+ssd	fumotom/43986	Kootion Ssd Sata Iii 3 2.5 Polegada 512Gb
+ssd	promotom/112586	Loja não oficial - Ssd Servidor Kingston 2tb Nv3 Pcie 4.0 M.2 Nvme Snv3s/2000g Preto
+ssd	fumotom/44695	Nvme 2Tb 4Tb Pcie 4.0 Movespeed 7450 mb/s ssd nvme m.2 2280 4
+ssd	fumotom/43844	Nvme 2Tb Pcie 4.0 Movespeed 7450 mb/s ssd nvme m.2 2280 4
+ssd	fumotom/43021	Ssd 1Tb Sata 3 Darkplayer Pro Gamer Alta Performance
+ssd	fumotom/43551	Ssd 1tb Sata 3 Darkplayer Pro Gamer Alta Performance Preto
+ssd	fumotom/44533	Ssd 512Gb Cusu 550Mb/S Sata Iii
+ssd	fumotom/44532	Ssd 512Gb Netac Sata Iii 550Mb/S
+ssd	fumotom/44692	Ssd Cusu M2 Nvme 256Gb 512Gb
+ssd	fumotom/43976	Ssd Cusu M2 Nvme Ssd 512Gb
+ssd	fumotom/43978	Ssd Kootion 1Tb X12 550Mb/s (Do Brasil)
+ssd	fumotom/43642	Ssd M.2 1Tb Sandisk Plus Nvme 2280 1Tb
+ssd	fumotom/43175	Ssd M.2 Nvme 1tb Sandisk Plus Sdssda3n-1t00-g26 3200mbps Azul-marinho
+ssd	fumotom/44096	Ssd Netac 512Gb Sata Iii
+ssd	fumotom/44340	Ssd Nvme 250Gb 500Gb Gen3 Netac
+ssd	fumotom/43858	Ssd Nvme 250Gb Gen3 Netac
+ssd	fumotom/43862	Ssd Nvme 500Gb Gen3 Netac
+ssd	fumotom/44693	Ssd Nvme 512Gb Kootion M.2 Gen3
+ssd	fumotom/44723	Ssd Nvme Ediloca En600 Pro 512Gb 3000Mb/s
+ssd	fumotom/44162	Ssd Nvme Ediloca En880e 500Gb 6300Mb/S Gen4
+ssd	fumotom/44267	Ssd Nvme Gen3 Cusu Cv3500q 512Gb 3300Mb
+ssd	fumotom/43651	SSD NVMe Gen4 Hiksemi Future Lite 1024GB M.2 2280, Leitura 7000MB/s - HS-SSD-FUTURE LITE 1024G
+ssd	fumotom/43977	Ssd Nvme Kootion 1Tb 2100Mb/S
+ssd	fumotom/44691	Ssd Nvme Kootion 512Gb Gen3 Pcie 3.0 M2 2280
+ssd	fumotom/43834	Ssd Nvme Kootion 512Gb Lite Gen3 Pcie 3.0 M2 2280
+ssd	fumotom/44637	Ssd Nvme Kootion X15 lite 1Tb 2100 Mb/s
+ssd	fumotom/44548	Ssd Nvme Kootion Xx15lite Ssd Nvme M2 Nvme M2 Ssd M.2 2280 Pcie 3.0X4 X15 Lite
+ssd	fumotom/44684	Ssd Nvme M2 1Tb 7000 Mbs Pcie 4.0 X 4 2280 Ps5
+ssd	fumotom/43836	Ssd Nvme M2 1Tb 7400 mbs Pcie 4.0 X 4 2280 Ps5 Laptop
+ssd	fumotom/43927	Ssd Nvme M2 2Tb 7200 Mbs Pcie 4.0 X 4 2280 Ps5
+ssd	fumotom/43960	Ssd Nvme M2 2Tb 7400 Mbs Pcie 4.0 X 4 2280
+ssd	fumotom/44694	Ssd Nvme M2 2Tb 7400 mbs Pcie 4.0 X 4 2280 Ps5 Laptop
+ssd	fumotom/44492	Ssd Nvme Movespeed 4tb 7450 mb/s m2 pcie 4.0x4 2280 4 Tb
+ssd	fumotom/44091	Ssd Nvme Yixin M.2 Pcie 3.0 Gen3 2000Mbp/S
+ssd	fumotom/43185	SSD PNY CS900 2TB 2,5" SATA III
+ssd	fumotom/44278	Ssd Sata 3 Cusu 512Gb
+ssd	promotom/112477	Ssd Sata Cusu 480Gb
+ssd	fumotom/44674	Ssd Sata Walram 512Gb
+ssd	fumotom/44551	Ssd Wd Green 2.5 2tb Sata Iii 545 Mb/s - Wds200t5g0a
+ssd	fumotom/42750	Ssd Wd Green 2.5'' 2Tb Sata Iii 545 Mb/S Wds200t5g0a
+ssd	fumotom/43095	Ssd Wd Green 480Gb
+ssd	fumotom/42583	Unidade Ssd para notebook Patriot Sata3 2.5 Burst Elite Sata de 960 Gb
+ssd	nerdofertas/148506	➡️ 1TB SSD Kootion 2000mbps NVME
+ssd	nerdofertas/148753	➡️ 2TB Nvme 2Tb Pcie 4.0 Movespeed 7450 MB/s ssd nvme m.2 2280 4 🇧🇷
+ssd	nerdofertas/148409	➡️ Kootion Ssd Sata Iii 3 2.5 Polegada 240Gb 256Gb 480Gb 512Gb 1 Tb
+ssd	nerdofertas/148407	➡️ Kootion Ssd Sata Iii 3 2.5 Polegada 256Gb
+ssd	nerdofertas/148884	➡️ Netac SSD NVMe M.2 250GB
+ssd	nerdofertas/148961	➡️ Nvme 2Tb 4Tb Pcie 4.0 Movespeed 7450 mb/s ssd nvme m.2 2280 4
+ssd	nerdofertas/148437	➡️ Nvme 2Tb Pcie 4.0 Movespeed 7450 mb/s ssd nvme m.2 2280 4
+ssd	nerdofertas/148593	➡️ Nvme 2Tb Pcie 4.0 Movespeed 7450 MB/s ssd nvme m.2 2280 4 🇧🇷
+ssd	nerdofertas/147424	➡️ Ssd 1Tb Sata 3 Darkplayer Pro Gamer Alta Performance
+ssd	nerdofertas/148059	➡️ Ssd 1tb Sata 3 Darkplayer Pro Gamer Alta Performance Preto
+ssd	nerdofertas/148839	➡️ Ssd 512Gb Cusu 550Mb/S Sata Iii
+ssd	nerdofertas/148837	➡️ Ssd 512Gb Netac Sata Iii 550Mb/S
+ssd	nerdofertas/148502	➡️ SSD CUSU M2 NVMe SSD 512GB
+ssd	nerdofertas/148508	➡️ Ssd Kootion 1Tb X12 550Mb/s (Do Brasil)
+ssd	nerdofertas/148155	➡️ Ssd M.2 1Tb Sandisk Plus Nvme 2280 1Tb
+ssd	nerdofertas/146938	➡️ Ssd M.2 Nvme 1Tb Sandisk Plus Sdssda3n-1t00-g26 3200mbps
+ssd	nerdofertas/148354	➡️ Ssd M.2 Nvme 1tb Sandisk Plus Sdssda3n-1t00-g26 3200mbps Azul-marinho
+ssd	nerdofertas/148829	➡️ SSD Netac 512GB SATA III
+ssd	nerdofertas/148454	➡️ Ssd Nvme 250Gb Gen3 Netac
+ssd	nerdofertas/148455	➡️ Ssd Nvme 500Gb Gen3 Netac
+ssd	nerdofertas/148959	➡️ Ssd Nvme 512Gb Kootion M.2 Gen3
+ssd	nerdofertas/148478	➡️ Ssd Nvme Ediloca En600 Pro 512Gb 3000Mb/s
+ssd	nerdofertas/148158	➡️ SSD NVMe Gen4 Hiksemi Future Lite 1024GB M.2 2280, Leitura 7000MB/s HS-SSD-FUTURE LITE 1024G
+ssd	nerdofertas/148423	➡️ Ssd Nvme Kootion 512Gb Lite Gen3 Pcie 3.0 M2 2280
+ssd	nerdofertas/148918	➡️ Ssd Nvme Kootion X15 lite 1Tb 2100 MB/s
+ssd	nerdofertas/148894	➡️ Ssd Nvme Kootion X15 lite 512GB 2100 MB/s
+ssd	nerdofertas/148850	➡️ Ssd Nvme Kootion Xx15lite Ssd Nvme M2 Nvme M2 Ssd M.2 2280 Pcie 3.0X4 X15 Lite
+ssd	nerdofertas/148433	➡️ Ssd Nvme M2 1Tb 7000 Mbs Pcie 4.0 X 4 2280 Ps5
+ssd	nerdofertas/148895	➡️ SSD Nvme M2 1TB 7000 mbs PCIE 4.0 X 4 2280 PS5 🇧🇷
+ssd	nerdofertas/148430	➡️ Ssd Nvme M2 1Tb 7400 mbs Pcie 4.0 X 4 2280 Ps5 Laptop
+ssd	nerdofertas/148592	➡️ Ssd Nvme M2 1Tb 7400 mbs Pcie 4.0 X 4 2280 Ps5 Laptop 🇧🇷
+ssd	nerdofertas/148491	➡️ Ssd Nvme M2 2Tb 7200 Mbs Pcie 4.0 X 4 2280 Ps5
+ssd	nerdofertas/148960	➡️ Ssd Nvme M2 2Tb 7400 mbs Pcie 4.0 X 4 2280 Ps5 Laptop
+ssd	nerdofertas/148517	➡️ Ssd Nvme Movespeed 4Tb 7450 Mb/s m2 pcie 4.0x4 2280 4 Tb
+ssd	nerdofertas/148748	➡️ Ssd Sata 3 Cusu 512Gb
+ssd	nerdofertas/148882	➡️ Ssd Servidor Kingston 2tb Nv3 Pcie 4.0 M.2 Nvme Snv3s/2000g Preto
+ssd	nerdofertas/147247	➡️ Ssd Wd Green 2.5'' 2Tb Sata Iii 545 Mb/S Wds200t5g0a
+ssd	nerdofertas/147110	➡️ Unidade Ssd para notebook Patriot Sata3 2.5 Burst Elite Sata de 960 Gb
+ssd	nerdofertas/148744	➡️  SSD NVME GEN3 CUSU CV3500Q 512GB 3300Mb
+ssd	SamuelF3lipePromo/124492	🔥 Kootion Ssd Sata Iii 3 2.5 Polegada 240Gb 256Gb 480Gb 512Gb 1 Tb
+ssd	SamuelF3lipePromo/124491	🔥 Kootion Ssd Sata Iii 3 2.5 Polegada 256Gb
+ssd	SamuelF3lipePromo/124599	🔥 Kootion Ssd Sata Iii 3 2.5 Polegada 512Gb
+ssd	SamuelF3lipePromo/124906	🔥 Loja não oficial - Ssd Servidor Kingston 2tb Nv3 Pcie 4.0 M.2 Nvme Snv3s/2000g Preto
+ssd	SamuelF3lipePromo/124791	🔥 Nvme 2Tb 4Tb Pcie 4.0 Movespeed 7450 mb/s ssd nvme m.2 2280 4
+ssd	SamuelF3lipePromo/124516	🔥 Nvme 2Tb Pcie 4.0 Movespeed 7450 mb/s ssd nvme m.2 2280 4
+ssd	SamuelF3lipePromo/124202	🔥 Ssd 1tb Sata 3 Darkplayer Pro Gamer Alta Performance Preto
+ssd	SamuelF3lipePromo/124884	🔥 Ssd 512Gb Cusu 550Mb/S Sata Iii
+ssd	SamuelF3lipePromo/124885	🔥 Ssd 512Gb Netac Sata Iii 550Mb/S
+ssd	SamuelF3lipePromo/124589	🔥 Ssd Cusu M2 Nvme Ssd 512Gb
+ssd	SamuelF3lipePromo/124592	🔥 Ssd Kootion 1Tb X12 550Mb/s (Do Brasil)
+ssd	SamuelF3lipePromo/124288	🔥 Ssd M.2 1Tb Sandisk Plus Nvme 2280 1Tb
+ssd	SamuelF3lipePromo/124661	🔥 Ssd Netac 512Gb Sata Iii
+ssd	SamuelF3lipePromo/124527	🔥 Ssd Nvme 250Gb Gen3 Netac
+ssd	SamuelF3lipePromo/124530	🔥 Ssd Nvme 500Gb Gen3 Netac
+ssd	fullpromotion/33119	🔥 SSD NVMe Gen4 Hiksemi Future Lite 1024GB M.2 2280, Leitura 7000MB/s - HS-SSD-FUTURE LITE 1024G
+ssd	SamuelF3lipePromo/124591	🔥 Ssd Nvme Kootion 1Tb 2100Mb/S
+ssd	SamuelF3lipePromo/124507	🔥 Ssd Nvme Kootion 512Gb Lite Gen3 Pcie 3.0 M2 2280
+ssd	SamuelF3lipePromo/124935	🔥 Ssd Nvme Kootion X15 lite 1Tb 2100 Mb/s
+ssd	SamuelF3lipePromo/124782	🔥 Ssd Nvme M2 1Tb 7000 Mbs Pcie 4.0 X 4 2280 Ps5
+ssd	SamuelF3lipePromo/124790	🔥 Ssd Nvme M2 1Tb 7400 mbs Pcie 4.0 X 4 2280 Ps5 Laptop
+ssd	SamuelF3lipePromo/124614	🔥 Ssd Nvme Movespeed 4Tb 7450 Mb/s m2 pcie 4.0x4 2280 4 Tb
+ssd	SamuelF3lipePromo/124657	🔥 Ssd Nvme Yixin M.2 Pcie 3.0 Gen3 2000Mbp/S
+ssd	fadapromos/14216	🔥 SSD Pny CS900 2TB 2,5" Sata III
+ssd	SamuelF3lipePromo/124753	🔥 Ssd Sata 3 Cusu 512Gb
+ssd	SamuelF3lipePromo/124517	🔥 Ssd Sata Cusu 480Gb
+ssd	fadapromos/13972	🔥 SSD SATA3 De 2,5 480GB
+ssd	fadapromos/13585	🔥 SSD SATA3 De 2,5 Polegadas 480GB
+ssd	fadapromos/14364	🔥 Ssd Wd Green 2.5 2tb Sata Iii 545 Mb/s - Wds200t5g0a
+ssd	SamuelF3lipePromo/124883	🔥 Ssd Wd Green 2.5 2tb Sata Iii 545 Mb/s Wds200t5g0a
+monitor_gamer	fadapromos/13793	🔥 Acer Nitro Kg270 P0bi 27" IPSFull Hd 144hz
+monitor_gamer	fumotom/42581	Samsung Odyssey G5 2.7 Qhd 180 Hz 0,03 ms G-sync Freesync
+	fumotom/44484	Fone de Ouvido Intra-Auricular Sem Fio Jbl Wave Buds 2
+	fumotom/43479	Cadeira De Escritório Ergonômica LuvinCo Genebra B500 G500 Executiva Suporte Lombar Tela Mesh 200kg
+	fumotom/43189	Caixa Amplificada Cm-400-l 400w Rms Preta Mondial Bivolt Preto
+	fumotom/43158	Máquina de Gelo Turbo Ice Premium, Mondial, 120W - Mg-12-Gi
+	fumotom/42621	Parafusadeira Furadeira De Impacto A Bateria 21V 3/8” Bivolt 1400 Rpm Com Acessórios E Maleta
+	fumotom/43607	Pré-venda - Grand Theft Auto Vi: The Album (Amazon Exclusive)
+	promotom/112197	MONDIAL Ventilador 40cm Super Turbo 8 Pás Repelente Pastilha, Preto/Prata, 140W, 220V - VTX-40-8P-RP
+	fullpromotion/33898	🔥 Philips Walita Vaporizador de Roupas 2 em 1 1500W OptimalTEMP, 220V | Acompanha Bolsa e Luva – 2 acessórios que facilitam a passagem de vários tecidos com vapor (STH7020/20)
+	nerdofertas/148568	🎧 Headphone Ugreen MAX5S 2026 - Bluetooth 5.4  🚫 Cancelamento de Ruído Híbrido 45dB 🎮 Modo Gamer Baixa Latência 0,06s 📲 APP com Vários efeitos de equalização🔋 Autonomia de 112 Horas de música
+	fullpromotion/33907	🔥 GRAMPO - 08MM - TEMP - T/53-1000PCS - MTX - 412089
+	SamuelF3lipePromo/124440	🔥 Caixa de Som Pcx6700 Amplificada 650W de Potência Ex Bass Philco
+	fumotom/44036	Console Portátil Trimui Smart Pro com Wifi, tela 4.96p Ips, Linux, 5000mAh
+	fumotom/42917	Dark Souls Trilogy Standard Edition (Físico)
+	fadapromos/13825	🚨 Cupom R$ 20 OFF Sem Mínimo em Selecionados Época
+	fumotom/42748	Smart Tv Aoc 43 Led Roku Full 43S5155/78G
+	nerdofertas/147702	➡️ Impressora Multifuncional Brother Mono Laser Dcp-L2540dw 220V Nova Lacrado Com Nf
+	SamuelF3lipePromo/124616	🔥 Headset Qcy Sem Fio Heroad V200
+	fumotom/42935	Pasta Térmica Mach1 Hyper Flow - 300-30
+	nerdofertas/147834	➡️ Lixeira com Pedal EKO STELLA SLIM 10L
+	nerdofertas/147737	➡️ Top Mizuno Compress Feminino
+	fadapromos/13806	🔥 Galaxy A57 5G (128GB) - Cinza + Galaxy Watch8 BT 40mm - Grafite
+	nerdofertas/147530	TODOSITE2810 Esgotado! ❌
+	fumotom/42468	Pulverizador Manual 2 L Snow Foam Profissional Com 3 Bicos para Espuma Ativa
+	nerdofertas/148688	Comprando 3 fica menos de R$110 cada KIT
+	fullpromotion/33935	🔥 LYOR - Tábua para Corte de Bambu 20cm x 15cm x 1cm
+	fumotom/43955	Attack Shark x11 Com Dock Mouse Sem Fio 22000 Dpi Bluetooth Usb Paw3311 3311 se
+	promotom/112498	Headset Mchose V9 Pro V2 Gaming Headset, Over-Ear Quad-Mode
+	fumotom/44704	Teclado Magnético Akko Tac75 He
+	nerdofertas/147867	➡️ Ou Lixeira com Pedal 46L + 4L Preto Linha Trium
+	nerdofertas/148951	➡️ 10x Salgadinho de Batata Ruffles, Original, 270g
+	fullpromotion/33996	🔥 Creme Finalizador YouthLock Collagen Joico 177ml
+	SamuelF3lipePromo/124910	🔥 PowerBank Coibeu 10.000mAh 20.000mAh 23w Power Bank Carregador Smartphone Celular iPhone Samsung Android etc 10.000 20.000
+	nerdofertas/148877	Realmente tem um universo muito bizarro dentro dos livros de romance adolescente  🫪🫪🫪  https://link.amazon/B07ekvZSr que negócio absurdo
+	fumotom/44054	Fone de Ouvido sem fio Ugreen Max5c Anc com Cancelamento de ruído
+	fadapromos/14367	🔥 Espreguiçadeira de Ferro e Fibra Sintética com Encosto Fixo para Piscina Área Externa Lazer Jardim
+	nerdofertas/147197	➡️ Aparelho De Jantar Oxford Cerâmica Lola 20 Pç Cor Estampado
+	promotom/112388	Paçoca Quadrada Paçoquita C/50 Unidades 1kg Festa Junina Santa Helena
+	fumotom/44530	Cupom KaBuM em Console selecionado - R$400 OFF
+	SamuelF3lipePromo/124896	🔥 Conjunto 3 Mesas Treliças em Ferro Dourado para Festa e Decoração
+	fumotom/43711	Mochila Infantil Stitch com Estojo Triplo Azul
+	fumotom/42610	Smart Tv Philco 60 P60crb 4k Uhd Led Roku Dolby Audio Wi-fi
+	fadadoscupons/18099	🔥 Cupom Mercado Livre Meli+
+	nerdofertas/148169	➡️ Fritadeira Air Fryer Eos Family 8,2l Digital Eaf80p Cor Preto
+	nerdofertas/148438	🚨 Envie o link do produto que você quer comprar em nosso bot para achar cupons Secretos no produto! São cupons que não aparecem na página do produto.
+	promotom/112315	Mangueiras em Oferta
+	fullpromotion/32912	🚨 Amanhã é Dia de Cupons na Shopee
+	fumotom/44107	Headset Gamer Force One Supersonic 7.1 Surround, USB, Branco - FR.AU.SU.02
+	nerdofertas/147525	➡️ 2x Kit Meia Invisível Mash 10 Pares Algodão Sem Cano Esportiva
+	nerdofertas/149019	➡️ Smart TV HQ 32" HD tela sem Bordas Sistema Android Design Slim HQS32NKHM
+	fadapromos/14023	🔥 Power Bank Basike 30.000mAh Portátil, Carregamento Rápido 22.5W, com Cabos Embutidos e Display LED para iPhone e Samsung
+	nerdofertas/148803	➡️ Smart Tv Semp 43" Polegadas Led Hva 4K S62 WiFi Bluetooth Google Tv 3 Hdmi Hdr10+ Dolby Audio 43S62
+	SamuelF3lipePromo/124974	🔥 Simplo Mop com Balde e Esfregão Slim Limpeza Prática e Eficiente
+	promotom/112645	Café Orgânico em Cápsulas Select 50g Native
+	fadadoscupons/17922	🔥 Cupom 20% OFF Mercado Livre para Lojas Oficiais
+	SamuelF3lipePromo/124721	-Ainda ativo, bom preço em 12x sem juros
+	fumotom/43121	Esmerilhadeira Bosch 4,5" 220V 710W Gws 700 06013A30e0
+	promotom/112383	Bala de Caramelo Leite Sabor Baunilha 660g - Embaré Doces Clássicos
+	fumotom/43583	Fechadura Digital KABUM! smart Slim, Preta, Biometria, Controle via app, Senha numérica - KSFD100PT
+	SamuelF3lipePromo/124525	🔥 Geladeira Brastemp 385 Litros Frost Free Duplex Branca BRM46MB 220V
+	fumotom/44139	Headset Sem Fio Picun Kofire Ug-06, 65h, Tri-mode, Driver 50mm Titan
+	fadapromos/14298	🔥 Azeite Extra Virgem 500ml Cocinero
+	fumotom/44110	Cupom KaBuM em Consoles selecionados - R$500 OFF
+	fullpromotion/33938	🔥 Protetor Auricular 3m Pomp Plus, Silicone, Laranja
+	fumotom/44198	Wd-40 Specialist Graxa Branca de Lítio 365ml, 280g - Aerossol
+	nerdofertas/147372	➡️ Calha Cozinha Escorredor Canal Organizador Embutir Úmida Inox 60cm Cor Aço inox escovado
+	fumotom/43813	8Bitdo Ultimate 3C+
+	fumotom/42966	Caixa de Som Hyperboom 1000 - Waaw By Alok
+	nerdofertas/147632	Voltando 🚨 Cupom Shopee!
+	promotom/112158	Smart Tv 43” Philco Led Roku Tv Dolby Audio Ptv43va4regb
+	promotom/112186	Tira-Manchas em Pó para Roupas Brancas Vanish Oxi Action, 2,5kg
+	nerdofertas/148971	➡️ QCY Melobuds N20, BT 6.0, ANC adaptativo -50db
+	SamuelF3lipePromo/124352	🔥 Sabão em Pasta Cristal Rosa ne3rd 500g
+	fadapromos/14105	🔥 Smartphone Samsung Galaxy A57  128GB 8GB RAM 5G Azul Escuro
+	promotom/112216	Smart TV LG 43" 4K UHD NANO AI 43UN85CBPSA.AWZ
+	nerdofertas/147315	➡️ Mousepad Gamer Rise Mode Speed Estendido 900x300mm Costura
+	nerdofertas/148601	➡️ Relogio Inteligente Colmi V76, com GPS, 1,43" Ultra Amoled Bússola Altímetro Chamada BT Bateria 500mAh
+	fadadoscupons/17985	🔥 Cupom Mercado Livre (Exclusivo Meli+)
+	nerdofertas/148892	➡️ Refrigerador de ar evaporativo B 2
+	nerdofertas/147708	➡️ Smart Tv 43" Philco Qled Hdr10 Tv P43krb
+	fullpromotion/33214	🔥 Tônico Fortalecedor Sos Nerdi Bomba Crescimento Acelerado Salon Line 100ml
+	fadapromos/13892	🔥 Camiseta Kappa Térmica Embrace Masculina
+	SamuelF3lipePromo/124719	🔥 6x Camesa Jogo de Banho Decor Especial 4 peças Rosa
+	fullpromotion/32854	🔥 10x Veja Power Fusion Desinfetante Multiuso Coco 500ml
+	nerdofertas/147352	➡️ Fritadeira Air Fryer 5,5L Cyclone Preto e Inox Midea
+	fadapromos/14193	🔥 WAP Serra Sabre Elétrica WF SA01 20mm com Punho Giratório e Ajuste de Velocidade 2800gpm 1200W 127V
+	nerdofertas/148672	➡️ Fruteira de Mesa Rustica de Ferro e Bambu para Café da Manhã Multiuso de Metal Preto
+	SamuelF3lipePromo/124980	🔥 Pilha recarregável AAA 900mAh Elgin com 4 unidades Palito
+	fumotom/44742	Mondial Fritadeira Air Fryer Forno Oven Analógica 12L, Preto, 2000W, 110V - Afon-12L-Ab
+	fullpromotion/33848	🔥 Diamond Dotz - Sereia com 2.330 Dotz
+	fumotom/44284	Controle Com fio GameSir Kaleid Flux Hall Effect, Para Pc, Xbox Series X, Xbox Series S, Xbox One
+	fumotom/43872	Fone Hi-Fi Hifiman Edition Xs Over-Ear Open-Back Haste Ajustável
+	fullpromotion/33839	🔥 Churrasqueira Elétrica De Mesa Bbq Show Elgin 220V Com controle de temperatura, bandeja anti-fumaça e grelha removível
+	fadadoscupons/17869	🔥 Nova Chance Roleta Shopee
+	nerdofertas/147962	🚨 Ainda tem 40% OFF Amazon
+	nerdofertas/146842	➡️ 100un Pratinho Descartável Bolo Sobremesa Aniversário
+	promotom/112165	WAP Aspirador Automotivo Portátil 12V, 420ML Sólido, Filto Hepa, cabo de 3,7m CAR 12V3
+	nerdofertas/147717	➡️ Fantasia Drácula NovabrinkFantasia
+	nerdofertas/147216	➡️ Liquidificador Mondial Pratic Power L-97-W 2 Velocidades Pulsar 550W Branco
+	nerdofertas/147153	➡️ Power Bank Pro 20000mAH Elg Pb200bk, Bateria Portátil
+	fullpromotion/33831	🔥 Lixeira com Pedal Plasútil 7 L - Ouro Velho
+	fullpromotion/33129	🔥 Óleo Capilar Vult Cabelos 10 Super Óleos 90ml
+	nerdofertas/148199	➡️ Cadeira Ergonômica Reforçada Malha Respirável Ajustes Para Braços, Cabeça, Lombar e Apoio Pés LARUNO
+	fullpromotion/33526	🔥 Barra Proteica Nutrata Havanna Zero Grego Bar Doce de Leite Display C/ 12 Un
+	nerdofertas/147611	➡️ 2x Energético Monster Energy Zero Açucar 473ml - 6 Unidades
+	SamuelF3lipePromo/124715	🔥 Controle 8BitDo Ultimate 2 Wuchang com Joysticks Tmr
+	fumotom/43941	Boni Natural - Kit Desodorante Spray Melaleuca e Lavanda 120 ml + Spray Melaleuca & Toranja 120 ml, Vegano, Proteção 24 Horas, Sem Álcool Etílico e Sem Cloridrato de Alumínio
+	nerdofertas/148296	➡️ Energético Baly Abacaxi e Hortelã Sem Açúcar 473ml Pack 6 Latas
+	fullpromotion/33981	🔥 Sparta Maleta de ferramentas kit com 129 peças
+	nerdofertas/148295	➡️ Paçoca Rolha Amendupã Caixa c/100 unidades 1,5kg
+	fumotom/43582	Microfone Gamer Force One Hero, RGB, Botão De Mute, USB, Cardicóide ou Unidirecional, Branco - FR.MC.HE.01
+	promotom/112778	Gaveteiro Maia 3 Gavetas com Rodízios Preto Politorno
+	nerdofertas/147407	➡️ Jogo de 6 Taças de Cristal 330ml Linha Premium Decorativa
+	nerdofertas/147388	➡️ Caixa de Som Hyperboom 1000 Waaw By Alok
+	fullpromotion/33889	🔥 Óculos de Sol Ray-Ban Wayfarer RB2140 Unissex
+	nerdofertas/147441	➡️ Samsung Smart TV 50" Crystal UHD 4K U8000H 26/2027, Vision AI Companion, Modo Estádio, Xbox Cloud Gaming
+	nerdofertas/148704	🔥 Cupons Acumulando na Amazon
+	fumotom/43060	Jogo de Panelas Electrolux Inox com 5 Peças Design com Fundo Triplo
+	nerdofertas/148285	➡️ Drops Halls Menta Com 21 Unidades
+	fumotom/43045	Conjunto Sala de Jantar Lexy Madesa Mesa Tampo de Madeira com 4 Cadeiras - Rustic/Pérola
+	fadapromos/14288	🔥 Jogo de Soquetes Sextavados 40 Peças 1/4" e 3/8" Titanium
+	fadapromos/13830	🔥 Bundle Marvel's Spider-Man 2 + Miles Morales - PlayStation 5
+	promotom/112465	Maior Evento Aliexpress do ano, meia-noite
+	fumotom/42667	Oneida Colheres de jantar H084006D Aptitude Everyday Flatware, conjunto de 6, 18 cm C x 3,8 cm L
+	promotom/112793	Smart TV HQ 32" HD tela sem Bordas Sistema Android Design Slim HQS32NKHM
+	fadapromos/14256	🔥 Defrizante Protetor Térmico Nerdi Liso Muito + Liso Salon Line 200ml
+	fumotom/42612	Samsung Smart Tv 55 Crystal Uhd 4k + Soundbar Hw-b400f
+	SamuelF3lipePromo/124581	🔥 Mouse Gamer Aula X9 Max Ultra Sem Fio Tri-Modo Leve Dual 8KHz 500mAh Paw3950
+	fadapromos/13928	🔥 Forno de Embutir a Gás Continental 50L TOPLimpaFácil OC4GM Cor Preto
+	fumotom/42981	Compre 2 e ganhe 50% de desconto em 1
+	nerdofertas/147222	➡️ Caixa de Som Bluetooth Waaw Boom 110 40W Rms de Potência Á prova D’água Proteção Ipx7 26 Horas
+	promotom/112354	Energético Baly Tropical 2L Unidade Garrafa Refrescante Bebida Gaseificada Drink
+	SamuelF3lipePromo/124864	🔥 Fone de Ouvido Intra-Auricular Sem Fio Jbl Wave Buds 2
+	nerdofertas/148855	➡️ Conjunto De Facas Para Churrasco Tramontina Ipanema Com Lâminas Em Aço Inox E Cabos De Polipropileno Branco 3 Peças
+	fadapromos/14059	🔥 Controle Sem Fio Sony DualSense Hyperpop, PS5, Rhythm Blue, Azul - 1000048538
+	fumotom/44627	Smart TV 50" TCL 4K UHD QLED 50P7L Google TV 2026
+	fullpromotion/33187	🔥 Controle sem fio DualSense - Rhythm Blue
+	fadapromos/14300	🔥 Paçoca Quadrada Paçoquita C/50 Unidades 1kg Festa Junina Santa Helena
+	fumotom/42613	Samsung Smart TV 58" Crystal UHD 4K U8000H 26/2027, Vision AI Companion, Modo Estádio, Xbox Cloud Gaming
+	nerdofertas/146882	mais de mil conto na gringa
+	nerdofertas/146942	➡️ Kit 4 Pneu Continental Aro 16 205/55r16 91v Fr Powercontact2
+	fumotom/44306	Teclado Mecânico Ajazz X Nacodex Nk61, Switch Red, mecanico gamer nk 61
+	fadadoscupons/17797	🚨 Cupom Amazon APP para Primeira Compra
+	fullpromotion/33702	🔥 Salgadinho de Batata Ruffles, Original, 270g
+	nerdofertas/146945	➡️ Camisa Santos Ii 26/27 s/n Torcedor Umbro Masculina
+	fadapromos/13992	🔥 Barra De Proteína Bold Speculoos 10g Proteína - Pack com 12
+	fumotom/43118	Kit 3 Bermudas Jeans Masculina Lycra Elastano
+	fumotom/44077	2x Gm2 Pro Tws Fone de Ouvido Sem Fio Bluetooth 5.3, game mode fones
+	fullpromotion/33421	🔥 Conjunto C/ 6 Bowl Decorado Mali
+	fumotom/44775	Fritadeira e Forno Elétrico Style Oven Fry 3 em 1 Elgin - 10 Litros
+	SamuelF3lipePromo/124310	🔥 Smart Tv Pro Lg 50'' 4K Ultra Hd Ai 50Un85c
+	SamuelF3lipePromo/124622	🔥 Teclado Mecânico Sem Fio Epomaker x Aula F99 Gasket Mount Reaper Switch 8000mAh
+	fumotom/43883	Controle Gamer 8BitDo Pro 3 Retrô, para Switch 1/2 Windows, Apple, Joysticks Tmr, Retro
+	nerdofertas/148074	➡️ BEST Forno Elétrico 70L, Inox/Platinium, 1800W com Rotisserie, Luz Interna, Timer 120min, 6 Funções
+	fullpromotion/33974	🔥 Whisky Johnnie Walker Red Label 750ml
+	fumotom/43290	Kit Starlink Mini X, Antena + Roteador, Internet via Satélite, Wi-Fi 5, Branca
+	SamuelF3lipePromo/124880	🔥 Samsung Smart Tv 65 Miniled 4k M75h + Soundbar Samsung B-series Hw-b450f
+	SamuelF3lipePromo/124987	🔥 Lâmpada Inteligente Smart Color 10W Elgin Rgb Wifi Compatível com Alexa e Google Home
+	SamuelF3lipePromo/124437	🔥 Teclado Gamer Magnético 8000hz Rapid Trigger 0,01mm Hot Swap Switch Shadow Dareu Cool68 Blazing Orange
+	promotom/112083	Escova Eletrica Philips Colgate Sonicpro 35 2 Unidades
+	nerdofertas/148080	➡️ Max Titanium Top Whey Bar 12 Unidades De 41G (Doce De Leite)
+	fullpromotion/32911	🔥 HyperX Teclado Gamer HyperX Alloy Core RGB, ABNT2, PRETO
+	fullpromotion/33297	🔥 Achocolatado Ovomaltine Flocos Crocantes Sachê 190g para Leite e Receitas
+	fumotom/44763	Creme Finalizador YouthLock Collagen Joico 177ml
+	nerdofertas/148597	➡️ Adaptador de áudio portátil HiFi para jogos, Epz Tp35 Pro Dac Dongle, com decodificador e amplificador duplo Cs43198, 32 bits/384 kHz, ajuste de equalização (Peq) e saída de 3,5 mm
+	fadapromos/13925	🔥 Lava Louça Midea 14 Serviços Dwa14s1 - 127 Volts 127V
+	nerdofertas/148174	🔥 Regional - Pizzas, Hambúrgueres e muito mais a partir de R$ 9,99 no 99 Food!
+	nerdofertas/148009	CORRE PREÇÃO
+	fadapromos/14125	🔥 Micro-ondas Philco 25L Função Tira Odor 1100W Pm27
+	fullpromotion/33798	🔥 FITA DE FIBRA DE VIDRO, PARA PAREDE, 50 MM X 20 M, 1 PC//MTX
+	promotom/112145	WAP Panela de Pressão WPPE3 6L, 10 Receitas Pré-Programada
+	fumotom/43919	Controle Sem FIo EasySMX X 0 5 Pro Rgb, Hall Effect, Botões Programáveis, Conexão Tri Mode, 1000hz & 1000mAh
+	promotom/112639	Vonder, Trena Curta de Aço 5 M X 19 Mm
+	promotom/112106	Ganhe Perfume Tommy 100ML nas compras da seleção
+	fullpromotion/33868	🔥 Flash Limp, MOP6065, Mop Spray EVO 2 em 1 com reservatório 380 ml, Verde
+	fadapromos/13719	🔥 Xiaomi 17 Ultra 512Gb 16Gb Ram Novo Lacrado Rom Global
+	fullpromotion/33280	🔥 Wafer Danke Chocolate Amargo 25g - Recheio e Cobertura 70% Cacau
+	fumotom/42879	Cupom KaBuM em Áudio selecionado - 12% OFF
+	fumotom/43992	Ulanzi cu01 refrigerador termostático semicondutor para câmera, ventilador de refrigeração, radiador 4k, kit de gravação, dissipador de calor para sony canon nikon
+	nerdofertas/147880	➡️ Plasútil Kit 16 Potes de Plástico Tampa Fixa e Trava Não Perde a Tampa PLASUTIL
+	fumotom/43474	Pasta Térmica Mach1 Extreme Cold - 400
+	nerdofertas/147270	➡️ Monster Energético Pack 6 Unidades
+	nerdofertas/147397	➡️ Jogo de Taças para Bebidas de Vidro 330ml 6 Peças Haus Diamond Empire
+	nerdofertas/147591	➡️ Kit coala Home Chá Branco 4 Itens
+	fumotom/44697	Controle Sem Fio Machenike G3 V2, Com Base
+	fumotom/44478	Conjunto 06 Prato fundo em porcelana Germer
+	fumotom/44534	Samsung Smart Tv 50 Mini Led 4k M75h + Soundbar Hw-b450f
+	nerdofertas/148707	➡️ Controle Fantech Nova II WGP16 com sensor giroscópio, Hall joystick e gatilho
+	fadapromos/13960	🔥 Aspirador De Pó Vertical Power Cycle Elgin 1.600w
+	fadapromos/13902	🔥 Kit 10 Lâmpadas LED Bulbo 50W Alta Potência Branco Frio 6500K Bivolt E27 - Super Bulbo Econômica 4000 Lúmens Ideal Galpão Fábrica Comércio
+	fumotom/44111	Cupom KaBuM em produtos selecionados - 30% OFF
+	SamuelF3lipePromo/124214	🔥 BEST Forno Elétrico 70L, Inox/Platinium, 1800W com Rotisserie, Luz Interna, Timer 120min, 6 Funções
+	promotom/112651	Amend Condicionador Nutritivo Marula Fabulous Nutrition 250 Ml
+	fadapromos/13882	🔥 Lava Roupas em Pó Omo Lavanderia Pro 5,6kg
+	nerdofertas/147394	➡️ Smart Tv Tcl 65" Polegadas Qd-Mini Led 4K C6k WiFi Bluetooth Google Tv 4 Hdmi 144Hz Hdr10+ 65C6k
+	fullpromotion/33114	🔥 Sunny, Star Wars, Stretch, Boneco Elático do Chewbacca, 17 cm
+	nerdofertas/147749	➡️ Cadeira de Escritório Ergonômica Estofada Preta com Regulagem de Altura e Rodízios
+	fadapromos/14015	🔥 Amaciante de Roupa Concentrado Downy, Seiva de Alfazema, 1,5L
+	fumotom/42848	Pneu Lanvigator Comfort Ii 175/75R14 Aro 14 86T Kit4
+	nerdofertas/147092	➡️ Tênis Fila Comet Corrida Running Performance Amortecimento
+	nerdofertas/148880	➡️ LUMINATTI FITA LED 900W 2700K 24V, 18W/M, 240 LEDS/M, 50M, IP20, IRC 80
+	SamuelF3lipePromo/124851	🔥 Lavadora Alta Pressão Lava Rápido 1200W Kit Shampoo Kala
+	fadadoscupons/18042	🚨 Começou! Esquenta 11.11 Shopee
+	nerdofertas/147349	➡️ Dark Souls Trilogy Standard Edition (Físico)
+	SamuelF3lipePromo/124359	🔥 Lava Roupas Liquido Urca Azul 3l
+	fumotom/44550	Maizena Amido De Milho 720G
+	SamuelF3lipePromo/124705	🔥 Fone de Ouvido Intra-Auricular Sem Fio Jbl Wave Buds 2, Branco
+	nerdofertas/147674	➡️ Notebook Positivo Vision C15m Intel Celeron N4500 Windows 11 Home 4Gb Ram 128Gb eMMC Tela 15" Full Hd Ips Antirreflexo Minitela e Tecla Copilot Cinza
+	fumotom/43196	Capa Protetora FlexiCable para Plaud NotePin e NotePin S com Cordão Portátil
+	nerdofertas/148477	➡️ Projetor ThundeaL 3000 Ansi Lúmens 4K Full Hd TD98Pro
+	fadapromos/13968	🔥 HUAWEI WiFi AX2S | Roteador | WS7000 V2 | Dual Band | 4 Antenas | 5 GHz Wi-Fi 6
+	SamuelF3lipePromo/124829	🔥 Smart TV Philips 43 polegadas QLED Full HD Wi-Fi HDR10 Dolby Áudio 43PGQ6921/78
+	fullpromotion/33244	🔥 Clear Pele Abelha Rainha – Creme para Amenizar Manchas SenisPromo nasTom Mãos 60g
+	nerdofertas/148936	➡️ Mousepad Attack Shark CM02, base de borracha antiderrapante 450x400x4mm
+	fadapromos/14081	🔥 Impressora 3D Bambu Lab A1 Mini cor cinza Sem AMS
+	fadapromos/14085	🔥 Lavadora LG Vc5 12kg Branca Com Ia Aiddtm - 127v
+	fadadoscupons/17913	🚨🚨 Vai sair cupom 40% OFF no mercado livre às 18h
+	fullpromotion/33853	🔥 Relógio Life Lovely Feminino Couro e Aço Verde
+	promotom/112688	Saia Anágua Feminina Segunda Pele com Detalhe em Renda
+	fullpromotion/33698	🔥 Smart Tv Tcl 65 Polegadas Qled 4K P7l WiFi Bluetooth Google Tv Hdr10+ 120 Hz Vrr Aipq 65P7l
+	nerdofertas/147268	➡️ Sofá com Porta Copos e Carregador USB Eureka 2,30m Assento Retrátil e Reclinável Velosuede Grafite - NETSOFAS
+	nerdofertas/148366	➡️ Verden Bicicleta de Equlibrio sem pedal Balance Peppa George com cestinha
+	fadapromos/13685	🔥 Caixa de Som JBL PartyBox Stage 320 Bluetooth Portátil Com Show de Luzes e Resistente a Respingos – 240W RMS Preta
+	fumotom/42647	Headset Sem Fio Havit Fuxi H6 Gamenote
+	fumotom/43094	Touca Descartável, Vabene, Sanfonada, 20 cm, TNT, Branca, Pacote com 12
+	fullpromotion/33242	🔥 Cadiveu Essentials Quartzo Shine Quartzo Líquido Condicionante 65ml
+	SamuelF3lipePromo/124253	🔥 Soundbar Lg S40t Bluetooth, 300W, Som Imersivo Design Compacto, Conectividade, Ideal para Tv e Entretenimento em Casa
+	fumotom/44619	2x Smailwolf Rs7, Sensor Paw3311
+	fullpromotion/33300	🔥 Kit Nivea Sabonete em Barra Hidratante Leite 85g (6 unidades)
+	fullpromotion/33976	🔥 Hair Spray de Fixação Ultra Forte com Silicone 400ml | Amend Valorize
+	fumotom/44705	Controle GameSir G7 Pro Dragon's Dogma Ii para Xbox Series X, Xbox Series S, Xbox One X, Xbox One S
+	nerdofertas/147633	➡️ Smart Tv Tcl 55" 4K Uhd Qled Google Tv 2026
+	promotom/112782	Mosquetão Com Trava, 8 Mm X 80 Mm, Cartela Com 1 Peça, Vonder
+	promotom/112583	Kit 3 Cadeiras para Jardim e Varanda – Fibra Sintética
+	fadapromos/14261	🔥 Jogo 6 Copos Baixos Diamond 300ml Vidro Grosso Diamante Luxo
+	fullpromotion/33436	🔥 Boni Natural - Kit Desodorante Spray Melaleuca e Lavanda 120 ml + Spray Melaleuca & Toranja 120 ml, Vegano, Proteção 24 Horas, Sem Álcool Etílico e Sem Cloridrato de Alumínio
+	fullpromotion/33028	🔥 Rio Master Guardanapo de Natal | Guardanapo natalino para completar a mesa posta da ceia e das festas de fim de ano
+	fullpromotion/32992	🔥 Caixa de Som Speaker Philco Extreme 220W PBS220BT
+	nerdofertas/148569	➡️ Controle GameSir Nova 2 Lite com 1000Hz Polling Rate, PC, Sitch, IOS, Android
+	nerdofertas/147986	🚨 Geladeira para usar o cupom meia noite
+	fullpromotion/33866	🔥 Kit 6 Cuecas Zorba Boxer Side sem Costura Microfibra 839
+	fullpromotion/33350	🔥 Mouse Gamer Redragon Cobra V3, Preto, Rgb, Pmw3327, 10000 Dpi | M711 V3
+	fumotom/44200	Fruteira de Mesa Rustica de Ferro e Bambu para Café da Manhã Multiuso de Metal Preto
+	nerdofertas/147202	➡️ Aparelho De Jantar Oxford Cerâmica Folk 20 Peças Cor Estampado
+	fadapromos/14008	🔥 (Meli+) 2x Unidades: Kaiak Ultra Natura Colônia Perfume Masculino 100ml Relançamento 2025
+	promotom/112259	Huawei WiFi Ax2s | Roteador | Ws7000 V2 | Dual Band | 4 Antenas | 5 GHz Wi-Fi 6
+	fullpromotion/32818	🔥 Micro-ondas Agratto AMIC01N-02 Preto 32L
+	fullpromotion/34001	🔥 Godox S30 Iluminador Led Foco
+	fumotom/43433	Caixa de Som Portátil Jbl Boombox 4, Bluetooth, Branco
+	nerdofertas/146862	30ALLSITE esgotado
+	nerdofertas/148958	➡️ Projetor Mini Portátil Toptro com Suporte 4K e 20.000 Lumens Nativos 270 ° Projetor Rotativo para Home Theater Full Hd 1080P
+	nerdofertas/146941	➡️ Kit 2 Pneu Pirelli Aro 18 225/55r18 98v Scorpion
+	fadapromos/13816	🔥 Cadeira Presidente Ergonomica Escritorio Mesh Reclinavel Com Apoio De Pes Retratil E Apoio De Cabeça
+	fullpromotion/33881	🔥 Vonder, Estilete Largo, Lâmina de 18 Mm, Es 180
+	fadapromos/13935	🔥 Jogo de Potes de Plástico Herméticos Electrolux - com Tampa A23122901 12 Peças
+	nerdofertas/147659	➡️ Controle xbox Series X|S Series X|S
+	fumotom/42960	Calha Cozinha Escorredor Canal Organizador Embutir Úmida Inox 60cm Cor Aço inox escovado
+	nerdofertas/148632	➡️ Wap Furadeira Parafusaderia de Impacto Wf 1000Fe 1/2" com Seletor de Velocidade e Limitador de Profundidade 22Nm 1000W 127V
+	fadapromos/13736	🔥 Frigobar Hisense 90l Porta Reversível Rr121nw Branco
+	nerdofertas/146879	🚨Desconto Amazon
+	fumotom/43134	Kit Com 5 Camisetas Masculinas Básicas Slim Hering 4fv31den
+	nerdofertas/148150	➡️ Gta Vi Playstation 5 Versão Standard Nacional Br
+	fadadoscupons/17704	1010D4SH0P33
+	nerdofertas/146984	➡️ Qman Blocos De Montar Motocicleta da Polícia 6+ Plástico
+	promotom/112344	Cortina Blackout Corta Luz Blackout 2,20m X 1,30m Decoração Sala e Quarto Blecaute Várias Cores
+	SamuelF3lipePromo/124802	🔥 Feets X-Raypad Jade Air
+	promotom/112786	Só no app: 50% off em Itens Automotivoss
+	nerdofertas/146905	➡️ Fone De Ouvido Soundcore by Anker P20i
+	nerdofertas/147745	➡️ Câmera instax mini 13 Dreamy Purple
+	fumotom/43529	Daily T-shirt Insider
+	fadadoscupons/17608	🚨 Cupom Amazon Ativo
+	promotom/112763	MONDIAL Fritadeira Sem Óleo Air Fryer 5L, Vermelho/Inox, 1900W, 110V - AFN-50-RI
+	fumotom/44690	Controle Licenciado 8Bitdo Ultimate C Wired Xbox Rgb Hall Effect
+	promotom/112616	Fritadeira Black Perform 4,5L Oster - 220V
+	nerdofertas/147138	➡️ Samsung Smart TV 58" Crystal UHD 4K U8000H 26/2027, Vision AI Companion, Modo Estádio, Xbox Cloud Gaming
+	fadadoscupons/17833	🔥 Cupom Mercado Livre em Full
+	fullpromotion/33979	🔥 Mondial Fritadeira Air Fryer Forno Oven Analógica 12L, Preto, 2000W, 110V - Afon-12L-Ab
+	fullpromotion/33994	🔥 Knut Hair Care Shampoo Knut Men Anticaspa 250Ml
+	nerdofertas/148459	➡️ Kysona Jupiter X Ultra 3950 54L15, Fibra de Carbono Paw3950
+	fullpromotion/32828	🔥 Sparta Grampeador Manual Com Ajuste De Pressão E Acessorios - Sparta
+	fadapromos/14220	🔥 Daily T-shirt Insider
+	fumotom/44605	Teclado Sem Fio Mecânico Gamer Husky Nomadic, Rgb, Switch Gateron G Pro Red, Bluetooth, Abnt2, Preto
+	fumotom/43111	Headset Sem Fio Havit Fuxi H6
+	fadapromos/13654	🔥 Escova Secadora Secador Profissional Seca Alisa E Modela Cabelo - New
+	fadapromos/13750	🔥 IMPRESSORA MULTIFUNCIONAL JATO DE TINTA  ECOTANK  EPSON 3250  Bivolt
+	fumotom/42725	Sofá Retrátil e Reclinável 1,70m Clean. Cama inBox Velusoft
+	fumotom/43532	Estojo com 6 Pratos Sobremesa em Porcelana, Modelo Redondo Voyage Coup, Decoração Itacaré, Azul, Porcelana Schmidt
+	fullpromotion/33710	🔥 Dgoias Torresminho Pronto - 120G - Tradicional
+	fadapromos/14221	🔥 Controle para Xbox Sem Fio Preto + Cabo USB-C
+	fadapromos/14166	🔥 Smart TV LG AI 65" - 4K UHD α7 AI Processor 4K Gen8 webOS 25-65UA7500PSA
+	fumotom/44689	Projetor Mini Portátil Toptro com Suporte 4K e 20.000 Lumens Nativos 270 ° Projetor Rotativo para Home Theater Full Hd 1080P
+	fullpromotion/33793	🔥 Regata Feminina Segunda Pele Anágua Lisa
+	nerdofertas/147742	➡️ Tenis New Balance 370v1 Unisex
+	SamuelF3lipePromo/124394	🔥 Vai esgotar!
+	fadapromos/13591	🚨 Testem! Cupom iFood em Mercado
+	promotom/112353	Chinelo Infantil Slide Menino Menina Nuvem Escolar Confortável 21/22 ao 33/34 Promoção
+	nerdofertas/147689	➡️ Geladeira Frost Free Duplex 473l Inverter Cor Preto Midea Preto
+	nerdofertas/148056	Verifique se aparece os cupons aí https://s.shopee.com.br/3LS0IW9vKP
+	fullpromotion/33014	🔥 Samsung Galaxy S25+ 5g, 256gb, 12gb, Câmera Tripla - Azul marinho
+	promotom/112049	Invicta Speedway Stainless Steel Men's Quartz Watch - 42mm
+	fumotom/44714	Ajazz Ak820 Led White Teclado Mecânico, Switch Red e Blue, Hot Swappable, Knob volume, black white branco preto com fio, wired
+	promotom/112602	10x Salgadinho de Batata Ruffles, Original, 270g
+	SamuelF3lipePromo/124975	🔥 MONDIAL Ventilador de mesa 30cm, 110V, Branco/Azul V-30-6P
+	fullpromotion/33230	🔥 Cappuccino Clássico América 400g
+	nerdofertas/148134	➡️ MONDIAL Caixa de Som Party Box, Luzes Multicores, Bluetooth, 350W RMS, TWS PBX-350
+	SamuelF3lipePromo/124347	🔥 Creatina Monohidratada Refil 300g Wefit
+	nerdofertas/147765	➡️ WAP Aspirador de Pó e Água Barril GTW COMPACT, Compacto, 5,5 Litros, com Filtro Lavável, 150mbar 1400W 220V
+	fumotom/43845	Teclado Magnético Epomaker He68 Lite Hall Effect
+	nerdofertas/147723	➡️ Top de Treino Feminino Mizuno Essence
+	fumotom/42870	Oral-B Pasta de Dente 3D White Mineral Clean, Carvão de Bambu, 107 ml
+	fumotom/43880	Fosi Audio Zh3 Dac Amplificador de fone de ouvido com controle remoto Pcm 768kHz Hifi Audio Dac Akm4493seq Pré-amplificador totalmente balanceado
+	nerdofertas/148657	➡️ BARRA PROTEICA NUTRATA NESTLÉ CHARGE BAR DISPLAY C/ 12 UN
+	nerdofertas/147079	➡️ Máquina De Lavar Electrolux Efficient 13kg Auto Cesto Inox Branco
+	fullpromotion/33874	🔥 Targifor C Vitamina C e Arginina 16 comprimidos efervescentes
+	nerdofertas/147381	11DO113N4SH050
+	fadapromos/13656	🔥 Britânia BBP760 Batedeira Planetária Power Plus, Preto, 12 Velocidades, 4.5L, 700W, 220V
+	fullpromotion/32824	🔥 Tech T-shirt Gola U Masculino insider
+	fullpromotion/33850	🔥 Estilete Lamina 9 MM, Lamina Retratil, Comprimento 155 MM, 1
+	fumotom/43669	Tênis Nike Sb Chron 2 Canvas
+	fadapromos/13642	🔥 Pokémon TCG: Mega Evolution - Pitch Black - Elite Trainer Box - Inglês, Jogo de Cartas
+	fullpromotion/33739	🔥 Mais produtos adicionados! Exclusivo Prime: Cupom 40% OFF, limitado a R$ 300 OFF
+	fullpromotion/33524	🔥 Barra Proteica Nutrata Nestlé Charge Bar Display C/ 12 Un
+	nerdofertas/148861	➡️ Antena Starlink Mini X com Roteador
+	SamuelF3lipePromo/124596	🔥 Mouse Sem Fio Com Dock Smailwolf M3 Pro Plus Paw 3311 500mAh
+	nerdofertas/147483	➡️ Inova caixa de som Bluetooth Portátil Go 4 À Prova D 'Água
+	promotom/112193	10x Café Campos Altos Especial Moído 250g, Arábica Catuaí Vermelho, 84+ Pontos
+	promotom/112507	Cupom Amazon Primeira Compra
+	fullpromotion/33443	🔥 Lista de Cupons Mercado Livre
+	nerdofertas/148694	Muito divertido! Versão proibidona, frases muito engraçadas (veja no anuncio)
+	nerdofertas/147285	➡️ Guarda Roupa Casal 8 Portas 4 Gavetas Paris Espresso Móveis Off White/Cinamomo Cinamomo/Off White
+	promotom/112606	Mangueira Cristal Transparente 5/16"x0,8mm com 50 metros - Vonder
+	fullpromotion/32950	🔥 Smart Tv 43 Polegadas 43s5155 78g Full Hd Led Wi-Fi Tv Dolby Audio AOC
+	nerdofertas/147467	➡️ Batedeira Planetária Turbo Power Plus Bbp760p Britânia Cor Preto Frequência 60
+	nerdofertas/147888	➡️ 10x Pringles Nacho Cítrico 100g
+	nerdofertas/147501	➡️ Filtro Linha Régua Energia 8 Tomadas Tecnologia Lcf Clamper
+	promotom/112506	Jogo 6pçs Tefal Refresh Ceramic Azul Ártico + 3 Acess.
+	fadapromos/13915	🔥 Refrigerador Panasonic 407l Black Glass Nr-bb41gv2b Preto
+	nerdofertas/147237	➡️ Console Nintendo Switch 2, 256Gb, Preto, Azul e Vermelho
+	fumotom/43091	Painel Pegboard Organizador Setup Gamer 59x35 + Brindes
+	nerdofertas/148860	➡️ Fleischmann Mistura para Bolo Cenoura UP 390g
+	fumotom/43007	Celular Samsung Galaxy A57 5g 128gb, 8gb Ram, Recursos Ai
+	fadapromos/14324	🔥 Air Fryer Britânia 5L Cesto Quadrado Redstone 1500W BAF45B 127V
+	nerdofertas/148630	➡️ Mor Life Barraca Luna 4 Pessoas
+	nerdofertas/147072	CUPOMZAO VAI ESGOTAR
+	fadapromos/13839	🔥 iFood - Leve 4 e Pague 2
+	nerdofertas/148536	🚨 Novos Cupons 11.11 DO ALIEXPRESS: A MAIOR PROMOÇÃO DO ANO!
+	nerdofertas/147472	Comprei o anker eufy C20, que postei promo pra vocês, pra conhecer o produto
+	fadapromos/13752	🔥 Kit 4 Pneus XBri Aro 13 175/75R13 84T Fastway C1
+	fumotom/44217	Preservativo Zero com 3 Unidades, Blowtex
+	SamuelF3lipePromo/124523	🔥 Geladeira Refrigerador HQ 230 Litros Duplex Defrost, Baixo Consumo A+++ Preto/Cinza HQ-230RDFS
+	fadapromos/13612	🔥 Aspirador de Pó Vertical Britânia 2 em 1 com Filtro Ciclone 1400W Bas30 1,5L Azul 220V
+	fumotom/43564	6x Monange Sabonete Líquido Frutas Vermelhas 240Ml
+	nerdofertas/147359	➡️ Pasta Térmica Mach1 Hyper Flow 300-30
+	nerdofertas/148775	➡️ Geladeira Refrigerador Compacto HQ 140L Duplex Defrost, Baixo Consumo A+++ Preto/Cinza HQ-140RDF
+	nerdofertas/147311	➡️ Coala Sabonete Liquido Maos e Corpo Limpa Hidrata Perfuma 500ml Cha Branco
+	nerdofertas/148952	➡️ Controle 8BitDo Ultimate 2 Evernight Honkai: Star Rail
+	fumotom/44422	Smart Tv Semp 43" Polegadas Led Hva 4K S62 WiFi Bluetooth Google Tv 3 Hdmi Hdr10+ Dolby Audio 43S62
+	fadapromos/14134	🔥 Mercusys MR30G Roteador Wifi5 AC1200 Gigabit Banda Dupla por TP-Link
+	fullpromotion/33135	🔥 Invicta Speedway Stainless Steel Men's Quartz Watch - 42mm
+	fullpromotion/33997	🔥 Protetor de Cabeça Capacete Fechado Boxe Muay Thai Kickboxing P/M Pu Vollo
+	fumotom/43584	Extratora de Sujeira KABUM! smart Fiber Pro, Pulveriza, Esfrega e Extrai, Com Sistema de Autolimpeza, Sucção Forte 11KPa, 220V - KSEL020
+	nerdofertas/146904	➡️ Pista de Carrinhos Infantil Bombeiro com 5 Veículos e Acessórios Maxi Toys
+	SamuelF3lipePromo/124726	🔥 Fone de ouvido Aiw Eb-03-B c/cancelamento de ruído, 25 horas de bateria, Ipx5, sem fio
+	fumotom/44249	Máquina de Lavagem e Cura 2 em 1 Elegoo Mercury Plus V3.0 para Impressora 3D de Resina
+	fumotom/44553	Desodorante Corporal Aerossol Rexona All Body, Fresh Citrus, 150ml
+	fadapromos/13647	🔥 Martelo de Unha Cabeça de Aço para Marcenaria e Obras - Mega prime
+	nerdofertas/148701	➡️ GameSir G7 Pro 8K Edição Nioh 3, Controle Sem Fio para Nintendo Switch com Estação de Carregamento, Joystick Tmr Gen-2, Efeito Hall, Giroscópio
+	fumotom/44215	Fone de Ouvido Bluetooth Sem Fio Fortrek Hws1
+	fumotom/42493	Kit 2 Travesseiros 70x50 Antialérgico Lavável Fibra Siliconada Toque de Pluma de Ganso Oaktex Cor Branco
+	fumotom/43595	Fone De Ouvido Bluetooth Polyvox Com Cancelamento De Ruido
+	nerdofertas/148983	➡️ Virbac Easotic Tratamento Otológico para Cães 10 mL Tratamento; Cão; Otite; Virbac; Otológico
+	promotom/112792	Pegara esse? Óculos de Sol Ray-Ban Aviator Unissex
+	nerdofertas/148684	➡️ Fone de Ouvido Bluetooth Sem Fio Fortrek Hws1
+	promotom/112280	Jogo de Potes de Plástico Hermético Electrolux Retangular Experience 3 Peças
+	fullpromotion/33550	🔥 10x Desodorante Aerosol Blue Giovanna Baby 72H 200Ml
+	fadadoscupons/18168	Entrem -> @fadapromos
+	fumotom/42515	5 Cuecas Algodão Boxer Basic Lisa Masculina Forro Duplo Costura Tripla Sortido
+	fadapromos/14389	🔥 Panela de Pressão Digital Elétrica Multi Cook 5 Litros 220V Elgin, Aço inoxidável
+	fadapromos/13863	🔥 Lava-Roupas em Pó Omo Todo Ciclo Caixa 2kg
+	nerdofertas/147892	➡️ Mor Life - Barraca Luna 4 Pessoas
+	SamuelF3lipePromo/124514	-Bom preço parcelado
+	fadapromos/14112	🔥 Alto-falante Jbl Partybox Encore Essential 2 Party preto
+	nerdofertas/148967	🔥 VAI COMEÇAR A BLACK NA AMAZON! 3 meses de Amazon Prime por apenas R$ 9,90
+	fumotom/44182	Wella Oil Reflections Óleo Suavizante Tratamento 100ml
+	promotom/112520	Jogo de Panelas Antiaderente Teflon Preta 8 Peças tampa de vidro
+	fumotom/43343	Tenis New Balance 370v1 Unisex
+	fadapromos/14184	🔥 Max Titanium Top Whey Bar 12 Unidades De 41G (Doce De Leite)
+	nerdofertas/147769	➡️ Colli Bike, Bicicleta Athena Aro 29 Freios a Disco Dianteiro e Traseiro, 36 Raias, 21 Marchas, Suspensão Dianteira
+	fumotom/43084	Chiclete Trident XSenses Morango Lime Sem Açúcar Garrafa - Caixa com 6 unid. de 54g
+	fadadoscupons/18084	3SQU3NT411D011
+	fumotom/44298	Rapoo Vt3 Max v2 Paw3398 26000 Dpi Mouse Sem Fio 8000hz 53g gen 2 Vt 3 gen2 paw 3398 26k Dpi vt3max 750h Mcu Nordic nRF54L15
+	fadapromos/13820	🔥 Jogo 4 Pneus Barum by Continental Aro 15 Bravuris 5HM 195/50R15 82V
+	fumotom/43420	Pipoqueira Po Cine Pp01 Vermelho Com Dosador 1200W 127V Agratto | Com Dosador
+	fadapromos/14302	🔥 Geladeira/Refrigerador Midea Frost Free 2 Portas 473L MDRT611EVA462
+	nerdofertas/147058	➡️ Kit 2 Vult Creogel 3 em 1 Ondulados e Cachos 250g
+	nerdofertas/148189	➡️ Belliz Puff Para Po Compacto
+	promotom/112596	Mouse Sem Fio Attack Shark X8 Plus Paw 33950Pro 500mAh
+	nerdofertas/148060	➡️ Geladeira Inteligente Frost Free Duplex 476 Litros Branca Br
+	SamuelF3lipePromo/124983	🔥 Só no app: 50% off em Itens Automotivoss
+	nerdofertas/148738	➡️ Caixa de Som Tronsmart T8 Bluetooth 40W IPX7

@@ -365,9 +365,10 @@ def test_07_fronteiras(r):
                     importadores.append(rel)
     # [F1.2-A2-E] Lista FECHADA e exata (decisão D2 do dono): main.py e os
     # três módulos do funil de entrada; [F1.2-A2-R] mais a completude e a
-    # sucessão; [F1.2, exclusão] mais a origem apagada. Qualquer outro
-    # importador quebra.
+    # sucessão; [F1.2, exclusão] mais a origem apagada; [Curadoria] mais a
+    # curadoria (a segurada e o aval). Qualquer outro importador quebra.
     r.check(sorted(set(importadores)) == ["main.py", "pipeline/completude.py",
+                                          "pipeline/curadoria.py",
                                           "pipeline/orchestrator.py",
                                           "pipeline/orchestrator_fila.py",
                                           "pipeline/orchestrator_pipeline.py",

@@ -78,10 +78,13 @@ TIPOS: Dict[str, Optional[str]] = {
     "canal.mensagem_apagada": None,
     "plataforma.alerta": None,
     "fonte.consultada": None,
+    # curadoria: hardware só com aval de canal curador (pipeline.curadoria)
+    "curadoria.retida": "DESCARTADA",
+    "curadoria.aval": None,
 }
 
 ENUMS: Dict[str, FrozenSet[str]] = {
-    "via": frozenset({"TELEGRAM", "RECUPERACAO", "SUCESSAO"}),
+    "via": frozenset({"TELEGRAM", "RECUPERACAO", "SUCESSAO", "CURADORIA"}),
     "tipo_execucao": frozenset({"MENSAGEM", "EXCLUSAO", "MANUTENCAO"}),
     "resultado_execucao": frozenset({
         "DESCARTADA", "PUBLICADA", "RENASCIDA", "EVOLUIDA", "SINCRONIZADA",
@@ -153,6 +156,8 @@ ENUMS: Dict[str, FrozenSet[str]] = {
 # A2-R: a completude e a sucessão (pipeline/completude.py e
 # pipeline/sucessao.py), que não abrem execução. Exclusão: origem.apagada
 # (pipeline/origem_apagada.py), na raiz EXCLUSAO de cada id apagado.
+# Curadoria: a segurada (no funil, dentro da execução da mensagem) e o aval
+# de canal curador (pipeline/curadoria.py).
 LOCAIS: FrozenSet[str] = frozenset({
     "eventos.execucao.fim",
     # A2-E — origem.recebida e os descartes antes da fila
@@ -188,6 +193,9 @@ LOCAIS: FrozenSet[str] = frozenset({
     "sucessao.suceder.lideranca_transferida",
     # Exclusão — a origem apagada, depois de _uma
     "origem_apagada.apagadas.apagada",
+    # Curadoria — hardware só com aval
+    "curadoria.portao.retida",
+    "curadoria.aval.registrado",
 })
 
 # Chaves que a coleta preenche: o que o coletor puser nelas é sobrescrito.

@@ -657,6 +657,21 @@ def _da_exec(evs, ex):
 # ─────────────────────────────────────────────────────────────────
 # Contrato
 # ─────────────────────────────────────────────────────────────────
+# [Curadoria] A frente da curadoria (pipeline/curadoria.py) registrou DEPOIS
+# da exclusão: 2 LOCAIS, 2 TIPOS e o valor CURADORIA em `via`
+# (tests/test_curadoria.py confere o escopo dela). Sem esse delta exato, o
+# catálogo é o de antes dela — o hash abaixo continua provando o da exclusão.
+LOCAIS_CURADORIA = {"curadoria.portao.retida", "curadoria.aval.registrado"}
+TIPOS_CURADORIA = {"curadoria.retida", "curadoria.aval"}
+ARQ_CURADORIA = "pipeline/curadoria.py"
+
+
+def _sem_curadoria():
+    tipos = {k: v for k, v in catalogo.TIPOS.items() if k not in TIPOS_CURADORIA}
+    enums = {k: (v - {"CURADORIA"} if k == "via" else v) for k, v in catalogo.ENUMS.items()}
+    return tipos, enums, catalogo.LOCAIS - LOCAIS_CURADORIA
+
+
 def test_c01_catalogo_e_fronteira(r):
     achados = [e for rel in _ARQ_EXC for e in a2e._emissoes(rel)]
     r.check(achados == [("origem.apagada", LOCAL_EXC, None)], "C01.um_ponto_um_local",
@@ -676,9 +691,9 @@ def test_c01_catalogo_e_fronteira(r):
     # exclusão —, sem sobra nem falta. Cada frente confere o próprio escopo
     # no próprio teste.
     frentes = {"A1": {a2r.LOCAL_A1}, "A2-E": set(a2e.LOCAIS_A2E), "A2-R": set(a2r.LOCAIS_A2R),
-               "EXCLUSAO": {LOCAL_EXC}}
+               "EXCLUSAO": {LOCAL_EXC}, "CURADORIA": LOCAIS_CURADORIA}
     uniao = set().union(*frentes.values())
-    r.check(sum(len(v) for v in frentes.values()) == len(uniao) == 29, "C01.frentes_disjuntas",
+    r.check(sum(len(v) for v in frentes.values()) == len(uniao) == 31, "C01.frentes_disjuntas",
             str(len(uniao)))
     r.check(catalogo.LOCAIS == uniao, "C01.catalogo_global_A1_A2E_A2R_exclusao",
             str(sorted(catalogo.LOCAIS ^ uniao)))
@@ -691,7 +706,8 @@ def test_c01_catalogo_e_fronteira(r):
             continue
         dono = (set(a2e.LOCAIS_A2E) if rel in a2e._ARQ_FUNIL
                 else set(a2r.LOCAIS_A2R) if rel in a2r._ARQ_A2R
-                else {LOCAL_EXC} if rel in _ARQ_EXC else set())
+                else {LOCAL_EXC} if rel in _ARQ_EXC
+                else LOCAIS_CURADORIA if rel == ARQ_CURADORIA else set())
         if not locs <= dono:
             fora.append((rel, sorted(locs - dono)))
     r.check(fora == [], "C01.nenhum_outro_emissor", str(fora))
@@ -701,7 +717,7 @@ def test_c01_catalogo_e_fronteira(r):
     rc = catalogo.resumo()
     r.check(catalogo.VERSAO == 1 and rc["versao"] == 1
             and rc["hash"] == catalogo._hash(catalogo.TIPOS, catalogo.ENUMS, catalogo.LOCAIS)
-            and catalogo._hash(catalogo.TIPOS, catalogo.ENUMS, catalogo.LOCAIS - {LOCAL_EXC})
+            and catalogo._hash(*_sem_curadoria()[:2], _sem_curadoria()[2] - {LOCAL_EXC})
             == "5dad380f73bcc7ac",
             "C01.versao_1_hash_recalculado_e_a2r_sem_o_local", str(rc))
 

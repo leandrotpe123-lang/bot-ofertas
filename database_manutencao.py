@@ -34,6 +34,11 @@ def db_limpar():
             db.execute("DELETE FROM post_exibida WHERE ts<?", (agora - 30 * 86400,))
             db.execute("DELETE FROM espelho_post WHERE ts<?", (agora - 30 * 86400,))
             db.execute("DELETE FROM conflito_estrutural WHERE ts<?", (agora - 30 * 86400,))
+            # Curadoria: a janela é de minutos; 1 dia de aval e 3 de
+            # retida bastam para diagnóstico ("por que não passou?").
+            db.execute("DELETE FROM curadoria_aval   WHERE ts<?", (agora - 86400,))
+            db.execute("DELETE FROM curadoria_retida WHERE ts<?", (agora - 3 * 86400,))
+            db.execute("DELETE FROM curadoria_chave  WHERE ts_entrada<?", (agora - 3 * 86400,))
         if len(_raw_cache) > 3000:
             for k in list(_raw_cache.keys())[:1000]:
                 del _raw_cache[k]
