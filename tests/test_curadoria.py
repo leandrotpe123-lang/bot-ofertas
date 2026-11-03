@@ -39,8 +39,8 @@ As regras do Léo (03/11/2026), uma por teste:
   16  o canal de aval é LIDO (varredura): base no 1º ciclo, depois só o
       novo; handler e varredura não contam a mesma mensagem duas vezes;
       aval velho não solta nada
-  17  falha do banco no portão deixa passar (nunca trava o canal por
-      defeito interno); só produto passa pelo portão
+  17  banco fora no portão BLOQUEIA o hardware (e só ele: outra categoria
+      segue); cupom não é curado
   18  eventos: curadoria.retida encerra a execução como DESCARTADA; a
       reinjeção chega com via CURADORIA; o aval sai como curadoria.aval
   19  main.py: o canal de aval sai das fontes antes dos handlers; a
@@ -80,6 +80,38 @@ Bateria da auditoria final (item 8 do fechamento):
   40  sem bypass: a curadoria não envia, não escreve SQL, não afilia; uma
       única entrega ao ponto de entrada
   41  lista do Nerd com cabeçalho dá aval a cada produto
+Auditoria forense (itens 1 a 4):
+  42  a mensagem guarda TODOS os produtos da versão atual; aval de A OU de
+      B (mesma loja) solta a mensagem inteira
+  43  A→A+B guarda os dois (B pelo edit_date); A→B guarda só B (aval de A
+      não solta); A+B→B; edições repetidas não devolvem o tirado nem
+      duplicam a publicação
+  44  troca do conjunto e aval na mesma transação (threads); reinjeção só
+      passa com o conjunto exato que o aval soltou
+  45  hardware SEM identidade (vazia, sem código, campanha, encurtador,
+      busca) fica retido, expira normal; edição com link identificável
+      passa a esperar aval; lista vazia nunca aprova; exceção dispensa aval
+  46  banco fora: bloqueia só o hardware, só na memória (logs dizem que não
+      é durável); banco volta: aval gravado, reavaliação, soltura sem duplicar
+  47  exceção interna nunca autoriza; fonte isenta e outra categoria não
+      bloqueiam; limite de repetição; SOMBRA nunca bloqueia
+  48  memória limitada; fora da janela sai da memória; reinjeção perdida é
+      reentregue (com limite); sem ler a prova não há reinjeção
+  49  edição publicada com o mesmo produto (preço, cupom) sincroniza normal
+  50  edição publicada com produto novo vigiado sem aval fica PENDENTE (o
+      post segue com o aprovado); o aval aplica no MESMO post
+  51  o produto novo da edição entra pelo edit_date (4 min antes vale; 6 min
+      não; perto da data original não)
+  52  pendente substituída (volta ao aprovado, troca para outra categoria)
+      fecha; aval tardio não reaplica
+  53  A→A+B publicada (aval de A cobre; publicada por exceção espera aval);
+      edição que tira a identidade fica pendente
+  54  edição de mensagem não líder: pendente; com aval, o mesmo post
+  55  SOMBRA aplica e registra; edição do Fada dá aval pelo edit_date
+  56  segurada antiga editada com produto novo: espera e sai pela data da
+      versão
+  57  o aprovado do post inclui a família; produto já publicado vale pela
+      data original
 
 Execução (standalone, stdlib + Telethon):  python3 tests/test_curadoria.py
 """
@@ -115,7 +147,7 @@ import eventos                                                 # noqa: E402
 import globals as g                                            # noqa: E402
 import client as modulo_client                                 # noqa: E402
 import plataformas                                             # noqa: E402
-from database import _init_db                                  # noqa: E402
+from database import _init_db, db_exibida, db_get_post, db_ofertas_de_post  # noqa: E402
 from database_conexao import _db                               # noqa: E402
 import database_curadoria as dbc                               # noqa: E402
 from eventos import catalogo                                   # noqa: E402
@@ -158,10 +190,12 @@ def _agora():
     return dt.datetime.now(dt.timezone.utc)
 
 
-def mensagem(canal, mid, texto, idade_s=5.0, editada=False):
+def mensagem(canal, mid, texto, idade_s=5.0, editada=False, edit_idade_s=0.0):
     m = types.Message(id=mid, peer_id=types.PeerChannel(_IDS[canal]),
                       date=_agora() - dt.timedelta(seconds=idade_s), message=texto,
-                      post=True, edit_date=_agora() if editada else None)
+                      post=True,
+                      edit_date=(_agora() - dt.timedelta(seconds=edit_idade_s)
+                                 if editada else None))
     m._finish_init(TC, {PEER[canal]: ENT[canal]}, None)
     return m
 
@@ -174,7 +208,7 @@ IDENTS_AVAL: dict = {}
 
 
 def registrar_norm(canal, mid, texto, idents):
-    ids = [i for _, i, _ in idents]
+    ids = [i for _, i, _ in idents if i]        # id ausente não é identidade (real)
     NORMS[(CHAT[canal], mid)] = MensagemNormalizada(
         msg_id=mid, chat=CHAT[canal], texto_limpo=texto, texto_analise=texto,
         mapa={"http://o": "http://a"}, preservar=[], plat=idents[0][0] if idents else "",
@@ -265,6 +299,7 @@ def _limpar_curadoria():
     with _db() as db:
         db.execute("DELETE FROM curadoria_aval")
         db.execute("DELETE FROM curadoria_retida")
+        db.execute("DELETE FROM curadoria_chave")
 
 
 def cenario(corpo, modo="ATIVO", identificar_real=False):
@@ -304,11 +339,13 @@ def novo_id():
     return _MID["n"]
 
 
-async def chega(mundo, canal, texto, idents, *, mid=None, idade_s=5.0, editada=False):
+async def chega(mundo, canal, texto, idents, *, mid=None, idade_s=5.0, editada=False,
+                edit_idade_s=0.0):
     """Uma mensagem da fonte chega pelo handler (NewMessage/MessageEdited)."""
     mid = mid or novo_id()
     registrar_norm(canal, mid, texto, idents)
-    m = mensagem(canal, mid, texto, idade_s=idade_s, editada=editada)
+    m = mensagem(canal, mid, texto, idade_s=idade_s, editada=editada,
+                 edit_idade_s=edit_idade_s)
     mundo.servidor[(PEER[canal], mid)] = m
     await orchestrator.processar(tl_events.NewMessage.Event(m), is_edit=editada)
     await drenar()
@@ -345,10 +382,14 @@ def retida(canal, mid):
 
 
 def envelhecer(mundo, canal, mid, segundos):
-    """O tempo passou: a mensagem da fonte e a linha dela têm `segundos`."""
+    """O tempo passou: a mensagem da fonte, a linha dela e a entrada de cada
+    produto dela têm `segundos`."""
+    t = time.time() - segundos
     with _db() as db:
-        db.execute("UPDATE curadoria_retida SET ts=? WHERE chat=? AND msg_id=?",
-                   (time.time() - segundos, CHAT[canal], mid))
+        db.execute("UPDATE curadoria_retida SET ts=?, ts_ref=? WHERE chat=? AND msg_id=?",
+                   (t, t, CHAT[canal], mid))
+        db.execute("UPDATE curadoria_chave SET ts_entrada=? WHERE chat=? AND msg_id=?",
+                   (t, CHAT[canal], mid))
     m = mundo.servidor.get((PEER[canal], mid))
     if m is not None:
         m.date = _agora() - dt.timedelta(seconds=segundos)
@@ -356,6 +397,20 @@ def envelhecer(mundo, canal, mid, segundos):
 
 def posts(mundo):
     return [p for p, _ in mundo.criados]
+
+
+def atuais(canal, mid):
+    """O conjunto ATUAL de produtos da mensagem no banco da curadoria."""
+    with _db() as db:
+        return sorted(c for (c,) in db.execute(
+            "SELECT chave FROM curadoria_chave WHERE chat=? AND msg_id=? AND atual=1",
+            (CHAT[canal], mid)))
+
+
+def linha(canal, mid):
+    with _db() as db:
+        return db.execute("SELECT tipo, estado FROM curadoria_retida WHERE chat=? AND msg_id=?",
+                          (CHAT[canal], mid)).fetchone()
 
 
 def vinculo(canal, mid):
@@ -425,7 +480,7 @@ def test_03_nerd_antes_promotom_passa_direto(r):
         s["estado"] = retida("promotom", p)
     cenario(corpo)
     r.check(s["apos_nerd"] == [], "03.nada_do_nerd_vai_ao_canal", str(s["apos_nerd"]))
-    r.check(len(s["posts"]) == 1 and s["estado"] is None, "03.promotom_passa_direto",
+    r.check(len(s["posts"]) == 1 and s["estado"] == "liberada", "03.promotom_passa_direto",
             str((s["posts"], s["estado"])))
 
 
@@ -638,10 +693,10 @@ def test_12_a_excecao_de_admissao_e_estreita(r):
 
     def liberando(mid, ha_s=0.0, canal="promotom"):
         with _db() as db:
-            db.execute("INSERT OR REPLACE INTO curadoria_retida(chat,msg_id,chaves,categoria,"
-                       "ts,estado,ts_estado) VALUES(?,?,?,?,?,?,?)",
-                       (CHAT[canal], mid, "[]", "placa_de_video", time.time() - 200,
-                        "liberando", time.time() - ha_s))
+            db.execute("INSERT OR REPLACE INTO curadoria_retida(chat,msg_id,tipo,categoria,"
+                       "ts,ts_ref,estado,ts_estado) VALUES(?,?,?,?,?,?,?,?)",
+                       (CHAT[canal], mid, "nova", "placa_de_video", time.time() - 200,
+                        time.time() - 200, "liberando", time.time() - ha_s))
 
     real = orchestrator._enfileirar
     orchestrator._enfileirar = espiao
@@ -688,8 +743,9 @@ def test_13_sem_corrida_entre_segurar_e_aval(r):
 
         def segura():
             barreira.wait()
-            res["portao"] = dbc.db_curadoria_avaliar("-1001", 50000 + i, [chave], "ssd",
-                                                     base, 300, time.time())[0]
+            res["portao"] = dbc.db_curadoria_avaliar("-1001", 50000 + i, dbc.NOVA, [chave],
+                                                     "ssd", base, base, 300, 120,
+                                                     time.time())[0]
 
         def aval():
             barreira.wait()
@@ -698,21 +754,21 @@ def test_13_sem_corrida_entre_segurar_e_aval(r):
         ts = [threading.Thread(target=segura), threading.Thread(target=aval)]
         [t.start() for t in ts]
         [t.join() for t in ts]
-        solta = any(m == 50000 + i for _, m, _ in (res["aval"] or []))
+        solta = any(m == 50000 + i for _, m, _, _ in (res["aval"] or []))
         if not (res["portao"] == dbc.AVAL or solta):
             perdidos.append((i, res))
     r.check(perdidos == [], "13.nenhuma_segurada_perde_o_aval", str(perdidos[:3]))
     # as duas ordens, deterministicas
     _limpar_curadoria()
-    r.check(dbc.db_curadoria_avaliar("-1001", 1, ["k|1"], "ssd", base, 300, base)
-            == (dbc.SEGURADA, True)
+    av = lambda mid, ch, ts, **k: dbc.db_curadoria_avaliar(  # noqa: E731
+        "-1001", mid, dbc.NOVA, ch, "ssd", ts, ts, 300, 120, base, **k)
+    r.check(av(1, ["k|1"], base) == (dbc.SEGURADA, True)
             and dbc.db_curadoria_registrar_aval(["k|1"], "-1002", 2, base + 10, 300,
-                                                base - 420, base) == [("-1001", 1, "ssd")]
-            and dbc.db_curadoria_avaliar("-1001", 1, ["k|1"], "ssd", base, 300, base)
-            == (dbc.LIBERACAO, False), "13.segura_depois_aval")
+                                                base - 420, base) == [("-1001", 1, "ssd", "nova")]
+            and av(1, ["k|1"], base, reinjetada=True) == (dbc.LIBERACAO, False),
+            "13.segura_depois_aval")
     r.check(dbc.db_curadoria_registrar_aval(["k|2"], "-1002", 3, base, 300, base - 420, base)
-            == [] and dbc.db_curadoria_avaliar("-1001", 4, ["k|2"], "ssd", base + 10, 300, base)
-            == (dbc.AVAL, False), "13.aval_depois_segura")
+            == [] and av(4, ["k|2"], base + 10) == (dbc.AVAL, False), "13.aval_depois_segura")
 
 
 def test_14_reinicio(r):
@@ -811,15 +867,18 @@ def test_17_falha_de_banco_e_natureza(r):
     s = {}
 
     async def corpo(mundo):
-        real = curadoria.db_curadoria_avaliar
+        real, repor = curadoria.db_curadoria_avaliar, curadoria._marcar_repor
         curadoria.db_curadoria_avaliar = lambda *a, **k: (dbc.ERRO, False)
+        curadoria._marcar_repor = lambda: None        # a volta do banco é o teste 45
         try:
-            await chega(mundo, "fumotom", GPU, amz("B0FALHA001"))
+            p = await chega(mundo, "fumotom", GPU, amz("B0FALHA001"))
+            await chega(mundo, "fumotom", "Fritadeira Air Fryer Mondial 4L\n\nR$ 199",
+                        amz("B0FALHA002"))                     # outra categoria
+            s["posts"] = (len(posts(mundo)), (CHAT["fumotom"], p) in curadoria._PENDENTES)
         finally:
-            curadoria.db_curadoria_avaliar = real
-        s["posts"] = len(posts(mundo))
+            curadoria.db_curadoria_avaliar, curadoria._marcar_repor = real, repor
     cenario(corpo)
-    r.check(s["posts"] == 1, "17.banco_fora_deixa_passar", str(s["posts"]))
+    r.check(s["posts"] == (1, True), "17.banco_fora_bloqueia_so_o_hardware", str(s["posts"]))
 
     class Enr:
         tipo = "cupom"
@@ -828,8 +887,7 @@ def test_17_falha_de_banco_e_natureza(r):
                             texto_analise="Cupom KaBuM em Placas de Vídeo 10% OFF",
                             mapa={}, preservar=[], plat="", sku="", tem_midia=False,
                             media_obj=None)
-    r.check(curadoria.portao(n, Enr(), False) is True
-            and curadoria.portao(n, "ENR:1", False) is True, "17.so_produto")
+    r.check(curadoria.portao(n, Enr(), False) is True, "17.cupom_nao_e_curado")
 
 
 def test_18_eventos(r):
@@ -1227,7 +1285,8 @@ def test_31_mesma_identidade_e_mesma_loja(r):
             str(s["magalu"]))
     r.check(s["sem_produto"] == ("retida", 1), "31.link_sem_produto_nao_da_aval",
             str(s["sem_produto"]))
-    r.check(s["campanha"] == (1, None), "31.campanha_nao_e_produto", str(s["campanha"]))
+    r.check(s["campanha"] == (0, "retida"), "31.campanha_nao_e_identidade_fica_retida",
+            str(s["campanha"]))
     r.check(s["aval"] == ["mercadolivre|B0LOJA0001", "shopee|B0LOJA0001"], "31.avais_gravados",
             str(s["aval"]))
 
@@ -1329,16 +1388,16 @@ def test_33_janela_de_300s_nos_dois_sentidos(r):
     banco (limite exato) e no caminho real (299 passa, 301 não)."""
     _limpar_curadoria()
     b = time.time()
+    av = lambda mid, ch, ts: dbc.db_curadoria_avaliar(  # noqa: E731
+        "-1001", mid, dbc.NOVA, ch, "ssd", ts, ts, 300, 120, b)[0]
     r.check(dbc.db_curadoria_registrar_aval(["k|A"], "-1002", 1, b, 300, b - 420, b) == []
-            and dbc.db_curadoria_avaliar("-1001", 2, ["k|A"], "ssd", b + 300, 300, b)[0] == dbc.AVAL
-            and dbc.db_curadoria_avaliar("-1001", 3, ["k|A"], "ssd", b - 300, 300, b)[0] == dbc.AVAL
-            and dbc.db_curadoria_avaliar("-1001", 4, ["k|A"], "ssd", b + 300.5, 300, b)[0]
-            == dbc.SEGURADA, "33.banco_aval_antes_ate_300_exatos")
+            and av(2, ["k|A"], b + 300) == dbc.AVAL and av(3, ["k|A"], b - 300) == dbc.AVAL
+            and av(4, ["k|A"], b + 300.5) == dbc.SEGURADA, "33.banco_aval_antes_ate_300_exatos")
     _limpar_curadoria()
-    dbc.db_curadoria_avaliar("-1001", 5, ["k|B"], "ssd", b, 300, b)
-    dbc.db_curadoria_avaliar("-1001", 6, ["k|B"], "ssd", b - 1, 300, b)
+    av(5, ["k|B"], b)
+    av(6, ["k|B"], b - 1)
     r.check(dbc.db_curadoria_registrar_aval(["k|B"], "-1002", 7, b + 300, 300, b - 420, b)
-            == [("-1001", 5, "ssd")], "33.banco_aval_depois_ate_300_exatos")
+            == [("-1001", 5, "ssd", "nova")], "33.banco_aval_depois_ate_300_exatos")
     s = {}
 
     async def corpo(mundo):
@@ -1368,10 +1427,12 @@ def test_33_janela_de_300s_nos_dois_sentidos(r):
         f = await chega(mundo, "SamuelF3lipePromo", GPU, amz("B0JAN00006"))
         s["fada"] = (retida("SamuelF3lipePromo", e), retida("SamuelF3lipePromo", f))
     cenario(corpo)
-    r.check(s["antes"] == (None, "retida"), "33.aval_antes_299_passa_301_trava", str(s["antes"]))
+    r.check(s["antes"] == ("liberada", "retida"), "33.aval_antes_299_passa_301_trava",
+            str(s["antes"]))
     r.check(s["depois"] == ("liberada", "retida"), "33.aval_depois_299_solta_301_nao",
             str(s["depois"]))
-    r.check(s["fada"] == (None, "retida"), "33.fada_antes_299_passa_301_trava", str(s["fada"]))
+    r.check(s["fada"] == ("liberada", "retida"), "33.fada_antes_299_passa_301_trava",
+            str(s["fada"]))
     r.check(config.CURADORIA_JANELA_S == 300, "33.janela_e_300_s")
 
 
@@ -1566,7 +1627,8 @@ def test_38_relogio_local_atras_do_telegram(r):
         await chega(mundo, "fadapromos", GPU_FADA, amz("B0RELOG002"), idade_s=-2)
         s["x"] = (retida("promotom", a), retida("fumotom", b), len(posts(mundo)))
     cenario(corpo)
-    r.check(s["x"] == (None, "liberada", 2), "38.data_no_futuro_nao_perde_aval", str(s["x"]))
+    r.check(s["x"] == ("liberada", "liberada", 2), "38.data_no_futuro_nao_perde_aval",
+            str(s["x"]))
 
 
 def test_39_soltura_na_hora_com_a_ultima_edicao(r):
@@ -1631,6 +1693,678 @@ def test_41_lista_do_nerd_com_cabecalho_da_aval_a_cada_produto(r):
         s["x"] = (retida("promotom", a), retida("fumotom", b))
     cenario(corpo)
     r.check(s["x"] == ("liberada", "liberada"), "41.cada_produto_da_lista", str(s["x"]))
+
+
+# ══════════════════════════════════════════════════════════════════
+# AUDITORIA FORENSE (03/11/2026) — itens 1 a 4
+# ══════════════════════════════════════════════════════════════════
+DOIS = ("Placa de Vídeo Gigabyte RTX 5060 Ti Eagle OC 8GB\n\nR$ 2299\n\n"
+        "1 https://loja.teste/1\n2 https://loja.teste/2")             # 2 anúncios, 1 preço
+RX = "Placa de Vídeo RX 9060 XT Sapphire Pulse 16GB GDDR6\n\nR$ 2499"
+MOUSE = "Mouse Gamer Logitech G203 Lightsync RGB\n\nR$ 99"
+
+
+def aval_direto(chave, ts, fonte="-1009"):
+    """Um aval visto no passado (gravado como o portão/varredura gravaria)."""
+    with _db() as db:
+        db.execute("INSERT OR IGNORE INTO curadoria_aval(chave,fonte,msg_id,ts) VALUES(?,?,?,?)",
+                   (chave, fonte, novo_id(), ts))
+
+
+async def publicada(mundo, canal, texto, asin):
+    """Mensagem da fonte retentora que já está no canal (aval ANTES)."""
+    await nerd(mundo, GPU_NERD, amz(asin), idade_s=30)
+    mid = await chega(mundo, canal, texto, amz(asin))
+    return mid, vinculo(canal, mid)
+
+
+def test_42_a_ou_b_solta_a_mensagem_inteira(r):
+    """Item 1: a mensagem guarda TODOS os produtos da versão atual; aval de
+    A ou de B (mesma loja) solta a mensagem inteira, com os dois."""
+    s = {}
+
+    async def corpo(mundo):
+        p = await chega(mundo, "promotom", DOIS, amz("B0CONJA001") + amz("B0CONJB001"))
+        s["conj"] = atuais("promotom", p)
+        await nerd(mundo, GPU_NERD, amz("B0CONJA001"))                    # só A
+        s["a"] = (retida("promotom", p), len(posts(mundo)),
+                  mundo.criados[-1][1] if mundo.criados else "")
+        q = await chega(mundo, "fumotom", DOIS, amz("B0CONJA002") + amz("B0CONJB002"))
+        await chega(mundo, "fadapromos", GPU_FADA, amz("B0CONJB002"))     # só B (Fada)
+        s["b"] = (retida("fumotom", q), vinculo("fumotom", q) is not None)
+        await nerd(mundo, GPU_NERD, amz("B0CONJB003"))                    # B ANTES
+        t = await chega(mundo, "SamuelF3lipePromo", DOIS,
+                        amz("B0CONJA003") + amz("B0CONJB003"))
+        s["antes"] = retida("SamuelF3lipePromo", t)
+        u = await chega(mundo, "promotom", DOIS, amz("B0CONJA004") + amz("B0CONJB004"))
+        await nerd(mundo, GPU_NERD, [("shopee", "B0CONJA004", "produto")])  # outra loja
+        s["outra_loja"] = retida("promotom", u)
+    cenario(corpo)
+    r.check(s["conj"] == ["amazon|B0CONJA001", "amazon|B0CONJB001"], "42.guarda_a_e_b",
+            str(s["conj"]))
+    r.check(s["a"][:2] == ("liberada", 1) and "loja.teste/2" in s["a"][2],
+            "42.aval_de_a_solta_a_mensagem_inteira", str(s["a"])[:200])
+    r.check(s["b"] == ("liberada", True), "42.aval_de_b_solta", str(s["b"]))
+    r.check(s["antes"] == "liberada", "42.aval_de_b_antes_tambem", str(s["antes"]))
+    r.check(s["outra_loja"] == "retida", "42.mesmo_id_em_outra_loja_nao", str(s["outra_loja"]))
+
+
+def test_43_edicoes_trocam_o_conjunto_atual(r):
+    """Item 1: A→A+B guarda os dois (B entra pelo edit_date); A→B guarda só
+    B (aval de A não solta mais); A+B→B guarda só B; edições repetidas não
+    devolvem o produto tirado nem duplicam a publicação."""
+    s = {}
+
+    async def corpo(mundo):
+        p = await chega(mundo, "promotom", GPU, amz("B0EDA00001"))
+        with _db() as db:
+            ta = db.execute("SELECT ts_entrada FROM curadoria_chave WHERE msg_id=?",
+                            (p,)).fetchone()[0]
+        await chega(mundo, "promotom", DOIS, amz("B0EDA00001") + amz("B0EDB00001"), mid=p,
+                    idade_s=40, editada=True)
+        with _db() as db:
+            ent = dict(db.execute("SELECT chave, ts_entrada FROM curadoria_chave WHERE msg_id=?",
+                                  (p,)).fetchall())
+        s["mais"] = (atuais("promotom", p), ent["amazon|B0EDA00001"] == ta,
+                     abs(ent["amazon|B0EDB00001"] - time.time()) < 5)
+        await nerd(mundo, GPU_NERD, amz("B0EDB00001"))
+        s["mais_solta"] = retida("promotom", p)
+
+        q = await chega(mundo, "fumotom", GPU, amz("B0EDA00002"))
+        await chega(mundo, "fumotom", RX, amz("B0EDB00002"), mid=q, idade_s=40, editada=True)
+        s["troca"] = atuais("fumotom", q)
+        await nerd(mundo, GPU_NERD, amz("B0EDA00002"))                   # A saiu
+        s["troca_a"] = retida("fumotom", q)
+        await nerd(mundo, GPU_NERD, amz("B0EDB00002"))
+        s["troca_b"] = retida("fumotom", q)
+
+        t = await chega(mundo, "SamuelF3lipePromo", DOIS, amz("B0EDA00003") + amz("B0EDB00003"))
+        await chega(mundo, "SamuelF3lipePromo", RX, amz("B0EDB00003"), mid=t, idade_s=30,
+                    editada=True)
+        for i, extra in enumerate(("\n-CUPOM: X10", "\n-CUPOM: X15")):
+            await chega(mundo, "SamuelF3lipePromo", RX + extra, amz("B0EDB00003"), mid=t,
+                        idade_s=40 + i, editada=True)
+        s["repete"] = atuais("SamuelF3lipePromo", t)
+        await chega(mundo, "fadapromos", GPU_FADA, amz("B0EDA00003"))   # aval de A
+        s["repete_a"] = retida("SamuelF3lipePromo", t)
+        n0 = len(posts(mundo))
+        await nerd(mundo, GPU_NERD, amz("B0EDB00003"))
+        s["repete_b"] = (retida("SamuelF3lipePromo", t), len(posts(mundo)) - n0)
+        for i in range(3):
+            await chega(mundo, "SamuelF3lipePromo", RX + f"\n-CUPOM: Y{i}", amz("B0EDB00003"),
+                        mid=t, idade_s=60 + i, editada=True)
+        s["sem_dup"] = (len(posts(mundo)) - n0, atuais("SamuelF3lipePromo", t))
+    cenario(corpo)
+    r.check(s["mais"] == (["amazon|B0EDA00001", "amazon|B0EDB00001"], True, True),
+            "43.a_mais_b_guarda_os_dois_b_pelo_edit_date", str(s["mais"]))
+    r.check(s["mais_solta"] == "liberada", "43.aval_do_b_acrescentado_solta")
+    r.check(s["troca"] == ["amazon|B0EDB00002"], "43.a_por_b_guarda_so_b", str(s["troca"]))
+    r.check(s["troca_a"] == "retida" and s["troca_b"] == "liberada",
+            "43.aval_de_a_nao_solta_b_e_o_de_b_solta", str((s["troca_a"], s["troca_b"])))
+    r.check(s["repete"] == ["amazon|B0EDB00003"] and s["repete_a"] == "retida",
+            "43.a_mais_b_para_b_e_repeticoes_nao_devolvem_a",
+            str((s["repete"], s["repete_a"])))
+    r.check(s["repete_b"] == ("liberada", 1) and s["sem_dup"] == (1, ["amazon|B0EDB00003"]),
+            "43.uma_publicacao_so", str((s["repete_b"], s["sem_dup"])))
+
+
+def test_44_troca_do_conjunto_e_aval_na_mesma_transacao(r):
+    """Item 1: a troca do conjunto e a conferência do aval são uma
+    transação. Edição A→B × aval de A ao mesmo tempo: nunca solta; edição
+    A→A+B × aval de B: sempre solta. Reinjeção só passa com o conjunto
+    exato que o aval soltou."""
+    _limpar_curadoria()
+    base = time.time()
+    av = lambda mid, ch, ts, **k: dbc.db_curadoria_avaliar(  # noqa: E731
+        "-1001", mid, dbc.NOVA, ch, "ssd", base, ts, 300, 120, time.time(), **k)
+    ruins = []
+    for i in range(120):
+        for caso in ("troca", "soma"):
+            mid = 71000 + 2 * i + (caso == "soma")
+            A, B = f"amazon|A{caso}{i}", f"amazon|B{caso}{i}"
+            av(mid, [A], base)
+            barreira, res = threading.Barrier(2), {}
+
+            def edita():
+                barreira.wait()
+                res["e"] = av(mid, [B] if caso == "troca" else [A, B], base + 5)[0]
+
+            def aval():
+                barreira.wait()
+                res["a"] = dbc.db_curadoria_registrar_aval(
+                    [A] if caso == "troca" else [B], "-1002", 90000 + mid, base + 10, 300,
+                    base - 420, time.time())
+            ts = [threading.Thread(target=edita), threading.Thread(target=aval)]
+            [t.start() for t in ts]
+            [t.join() for t in ts]
+            with _db() as db:
+                est = db.execute("SELECT estado FROM curadoria_retida WHERE msg_id=?",
+                                 (mid,)).fetchone()[0]
+            if caso == "troca":
+                ok = (est == "retida" and res["e"] == dbc.SEGURADA
+                      and av(mid, [A], base, reinjetada=True)[0] == dbc.OBSOLETA)
+            else:
+                ok = est in ("liberada", "liberando")
+            if not ok:
+                ruins.append((caso, i, est, res))
+    r.check(ruins == [], "44.sem_corrida_na_troca_do_conjunto", str(ruins[:3]))
+    _limpar_curadoria()
+    av(1, ["k|A"], base)
+    dbc.db_curadoria_registrar_aval(["k|A"], "-1002", 2, base, 300, base - 420, time.time())
+    r.check(av(1, ["k|A", "k|C"], base, reinjetada=True)[0] == dbc.AVAL,
+            "44.reinjecao_com_conjunto_diferente_e_reavaliada")
+    av(3, ["k|X"], base)
+    dbc.db_curadoria_registrar_aval(["k|X"], "-1002", 4, base, 300, base - 420, time.time())
+    r.check(av(3, ["k|Y"], base, reinjetada=True)[0] == dbc.SEGURADA
+            and av(3, ["k|X"], base, reinjetada=True)[0] == dbc.OBSOLETA,
+            "44.reinjecao_de_outro_produto_nao_passa")
+
+
+def test_45_hardware_sem_identidade_fica_retido(r):
+    """Item 2: identidade vazia, produto sem código, campanha, encurtador não
+    resolvido e busca não são identidade: o hardware vigiado fica retido
+    (nenhum aval o solta) e expira normal; a edição que traz link
+    identificável passa a esperar aval por ele. Lista vazia nunca é
+    aprovação no banco. Exceção (destaque) dispensa o aval também aqui."""
+    _limpar_curadoria()
+    b = time.time()
+    r.check(dbc.db_curadoria_avaliar("-1001", 1, dbc.NOVA, [], "ssd", b, b, 300, 120, b)
+            == (dbc.SEGURADA, True)
+            and dbc.db_curadoria_registrar_aval([], "-1002", 2, b, 300, b - 420, b) == [],
+            "45.banco_lista_vazia_nao_aprova")
+    s = {}
+    casos = {"vazia": [], "sem_codigo": [("amazon", "", "produto")],
+             "campanha": [("amazon", "PROMO77", "campanha")],
+             "encurtado": [("mercadolivre", "MLBX1", "encurtado")],
+             "busca": [("mercadolivre", "placa-de-video", "busca")]}
+
+    async def corpo(mundo):
+        ids = {n: await chega(mundo, "promotom", GPU, idents) for n, idents in casos.items()}
+        s["presas"] = ({n: retida("promotom", m) for n, m in ids.items()}, len(posts(mundo)),
+                       {n: atuais("promotom", m) for n, m in ids.items()})
+        await nerd(mundo, GPU_NERD, amz("B0QUALQ001"))
+        await chega(mundo, "fadapromos", GPU_FADA, amz("B0QUALQ002"))
+        s["aval"] = {n: retida("promotom", m) for n, m in ids.items()}
+        p = ids["vazia"]
+        await chega(mundo, "promotom", GPU, amz("B0SEMID001"), mid=p, idade_s=60, editada=True)
+        s["edit"] = (atuais("promotom", p), retida("promotom", p))
+        n0 = len(posts(mundo))
+        await nerd(mundo, GPU_NERD, amz("B0SEMID001"))
+        s["edit_solta"] = (retida("promotom", p), len(posts(mundo)) - n0)
+        c = ids["campanha"]
+        envelhecer(mundo, "promotom", c, 430)
+        curadoria._expirar()
+        s["expira"] = retida("promotom", c)
+        await chega(mundo, "promotom", GPU, amz("B0SEMID002"), mid=c, idade_s=430, editada=True)
+        s["reabre"] = (retida("promotom", c), atuais("promotom", c))
+        n1 = len(posts(mundo))
+        x = await chega(mundo, "promotom", "Ainda ativo! " + GPU, [])
+        s["excecao"] = (retida("promotom", x), len(posts(mundo)) - n1)
+    cenario(corpo)
+    r.check(set(s["presas"][0].values()) == {"retida"} and s["presas"][1] == 0
+            and all(v == [] for v in s["presas"][2].values()),
+            "45.sem_identidade_fica_retida_sem_chave", str(s["presas"]))
+    r.check(set(s["aval"].values()) == {"retida"}, "45.nenhum_aval_solta", str(s["aval"]))
+    r.check(s["edit"] == (["amazon|B0SEMID001"], "retida") and s["edit_solta"] == ("liberada", 1),
+            "45.edicao_com_link_identificavel_espera_e_solta",
+            str((s["edit"], s["edit_solta"])))
+    r.check(s["expira"] == "expirada", "45.expira_normal", str(s["expira"]))
+    r.check(s["reabre"] == ("retida", ["amazon|B0SEMID002"]),
+            "45.produto_novo_depois_de_expirar_tem_janela_propria", str(s["reabre"]))
+    r.check(s["excecao"] == (None, 1), "45.excecao_dispensa_o_aval", str(s["excecao"]))
+
+
+def test_46_banco_fora_bloqueia_e_recupera(r):
+    """Item 3: banco fora → hardware vigiado BLOQUEADO só na memória (nunca
+    autorizado); outra categoria e fonte isenta seguem; o aval do Fada fica
+    na memória; com o banco de volta: o aval é gravado, a bloqueada volta ao
+    portão (prova `reavaliando`) e o aval a solta, sem duplicar; a sem aval
+    passa a esperar no banco e o aval seguinte a solta."""
+    s = {}
+
+    async def corpo(mundo):
+        nomes = ("db_curadoria_avaliar", "db_curadoria_registrar_aval", "db_curadoria_reavaliar",
+                 "_marcar_repor")
+        reais = {n: getattr(curadoria, n) for n in nomes}
+        fora = {"v": True}
+
+        def falha(nome, valor):
+            real = reais[nome]
+            return lambda *a, **k: valor if fora["v"] else real(*a, **k)
+        curadoria.db_curadoria_avaliar = falha("db_curadoria_avaliar", (dbc.ERRO, False))
+        curadoria.db_curadoria_registrar_aval = falha("db_curadoria_registrar_aval", None)
+        curadoria.db_curadoria_reavaliar = falha("db_curadoria_reavaliar", None)
+        curadoria._marcar_repor = lambda: None
+        try:
+            with _Logs() as logs:
+                a = await chega(mundo, "promotom", GPU, amz("B0BANCO001"))
+                await chega(mundo, "promotom", "Fritadeira Air Fryer Mondial 4L\n\nR$ 199",
+                            amz("B0BANCO0X1"))
+                f = await chega(mundo, "fadapromos", GPU_FADA, amz("B0BANCO001"))
+                b = await chega(mundo, "fumotom", GPU, amz("B0BANCO002"))
+                s["fora"] = (len(posts(mundo)), sorted(m for _, m in curadoria._PENDENTES),
+                             sorted(m for _, m in curadoria._AVAIS_PENDENTES),
+                             retida("promotom", a), retida("fumotom", b))
+                s["logs"] = (len(logs.tem("BLOQUEADA, guardada SÓ NA MEMÓRIA")),
+                             len(logs.tem("[CURADORIA_AVAL_SEM_BANCO]")))
+                curadoria._repor_pendentes()                    # banco ainda fora
+                s["ainda"] = (len(curadoria._PENDENTES), len(curadoria._AVAIS_PENDENTES))
+                fora["v"] = False                               # o banco voltou
+                curadoria._repor_pendentes()
+                await drenar()
+                s["volta"] = (retida("promotom", a), retida("fumotom", b), len(posts(mundo)),
+                              len(curadoria._PENDENTES), len(curadoria._AVAIS_PENDENTES),
+                              vinculo("promotom", a) == vinculo("fadapromos", f))
+                await nerd(mundo, GPU_NERD, amz("B0BANCO002"))
+                s["depois"] = (retida("fumotom", b), len(posts(mundo)))
+        finally:
+            for n, v in reais.items():
+                setattr(curadoria, n, v)
+    cenario(corpo)
+    r.check(s["fora"][0] == 2 and len(s["fora"][1]) == 2 and len(s["fora"][2]) == 1
+            and s["fora"][3:] == (None, None), "46.bloqueia_so_o_hardware_na_memoria",
+            str(s["fora"]))
+    r.check(s["logs"] == (2, 1), "46.logs_dizem_que_nao_e_duravel", str(s["logs"]))
+    r.check(s["ainda"] == (2, 1), "46.banco_ainda_fora_nada_muda", str(s["ainda"]))
+    r.check(s["volta"] == ("liberada", "retida", 2, 0, 0, True),
+            "46.banco_volta_grava_aval_e_reavalia_sem_duplicar", str(s["volta"]))
+    r.check(s["depois"] == ("liberada", 3), "46.a_que_esperava_solta_com_o_aval", str(s["depois"]))
+
+
+def test_47_excecao_interna_nunca_autoriza(r):
+    """Item 3: exceção interna no caminho do hardware de fonte retentora
+    BLOQUEIA; não bloqueia fonte isenta nem outra categoria; repetida, tem
+    limite; SOMBRA nunca bloqueia; fonte não numérica não é curada."""
+    s = {}
+
+    async def corpo(mundo):
+        reais = (curadoria.destino_vivo_de_origem, curadoria._registrar_aval,
+                 curadoria._marcar_repor)
+
+        def explode(*a, **k):
+            raise RuntimeError("defeito")
+        curadoria.destino_vivo_de_origem = explode
+        curadoria._registrar_aval = explode
+        curadoria._marcar_repor = lambda: None
+        try:
+            with _Logs() as logs:
+                p = await chega(mundo, "promotom", GPU, amz("B0EXC00001"))
+                await chega(mundo, "promotom", MOUSE, amz("B0EXC00002"))
+                await chega(mundo, "fadapromos", GPU_FADA, amz("B0EXC00003"))
+                s["x"] = (len(posts(mundo)), (CHAT["promotom"], p) in curadoria._PENDENTES,
+                          len(logs.tem("[CURADORIA_FALHA_INTERNA]")),
+                          len(logs.tem("aval do Fada não registrado")))
+                k = (CHAT["promotom"], p)
+                curadoria._falhas[k] = curadoria._MAX_FALHAS
+                await chega(mundo, "promotom", GPU + "\n-CUPOM: X", amz("B0EXC00001"), mid=p,
+                            idade_s=20, editada=True)
+                s["desiste"] = (k in curadoria._PENDENTES, len(logs.tem("desiste")),
+                                len(posts(mundo)))
+        finally:
+            (curadoria.destino_vivo_de_origem, curadoria._registrar_aval,
+             curadoria._marcar_repor) = reais
+    cenario(corpo)
+    r.check(s["x"] == (2, True, 1, 1), "47.bloqueia_so_o_hardware_da_retentora", str(s["x"]))
+    r.check(s["desiste"] == (False, 1, 2), "47.excecao_repetida_tem_limite", str(s["desiste"]))
+    d = {}
+
+    async def corpo2(mundo):
+        real = curadoria.destino_vivo_de_origem
+        curadoria.destino_vivo_de_origem = lambda *a, **k: (_ for _ in ()).throw(RuntimeError())
+        try:
+            await chega(mundo, "promotom", GPU, amz("B0EXC00010"))
+        finally:
+            curadoria.destino_vivo_de_origem = real
+        d["n"] = len(posts(mundo))
+    cenario(corpo2, modo="SOMBRA")
+    r.check(d["n"] == 1, "47.sombra_nunca_bloqueia", str(d))
+    n = MensagemNormalizada(msg_id=1, chat="abc", texto_limpo=GPU, texto_analise=GPU, mapa={},
+                            preservar=[], plat="", sku="", tem_midia=False, media_obj=None)
+
+    class Enr:
+        tipo = "produto"
+    r.check(curadoria.portao(n, Enr(), False) is True, "47.fonte_nao_numerica_nao_e_curada")
+
+
+def test_48_memoria_limitada_e_reentrega(r):
+    """Item 3: a fila da memória tem limite (o mais velho sai, com log, e NÃO
+    vai ao canal) e a que passou da janela sai sem ir ao canal; a reinjeção
+    marcada que não chegou ao portão é entregue de novo (limite, depois
+    `falhou`); sem ler a prova no banco, nenhuma reinjeção passa."""
+    s = {}
+
+    async def corpo(mundo):
+        reais = (curadoria.db_curadoria_avaliar, curadoria._marcar_repor,
+                 curadoria._MAX_PENDENTES, curadoria.db_curadoria_reavaliar)
+        curadoria.db_curadoria_avaliar = lambda *a, **k: (dbc.ERRO, False)
+        curadoria.db_curadoria_reavaliar = lambda *a, **k: None      # banco fora
+        curadoria._marcar_repor = lambda: None
+        curadoria._MAX_PENDENTES = 3
+        try:
+            with _Logs() as logs:
+                ids = [await chega(mundo, "fumotom", GPU, amz(f"B0LIMIT00{i}")) for i in range(5)]
+                s["limite"] = (sorted(m for _, m in curadoria._PENDENTES), ids[2:],
+                               len(logs.tem("[CURADORIA_PENDENTE_DESCARTADA]")), len(posts(mundo)))
+                k = (CHAT["fumotom"], ids[4])
+                curadoria._PENDENTES[k]["limite"] = time.time() - 1
+                curadoria._repor_pendentes()
+                s["expira"] = (k in curadoria._PENDENTES, len(logs.tem("[CURADORIA_PENDENTE_EXPIROU]")))
+        finally:
+            (curadoria.db_curadoria_avaliar, curadoria._marcar_repor, curadoria._MAX_PENDENTES,
+             curadoria.db_curadoria_reavaliar) = reais
+            curadoria._PENDENTES.clear()
+        await drenar()
+        # reinjeção perdida no caminho → reentrega
+        perdidas = {"n": 1}
+        real_desp = curadoria._estado["despachar"]
+
+        async def perde(ev, is_edit=False):
+            if perdidas["n"] > 0:
+                perdidas["n"] -= 1
+                return
+            await real_desp(ev, is_edit=is_edit)
+        curadoria._estado["despachar"] = perde
+        reais2 = curadoria._PRESA_S
+        curadoria._PRESA_S = -1
+        try:
+            p = await chega(mundo, "promotom", GPU, amz("B0PRESA001"))
+            await nerd(mundo, GPU_NERD, amz("B0PRESA001"))
+            s["perdida"] = (retida("promotom", p), len(posts(mundo)))
+            curadoria._reentregar_presas()
+            await drenar()
+            s["reentregue"] = (retida("promotom", p), len(posts(mundo)))
+            perdidas["n"] = 99
+            q = await chega(mundo, "promotom", GPU, amz("B0PRESA002"))
+            await nerd(mundo, GPU_NERD, amz("B0PRESA002"))
+            for _ in range(curadoria._MAX_REENTREGAS + 1):
+                curadoria._reentregar_presas()
+                await drenar()
+            s["desiste"] = (retida("promotom", q), len(posts(mundo)))
+        finally:
+            curadoria._estado["despachar"], curadoria._PRESA_S = real_desp, reais2
+        real_lib = curadoria.db_curadoria_em_liberacao
+
+        def quebra(*a, **k):
+            raise RuntimeError("banco")
+        curadoria.db_curadoria_em_liberacao = quebra
+        try:
+            s["sem_prova"] = curadoria.reinjecao(
+                EventoRecuperado(mensagem("promotom", 999001, GPU, idade_s=200), via="CURADORIA"))
+        finally:
+            curadoria.db_curadoria_em_liberacao = real_lib
+    cenario(corpo)
+    r.check(s["limite"] == (s["limite"][1], s["limite"][1], 2, 0), "48.fila_limitada",
+            str(s["limite"]))
+    r.check(s["expira"] == (False, 1), "48.fora_da_janela_sai_da_memoria", str(s["expira"]))
+    r.check(s["perdida"] == ("liberando", 0) and s["reentregue"] == ("liberada", 1),
+            "48.reinjecao_perdida_e_reentregue", str((s["perdida"], s["reentregue"])))
+    r.check(s["desiste"] == ("falhou", 1), "48.reentrega_tem_limite", str(s["desiste"]))
+    r.check(s["sem_prova"] is False, "48.sem_ler_a_prova_nao_passa")
+
+
+def test_49_edicao_publicada_que_preserva_identidade_segue(r):
+    """Item 4: preço, cupom e texto de mensagem JÁ publicada, com o mesmo
+    produto: o post sincroniza normal, sem curadoria."""
+    s = {}
+
+    async def corpo(mundo):
+        p, post = await publicada(mundo, "promotom", GPU, "B0PUBL0001")
+        e0 = len(mundo.edits)
+        await chega(mundo, "promotom", GPU.replace("2299", "2199"), amz("B0PUBL0001"), mid=p,
+                    idade_s=20 * 60, editada=True)
+        await chega(mundo, "promotom", GPU.replace("2299", "2199") + "\n-CUPOM: PLACA5",
+                    amz("B0PUBL0001"), mid=p, idade_s=20 * 60, editada=True)
+        s["x"] = (len(posts(mundo)), [m for m, _ in mundo.edits[e0:]],
+                  "PLACA5" in (mundo.edits[-1][1] if mundo.edits else ""), linha("promotom", p))
+        s["post"] = post
+    cenario(corpo)
+    r.check(s["x"][0] == 1 and s["x"][1] == [s["post"], s["post"]] and s["x"][2],
+            "49.preco_e_cupom_sincronizam", str(s["x"])[:200])
+    r.check(s["x"][3] == ("nova", "liberada"), "49.sem_pendencia", str(s["x"][3]))
+
+
+def test_50_edicao_publicada_com_produto_novo_fica_pendente(r):
+    """Item 4: a edição troca o produto por outro vigiado SEM aval → o post
+    continua com o aprovado (nenhuma edição no canal), a alteração fica
+    pendente; o aval do produto novo aplica a edição no MESMO post (caminho
+    normal de edição, sem segundo post)."""
+    s = {}
+
+    async def corpo(mundo):
+        p, post = await publicada(mundo, "promotom", GPU, "B0PUBL0002")
+        e0, c0 = len(mundo.edits), len(mundo.criados)
+        with _Logs() as logs:
+            await chega(mundo, "promotom", RX, amz("B0PUBL0003"), mid=p, idade_s=60, editada=True)
+        s["pendente"] = (len(mundo.edits) - e0, linha("promotom", p), atuais("promotom", p),
+                         len(logs.tem("[CURADORIA_EDICAO_PENDENTE]")),
+                         "Gigabyte" in db_get_post(post)["texto"])
+        await nerd(mundo, GPU_NERD, amz("B0PUBL0003"))
+        s["aplicada"] = (len(mundo.criados) - c0, [m for m, _ in mundo.edits[e0:]],
+                         "RX 9060" in (mundo.edits[-1][1] if mundo.edits else ""),
+                         linha("promotom", p), vinculo("promotom", p))
+        s["post"] = post
+    cenario(corpo)
+    r.check(s["pendente"] == (0, ("edicao", "retida"), ["amazon|B0PUBL0003"], 1, True),
+            "50.sem_aval_o_post_segue_com_o_aprovado", str(s["pendente"]))
+    r.check(s["aplicada"] == (0, [s["post"]], True, ("edicao", "liberada"), s["post"]),
+            "50.aval_aplica_no_mesmo_post", str(s["aplicada"]))
+
+
+def test_51_edit_date_e_a_entrada_do_produto_novo(r):
+    """Item 4: o produto que a edição traz entra pelo edit_date: aval 4 min
+    antes da edição vale; 6 min antes não; aval perto da data ORIGINAL da
+    mensagem (20 min antes) não vale para ele."""
+    s = {}
+
+    async def corpo(mundo):
+        p, _ = await publicada(mundo, "promotom", GPU, "B0EDDT0001")
+        e0 = len(mundo.edits)
+        await nerd(mundo, GPU_NERD, amz("B0EDDT0002"), idade_s=240)
+        await chega(mundo, "promotom", RX, amz("B0EDDT0002"), mid=p, idade_s=20 * 60, editada=True)
+        s["vale"] = (len(mundo.edits) - e0, linha("promotom", p))
+        q, _ = await publicada(mundo, "fumotom", GPU, "B0EDDT0003")
+        await nerd(mundo, GPU_NERD, amz("B0EDDT0004"), idade_s=360)
+        await chega(mundo, "fumotom", RX, amz("B0EDDT0004"), mid=q, idade_s=20 * 60, editada=True)
+        s["nao_vale"] = linha("fumotom", q)
+        t, _ = await publicada(mundo, "SamuelF3lipePromo", GPU, "B0EDDT0005")
+        envelhecer(mundo, "SamuelF3lipePromo", t, 20 * 60)        # publicada há 20 min
+        aval_direto("amazon|B0EDDT0006", time.time() - 20 * 60 + 10)
+        await chega(mundo, "SamuelF3lipePromo", RX, amz("B0EDDT0006"), mid=t, idade_s=20 * 60,
+                    editada=True)
+        s["original"] = linha("SamuelF3lipePromo", t)
+    cenario(corpo)
+    r.check(s["vale"] == (1, ("edicao", "liberada")), "51.aval_4min_antes_da_edicao_vale",
+            str(s["vale"]))
+    r.check(s["nao_vale"] == ("edicao", "retida"), "51.aval_6min_antes_nao_vale",
+            str(s["nao_vale"]))
+    r.check(s["original"] == ("edicao", "retida"), "51.data_original_nao_vale_para_o_novo",
+            str(s["original"]))
+
+
+def test_52_pendente_substituida_nao_volta(r):
+    """Item 4: a fonte volta ao produto aprovado (ou troca para um produto
+    não vigiado): a edição segue normal e a pendência FECHA — o aval tardio
+    do produto que saiu não reaplica nada."""
+    s = {}
+
+    async def corpo(mundo):
+        p, post = await publicada(mundo, "promotom", GPU, "B0SUPER001")
+        await chega(mundo, "promotom", RX, amz("B0SUPER002"), mid=p, idade_s=60, editada=True)
+        e0 = len(mundo.edits)
+        await chega(mundo, "promotom", GPU.replace("2299", "2099"), amz("B0SUPER001"), mid=p,
+                    idade_s=70, editada=True)
+        s["volta"] = (len(mundo.edits) - e0, linha("promotom", p))
+        e1 = len(mundo.edits)
+        await nerd(mundo, GPU_NERD, amz("B0SUPER002"))
+        s["aval_tardio"] = (len(mundo.edits) - e1, len(posts(mundo)), "2099" in db_get_post(post)["texto"])
+        q, _ = await publicada(mundo, "fumotom", GPU, "B0SUPER003")
+        await chega(mundo, "fumotom", RX, amz("B0SUPER004"), mid=q, idade_s=60, editada=True)
+        e2 = len(mundo.edits)
+        await chega(mundo, "fumotom", MOUSE, amz("B0SUPER005"), mid=q, idade_s=70, editada=True)
+        s["outra_cat"] = (len(mundo.edits) - e2, linha("fumotom", q))
+        e3 = len(mundo.edits)
+        await nerd(mundo, GPU_NERD, amz("B0SUPER004"))
+        s["aval_tardio2"] = len(mundo.edits) - e3
+    cenario(corpo)
+    r.check(s["volta"] == (1, ("edicao", "superada")), "52.volta_ao_aprovado_segue_e_fecha",
+            str(s["volta"]))
+    r.check(s["aval_tardio"] == (0, 1, True), "52.aval_tardio_nao_reaplica", str(s["aval_tardio"]))
+    r.check(s["outra_cat"] == (1, ("edicao", "superada")) and s["aval_tardio2"] == 0,
+            "52.troca_para_outra_categoria_segue_e_fecha",
+            str((s["outra_cat"], s["aval_tardio2"])))
+
+
+def test_53_publicada_a_mais_b_e_sem_identidade(r):
+    """Item 4: A→A+B numa publicada — com aval de A (aval de A OU B solta a
+    mensagem inteira) a edição passa; publicada por exceção, sem aval, a
+    edição espera aval de A ou de B (A pela data original). Edição que
+    tira a identidade de produto fica pendente."""
+    s = {}
+
+    async def corpo(mundo):
+        p, _ = await publicada(mundo, "promotom", GPU, "B0AMB00001")
+        e0 = len(mundo.edits)
+        await chega(mundo, "promotom", DOIS, amz("B0AMB00001") + amz("B0AMB00002"), mid=p,
+                    idade_s=60, editada=True)
+        s["com_aval"] = (len(mundo.edits) - e0, linha("promotom", p))
+        q = await chega(mundo, "fumotom", "Ainda ativo! " + GPU, amz("B0AMB00003"))
+        e1 = len(mundo.edits)
+        await chega(mundo, "fumotom", DOIS, amz("B0AMB00003") + amz("B0AMB00004"), mid=q,
+                    idade_s=60, editada=True)
+        s["sem_aval"] = (len(mundo.edits) - e1, linha("fumotom", q))
+        await nerd(mundo, GPU_NERD, amz("B0AMB00003"))
+        s["aval_de_a"] = (len(mundo.edits) - e1, linha("fumotom", q))
+        t, post = await publicada(mundo, "SamuelF3lipePromo", GPU, "B0AMB00005")
+        e2 = len(mundo.edits)
+        await chega(mundo, "SamuelF3lipePromo", GPU, [], mid=t, idade_s=60, editada=True)
+        s["sem_id"] = (len(mundo.edits) - e2, linha("SamuelF3lipePromo", t),
+                       "Gigabyte" in db_get_post(post)["texto"])
+    cenario(corpo)
+    r.check(s["com_aval"] == (1, ("edicao", "liberada")), "53.a_mais_b_com_aval_de_a_passa",
+            str(s["com_aval"]))
+    r.check(s["sem_aval"] == (0, ("edicao", "retida")) and s["aval_de_a"] == (1, ("edicao", "liberada")),
+            "53.publicada_por_excecao_espera_aval", str((s["sem_aval"], s["aval_de_a"])))
+    r.check(s["sem_id"] == (0, ("edicao", "retida"), True), "53.edicao_sem_identidade_pendente",
+            str(s["sem_id"]))
+
+
+def test_54_edicao_de_mensagem_nao_lider(r):
+    """Item 4: a mensagem da fonte retentora que casou no post do Fada (não
+    é a líder) troca o produto: pendente sem aval; com aval, a edição vai à
+    decisão do MESMO post (nunca um segundo post)."""
+    s = {}
+
+    async def corpo(mundo):
+        await chega(mundo, "fadapromos", GPU_FADA, amz("B0NLID0001"))
+        post = posts(mundo)[-1]
+        p = await chega(mundo, "promotom", GPU, amz("B0NLID0001"))
+        s["vinc"] = vinculo("promotom", p) == post
+        c0, e0 = len(mundo.criados), len(mundo.edits)
+        await chega(mundo, "promotom", RX, amz("B0NLID0002"), mid=p, idade_s=60, editada=True)
+        s["pendente"] = (len(mundo.criados) - c0, len(mundo.edits) - e0, linha("promotom", p))
+        await nerd(mundo, GPU_NERD, amz("B0NLID0002"))
+        s["aval"] = (len(mundo.criados) - c0, linha("promotom", p), vinculo("promotom", p) == post,
+                     all(m == post for m, _ in mundo.edits[e0:]))
+    cenario(corpo)
+    r.check(s["vinc"], "54.casou_no_post_do_fada")
+    r.check(s["pendente"] == (0, 0, ("edicao", "retida")), "54.sem_aval_pendente",
+            str(s["pendente"]))
+    r.check(s["aval"] == (0, ("edicao", "liberada"), True, True), "54.com_aval_o_mesmo_post",
+            str(s["aval"]))
+
+
+def test_55_edicao_publicada_em_sombra_e_fada(r):
+    """Item 4: em SOMBRA a edição publicada vai ao ar e só fica registrada;
+    a edição do Fada que traz produto novo é aval pelo edit_date."""
+    s = {}
+
+    async def corpo(mundo):
+        p, post = await publicada(mundo, "promotom", GPU, "B0SOMB0001")
+        e0 = len(mundo.edits)
+        await chega(mundo, "promotom", RX, amz("B0SOMB0002"), mid=p, idade_s=60, editada=True)
+        s["x"] = (len(mundo.edits) - e0, linha("promotom", p))
+    cenario(corpo, modo="SOMBRA")
+    r.check(s["x"] == (1, ("edicao", "retida")), "55.sombra_aplica_e_registra", str(s["x"]))
+    d = {}
+
+    async def corpo2(mundo):
+        f = await chega(mundo, "fadapromos", GPU_FADA, amz("B0FADE0001"))
+        await chega(mundo, "fadapromos", GPU_FADA, amz("B0FADE0001") + amz("B0FADE0002"),
+                    mid=f, idade_s=20 * 60, editada=True)
+        with _db() as db:
+            d["ts"] = dict(db.execute("SELECT chave, ts FROM curadoria_aval").fetchall())
+    cenario(corpo2)
+    r.check(abs(d["ts"]["amazon|B0FADE0002"] - time.time()) < 10
+            and d["ts"]["amazon|B0FADE0001"] < d["ts"]["amazon|B0FADE0002"],
+            "55.fada_edicao_aval_pelo_edit_date", str(d))
+
+
+def test_56_segurada_antiga_editada_com_produto_novo(r):
+    """Item 1: mensagem retida (nunca publicada) há 15 min que a fonte edita
+    trazendo B: B espera aval pelo edit_date e, com o aval, a mensagem sai
+    — a reinjeção vale pela data da versão, não pela da mensagem."""
+    s = {}
+
+    async def corpo(mundo):
+        p = await chega(mundo, "promotom", GPU, amz("B0VELHA001"))
+        envelhecer(mundo, "promotom", p, 15 * 60)
+        curadoria._expirar()
+        s["expirou"] = retida("promotom", p)
+        await chega(mundo, "promotom", RX, amz("B0VELHA002"), mid=p, idade_s=15 * 60,
+                    editada=True)
+        s["espera"] = (retida("promotom", p), atuais("promotom", p))
+        await nerd(mundo, GPU_NERD, amz("B0VELHA002"))
+        s["sai"] = (retida("promotom", p), len(posts(mundo)),
+                    "RX 9060" in (mundo.criados[-1][1] if mundo.criados else ""))
+    cenario(corpo)
+    r.check(s["expirou"] == "expirada", "56.expirou_sem_aval")
+    r.check(s["espera"] == ("retida", ["amazon|B0VELHA002"]), "56.produto_novo_reabre_a_espera",
+            str(s["espera"]))
+    r.check(s["sai"] == ("liberada", 1, True), "56.aval_do_novo_solta_a_versao_atual",
+            str(s["sai"]))
+
+
+def test_57_aprovado_do_post_inclui_a_familia_e_a_data_original(r):
+    """Item 4: (a) o que o post já tem inclui a FAMÍLIA dele: a mensagem que
+    casou no post do Fada trazendo outro anúncio (A2, aprendido pela
+    família, não exibido) edita o preço só com A2 → segue normal; (b) o
+    produto que já estava na mensagem publicada (sem histórico na
+    curadoria) vale pela data ORIGINAL: aval de A perto dela cobre a edição
+    A→A+B."""
+    s = {}
+
+    async def corpo(mundo):
+        await chega(mundo, "fadapromos", "🔥 Placas de vídeo\n\n🔹 RTX 5060 Ti Gigabyte - R$ 2299"
+                    "\n\n🔹 RX 9060 XT Sapphire - R$ 2499",
+                    amz("B0FAMI0001") + amz("B0FAMI0009"))              # lista {A, C}
+        post = posts(mundo)[-1]
+        p = await chega(mundo, "promotom", DOIS, amz("B0FAMI0001") + amz("B0FAMI0002"))
+        s["casou"] = (vinculo("promotom", p) == post,
+                      "amazon|B0FAMI0002" in db_ofertas_de_post(post),
+                      "amazon|B0FAMI0002" in db_exibida(post))
+        await chega(mundo, "promotom", GPU.replace("2299", "2149"), amz("B0FAMI0002"), mid=p,
+                    idade_s=60, editada=True)
+        s["familia"] = (linha("promotom", p), len(curadoria._SEGURADAS))
+        q = await chega(mundo, "fumotom", "Ainda ativo! " + GPU, amz("B0FAMI0003"))
+        envelhecer(mundo, "fumotom", q, 20 * 60)
+        aval_direto("amazon|B0FAMI0003", time.time() - 20 * 60 + 30)    # perto da original
+        e1 = len(mundo.edits)
+        await chega(mundo, "fumotom", DOIS, amz("B0FAMI0003") + amz("B0FAMI0004"), mid=q,
+                    idade_s=20 * 60, editada=True)
+        s["original"] = (len(mundo.edits) - e1, linha("fumotom", q))
+        with _db() as db:
+            s["entradas"] = dict(db.execute(
+                "SELECT chave, ts_entrada FROM curadoria_chave WHERE msg_id=?", (q,)).fetchall())
+    cenario(corpo)
+    r.check(s["casou"] == (True, True, False), "57.casou_e_a_familia_aprendeu_sem_exibir",
+            str(s["casou"]))
+    r.check(s["familia"][0] == ("nova", "liberada"), "57.anuncio_da_familia_e_aprovado",
+            str(s["familia"]))
+    r.check(s["original"] == (1, ("edicao", "liberada")), "57.ja_publicado_vale_pela_data_original",
+            str(s["original"]))
+    e = s["entradas"]
+    r.check(e["amazon|B0FAMI0004"] - e["amazon|B0FAMI0003"] > 15 * 60,
+            "57.o_novo_entra_pelo_edit_date_o_antigo_pela_original", str(e))
 
 
 if __name__ == "__main__":

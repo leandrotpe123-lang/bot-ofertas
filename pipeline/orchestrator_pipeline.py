@@ -144,10 +144,12 @@ async def _pipeline(event, is_edit: bool = False) -> None:
 
     # ── Curadoria: hardware só com aval (Fada Promoções / Nerd Ofertas) ──
     #    Antes da deduplicação, para a segurada não gastar a reserva de
-    #    reativação. Vale também na edição: a edição de mensagem nunca
-    #    publicada vira post novo. O log e o evento saem de lá.
-    if not curadoria.portao(norm, enr, is_edit, getattr(event.message, "date", None),
-                            getattr(bruta, "texto", "") or ""):
+    #    reativação. Vale também na edição: a de mensagem nunca publicada
+    #    vira post novo; a de mensagem publicada que traz produto vigiado
+    #    novo fica pendente (o post segue como está). O log e o evento
+    #    saem de lá.
+    if not curadoria.portao(norm, enr, is_edit, event.message,
+                            getattr(bruta, "texto", "") or "", getattr(event, "via", None)):
         return
     if not is_edit:
         try:

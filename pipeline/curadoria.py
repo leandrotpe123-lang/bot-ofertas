@@ -14,8 +14,10 @@ A REGRA
 ═══════════════════════════════════════════════════════════════════
   · categoria vigiada: pipeline.curadoria_categoria (notebook, PC gamer e
     monitor comum ficam de fora);
-  · só vale para post de PRODUTO (natureza "produto"): cupom e campanha
-    seguem o fluxo de sempre;
+  · vale para todo post que não é CUPOM: produto e também "evento" (a
+    natureza do post sem identidade de produto — campanha, busca,
+    encurtador que não abriu, produto sem código); cupom segue o fluxo de
+    sempre;
   · vale para TODA fonte monitorada, menos as ISENTAS — Fada Promoções, Fada
     dos Cupons e Oferta Convertida —, sempre pelo ID REAL do chat
     (config.GRUPO_ID / CURADORIA_ISENTOS); fonte nova entra retida;
@@ -24,18 +26,26 @@ A REGRA
     sinal, config.GRUPOS_AVAL: o bot só LÊ; nada dele entra na fila nem vai
     ao canal). Fada dos Cupons e Oferta Convertida são isentas, mas não dão
     aval;
-  · "mesmo produto" = a mesma identidade de produto que a família usa, só
-    nas lojas em que ela é exata (config.CURADORIA_LOJAS_AVAL: ASIN da
-    Amazon, MLB do Mercado Livre, loja+item da Shopee), com a loja na chave
-    ("amazon|B0…"). Título parecido NÃO é aval; identidade incerta não é
-    aval. Para o Nerd a identidade vem SEM afiliar (_identificar);
-  · janela (config.CURADORIA_JANELA_S, 300 s) contada pelas DATAS ORIGINAIS
-    das mensagens no Telegram, nos dois sentidos:
-      aval ANTES (até 300 s)  → a mensagem da fonte passa direto;
-      aval DEPOIS (até 300 s) → a mensagem da fonte fica SEGURADA e o aval a
-                                SOLTA, na hora em que o aval é visto;
-      fora da janela → a segurada nunca vai ao canal (o post do Fada, se
-      vier depois, sai normal pelo caminho dele);
+  · IDENTIDADE = o conjunto de produtos da VERSÃO ATUAL da mensagem (link
+    de produto, só nas lojas de identidade exata — config.
+    CURADORIA_LOJAS_AVAL: ASIN da Amazon, MLB do Mercado Livre, loja+item
+    da Shopee —, com a loja na chave: "amazon|B0…"). Aval de QUALQUER
+    produto atual solta a mensagem inteira; produto que a edição tirou não
+    conta mais; título parecido não é aval; identidade incerta não é aval;
+    mensagem SEM identidade exata nunca tem aval (fica segurada);
+  · janela (config.CURADORIA_JANELA_S, 300 s) pelas DATAS do Telegram, nos
+    dois sentidos, contada da ENTRADA de cada produto na mensagem (a data
+    da mensagem; numa edição que traz produto novo, o edit_date dela):
+      aval ANTES (até 300 s)  → a versão passa direto;
+      aval DEPOIS (até 300 s) → a versão fica SEGURADA e o aval a SOLTA, na
+                                hora em que o aval é visto;
+      fora da janela → a segurada nunca vai ao canal;
+  · EDIÇÃO de mensagem JÁ PUBLICADA: preço, cupom, texto — tudo que
+    mantém os produtos que o post de destino já tem (o que ele exibe e a
+    família dele) — segue normal. Produto NOVO de categoria vigiada passa
+    pela mesma regra; sem aval, a edição fica PENDENTE e o post continua
+    com o produto aprovado; o aval aplica a edição pelo caminho normal de
+    edição (o mesmo post, nunca um segundo);
   · passam SEM aval (decisão do Léo, 03/11): LISTA de produtos distintos com
     preço próprio (variante de cor/tamanho/capacidade e vendedor não contam
     — curadoria_categoria.produtos_com_preco); frase de DESTAQUE no texto da
@@ -49,26 +59,49 @@ COMO SOLTA — reinjeção no ponto de entrada (CLAUDE.md §3)
 ═══════════════════════════════════════════════════════════════════
 O aval marca a linha da segurada como `liberando` (database_curadoria, na
 mesma transação que grava o aval) e uma task própria entrega a MESMA
-mensagem a `processar` como EventoRecuperado com via CURADORIA — o pipeline
-de sempre: travas, identidade, família, decisão, publicação. Nenhum segundo
-caminho de escrita no canal. VELOCIDADE: a mensagem guardada na memória
-quando foi segurada (a última versão, se a fonte editou) sai na hora, sem
-nova consulta ao Telegram; só depois de um reinício ela é buscada na fonte.
+versão a `processar` como EventoRecuperado com via CURADORIA — mensagem
+nova (nunca publicada) ou edição (alteração pendente de post publicado) —,
+e o pipeline de sempre faz o resto: travas, identidade, família, decisão,
+publicação. Nenhum segundo caminho de escrita no canal. VELOCIDADE: a
+versão guardada na memória quando foi segurada (a última, se a fonte
+editou) sai na hora, sem nova consulta ao Telegram; só depois de um
+reinício ela é buscada na fonte. O portão só a deixa passar se o conjunto
+dela é exatamente o que o aval soltou.
 
-A reinjeção é mensagem NOVA de até ~7 min: a trava de frescor (120 s) e a
-idempotência em memória a barrariam. `reinjecao()` é a única exceção, e
-exige as três provas juntas: via CURADORIA, estado `liberando` marcado há
-menos de _PRAZO_LIBERACAO_S no banco, e mensagem dentro da janela.
+A reinjeção de mensagem NOVA tem até ~7 min: a trava de frescor (120 s) e
+a idempotência em memória a barrariam. `reinjecao()` é a única exceção, e
+exige as três provas juntas: via CURADORIA, estado `liberando` ou
+`reavaliando` marcado há menos de _PRAZO_LIBERACAO_S no banco, e mensagem
+dentro da janela.
+
+═══════════════════════════════════════════════════════════════════
+FALHA — fechada para o hardware vigiado
+═══════════════════════════════════════════════════════════════════
+Banco fora ou exceção interna nunca viram autorização. A versão de
+hardware vigiado de fonte retentora fica BLOQUEADA, guardada SÓ NA
+MEMÓRIA (fila limitada, _MAX_PENDENTES; o aval que não pôde ser gravado
+também, _MAX_AVAIS_PENDENTES); a gravação é tentada de novo em
+_REPOR_PRIMEIRO_S e a cada rodada; com o banco de volta, ela volta ao
+ponto de entrada com a prova `reavaliando` e o portão a avalia de novo.
+RISCO DOCUMENTADO: o que está só na memória NÃO é durável — um reinício
+com o banco fora o perde (fica fora do canal; nada é publicado sem aval).
+Os logs dizem isso em cada caso. Outras categorias, cupom e campanha nunca
+passam pelo banco no portão e não são bloqueadas. Modo SOMBRA nunca
+bloqueia.
 
 ═══════════════════════════════════════════════════════════════════
 ROBUSTEZ
 ═══════════════════════════════════════════════════════════════════
-  · sem corrida: "há aval?" e "há segurada?" rodam cada uma numa transação;
-  · edição de mensagem segurada continua segurada (a janela não recomeça);
-    edição de mensagem já publicada (origem vinculada) passa;
+  · sem corrida: "há aval para esta versão?" (grava o conjunto atual) e
+    "há segurada para este aval?" rodam cada uma numa transação;
+  · edição da segurada continua segurada (a janela do produto que já estava
+    lá não recomeça); produto novo entra com o edit_date dela; produto que
+    sai não conta; o que volta mantém a primeira entrada;
   · a fonte apagou a segurada: nada sai (origem_apagada + busca na fonte);
   · reinício: avais e seguradas estão no banco; a liberação interrompida é
-    retomada no boot; a leitura do canal de aval recomeça da janela;
+    retomada no boot; a que parou no caminho (_PRESA_S) é entregue de novo,
+    até _MAX_REENTREGAS vezes; a leitura do canal de aval recomeça da
+    janela;
   · canal de aval: chega NA HORA pelo handler quando a conta segue o canal;
     a leitura a cada _VARREDURA_S é a rede de segurança (update perdido,
     conta que não segue) e respeita FloodWait; cada rodada LÊ o aval antes
@@ -80,10 +113,9 @@ ROBUSTEZ
     linha de produto com categoria (_categoria_aval);
   · relógio local atrás do Telegram (data "no futuro") não perde aval nem
     reinjeção;
-  · a edição que traz uma exceção a uma segurada a solta UMA vez e fecha a
-    linha (db_curadoria_passou): nenhum aval posterior a reinjeta;
-  · falha de banco no portão: deixa passar e registra (a mesma escolha da
-    deduplicação: nunca travar o canal por defeito interno);
+  · a versão que SEGUE sem aval (exceção, identidade publicada preservada,
+    deixou de ser hardware) fecha a linha (db_curadoria_seguiu): nenhum
+    aval posterior reinjeta uma versão que a fonte já trocou;
   · modo SOMBRA: só registra; DESLIGADO: nada roda.
 
 Dependências INJETADAS em `instalar` (cliente, fontes, canais de aval,
@@ -95,6 +127,7 @@ import asyncio
 import contextlib
 import contextvars
 import time
+from collections import OrderedDict
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import config
@@ -102,16 +135,18 @@ import eventos
 import globals as g
 from database import (db_curadoria_avaliar, db_curadoria_desfecho,
                       db_curadoria_em_liberacao, db_curadoria_expirar,
-                      db_curadoria_passou, db_curadoria_registrar_aval,
-                      db_curadoria_retomar)
-from database_curadoria import (AVAL, AUSENTE, ERRO, FALHOU, JA_LIBERADA,
-                                LIBERACAO, LIBERADA)
+                      db_curadoria_reavaliar, db_curadoria_registrar_aval,
+                      db_curadoria_retomar, db_curadoria_seguiu, db_exibida,
+                      db_ofertas_de_post)
+from database_curadoria import (AVAL, AUSENTE, EDICAO, ERRO, FALHOU, LIBERACAO,
+                                LIBERADA, NOVA, OBSOLETA, SUPERADA)
 from logger import _idade_seg, log_ded
-from pipeline import ingestao, origem, origem_apagada
+from pipeline import ingestao, origem_apagada
 from pipeline.completude import EventoRecuperado
 from pipeline.curadoria_categoria import categoria, produtos_com_preco
 from pipeline.destaque import frase_de_destaque
 from pipeline.identidade import username_de
+from pipeline.publicacao_estado import destino_vivo_de_origem
 from pipeline.reativacao import eh_reativacao
 from plataformas import registry
 from plataformas.contrato import AUSENTE as SEM_ID, TipoLink
@@ -126,12 +161,12 @@ VIA = "CURADORIA"
 # ── Parâmetros ────────────────────────────────────────────────────
 # Folga para VER o aval depois da data dele (fila, rede, varredura de 15 s,
 # reinício curto) e ainda soltar a segurada. Não alarga a regra: o par
-# continua exigindo |data do aval − data da fonte| <= 300 s; isto só evita
-# que a demora em ENXERGAR um aval válido o perca. A segurada mais velha que
-# se solta tem 300 + 120 s.
+# continua exigindo |data do aval − entrada do produto| <= 300 s; isto só
+# evita que a demora em ENXERGAR um aval válido o perca. O produto mais
+# velho que se solta entrou há 300 + 120 s.
 _ATRASO_MAX_S = 120.0
-# Validade da prova `liberando` para a admissão: a reinjeção acontece em
-# segundos depois de marcada.
+# Validade da prova `liberando`/`reavaliando` para a admissão: a reinjeção
+# acontece em segundos depois de marcada.
 _PRAZO_LIBERACAO_S = 120.0
 # Leitura do canal de aval (rede de segurança do handler): a cada 15 s, até
 # 20 mensagens por página e 5 páginas por rodada.
@@ -151,6 +186,18 @@ _MAX_LINKS_AVAL = 16
 _REPETIR_S = (5.0, 15.0)
 # Busca da segurada na fonte (só depois de reinício): novas tentativas.
 _BUSCA_REPETIR_S = (1.0, 3.0)
+# Reinjeção marcada e que não chegou ao portão em _PRESA_S (prova perdida
+# no banco, normalização que falhou): entregue de novo, até
+# _MAX_REENTREGAS vezes; depois, `falhou`.
+_PRESA_S = 30.0
+_MAX_REENTREGAS = 3
+# Banco fora: o que fica SÓ NA MEMÓRIA (não durável) e quando tentar de novo.
+_MAX_PENDENTES = 500
+_MAX_AVAIS_PENDENTES = 500
+_REPOR_PRIMEIRO_S = 2.0
+# Exceção interna que se repete na MESMA mensagem: depois de tantas, desiste
+# (a mensagem fica fora do canal; o log diz).
+_MAX_FALHAS = 5
 
 
 def _modo() -> str:
@@ -170,9 +217,21 @@ _maior: Dict[int, int] = {}
 _falha_varredura: Dict[int, bool] = {}
 _pausa_ate: Dict[int, float] = {}
 _tentativas: Dict[tuple, int] = {}
-# A mensagem segurada, como chegou (ou na última edição): (chat, msg) ->
+# A versão segurada, como chegou (ou na última edição): (chat, msg) ->
 # (Message, instante). É o que sai na hora quando o aval chega.
 _SEGURADAS: Dict[tuple, Tuple[object, float]] = {}
+# Banco fora / exceção interna — SÓ NA MEMÓRIA, não durável:
+#   _PENDENTES       (chat, msg) -> {is_edit, cat, ts_msg, limite}
+#   _AVAIS_PENDENTES (fonte, msg) -> (chaves, cat, ts_aval)
+_PENDENTES: "OrderedDict[tuple, dict]" = OrderedDict()
+_AVAIS_PENDENTES: "OrderedDict[tuple, tuple]" = OrderedDict()
+_reentregas: Dict[tuple, int] = {}
+_falhas: Dict[tuple, int] = {}
+_repor_marcado = False
+
+
+class _BancoFora(Exception):
+    """db_curadoria_avaliar respondeu ERRO: a versão NÃO passa."""
 
 
 def _papel(chat_id: int) -> str:
@@ -209,7 +268,7 @@ def instalar(cliente, fontes: Iterable, avais: Iterable,
     GRUPOS_AVAL, `despachar(evento, is_edit=)` o ponto de entrada. Confere
     cada ID de config.GRUPO_ID contra o @ resolvido e registra o papel de
     cada fonte. Devolve a task da varredura, ou None com o modo DESLIGADO."""
-    global _aberto
+    global _aberto, _repor_marcado
     from telethon import events
     from telethon.utils import get_peer_id
 
@@ -225,6 +284,11 @@ def instalar(cliente, fontes: Iterable, avais: Iterable,
     _pausa_ate.clear()
     _tentativas.clear()
     _SEGURADAS.clear()
+    _PENDENTES.clear()
+    _AVAIS_PENDENTES.clear()
+    _reentregas.clear()
+    _falhas.clear()
+    _repor_marcado = False
     _aberto = True
     if avais:
         cliente.add_event_handler(_ao_aval, events.NewMessage(chats=avais))
@@ -323,94 +387,245 @@ def _ts(data) -> float:
         return time.time()
 
 
+def _datas(mensagem) -> Tuple[float, float]:
+    """(data original, data desta versão): a versão editada vale pelo
+    edit_date — é quando o produto que ela trouxe entrou na mensagem."""
+    ts_msg = _ts(getattr(mensagem, "date", None))
+    editada = getattr(mensagem, "edit_date", None)
+    return ts_msg, (_ts(editada) if editada else ts_msg)
+
+
+def _aprovadas(dest: int) -> set:
+    """Os produtos que o post de destino JÁ tem: o que ele exibe e a
+    família dele (oferta_index). Falha de leitura devolve vazio — o que só
+    faz a edição passar pela curadoria, nunca a libera."""
+    return set(db_exibida(dest) or ()) | set(db_ofertas_de_post(dest) or ())
+
+
+def _soltar_memoria(k: tuple) -> None:
+    _SEGURADAS.pop(k, None)
+    _PENDENTES.pop(k, None)
+    _reentregas.pop(k, None)
+    _falhas.pop(k, None)
+
+
+def _seguiu(chat: str, msg_id: int, chaves: List[str], ts_versao: float,
+            estado: str, motivo: str) -> None:
+    """A versão atual seguiu sem aval: fecha a linha aberta (se houver) e
+    larga a memória. Nunca bloqueia: falha do banco aqui só é registrada
+    (o que está na memória sai — nenhum aval posterior reinjeta a versão
+    antiga sem antes buscá-la de novo na fonte)."""
+    _soltar_memoria((chat, msg_id))
+    r = db_curadoria_seguiu(chat, msg_id, chaves, ts_versao, estado, time.time())
+    if r:
+        log_ded.info(f"🎯 [CURADORIA_{'SUPERADA' if estado == SUPERADA else 'SEGUIU'}] "
+                     f"{_nome(chat)} id={msg_id} — {motivo}; a pendência desta mensagem "
+                     f"foi fechada")
+    elif r is None:
+        log_ded.error(f"❌ curadoria: banco indisponível ao fechar a pendência de "
+                      f"{_nome(chat)} id={msg_id} ({motivo})")
+
+
+def _emitir_retida(chat: str, msg_id: int, cat: str, n: int, nova: bool,
+                   is_edit: bool, situacao: str) -> None:
+    eventos.emitir_de("curadoria.retida", lambda: (
+        {"chat": chat, "msg": msg_id},
+        {"categoria": cat, "produtos_n": n, "nova": nova, "is_edit": bool(is_edit),
+         "situacao": situacao}),
+        local="curadoria.portao.retida")
+
+
 # ─────────────────────────────────────────────────────────────────
 # PORTÃO — no pipeline, depois do enriquecimento e antes da deduplicação
 # ─────────────────────────────────────────────────────────────────
-def portao(norm, enr, is_edit: bool, data_msg=None, texto_original: str = "") -> bool:
-    """True: a mensagem segue o pipeline. False: ficou SEGURADA (o funil
-    para aqui; o log e o evento saem daqui). `data_msg` é a data ORIGINAL
-    da mensagem no Telegram; `texto_original`, o texto da PRÓPRIA mensagem
-    (a frase de destaque é procurada nele inteiro). Nunca levanta."""
+def portao(norm, enr, is_edit: bool, mensagem=None, texto_original: str = "",
+           via: Optional[str] = None) -> bool:
+    """True: a versão segue o pipeline. False: ficou SEGURADA ou BLOQUEADA
+    (o funil para aqui; o log e o evento saem daqui). `mensagem` é a
+    mensagem do Telegram desta versão (datas originais e a cópia que sai na
+    hora); `texto_original`, o texto da PRÓPRIA mensagem (a frase de
+    destaque é procurada nele inteiro); `via`, a via do evento (CURADORIA =
+    reinjeção). Nunca levanta. Nenhuma exceção vira autorização para o
+    hardware de fonte retentora: ela BLOQUEIA (_falha_fechada)."""
+    modo = _modo()
+    if modo == DESLIGADO:
+        return True
     try:
-        modo = _modo()
-        if modo == DESLIGADO:
-            return True
-        try:
-            chat_id = int(getattr(norm, "chat", ""))
-        except (TypeError, ValueError):
-            return True
+        chat_id = int(getattr(norm, "chat", ""))
+        chat, msg_id = str(norm.chat), int(norm.msg_id)
+    except (TypeError, ValueError, AttributeError):
+        return True                 # não é mensagem de fonte numérica
+    ctx: dict = {"cat": "", "is_edit": bool(is_edit), "mensagem": mensagem}
+    retentora = False
+    try:
         if chat_id in _estado["avais"]:
             # Canal de aval no funil (configuração errada): NUNCA publica.
             log_ded.error(f"❌ curadoria: mensagem do canal de aval {_nome(chat_id)} no "
                           f"funil de publicação — barrada")
             return False
-        if getattr(enr, "tipo", None) != "produto":
-            return True
-        analise = getattr(norm, "texto_analise", "") or ""
-        chaves = _chaves(getattr(norm, "idents", None))
-        if not chaves:
-            return True
-        chat, msg_id = str(norm.chat), int(norm.msg_id)
-        ts_msg = _ts(data_msg)
         if chat_id in config.CURADORIA_AVALISTAS_FONTE:
-            cat = _categoria_aval(analise)
-            if cat:
-                _registrar_aval(chat, msg_id, chaves, cat, ts_msg)
+            _aval_da_fonte(norm, enr, mensagem)
             return True
         if chat_id in config.CURADORIA_ISENTOS:
             return True
-        cat = categoria(analise)
-        if not cat:
+        retentora = True
+        return _portao_retentora(norm, enr, is_edit, mensagem, texto_original,
+                                 via == VIA, modo, chat, msg_id, ctx)
+    except Exception as e:                              # noqa: BLE001
+        if not retentora:
+            log_ded.error(f"❌ curadoria.portao: {type(e).__name__}: {e} — fonte isenta: "
+                          f"segue", exc_info=True)
             return True
-        if origem.consultar(chat, msg_id):
-            return True             # já publicada/vinculada: edição e afins seguem
-        livre = _isencao(norm, chaves, texto_original)
-        if livre:
-            log_ded.info(f"🎯 [CURADORIA_LIVRE] {_nome(chat)} id={msg_id} cat={cat} "
-                         f"motivo={livre} — passa sem aval (não é aval de ninguém)")
-            # A edição de uma segurada trouxe a exceção: fecha a linha (nenhum
-            # aval posterior a reinjeta de novo).
-            _SEGURADAS.pop((chat, msg_id), None)
-            if is_edit and modo == ATIVO:
-                db_curadoria_passou(chat, msg_id, time.time())
+        return _falha_fechada(chat, msg_id, ctx, e, modo)
+
+
+def _portao_retentora(norm, enr, is_edit: bool, mensagem, texto_original: str,
+                      reinjetada: bool, modo: str, chat: str, msg_id: int,
+                      ctx: dict) -> bool:
+    ts_msg, ts_versao = _datas(mensagem)
+    ctx.update(ts_msg=ts_msg, ts_versao=ts_versao)
+    analise = getattr(norm, "texto_analise", "") or ""
+    chaves = _chaves(getattr(norm, "idents", None))
+    # Só o CUPOM fica fora (é outra categoria de post). Produto e "evento" —
+    # a natureza do post SEM identidade de produto: link de campanha, de
+    # busca, encurtador que não abriu, produto sem código — entram: hardware
+    # vigiado sem identidade exata fica retido (nenhum aval o solta).
+    # Natureza desconhecida também entra (fechado por padrão).
+    if getattr(enr, "tipo", None) == "cupom" or not (cat := categoria(analise)):
+        # Não é hardware vigiado: nunca é bloqueado. Se esta versão substitui
+        # uma pendente (edição), a pendente fecha.
+        if is_edit or reinjetada:
+            _seguiu(chat, msg_id, chaves, ts_versao, SUPERADA,
+                    "a versão atual não é hardware vigiado")
+        return True
+    ctx["cat"] = cat
+    dest = destino_vivo_de_origem(chat, msg_id)
+    tipo = EDICAO if dest else NOVA
+    aprovadas: set = set()
+    if dest:
+        aprovadas = _aprovadas(dest)
+        if chaves and set(chaves) <= aprovadas:
+            # Edição que mantém os produtos que o post já tem (preço, cupom,
+            # texto): segue normal.
+            _seguiu(chat, msg_id, chaves, ts_versao, LIBERADA if reinjetada else SUPERADA,
+                    f"edição preserva a identidade do post:{dest}")
             return True
-        resposta, nova = db_curadoria_avaliar(chat, msg_id, chaves, cat, ts_msg,
-                                              _janela(), time.time())
-        if resposta in (AVAL, LIBERACAO, JA_LIBERADA):
-            if resposta != JA_LIBERADA:
-                log_ded.info(f"🎯 [CURADORIA_{'LIBERADA' if resposta == LIBERACAO else 'COM_AVAL'}] "
-                             f"{_nome(chat)} id={msg_id} cat={cat} — segue")
-            _SEGURADAS.pop((chat, msg_id), None)
-            return True
-        if resposta == ERRO:
-            log_ded.error(f"❌ curadoria: banco indisponível — {_nome(chat)} id={msg_id} "
-                          f"cat={cat} passa sem conferir aval")
-            return True
-        # SEGURADA
-        if modo == SOMBRA:
-            if nova:
-                log_ded.info(f"👻 [CURADORIA_SOMBRA] {_nome(chat)} id={msg_id} cat={cat} "
-                             f"produtos={chaves} — seguraria (sem aval); segue normal")
-            return True
-        mensagem = getattr(norm, "media_obj", None)
-        if getattr(mensagem, "id", None) == msg_id:
-            _SEGURADAS[(chat, msg_id)] = (mensagem, time.monotonic())
+    livre = _isencao(norm, chaves, texto_original)
+    if livre:
+        log_ded.info(f"🎯 [CURADORIA_LIVRE] {_nome(chat)} id={msg_id} cat={cat} "
+                     f"motivo={livre} — passa sem aval (não é aval de ninguém)")
+        if is_edit or reinjetada or dest:
+            _seguiu(chat, msg_id, chaves, ts_versao, LIBERADA, f"exceção {livre}")
+        else:
+            _soltar_memoria((chat, msg_id))
+        return True
+    resposta, nova = db_curadoria_avaliar(chat, msg_id, tipo, chaves, cat, ts_msg, ts_versao,
+                                          _janela(), _ATRASO_MAX_S, time.time(),
+                                          reinjetada=reinjetada, ja_publicadas=aprovadas)
+    if resposta == ERRO:
+        raise _BancoFora()
+    if resposta in (AVAL, LIBERACAO):
+        rotulo = "LIBERADA" if resposta == LIBERACAO else "COM_AVAL"
+        if tipo == EDICAO:
+            rotulo = "EDICAO_" + rotulo
+        log_ded.info(f"🎯 [CURADORIA_{rotulo}] {_nome(chat)} id={msg_id} cat={cat} "
+                     f"produtos={chaves} — segue")
+        _soltar_memoria((chat, msg_id))
+        return True
+    if resposta == OBSOLETA:
+        log_ded.info(f"🎯 [CURADORIA_OBSOLETA] {_nome(chat)} id={msg_id} — reinjeção que "
+                     f"não é mais a versão aprovada; descartada")
+        log_ded.info(f"🧭 TL | id={msg_id} chat={chat} | DESCARTE | "
+                     f"motivo=CURADORIA_OBSOLETA cat={cat} edit={is_edit}")
+        _emitir_retida(chat, msg_id, cat, len(chaves), False, is_edit, "OBSOLETA")
+        return False
+    # SEGURADA
+    sem_id = "" if chaves else " (SEM identidade exata de produto: nenhum aval a solta)"
+    if modo == SOMBRA:
+        if nova:
+            log_ded.info(f"👻 [CURADORIA_SOMBRA] {_nome(chat)} id={msg_id} cat={cat} "
+                         f"produtos={chaves}{sem_id} — seguraria (sem aval); segue normal")
+        return True
+    if getattr(mensagem, "id", None) == msg_id:
+        _SEGURADAS[(chat, msg_id)] = (mensagem, time.monotonic())
+    if tipo == EDICAO:
+        if nova:
+            log_ded.info(f"✏️ [CURADORIA_EDICAO_PENDENTE] {_nome(chat)} id={msg_id} "
+                         f"cat={cat} produtos={chaves}{sem_id} — produto NOVO sem aval: "
+                         f"post:{dest} segue com o aprovado; alteração pendente até "
+                         f"{_janela():g}s")
+        motivo = "CURADORIA_EDICAO_PENDENTE"
+    else:
         if nova:
             log_ded.info(f"🎯 [CURADORIA_RETIDA] {_nome(chat)} id={msg_id} cat={cat} "
-                         f"produtos={chaves} — espera aval (Fada/Nerd) até "
+                         f"produtos={chaves}{sem_id} — espera aval (Fada/Nerd) até "
                          f"{_janela():g}s")
-        log_ded.info(f"🧭 TL | id={msg_id} chat={chat} | DESCARTE | "
-                     f"motivo=CURADORIA_RETIDA cat={cat} edit={is_edit}")
-        eventos.emitir_de("curadoria.retida", lambda: (
-            {"chat": chat, "msg": msg_id},
-            {"categoria": cat, "produtos_n": len(chaves), "nova": nova,
-             "is_edit": bool(is_edit)}),
-            local="curadoria.portao.retida")
-        return False
-    except Exception as e:                              # noqa: BLE001
-        log_ded.error(f"❌ curadoria.portao: {type(e).__name__}: {e} — segue sem conferir",
-                      exc_info=True)
+        motivo = "CURADORIA_RETIDA"
+    log_ded.info(f"🧭 TL | id={msg_id} chat={chat} | DESCARTE | "
+                 f"motivo={motivo} cat={cat} edit={is_edit}")
+    _emitir_retida(chat, msg_id, cat, len(chaves), nova, is_edit,
+                   "EDICAO_PENDENTE" if tipo == EDICAO else "SEGURADA")
+    return False
+
+
+def _falha_fechada(chat: str, msg_id: int, ctx: dict, erro: Exception, modo: str) -> bool:
+    """Banco fora ou exceção interna numa mensagem de fonte retentora: a
+    versão é BLOQUEADA (nunca autorizada) e guardada SÓ NA MEMÓRIA para
+    nova tentativa. SOMBRA nunca bloqueia."""
+    banco = isinstance(erro, _BancoFora)
+    causa = "banco indisponível" if banco else f"falha interna {type(erro).__name__}: {erro}"
+    if modo == SOMBRA:
+        log_ded.error(f"👻 [CURADORIA_SOMBRA] {_nome(chat)} id={msg_id} — {causa}; "
+                      f"no ATIVO ficaria bloqueada")
         return True
+    k = (chat, msg_id)
+    _falhas[k] = _falhas.get(k, 0) + 1
+    rotulo = "CURADORIA_SEM_BANCO" if banco else "CURADORIA_FALHA_INTERNA"
+    if _falhas[k] > _MAX_FALHAS:
+        log_ded.error(f"❌ [{rotulo}] {_nome(chat)} id={msg_id} — {causa} pela "
+                      f"{_falhas[k]}ª vez: desiste; NÃO vai ao canal", exc_info=not banco)
+        _soltar_memoria(k)
+    else:
+        log_ded.error(f"❌ [{rotulo}] {_nome(chat)} id={msg_id} cat={ctx.get('cat') or '?'} "
+                      f"— {causa}: BLOQUEADA, guardada SÓ NA MEMÓRIA (não persistida; um "
+                      f"reinício agora a perde e ela não vai ao canal); nova tentativa em "
+                      f"{_REPOR_PRIMEIRO_S:g}s", exc_info=not banco)
+        _pendurar(k, ctx)
+    log_ded.info(f"🧭 TL | id={msg_id} chat={chat} | DESCARTE | motivo={rotulo} "
+                 f"edit={ctx.get('is_edit')}")
+    try:
+        _emitir_retida(chat, msg_id, ctx.get("cat") or "", 0, False,
+                       bool(ctx.get("is_edit")), "SEM_BANCO" if banco else "FALHA_INTERNA")
+    except Exception:                                   # noqa: BLE001
+        pass
+    return False
+
+
+def _pendurar(k: tuple, ctx: dict) -> None:
+    mensagem = ctx.get("mensagem")
+    if getattr(mensagem, "id", None) == k[1]:
+        _SEGURADAS[k] = (mensagem, time.monotonic())
+    ts_msg = ctx.get("ts_msg") or time.time()
+    ts_versao = ctx.get("ts_versao") or ts_msg
+    _PENDENTES[k] = {"is_edit": bool(ctx.get("is_edit")), "cat": ctx.get("cat") or "",
+                     "ts_msg": ts_msg, "limite": ts_versao + _janela() + _ATRASO_MAX_S}
+    _PENDENTES.move_to_end(k)
+    while len(_PENDENTES) > _MAX_PENDENTES:
+        velho, _ = _PENDENTES.popitem(last=False)
+        _SEGURADAS.pop(velho, None)
+        log_ded.error(f"❌ [CURADORIA_PENDENTE_DESCARTADA] {_nome(velho[0])} id={velho[1]} — "
+                      f"fila da memória cheia ({_MAX_PENDENTES}); NÃO vai ao canal")
+    _marcar_repor()
+
+
+def _marcar_repor() -> None:
+    """Primeira nova tentativa de gravar o que ficou na memória, logo depois
+    da falha (as seguintes vêm a cada rodada da varredura)."""
+    global _repor_marcado
+    if _repor_marcado or not _aberto or g._encerrando:
+        return
+    _repor_marcado = True
+    _agendar(_repor_em(_REPOR_PRIMEIRO_S))
 
 
 def _isencao(norm, chaves: List[str], texto_original: str = "") -> str:
@@ -424,7 +639,9 @@ def _isencao(norm, chaves: List[str], texto_original: str = "") -> str:
       DESTAQUE  frase de destaque em QUALQUER ponto do texto da mensagem
                 ("Ainda ativo!", "Bom preço!" — dono: pipeline.destaque);
       VOLTANDO  retorno de oferta pela MESMA detecção que a deduplicação e a
-                decisão usam (pipeline.reativacao — sem regex própria)."""
+                decisão usam (pipeline.reativacao — sem regex própria).
+    As exceções dispensam o AVAL (e por isso a identidade, que só serve ao
+    aval): valem também para a mensagem sem identidade exata."""
     analise = getattr(norm, "texto_analise", "") or ""
     produtos = produtos_com_preco(analise)
     if len(chaves) >= _MIN_ITENS_LISTA and produtos >= _MIN_ITENS_LISTA:
@@ -439,17 +656,22 @@ def _isencao(norm, chaves: List[str], texto_original: str = "") -> str:
 
 def reinjecao(event) -> bool:
     """A mensagem que chega ao ponto de entrada é a REINJEÇÃO de uma
-    segurada que o aval soltou? Só com as três provas: via CURADORIA, estado
-    `liberando` no banco marcado há menos de _PRAZO_LIBERACAO_S e mensagem
-    dentro da janela. Síncrona, barata quando a via é outra; nunca levanta.
-    É o que deixa a reinjeção passar pela trava de frescor e pela
-    idempotência em memória — e nada mais passa por ela."""
+    segurada (aval) ou de uma bloqueada que volta com o banco (`reavaliando`)?
+    Só com as três provas: via CURADORIA, estado `liberando`/`reavaliando`
+    no banco marcado há menos de _PRAZO_LIBERACAO_S e mensagem dentro da
+    janela. Síncrona, barata quando a via é outra; nunca levanta. É o que
+    deixa a reinjeção passar pela trava de frescor e pela idempotência em
+    memória — e nada mais passa por ela. Quem decide se a versão vai ao
+    canal continua sendo o portão."""
     try:
         if getattr(event, "via", None) != VIA:
             return False
         m = event.message
+        # A versão vale pela data DELA: a edição que trouxe o produto novo
+        # (edit_date) abre a janela dele, mesmo que a mensagem seja antiga.
         # Idade negativa = relógio local atrás do Telegram: não é velha.
-        if _idade_seg(m.date) > _janela() + _ATRASO_MAX_S + _PRAZO_LIBERACAO_S:
+        ref = getattr(m, "edit_date", None) or m.date
+        if _idade_seg(ref) > _janela() + _ATRASO_MAX_S + _PRAZO_LIBERACAO_S:
             return False
         return db_curadoria_em_liberacao(str(event.chat_id), int(m.id),
                                          time.time() - _PRAZO_LIBERACAO_S)
@@ -458,12 +680,30 @@ def reinjecao(event) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────
-# AVAL — post de curador (Fada pelo portão; Nerd pelo canal de aval)
+# AVAL — Fada Promoções pelo portão; Nerd pelo canal de aval
 # ─────────────────────────────────────────────────────────────────
+def _aval_da_fonte(norm, enr, mensagem) -> None:
+    """O post do Fada Promoções (isento) também é aval: cada produto vale
+    pela data em que entrou no post (a da mensagem, ou o edit_date da
+    edição que o trouxe). Nunca bloqueia o post do Fada."""
+    try:
+        if getattr(enr, "tipo", None) != "produto":
+            return
+        chaves = _chaves(getattr(norm, "idents", None))
+        cat = _categoria_aval(getattr(norm, "texto_analise", "") or "")
+        if chaves and cat:
+            _registrar_aval(str(norm.chat), int(norm.msg_id), chaves, cat, _datas(mensagem)[1])
+    except Exception as e:                              # noqa: BLE001
+        log_ded.error(f"❌ curadoria: aval do Fada não registrado ({type(e).__name__}: {e})",
+                      exc_info=True)
+
+
 def _registrar_aval(chat: str, msg_id: int, chaves: List[str], cat: str,
                     ts_aval: float) -> None:
     """Grava o aval (só nas lojas de identidade exata) e solta as seguradas
-    do MESMO produto na MESMA loja, com data até 300 s da data do aval."""
+    com o MESMO produto na MESMA loja entrado até 300 s da data do aval.
+    Banco fora: o aval fica SÓ NA MEMÓRIA e é gravado quando o banco
+    voltar."""
     agora = time.time()
     chaves = [c for c in chaves if c.split("|", 1)[0] in config.CURADORIA_LOJAS_AVAL]
     if not chaves:
@@ -474,30 +714,46 @@ def _registrar_aval(chat: str, msg_id: int, chaves: List[str], cat: str,
         chaves, chat, msg_id, ts_aval, _janela(),
         agora - _janela() - _ATRASO_MAX_S, agora)
     if soltas is None:
-        log_ded.error(f"❌ curadoria: aval de {_nome(chat)} id={msg_id} não gravado")
+        _AVAIS_PENDENTES[(chat, msg_id)] = (chaves, cat, ts_aval)
+        _AVAIS_PENDENTES.move_to_end((chat, msg_id))
+        while len(_AVAIS_PENDENTES) > _MAX_AVAIS_PENDENTES:
+            velho, _ = _AVAIS_PENDENTES.popitem(last=False)
+            log_ded.error(f"❌ [CURADORIA_AVAL_DESCARTADO] {_nome(velho[0])} id={velho[1]} — "
+                          f"fila de avais da memória cheia ({_MAX_AVAIS_PENDENTES})")
+        log_ded.error(f"❌ [CURADORIA_AVAL_SEM_BANCO] {_nome(chat)} id={msg_id} "
+                      f"produtos={chaves} — banco indisponível: aval guardado SÓ NA "
+                      f"MEMÓRIA (um reinício agora o perde); nova tentativa em "
+                      f"{_REPOR_PRIMEIRO_S:g}s")
+        _marcar_repor()
         return
     log_ded.info(f"✅ [CURADORIA_AVAL] {_nome(chat)} id={msg_id} cat={cat} "
-                 f"produtos={chaves} solta={[f'{_nome(c)}/{m}' for c, m, _ in soltas]}")
+                 f"produtos={chaves} solta={[f'{_nome(c)}/{m}' for c, m, _, _ in soltas]}")
     eventos.emitir_de("curadoria.aval", lambda: (
         {"chat": chat, "msg": msg_id},
         {"categoria": cat, "produtos_n": len(chaves), "solta_n": len(soltas)}),
         local="curadoria.aval.registrado")
-    for c, m, cat_r in soltas:
+    _soltar(soltas, chat, agora)
+
+
+def _soltar(soltas, quem: str, agora: float) -> None:
+    for c, m, cat_r, tipo in soltas:
         if _modo() == SOMBRA:
             log_ded.info(f"👻 [CURADORIA_SOMBRA] {_nome(c)} id={m} cat={cat_r} — o aval "
-                         f"de {_nome(chat)} soltaria")
+                         f"de {_nome(quem)} soltaria")
             db_curadoria_desfecho(c, m, LIBERADA, agora)
             continue
-        _agendar(_liberar(c, m, cat_r))
+        _agendar(_liberar(c, m, cat_r, tipo))
 
 
-async def _liberar(chat: str, msg_id: int, cat: str) -> None:
-    """Entrega a segurada ao ponto de entrada como mensagem nova (via
-    CURADORIA). NA HORA: a mensagem guardada quando foi segurada (ou na
-    última edição) sai sem nova consulta ao Telegram. Sem ela na memória
-    (reinício), é buscada na fonte. A fonte apagou: nada sai. O portão a
-    reconhece pelo estado `liberando` e a deixa seguir."""
-    guardada = _SEGURADAS.pop((chat, msg_id), None)
+async def _liberar(chat: str, msg_id: int, cat: str, tipo: str = NOVA) -> None:
+    """Entrega a versão segurada ao ponto de entrada (via CURADORIA): como
+    mensagem NOVA (nunca publicada) ou como EDIÇÃO (alteração pendente de
+    post já publicado — o caminho normal de edição atualiza o mesmo post).
+    NA HORA: a versão guardada na memória (a última que a fonte mandou) sai
+    sem nova consulta ao Telegram; sem ela (reinício), é buscada na fonte.
+    A fonte apagou: nada sai. A cópia da memória só sai da memória quando o
+    portão a aceita (uma reentrega ainda a encontra)."""
+    guardada = _SEGURADAS.get((chat, msg_id))
     m = guardada[0] if guardada else None
     if origem_apagada.apagada(chat, msg_id):
         m, apagada = None, True
@@ -536,12 +792,16 @@ async def _liberar(chat: str, msg_id: int, cat: str) -> None:
     if m is None:
         log_ded.info(f"🗑 [CURADORIA_AUSENTE] {_nome(chat)} id={msg_id} — sumiu da fonte "
                      f"antes de soltar; nada vai ao canal")
+        _soltar_memoria((chat, msg_id))
         db_curadoria_desfecho(chat, msg_id, AUSENTE, time.time())
         return
-    log_ded.info(f"🔓 [CURADORIA_SOLTA] {_nome(chat)} id={msg_id} cat={cat} — aval chegou; "
-                 f"volta ao ponto de entrada{'' if guardada else ' (buscada na fonte)'}")
+    edicao = tipo == EDICAO
+    log_ded.info(f"🔓 [CURADORIA_{'EDICAO_SOLTA' if edicao else 'SOLTA'}] {_nome(chat)} "
+                 f"id={msg_id} cat={cat} — volta ao ponto de entrada como "
+                 f"{'EDIÇÃO (o mesmo post)' if edicao else 'mensagem nova'}"
+                 f"{'' if guardada else ' (buscada na fonte)'}")
     try:
-        await _estado["despachar"](EventoRecuperado(m, via=VIA), is_edit=False)
+        await _estado["despachar"](EventoRecuperado(m, via=VIA), is_edit=edicao)
     except asyncio.CancelledError:
         raise
     except Exception as e:                              # noqa: BLE001
@@ -554,11 +814,87 @@ def _retomar() -> None:
     """Liberações interrompidas por um reinício: as ainda dentro da janela
     voltam a ser entregues (o banco renova a prova)."""
     agora = time.time()
-    for chat, mid, cat in db_curadoria_retomar(
+    for chat, mid, cat, tipo in db_curadoria_retomar(
             agora - _janela() - _ATRASO_MAX_S - _PRAZO_LIBERACAO_S, agora):
         log_ded.info(f"🔁 [CURADORIA_RETOMADA] {_nome(chat)} id={mid} — liberação "
                      f"interrompida pelo reinício")
-        _agendar(_liberar(chat, mid, cat))
+        _agendar(_liberar(chat, mid, cat, tipo))
+
+
+def _reentregar_presas() -> None:
+    """Reinjeções marcadas que não chegaram ao portão em _PRESA_S (a prova
+    não foi lida — banco —, a normalização falhou, a fila perdeu): entregues
+    de novo, até _MAX_REENTREGAS vezes. Reentrega a mais é inofensiva: a
+    segunda chega ao portão como OBSOLETA ou à admissão sem prova."""
+    agora = time.time()
+    for chat, mid, cat, tipo in db_curadoria_retomar(
+            agora - _janela() - _ATRASO_MAX_S - _PRAZO_LIBERACAO_S, agora,
+            presas_desde=agora - _PRESA_S):
+        k = (chat, mid)
+        n = _reentregas.get(k, 0) + 1
+        if n > _MAX_REENTREGAS:
+            _soltar_memoria(k)
+            db_curadoria_desfecho(chat, mid, FALHOU, agora)
+            log_ded.warning(f"⚠️ [CURADORIA_LIBERACAO_FALHOU] {_nome(chat)} id={mid} — "
+                            f"{_MAX_REENTREGAS} reentregas sem chegar ao portão")
+            continue
+        _reentregas[k] = n
+        log_ded.info(f"🔁 [CURADORIA_REENTREGA] {_nome(chat)} id={mid} — a reinjeção não "
+                     f"chegou ao portão em {_PRESA_S:g}s; entrega {n}/{_MAX_REENTREGAS}")
+        _agendar(_liberar(chat, mid, cat, tipo))
+
+
+async def _repor_em(atraso: float) -> None:
+    global _repor_marcado
+    try:
+        await asyncio.sleep(atraso)
+        _repor_pendentes()
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:                              # noqa: BLE001
+        log_ded.warning(f"⚠️ curadoria: repor pendentes ({type(e).__name__}: {e}) — a "
+                        f"próxima rodada tenta de novo")
+    finally:
+        _repor_marcado = False
+
+
+def _repor_pendentes() -> None:
+    """Banco de volta: grava os avais que ficaram na memória e devolve ao
+    ponto de entrada (prova `reavaliando`) as versões bloqueadas — o portão
+    as avalia de novo. Banco ainda fora: tenta na próxima rodada. O que
+    passou da janela sai da memória sem ir ao canal."""
+    agora = time.time()
+    for k, p in list(_PENDENTES.items()):
+        if agora > p["limite"]:
+            _PENDENTES.pop(k, None)
+            _SEGURADAS.pop(k, None)
+            log_ded.error(f"⌛ [CURADORIA_PENDENTE_EXPIROU] {_nome(k[0])} id={k[1]} — a "
+                          f"janela fechou com ela só na memória; NÃO vai ao canal")
+    for k, (chaves, cat, ts_aval) in list(_AVAIS_PENDENTES.items()):
+        if ts_aval < agora - 2 * _janela() - _ATRASO_MAX_S:
+            _AVAIS_PENDENTES.pop(k, None)
+            continue
+        soltas = db_curadoria_registrar_aval(chaves, k[0], k[1], ts_aval, _janela(),
+                                             agora - _janela() - _ATRASO_MAX_S, agora)
+        if soltas is None:
+            return                  # banco ainda fora
+        _AVAIS_PENDENTES.pop(k, None)
+        log_ded.info(f"✅ [CURADORIA_AVAL_GRAVADO] {_nome(k[0])} id={k[1]} produtos={chaves} "
+                     f"— estava só na memória; solta="
+                     f"{[f'{_nome(c)}/{m}' for c, m, _, _ in soltas]}")
+        _soltar(soltas, k[0], agora)
+    for k, p in list(_PENDENTES.items()):
+        tipo = EDICAO if (p["is_edit"] and destino_vivo_de_origem(k[0], k[1])) else NOVA
+        ok = db_curadoria_reavaliar(k[0], k[1], tipo, p["cat"], p["ts_msg"], agora)
+        if ok is None:
+            return                  # banco ainda fora
+        _PENDENTES.pop(k, None)
+        if ok:
+            log_ded.info(f"🔁 [CURADORIA_REAVALIA] {_nome(k[0])} id={k[1]} — o banco voltou; "
+                         f"a versão bloqueada volta ao portão")
+            _agendar(_liberar(k[0], k[1], p["cat"], tipo))
+        else:
+            _SEGURADAS.pop(k, None)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -690,19 +1026,28 @@ async def _identificar(links: List[str]) -> Tuple[List[str], bool]:
 
 
 async def _varrer() -> None:
-    """Lê os canais de aval a cada _VARREDURA_S (não depende de a conta
-    seguir o canal nem de o Telegram entregar o update) e expira as
-    seguradas que passaram da janela (depois da leitura)."""
+    """A cada _VARREDURA_S: devolve o que ficou na memória com o banco fora,
+    lê os canais de aval (não depende de a conta seguir o canal nem de o
+    Telegram entregar o update), reentrega as reinjeções paradas e expira
+    as seguradas que passaram da janela (depois da leitura)."""
     while True:
         await asyncio.sleep(_VARREDURA_S)
         if g._encerrando or not _aberto:
             return
+        try:
+            _repor_pendentes()
+        except Exception as e:                          # noqa: BLE001
+            log_ded.warning(f"⚠️ curadoria: repor pendentes ({type(e).__name__})")
         # Primeiro LÊ o aval, depois expira: o aval desta rodada nunca
         # perde para a expiração da mesma rodada.
         for chat_id, ent in list(_estado["avais"].items()):
             if g._encerrando or not _aberto:
                 return
             await _varrer_canal(chat_id, ent)
+        try:
+            _reentregar_presas()
+        except Exception as e:                          # noqa: BLE001
+            log_ded.warning(f"⚠️ curadoria: reentregar ({type(e).__name__})")
         try:
             _expirar()
         except Exception as e:                          # noqa: BLE001
@@ -757,14 +1102,20 @@ async def _varrer_canal(chat_id: int, ent) -> None:
 def _expirar() -> None:
     agora = time.time()
     sombra = _modo() == SOMBRA
-    velho = time.monotonic() - (_janela() + _ATRASO_MAX_S + _PRAZO_LIBERACAO_S)
-    for k in [k for k, (_m, t) in _SEGURADAS.items() if t < velho]:
+    velho = time.monotonic() - (_janela() + _ATRASO_MAX_S + _PRAZO_LIBERACAO_S + _PRESA_S
+                                * _MAX_REENTREGAS)
+    for k in [k for k, (_m, t) in _SEGURADAS.items() if t < velho and k not in _PENDENTES]:
         _SEGURADAS.pop(k, None)
-    for chat, mid, cat in db_curadoria_expirar(agora - _janela() - _ATRASO_MAX_S, agora):
-        _SEGURADAS.pop((chat, mid), None)
+        _reentregas.pop(k, None)
+    for chat, mid, cat, tipo in db_curadoria_expirar(agora - _janela() - _ATRASO_MAX_S, agora):
+        _soltar_memoria((chat, mid))
         if sombra:
             log_ded.info(f"👻 [CURADORIA_SOMBRA] {_nome(chat)} id={mid} cat={cat} — "
                          f"{_janela():g}s sem aval: no ATIVO não iria ao canal")
+        elif tipo == EDICAO:
+            log_ded.info(f"⌛ [CURADORIA_EDICAO_EXPIROU] {_nome(chat)} id={mid} cat={cat} — "
+                         f"{_janela():g}s sem aval do Fada/Nerd: a alteração pendente não "
+                         f"vai ao ar; o post segue com o produto aprovado")
         else:
             log_ded.info(f"⌛ [CURADORIA_EXPIROU] {_nome(chat)} id={mid} cat={cat} — "
                          f"{_janela():g}s sem aval do Fada/Nerd; não vai ao canal")

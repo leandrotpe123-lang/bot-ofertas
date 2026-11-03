@@ -38,6 +38,7 @@ def db_limpar():
             # retida bastam para diagnóstico ("por que não passou?").
             db.execute("DELETE FROM curadoria_aval   WHERE ts<?", (agora - 86400,))
             db.execute("DELETE FROM curadoria_retida WHERE ts<?", (agora - 3 * 86400,))
+            db.execute("DELETE FROM curadoria_chave  WHERE ts_entrada<?", (agora - 3 * 86400,))
         if len(_raw_cache) > 3000:
             for k in list(_raw_cache.keys())[:1000]:
                 del _raw_cache[k]
