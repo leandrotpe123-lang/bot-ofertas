@@ -24,8 +24,10 @@ A REGRA
   · AVALISTAS: o Fada Promoções (fonte comum: o post dele sai normal E é
     aval — config.CURADORIA_AVALISTAS_FONTE) e o Nerd Ofertas (canal só de
     sinal, config.GRUPOS_AVAL: o bot só LÊ; nada dele entra na fila nem vai
-    ao canal). Fada dos Cupons e Oferta Convertida são isentas, mas não dão
-    aval;
+    ao canal). O aval dos DOIS é lido do post ORIGINAL, sem afiliar
+    (_observar_aval): o do Fada não depende de a afiliação do post dele dar
+    certo — se ela falhar, o post do Fada pode não sair, mas o aval fica.
+    Fada dos Cupons e Oferta Convertida são isentas, mas não dão aval;
   · IDENTIDADE = o conjunto de produtos da VERSÃO ATUAL da mensagem (link
     de produto, só nas lojas de identidade exata — config.
     CURADORIA_LOJAS_AVAL: ASIN da Amazon, MLB do Mercado Livre, loja+item
@@ -111,9 +113,10 @@ ROBUSTEZ
     (id + edit_date) é lida uma vez, inteira: o produto que permanece
     conserva a data, o acrescentado (ou que volta) entra pelo edit_date;
     update atrasado de versão mais velha é ignorado; leitura que falha em
-    parte não tira produto. A leitura a cada _VARREDURA_S — sempre a página
-    mais recente, que traz o novo E a edição — é a rede de segurança
-    (update perdido) e respeita FloodWait; cada rodada LÊ o aval antes de
+    parte não tira produto. A leitura a cada _VARREDURA_S — TODA a janela,
+    do mais novo ao mais velho, no boot e em toda rodada (rajada de
+    qualquer tamanho até o teto de segurança, que tem log) — é a rede de
+    segurança (update perdido) e respeita FloodWait; cada rodada LÊ o aval antes de
     expirar; o aval visto com até _ATRASO_MAX_S de atraso ainda solta;
   · identificação do aval que falhou (rede, encurtador que não abriu) é
     refeita (_REPETIR_S); a busca da segurada na fonte também (_BUSCA_
@@ -178,11 +181,14 @@ _ATRASO_MAX_S = 120.0
 # Validade da prova `liberando`/`reavaliando` para a admissão: a reinjeção
 # acontece em segundos depois de marcada.
 _PRAZO_LIBERACAO_S = 120.0
-# Leitura do canal de aval (rede de segurança do handler): a cada 15 s, até
-# 20 mensagens por página e 5 páginas por rodada.
+# Leitura dos avalistas (rede de segurança do handler): a cada 15 s, em
+# páginas de 20, TUDO o que está dentro da janela (_janela + _ATRASO_MAX_S)
+# — do mais novo ao mais velho. _PAGINAS_MAX só é teto de segurança
+# (1.000 mensagens em ~7 min: acima do que um canal consegue postar); se for
+# atingido, o log diz.
 _VARREDURA_S = 15.0
 _LOTE = 20
-_PAGINAS = 5
+_PAGINAS_MAX = 50
 _VISTOS_MAX = 2000
 _DRENO_S = 5.0
 # LISTA: a partir de quantos produtos DISTINTOS, cada um com preço próprio,
@@ -218,12 +224,14 @@ def _janela() -> float:
     return float(config.CURADORIA_JANELA_S)
 
 
+# "avais": canais SÓ DE SINAL (Nerd) — nunca publicam; "lidos": todo canal de
+# onde o aval é LIDO sem afiliar (o Nerd e o Fada Promoções, que também é
+# fonte e publica pelo caminho normal).
 _estado: dict = {"cliente": None, "despachar": None, "fontes": {}, "avais": {},
-                 "varredura": None}
+                 "lidos": {}, "varredura": None}
 _TAREFAS: set = set()
 _aberto = False
 _vistos: Dict[tuple, None] = {}
-_maior: Dict[int, int] = {}
 _falha_varredura: Dict[int, bool] = {}
 _pausa_ate: Dict[int, float] = {}
 _tentativas: Dict[tuple, int] = {}
@@ -293,8 +301,12 @@ def instalar(cliente, fontes: Iterable, avais: Iterable,
     _estado["cliente"], _estado["despachar"] = cliente, despachar
     _estado["fontes"] = {get_peer_id(e): e for e in fontes}
     _estado["avais"] = {get_peer_id(e): e for e in avais}
+    # O Fada Promoções (pelo ID real, entre as fontes resolvidas) é LIDO como
+    # avalista pelo mesmo caminho do Nerd — sem afiliar: o aval dele não
+    # depende de a afiliação do post dele dar certo.
+    fada = [e for e in fontes if get_peer_id(e) in config.CURADORIA_AVALISTAS_FONTE]
+    _estado["lidos"] = {get_peer_id(e): e for e in [*avais, *fada]}
     _vistos.clear()
-    _maior.clear()
     _pausa_ate.clear()
     _tentativas.clear()
     _ultima_versao.clear()
@@ -305,11 +317,13 @@ def instalar(cliente, fontes: Iterable, avais: Iterable,
     _falhas.clear()
     _repor_marcado = False
     _aberto = True
-    if avais:
-        # Mensagem NOVA e EDIÇÃO do canal de aval: a edição que acrescenta
-        # (ou troca) o link de produto é aval pela data dela.
-        cliente.add_event_handler(_ao_aval, events.NewMessage(chats=avais))
-        cliente.add_event_handler(_ao_aval, events.MessageEdited(chats=avais))
+    lidos_ent = list(_estado["lidos"].values())
+    if lidos_ent:
+        # Mensagem NOVA e EDIÇÃO dos avalistas: a edição que acrescenta (ou
+        # troca) o link de produto é aval pela data dela. No Fada, estes
+        # handlers só LEEM o aval; a publicação dele é a do handler de fonte.
+        cliente.add_event_handler(_ao_aval, events.NewMessage(chats=lidos_ent))
+        cliente.add_event_handler(_ao_aval, events.MessageEdited(chats=lidos_ent))
     # Conferência: o ID configurado é a autoridade; o @ só confirma.
     por_id = {get_peer_id(e): (getattr(e, "username", None) or "").lower() for e in fontes}
     for nome, cid in config.GRUPO_ID.items():
@@ -328,9 +342,12 @@ def instalar(cliente, fontes: Iterable, avais: Iterable,
         log_ded.error(f"❌ curadoria: canal de aval {['@' + c for c in faltam]} NÃO resolvido "
                       f"no boot — sem o aval dele (só o Fada Promoções solta); confira o @ "
                       f"e se a conta segue o canal")
+    if not fada:
+        log_ded.error(f"❌ curadoria: o Fada Promoções ({sorted(config.CURADORIA_AVALISTAS_FONTE)}) "
+                      f"não está entre as fontes resolvidas — sem o aval dele")
     log_ded.info(f"🎯 curadoria {_modo()} | janela={_janela():g}s | fontes: {papeis} | "
-                 f"aval só-sinal: {lidos or 'nenhum'} | lojas: "
-                 f"{sorted(config.CURADORIA_LOJAS_AVAL)}")
+                 f"aval só-sinal: {lidos or 'nenhum'} | aval lido sem afiliar: "
+                 f"{sorted(_estado['lidos'])} | lojas: {sorted(config.CURADORIA_LOJAS_AVAL)}")
     _retomar()
     t = asyncio.get_running_loop().create_task(_varrer(), context=contextvars.Context())
     _estado["varredura"] = t
@@ -487,10 +504,9 @@ def portao(norm, enr, is_edit: bool, mensagem=None, texto_original: str = "",
             log_ded.error(f"❌ curadoria: mensagem do canal de aval {_nome(chat_id)} no "
                           f"funil de publicação — barrada")
             return False
-        if chat_id in config.CURADORIA_AVALISTAS_FONTE:
-            _aval_da_fonte(norm, enr, mensagem)
-            return True
         if chat_id in config.CURADORIA_ISENTOS:
+            # Fada Promoções incluído: publica normal. O aval dele é LIDO do
+            # post original, sem afiliar (_observar_aval) — não daqui.
             return True
         retentora = True
         return _portao_retentora(norm, enr, is_edit, mensagem, texto_original,
@@ -704,24 +720,8 @@ def reinjecao(event) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────
-# AVAL — Fada Promoções pelo portão; Nerd pelo canal de aval
+# AVAL — lido do post ORIGINAL do Nerd e do Fada, sem afiliar
 # ─────────────────────────────────────────────────────────────────
-def _aval_da_fonte(norm, enr, mensagem) -> None:
-    """O post do Fada Promoções (isento) também é aval: cada produto vale
-    pela data em que entrou no post (a da mensagem, ou o edit_date da
-    edição que o trouxe). Nunca bloqueia o post do Fada."""
-    try:
-        if getattr(enr, "tipo", None) != "produto":
-            return
-        chaves = _chaves(getattr(norm, "idents", None))
-        cat = _categoria_aval(getattr(norm, "texto_analise", "") or "")
-        if chaves and cat:
-            _registrar_aval(str(norm.chat), int(norm.msg_id), chaves, cat, _datas(mensagem)[1])
-    except Exception as e:                              # noqa: BLE001
-        log_ded.error(f"❌ curadoria: aval do Fada não registrado ({type(e).__name__}: {e})",
-                      exc_info=True)
-
-
 def _registrar_aval(chat: str, msg_id: int, chaves: List[str], cat: str,
                     ts_aval: float, parcial: bool = False) -> None:
     """Grava a versão atual da mensagem do avalista (só as lojas de
@@ -976,7 +976,7 @@ async def _observar_aval(chat_id: int, message, repeticao: bool = False,
         corrige na rodada seguinte, sem aval duplicado;
       · nova tentativa (`repeticao`) de versão que já não é a aplicada:
         ignorada."""
-    if chat_id not in _estado["avais"]:
+    if chat_id not in _estado["lidos"]:
         return
     mid = int(getattr(message, "id", 0) or 0)
     versao = _versao(message)
@@ -1121,7 +1121,7 @@ async def _varrer() -> None:
             log_ded.warning(f"⚠️ curadoria: repor pendentes ({type(e).__name__})")
         # Primeiro LÊ o aval, depois expira: o aval desta rodada nunca
         # perde para a expiração da mesma rodada.
-        for chat_id, ent in list(_estado["avais"].items()):
+        for chat_id, ent in list(_estado["lidos"].items()):
             if g._encerrando or not _aberto:
                 return
             await _varrer_canal(chat_id, ent)
@@ -1136,37 +1136,34 @@ async def _varrer() -> None:
 
 
 async def _varrer_canal(chat_id: int, ent) -> None:
+    """Uma rodada de leitura de um avalista: TODAS as mensagens dentro da
+    janela, da mais nova à mais velha, página a página, até a mais velha da
+    página sair da janela — no boot e em toda rodada (rajada de qualquer
+    tamanho, edição de qualquer mensagem da janela). A mesma versão não é
+    relida (_observar_aval)."""
     cliente = _estado["cliente"]
-    maior = _maior.get(chat_id)
     if time.monotonic() < _pausa_ate.get(chat_id, 0.0):
         return                      # FloodWait pedido pelo Telegram: respeita
     try:
-        # A 1ª página é SEMPRE a mais recente (as últimas _LOTE mensagens):
-        # traz o que é novo E a edição de mensagem já vista — a versão
-        # editada é outra versão e é relida. As páginas seguintes só vêm
-        # quando a 1ª é toda nova (rajada maior que _LOTE).
         lote: list = []
         teto = None
-        for _ in range(_PAGINAS):
+        for _ in range(_PAGINAS_MAX):
             kw = {"limit": _LOTE}
             if teto is not None:
                 kw["max_id"] = teto
-                if maior is not None:
-                    kw["min_id"] = maior
             pagina = [m for m in (await cliente.get_messages(ent, **kw) or [])
                       if m is not None]
             lote += pagina
             if len(pagina) < _LOTE:
                 break
             mais_velha = min(pagina, key=lambda m: m.id)
-            if maior is None:
-                # 1ª leitura (boot): continua até cobrir a janela — uma
-                # rajada maior que _LOTE durante o reinício não perde aval.
-                if _idade_seg(getattr(mais_velha, "date", None)) > _janela() + _ATRASO_MAX_S:
-                    break
-            elif mais_velha.id <= maior:
-                break
+            if _idade_seg(getattr(mais_velha, "date", None)) > _janela() + _ATRASO_MAX_S:
+                break                       # a janela inteira foi lida
             teto = mais_velha.id
+        else:
+            log_ded.error(f"❌ [CURADORIA_VARREDURA_LIMITE] {_nome(chat_id)} — mais de "
+                          f"{_PAGINAS_MAX * _LOTE} mensagens na janela: a leitura parou no "
+                          f"teto de segurança; as mais velhas dependem do handler")
     except asyncio.CancelledError:
         raise
     except Exception as e:                              # noqa: BLE001
@@ -1183,10 +1180,6 @@ async def _varrer_canal(chat_id: int, ent) -> None:
         return
     if _falha_varredura.pop(chat_id, False):
         log_ded.info(f"🎯 curadoria: varredura de {_nome(chat_id)} voltou")
-    if lote:
-        _maior[chat_id] = max([maior or 0] + [m.id for m in lote])
-    elif maior is None:
-        _maior[chat_id] = 0
     for m in sorted(lote, key=lambda x: x.id):
         if getattr(m, "action", None) is None:
             # O que o servidor devolve é o conteúdo ATUAL: desempata.

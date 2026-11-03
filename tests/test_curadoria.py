@@ -136,6 +136,11 @@ Versão do Nerd = edit_date + assinatura do conteúdo:
   69  nova tentativa de versão superada no mesmo segundo é ignorada
   70  reavaliação de robustez: memória sem vazamento, canal de aval não
       resolvido é erro, boot cobre a janela na rajada
+Pendências finais:
+  71  o aval do Fada é lido do post original sem afiliar: a afiliação do
+      post do Fada falhar não tira o aval; Fada dos Cupons não dá aval
+  72  toda rodada da varredura cobre a janela inteira (150 no boot, 130
+      depois); fora da janela para; teto de segurança tem log
 
 Execução (standalone, stdlib + Telethon):  python3 tests/test_curadoria.py
 """
@@ -363,15 +368,38 @@ def novo_id():
     return _MID["n"]
 
 
+_VERSAO_FADA = {"n": 0}
+
+
 async def chega(mundo, canal, texto, idents, *, mid=None, idade_s=5.0, editada=False,
-                edit_idade_s=0.0):
-    """Uma mensagem da fonte chega pelo handler (NewMessage/MessageEdited)."""
+                edit_idade_s=0.0, fada_normaliza=True):
+    """Uma mensagem da fonte chega como o Telegram a entrega: ao handler de
+    FONTE (processar) e, se o canal é avalista lido (Fada Promoções), também
+    ao handler de AVAL — que lê o post original sem afiliar. No Fada, o post
+    traz um link de teste que leva aos produtos dele (a identificação real
+    fica no teste 32). `fada_normaliza=False`: a afiliação/normalização do
+    post falha (o post não sai), mas o aval é lido do mesmo jeito."""
     mid = mid or novo_id()
-    registrar_norm(canal, mid, texto, idents)
+    lido = PEER[canal] in curadoria._estado["lidos"]
+    if lido:
+        _VERSAO_FADA["n"] += 1
+        link = f"https://fada.teste/p/{mid}/{_VERSAO_FADA['n']}"
+        IDENTS_AVAL[link] = [f"{p}|{i}" for p, i, t in idents if i and t == "produto"]
+        texto = f"{texto}\n\n🛒 {link}"
+    if fada_normaliza or not lido:
+        registrar_norm(canal, mid, texto, idents)
+    else:
+        NORMS.pop((CHAT[canal], mid), None)
     m = mensagem(canal, mid, texto, idade_s=idade_s, editada=editada,
                  edit_idade_s=edit_idade_s)
     mundo.servidor[(PEER[canal], mid)] = m
-    await orchestrator.processar(tl_events.NewMessage.Event(m), is_edit=editada)
+    ev = (tl_events.MessageEdited.Event(m) if editada else tl_events.NewMessage.Event(m))
+    await orchestrator.processar(ev, is_edit=editada)
+    if lido:
+        for cb, b in mundo.handlers:
+            if (cb is curadoria._ao_aval and isinstance(b, tl_events.MessageEdited) == editada
+                    and PEER[canal] in {utils.get_peer_id(c) for c in b.chats}):
+                await cb(ev)
     await drenar()
     return mid
 
@@ -1268,8 +1296,9 @@ def test_30_nerd_nunca_publica(r):
         await drenar()
         s["funil"] = (len(posts(mundo)), vinculo("nerdofertas", mid))
     cenario(corpo)
-    r.check(s["handlers"] == [("_ao_aval", "NewMessage", [PEER["nerdofertas"]]),
-                              ("_ao_aval", "MessageEdited", [PEER["nerdofertas"]])],
+    lidos = sorted([PEER["nerdofertas"], PEER["fadapromos"]])
+    r.check(s["handlers"] == [("_ao_aval", "NewMessage", lidos),
+                              ("_ao_aval", "MessageEdited", lidos)],
             "30.handlers_so_observam_nova_e_edicao", str(s["handlers"]))
     r.check(s["sem_segurada"] == ([], []), "30.nerd_sozinho_nao_despacha_nada",
             str(s["sem_segurada"]))
@@ -1502,7 +1531,8 @@ def test_34_aval_visto_atrasado_nao_expira_antes(r):
     r.check(s["antes"] == "retida" and s["solta"] == ("liberada", 1),
             "34.aval_visto_180s_depois_ainda_solta", str((s["antes"], s["solta"])))
     r.check(s["tarde"] == ("expirada", 1), "34.depois_da_folga_expira", str(s["tarde"]))
-    r.check(s["ordem"] == ["ler", "expirar"], "34.le_antes_de_expirar", str(s["ordem"]))
+    r.check(s["ordem"] == ["ler", "ler", "expirar"], "34.le_os_avalistas_antes_de_expirar",
+            str(s["ordem"]))
     r.check(curadoria._ATRASO_MAX_S == 120 and curadoria._VARREDURA_S == 15,
             "34.folga_120s_cobre_a_varredura_de_15s")
 
@@ -2019,7 +2049,7 @@ def test_47_excecao_interna_nunca_autoriza(r):
                 await chega(mundo, "fadapromos", GPU_FADA, amz("B0EXC00003"))
                 s["x"] = (len(posts(mundo)), (CHAT["promotom"], p) in curadoria._PENDENTES,
                           len(logs.tem("[CURADORIA_FALHA_INTERNA]")),
-                          len(logs.tem("aval do Fada não registrado")))
+                          len(logs.tem("não lido (RuntimeError)")))
                 k = (CHAT["promotom"], p)
                 curadoria._falhas[k] = curadoria._MAX_FALHAS
                 await chega(mundo, "promotom", GPU + "\n-CUPOM: X", amz("B0EXC00001"), mid=p,
@@ -2968,7 +2998,6 @@ def test_70_reavaliacao_de_robustez(r):
                 for i in range(44)]
         hist.insert(0, msg_nerd(799999, GPU_NERD, amz("B0ROBU0002"), idade_s=250))  # a mais velha
         mundo.historico[peer] = hist
-        curadoria._maior.pop(peer, None)
         await curadoria._varrer_canal(peer, ent)
         await drenar()
         s["rajada"] = (retida("promotom", alvo), len(mundo.varreduras))
@@ -2988,6 +3017,100 @@ def test_70_reavaliacao_de_robustez(r):
     logs = asyncio.run(boot())
     r.check(len(logs.tem("canal de aval ['@nerdofertas'] NÃO resolvido")) == 1,
             "70b.canal_de_aval_nao_resolvido_e_erro", str(logs.linhas)[-300:])
+
+
+# ══════════════════════════════════════════════════════════════════
+# PENDÊNCIAS FINAIS — aval do Fada sem afiliar; varredura cobre a janela
+# ══════════════════════════════════════════════════════════════════
+def test_71_aval_do_fada_nao_depende_da_afiliacao(r):
+    """O aval do Fada é lido do post ORIGINAL, sem afiliar: se a afiliação
+    (normalização) do post do Fada falha e ele não sai, a segurada do
+    Promotom com o mesmo produto é solta assim mesmo. O portão não grava
+    mais aval do Fada; o post dele segue normal quando a afiliação dá
+    certo. Fada dos Cupons continua sem dar aval."""
+    s = {}
+
+    async def corpo(mundo):
+        quem = []
+        real = curadoria.db_curadoria_registrar_aval
+
+        def espia(*a, **k):
+            import inspect
+            quem.append(inspect.stack()[2].function)
+            return real(*a, **k)
+        curadoria.db_curadoria_registrar_aval = espia
+        try:
+            p = await chega(mundo, "promotom", GPU, amz("B0FAFI0001"))
+            f = await chega(mundo, "fadapromos", GPU_FADA, amz("B0FAFI0001"),
+                            fada_normaliza=False)
+            s["afiliacao_falhou"] = (retida("promotom", p), len(posts(mundo)),
+                                     vinculo("promotom", p) == posts(mundo)[-1],
+                                     vinculo("fadapromos", f))
+            q = await chega(mundo, "fumotom", GPU, amz("B0FAFI0002"))
+            g2 = await chega(mundo, "fadapromos", GPU_FADA, amz("B0FAFI0002"))
+            s["normal"] = (retida("fumotom", q), vinculo("fadapromos", g2) is not None,
+                           vinculo("fadapromos", g2) == vinculo("fumotom", q))
+            t = await chega(mundo, "SamuelF3lipePromo", GPU, amz("B0FAFI0003"))
+            await chega(mundo, "fadadoscupons", GPU, amz("B0FAFI0003"))
+            s["cupons"] = retida("SamuelF3lipePromo", t)
+            s["quem"] = sorted(set(quem))
+        finally:
+            curadoria.db_curadoria_registrar_aval = real
+    cenario(corpo)
+    r.check(s["afiliacao_falhou"] == ("liberada", 1, True, None),
+            "71.afiliacao_do_fada_falhou_e_o_aval_vale", str(s["afiliacao_falhou"]))
+    r.check(s["normal"] == ("liberada", True, True), "71.fada_publica_normal_e_da_aval",
+            str(s["normal"]))
+    r.check(s["cupons"] == "retida", "71.fada_dos_cupons_nao_da_aval", str(s["cupons"]))
+    r.check(s["quem"] == ["_observar_aval"], "71.aval_so_pela_leitura_sem_afiliar",
+            str(s["quem"]))
+
+
+def test_72_varredura_cobre_a_janela_inteira(r):
+    """Toda rodada lê TODA a janela (no boot e depois): 150 mensagens do Nerd
+    dentro da janela — acima das 100 do teto antigo — e o aval mais velho é
+    achado; numa rodada seguinte, outra rajada de 130 também; mensagem fora
+    da janela para a leitura. Acima do teto de segurança, ERRO no log."""
+    s = {}
+
+    async def corpo(mundo):
+        peer, ent = PEER["nerdofertas"], ENT["nerdofertas"]
+        alvo = await chega(mundo, "promotom", GPU, amz("B0JAN150AA"))
+        hist = [msg_nerd(810000 + i, GPU_NERD, amz(f"B0R1{i:06d}"), idade_s=280 - i * 1.5)
+                for i in range(149)]
+        hist.insert(0, msg_nerd(809999, GPU_NERD, amz("B0JAN150AA"), idade_s=290))  # a mais velha
+        hist.insert(0, msg_nerd(809000, GPU_NERD, amz("B0FORAJAN1"), idade_s=900))  # fora
+        hist = [msg_nerd(700000 + i, GPU_NERD, [], idade_s=5000 - i)                  # antigas
+                for i in range(400)] + hist
+        mundo.historico[peer] = hist
+        mundo.varreduras.clear()
+        await curadoria._varrer_canal(peer, ent)
+        await drenar()
+        with _db() as db:
+            fora = db.execute("SELECT COUNT(*) FROM curadoria_aval WHERE chave=?",
+                              ("amazon|B0FORAJAN1",)).fetchone()[0]
+        s["boot"] = (retida("promotom", alvo), len(mundo.varreduras), fora)
+        alvo2 = await chega(mundo, "fumotom", GPU, amz("B0JAN130BB"))
+        rajada = [msg_nerd(820000 + i, GPU_NERD, amz(f"B0R2{i:06d}"), idade_s=60 - i * 0.3)
+                  for i in range(129)]
+        rajada.insert(0, msg_nerd(819999, GPU_NERD, amz("B0JAN130BB"), idade_s=70))
+        mundo.historico[peer] = hist + rajada
+        await curadoria._varrer_canal(peer, ent)
+        await drenar()
+        s["depois"] = retida("fumotom", alvo2)
+        real = curadoria._PAGINAS_MAX
+        curadoria._PAGINAS_MAX = 2
+        try:
+            with _Logs() as logs:
+                await curadoria._varrer_canal(peer, ent)
+            s["teto"] = len(logs.tem("[CURADORIA_VARREDURA_LIMITE]"))
+        finally:
+            curadoria._PAGINAS_MAX = real
+    cenario(corpo)
+    r.check(s["boot"][0] == "liberada" and 8 <= s["boot"][1] <= 9 and s["boot"][2] == 0,
+            "72.boot_le_a_janela_inteira_e_para_nela", str(s["boot"]))
+    r.check(s["depois"] == "liberada", "72.rodada_seguinte_tambem_cobre_rajada", str(s["depois"]))
+    r.check(s["teto"] == 1, "72.teto_de_seguranca_tem_log", str(s.get("teto")))
 
 
 if __name__ == "__main__":
