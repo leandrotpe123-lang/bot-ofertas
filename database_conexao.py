@@ -263,7 +263,7 @@ def _init_db():
             pendentes TEXT NOT NULL DEFAULT '[]', ts REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS curadoria_aval(
             chave TEXT NOT NULL, fonte TEXT NOT NULL, msg_id INTEGER NOT NULL,
-            ts REAL NOT NULL, PRIMARY KEY(chave, fonte, msg_id));
+            ts REAL NOT NULL, PRIMARY KEY(chave, fonte, msg_id, ts));
         CREATE TABLE IF NOT EXISTS curadoria_retida(
             chat TEXT NOT NULL, msg_id INTEGER NOT NULL,
             tipo TEXT NOT NULL DEFAULT 'nova', categoria TEXT NOT NULL,

@@ -69,9 +69,14 @@ async def processar(event, is_edit: bool = False) -> None:
             # antes da fila. Quem casa/evolui/sincroniza é a cadeia rio abaixo
             # (overlap V3 filtra por ciclo vivo). NÃO afeta NewMessage. Idade -1
             # não corta.
+            # [Curadoria] Única exceção: a edição PENDENTE que o aval soltou
+            # volta pelo MESMO ponto de entrada — passou por esta trava quando
+            # chegou (edit_date recente) e o aval pode vir até ~7 min depois;
+            # curadoria.reinjecao() exige via CURADORIA, prova no banco e a
+            # versão (edit_date) dentro da janela. Vida do post: rio abaixo.
             if is_edit:
                 idade = _idade_seg(event.message.date)
-                if idade > VIDA_OFERTA_S:
+                if idade > VIDA_OFERTA_S and not curadoria.reinjecao(event):
                     log_sys.info(
                         f"🧭 TL | id={event.message.id} chat={event.chat_id} | "
                         f"DESCARTE | motivo=EDIT_ANTIGO "

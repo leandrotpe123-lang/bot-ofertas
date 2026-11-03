@@ -45,7 +45,8 @@ A REGRA
     família dele) — segue normal. Produto NOVO de categoria vigiada passa
     pela mesma regra; sem aval, a edição fica PENDENTE e o post continua
     com o produto aprovado; o aval aplica a edição pelo caminho normal de
-    edição (o mesmo post, nunca um segundo);
+    edição (o mesmo post, nunca um segundo) — também depois de a mensagem
+    passar de 1 h (trava EDIT_ANTIGO), se a edição é recente e há a prova;
   · passam SEM aval (decisão do Léo, 03/11): LISTA de produtos distintos com
     preço próprio (variante de cor/tamanho/capacidade e vendedor não contam
     — curadoria_categoria.produtos_com_preco); frase de DESTAQUE no texto da
@@ -69,9 +70,11 @@ reinício ela é buscada na fonte. O portão só a deixa passar se o conjunto
 dela é exatamente o que o aval soltou.
 
 A reinjeção de mensagem NOVA tem até ~7 min: a trava de frescor (120 s) e
-a idempotência em memória a barrariam. `reinjecao()` é a única exceção, e
-exige as três provas juntas: via CURADORIA, estado `liberando` ou
-`reavaliando` marcado há menos de _PRAZO_LIBERACAO_S no banco, e mensagem
+a idempotência em memória a barrariam; a de EDIÇÃO pendente pode chegar
+quando a mensagem já passou de 1 h (trava EDIT_ANTIGO). `reinjecao()` é a
+única exceção às três travas, e exige as três provas juntas: via
+CURADORIA, estado `liberando` ou `reavaliando` marcado há menos de
+_PRAZO_LIBERACAO_S no banco, e a VERSÃO (edit_date, ou a data da mensagem)
 dentro da janela.
 
 ═══════════════════════════════════════════════════════════════════
@@ -94,18 +97,24 @@ ROBUSTEZ
 ═══════════════════════════════════════════════════════════════════
   · sem corrida: "há aval para esta versão?" (grava o conjunto atual) e
     "há segurada para este aval?" rodam cada uma numa transação;
-  · edição da segurada continua segurada (a janela do produto que já estava
-    lá não recomeça); produto novo entra com o edit_date dela; produto que
-    sai não conta; o que volta mantém a primeira entrada;
+  · edição da segurada continua segurada (a janela do produto que
+    PERMANECE não recomeça); produto novo entra com o edit_date dela;
+    produto que sai não conta; o que sai e VOLTA é ocorrência nova (data da
+    edição que o trouxe de volta: o aval da ocorrência antiga não vale);
   · a fonte apagou a segurada: nada sai (origem_apagada + busca na fonte);
   · reinício: avais e seguradas estão no banco; a liberação interrompida é
     retomada no boot; a que parou no caminho (_PRESA_S) é entregue de novo,
     até _MAX_REENTREGAS vezes; a leitura do canal de aval recomeça da
     janela;
-  · canal de aval: chega NA HORA pelo handler quando a conta segue o canal;
-    a leitura a cada _VARREDURA_S é a rede de segurança (update perdido,
-    conta que não segue) e respeita FloodWait; cada rodada LÊ o aval antes
-    de expirar; o aval visto com até _ATRASO_MAX_S de atraso ainda solta;
+  · canal de aval: mensagem NOVA e EDIÇÃO chegam NA HORA pelos handlers
+    (NewMessage e MessageEdited) quando a conta segue o canal; cada VERSÃO
+    (id + edit_date) é lida uma vez, inteira: o produto que permanece
+    conserva a data, o acrescentado (ou que volta) entra pelo edit_date;
+    update atrasado de versão mais velha é ignorado; leitura que falha em
+    parte não tira produto. A leitura a cada _VARREDURA_S — sempre a página
+    mais recente, que traz o novo E a edição — é a rede de segurança
+    (update perdido) e respeita FloodWait; cada rodada LÊ o aval antes de
+    expirar; o aval visto com até _ATRASO_MAX_S de atraso ainda solta;
   · identificação do aval que falhou (rede, encurtador que não abriu) é
     refeita (_REPETIR_S); a busca da segurada na fonte também (_BUSCA_
     REPETIR_S); falha persistente fecha sem inventar aval;
@@ -217,12 +226,15 @@ _maior: Dict[int, int] = {}
 _falha_varredura: Dict[int, bool] = {}
 _pausa_ate: Dict[int, float] = {}
 _tentativas: Dict[tuple, int] = {}
+# A versão mais recente já lida de cada mensagem do canal de aval: um update
+# atrasado de versão MAIS VELHA não desfaz o conjunto da mais nova.
+_ultima_versao: Dict[tuple, int] = {}
 # A versão segurada, como chegou (ou na última edição): (chat, msg) ->
 # (Message, instante). É o que sai na hora quando o aval chega.
 _SEGURADAS: Dict[tuple, Tuple[object, float]] = {}
 # Banco fora / exceção interna — SÓ NA MEMÓRIA, não durável:
 #   _PENDENTES       (chat, msg) -> {is_edit, cat, ts_msg, limite}
-#   _AVAIS_PENDENTES (fonte, msg) -> (chaves, cat, ts_aval)
+#   _AVAIS_PENDENTES (fonte, msg) -> (chaves, cat, ts_aval, parcial)
 _PENDENTES: "OrderedDict[tuple, dict]" = OrderedDict()
 _AVAIS_PENDENTES: "OrderedDict[tuple, tuple]" = OrderedDict()
 _reentregas: Dict[tuple, int] = {}
@@ -283,6 +295,7 @@ def instalar(cliente, fontes: Iterable, avais: Iterable,
     _maior.clear()
     _pausa_ate.clear()
     _tentativas.clear()
+    _ultima_versao.clear()
     _SEGURADAS.clear()
     _PENDENTES.clear()
     _AVAIS_PENDENTES.clear()
@@ -291,7 +304,10 @@ def instalar(cliente, fontes: Iterable, avais: Iterable,
     _repor_marcado = False
     _aberto = True
     if avais:
+        # Mensagem NOVA e EDIÇÃO do canal de aval: a edição que acrescenta
+        # (ou troca) o link de produto é aval pela data dela.
         cliente.add_event_handler(_ao_aval, events.NewMessage(chats=avais))
+        cliente.add_event_handler(_ao_aval, events.MessageEdited(chats=avais))
     # Conferência: o ID configurado é a autoridade; o @ só confirma.
     por_id = {get_peer_id(e): (getattr(e, "username", None) or "").lower() for e in fontes}
     for nome, cid in config.GRUPO_ID.items():
@@ -699,11 +715,14 @@ def _aval_da_fonte(norm, enr, mensagem) -> None:
 
 
 def _registrar_aval(chat: str, msg_id: int, chaves: List[str], cat: str,
-                    ts_aval: float) -> None:
-    """Grava o aval (só nas lojas de identidade exata) e solta as seguradas
-    com o MESMO produto na MESMA loja entrado até 300 s da data do aval.
-    Banco fora: o aval fica SÓ NA MEMÓRIA e é gravado quando o banco
-    voltar."""
+                    ts_aval: float, parcial: bool = False) -> None:
+    """Grava a versão atual da mensagem do avalista (só as lojas de
+    identidade exata) e solta as seguradas com o MESMO produto na MESMA loja
+    entrado até 300 s da data em que o produto entrou no avalista. `ts_aval`
+    é a data DESTA versão (edit_date na edição): vale para o produto
+    acrescentado ou reintroduzido; o que permanece conserva a data original
+    (database_curadoria). Banco fora: o aval fica SÓ NA MEMÓRIA e é gravado
+    quando o banco voltar."""
     agora = time.time()
     chaves = [c for c in chaves if c.split("|", 1)[0] in config.CURADORIA_LOJAS_AVAL]
     if not chaves:
@@ -712,9 +731,9 @@ def _registrar_aval(chat: str, msg_id: int, chaves: List[str], cat: str,
         return
     soltas = db_curadoria_registrar_aval(
         chaves, chat, msg_id, ts_aval, _janela(),
-        agora - _janela() - _ATRASO_MAX_S, agora)
+        agora - _janela() - _ATRASO_MAX_S, agora, parcial=parcial)
     if soltas is None:
-        _AVAIS_PENDENTES[(chat, msg_id)] = (chaves, cat, ts_aval)
+        _AVAIS_PENDENTES[(chat, msg_id)] = (chaves, cat, ts_aval, parcial)
         _AVAIS_PENDENTES.move_to_end((chat, msg_id))
         while len(_AVAIS_PENDENTES) > _MAX_AVAIS_PENDENTES:
             velho, _ = _AVAIS_PENDENTES.popitem(last=False)
@@ -870,12 +889,13 @@ def _repor_pendentes() -> None:
             _SEGURADAS.pop(k, None)
             log_ded.error(f"⌛ [CURADORIA_PENDENTE_EXPIROU] {_nome(k[0])} id={k[1]} — a "
                           f"janela fechou com ela só na memória; NÃO vai ao canal")
-    for k, (chaves, cat, ts_aval) in list(_AVAIS_PENDENTES.items()):
+    for k, (chaves, cat, ts_aval, parcial) in list(_AVAIS_PENDENTES.items()):
         if ts_aval < agora - 2 * _janela() - _ATRASO_MAX_S:
             _AVAIS_PENDENTES.pop(k, None)
             continue
         soltas = db_curadoria_registrar_aval(chaves, k[0], k[1], ts_aval, _janela(),
-                                             agora - _janela() - _ATRASO_MAX_S, agora)
+                                             agora - _janela() - _ATRASO_MAX_S, agora,
+                                             parcial=parcial)
         if soltas is None:
             return                  # banco ainda fora
         _AVAIS_PENDENTES.pop(k, None)
@@ -901,23 +921,39 @@ def _repor_pendentes() -> None:
 # CANAL DE AVAL (Nerd Ofertas) — só leitura
 # ─────────────────────────────────────────────────────────────────
 async def _ao_aval(event) -> None:
-    """Handler NewMessage dos canais de aval: o aval NA HORA (o Telegram só
-    entrega o update se a conta segue o canal). Só agenda e volta."""
+    """Handler NewMessage e MessageEdited dos canais de aval: o aval NA HORA
+    (o Telegram só entrega o update se a conta segue o canal). Só agenda e
+    volta: nada daqui entra no funil de publicação."""
     try:
         _agendar(_observar_aval(int(event.chat_id), event.message))
     except Exception as e:                              # noqa: BLE001
         log_ded.warning(f"⚠️ curadoria: aval do handler ({type(e).__name__})")
 
 
+def _versao(message) -> int:
+    """A versão da mensagem: 0 a original; o edit_date (s) de cada edição."""
+    editada = getattr(message, "edit_date", None)
+    return int(_ts(editada)) if editada else 0
+
+
 async def _observar_aval(chat_id: int, message, repeticao: bool = False) -> None:
-    """Uma mensagem do canal de aval: categoria vigiada + produto
-    identificado (sem afiliar) → aval. Cada mensagem é olhada uma vez
-    (handler e varredura podem trazer a mesma); se a identificação FALHOU
-    (rede, encurtador que não abriu), ela é refeita depois de _REPETIR_S.
-    Nada desta mensagem entra no funil de publicação."""
+    """Uma VERSÃO de mensagem do canal de aval (a original ou uma edição):
+    categoria vigiada + produto identificado (sem afiliar) → aval do
+    conteúdo ATUAL. Cada versão é olhada uma vez (handler e varredura podem
+    trazer a mesma); a edição é uma versão nova e é relida inteira — o
+    produto que permanece conserva a data, o acrescentado entra pelo
+    edit_date, nenhum aval anterior é duplicado (database_curadoria). Se a
+    identificação FALHOU (rede, encurtador que não abriu), ela é refeita
+    depois de _REPETIR_S. Nada desta mensagem entra no funil de
+    publicação."""
     if chat_id not in _estado["avais"]:
         return
-    chave = (chat_id, int(getattr(message, "id", 0) or 0))
+    chave = (chat_id, int(getattr(message, "id", 0) or 0), _versao(message))
+    if chave[2] < _ultima_versao.get(chave[:2], -1):
+        log_ded.info(f"🎯 [CURADORIA_AVAL_VERSAO_VELHA] {_nome(chat_id)} id={chave[1]} — "
+                     f"update atrasado de versão anterior à já lida; ignorado")
+        return
+    _ultima_versao[chave[:2]] = chave[2]
     if not repeticao:
         if chave in _vistos:
             return
@@ -925,32 +961,39 @@ async def _observar_aval(chat_id: int, message, repeticao: bool = False) -> None
         if len(_vistos) > _VISTOS_MAX:
             for k in list(_vistos)[:_VISTOS_MAX // 2]:
                 _vistos.pop(k, None)
+            for k in list(_ultima_versao)[:len(_ultima_versao) // 2]:
+                _ultima_versao.pop(k, None)
     try:
-        # Idade negativa = relógio local atrás do Telegram: é recente.
-        if _idade_seg(getattr(message, "date", None)) > _janela() + _ATRASO_MAX_S:
+        # A versão vale pela data DELA (a edição, pelo edit_date). Idade
+        # negativa = relógio local atrás do Telegram: é recente.
+        ref = getattr(message, "edit_date", None) or getattr(message, "date", None)
+        if _idade_seg(ref) > _janela() + _ATRASO_MAX_S:
             return                  # aval velho não solta nada
         texto = ingestao.texto_de(message)
         cat = _categoria_aval(texto)
         if not cat:
             return
         chaves, incerto = await _identificar(ingestao.links_de(texto))
-        if not chaves:
-            n = _tentativas.get(chave, 0)
-            if incerto and n < len(_REPETIR_S):
-                _tentativas[chave] = n + 1
-                log_ded.info(f"🎯 [CURADORIA_AVAL_REPETE] {_nome(chat_id)} id={chave[1]} "
-                             f"cat={cat} — identificação falhou; nova tentativa em "
-                             f"{_REPETIR_S[n]:g}s")
-                _agendar(_repetir_aval(chat_id, message, _REPETIR_S[n]))
-                return
+        n = _tentativas.get(chave, 0)
+        repete = incerto and n < len(_REPETIR_S)
+        if repete:
+            _tentativas[chave] = n + 1
+            log_ded.info(f"🎯 [CURADORIA_AVAL_REPETE] {_nome(chat_id)} id={chave[1]} "
+                         f"cat={cat} — identificação falhou{' em parte' if chaves else ''}; "
+                         f"nova tentativa em {_REPETIR_S[n]:g}s")
+            _agendar(_repetir_aval(chat_id, message, _REPETIR_S[n]))
+        else:
             _tentativas.pop(chave, None)
-            log_ded.info(f"🎯 [CURADORIA_AVAL_SEM_PRODUTO] {_nome(chat_id)} id={chave[1]} "
-                         f"cat={cat} — sem identidade exata de produto "
-                         f"({sorted(config.CURADORIA_LOJAS_AVAL)}"
-                         f"{', identificação falhou' if incerto else ''}); não é aval")
+        if not chaves:
+            if not repete:
+                log_ded.info(f"🎯 [CURADORIA_AVAL_SEM_PRODUTO] {_nome(chat_id)} "
+                             f"id={chave[1]} cat={cat} — sem identidade exata de produto "
+                             f"({sorted(config.CURADORIA_LOJAS_AVAL)}"
+                             f"{', identificação falhou' if incerto else ''}); não é aval")
             return
-        _tentativas.pop(chave, None)
-        _registrar_aval(str(chat_id), chave[1], chaves, cat, _ts(message.date))
+        # Leitura que falhou em parte: o produto não lido não é dado como
+        # removido da mensagem do avalista.
+        _registrar_aval(str(chat_id), chave[1], chaves, cat, _ts(ref), parcial=incerto)
     except asyncio.CancelledError:
         raise
     except Exception as e:                              # noqa: BLE001
@@ -1060,18 +1103,23 @@ async def _varrer_canal(chat_id: int, ent) -> None:
     if time.monotonic() < _pausa_ate.get(chat_id, 0.0):
         return                      # FloodWait pedido pelo Telegram: respeita
     try:
+        # A 1ª página é SEMPRE a mais recente (as últimas _LOTE mensagens):
+        # traz o que é novo E a edição de mensagem já vista — a versão
+        # editada é outra versão e é relida. As páginas seguintes só vêm
+        # quando a 1ª é toda nova (rajada maior que _LOTE).
         lote: list = []
         teto = None
         for _ in range(_PAGINAS):
             kw = {"limit": _LOTE}
-            if maior is not None:
-                kw["min_id"] = maior
             if teto is not None:
                 kw["max_id"] = teto
+                if maior is not None:
+                    kw["min_id"] = maior
             pagina = [m for m in (await cliente.get_messages(ent, **kw) or [])
                       if m is not None]
             lote += pagina
-            if maior is None or len(pagina) < _LOTE:
+            if (maior is None or len(pagina) < _LOTE
+                    or min(m.id for m in pagina) <= maior):
                 break
             teto = min(m.id for m in pagina)
     except asyncio.CancelledError:

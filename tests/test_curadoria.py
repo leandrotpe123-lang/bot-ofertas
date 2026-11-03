@@ -112,6 +112,21 @@ Auditoria forense (itens 1 a 4):
       versão
   57  o aprovado do post inclui a família; produto já publicado vale pela
       data original
+Última auditoria (edição no Nerd, reentrada, EDIT_ANTIGO):
+  58  o Nerd posta sem link e edita acrescentando o link: aval na hora pela
+      edição (também em mensagem antiga do Nerd editada agora)
+  59  o Nerd acrescenta B: A conserva a data, B entra pelo edit_date; rever
+      a versão não duplica aval
+  60  handler e varredura não duplicam a edição; a varredura acha a edição
+      que o handler perdeu; o Nerd nunca entra no funil
+  61  produto que sai e volta na fonte é ocorrência nova: aval antigo não a
+      solta; aval novo solta; o que permanece conserva a data
+  62  no Nerd, o produto que sai e volta ganha aval novo
+  63  EDIT_ANTIGO: a edição pendente aplicada depois de 1 h só com via
+      CURADORIA + prova no banco + edit_date recente; o resto continua
+      barrado
+  64  leitura parcial do Nerd não tira o produto nem dá data nova a ele
+  65  update atrasado de versão velha do Nerd é ignorado
 
 Execução (standalone, stdlib + Telethon):  python3 tests/test_curadoria.py
 """
@@ -856,8 +871,8 @@ def test_16_varredura_do_canal_de_aval(r):
     cenario(corpo)
     r.check(s["avais"] == ["amazon|B0VARRE002", "amazon|B0VARRE003"],
             "16.so_o_recente_e_o_novo_viram_aval", str(s["avais"]))
-    r.check(s["varreduras"][0][2] is None and s["varreduras"][1][2] == 700002,
-            "16.base_e_depois_so_o_novo", str(s["varreduras"]))
+    r.check([v[1:] for v in s["varreduras"]] == [(curadoria._LOTE, None, None)] * 2,
+            "16.sempre_a_pagina_mais_recente", str(s["varreduras"]))
     r.check(s["posts"] == [], "16.nada_do_nerd_publicado")
     r.check(s["chamadas"].count(700003) == 2, "16.handler_e_varredura_trazem_a_mesma",
             str(s["chamadas"]))
@@ -1227,7 +1242,8 @@ def test_30_nerd_nunca_publica(r):
             despachados.append((str(ev.chat_id), ev.message.id))
             await real(ev, is_edit=is_edit)
         curadoria._estado["despachar"] = espiao
-        s["handlers"] = [(cb.__name__, sorted(utils.get_peer_id(c) for c in ev.chats))
+        s["handlers"] = [(cb.__name__, type(ev).__name__,
+                          sorted(utils.get_peer_id(c) for c in ev.chats))
                          for cb, ev in mundo.handlers]
         await nerd(mundo, GPU_NERD, amz("B0NERDSO01"), pelo_handler=True)   # nada segurado
         s["sem_segurada"] = (list(despachados), list(posts(mundo)))
@@ -1243,8 +1259,9 @@ def test_30_nerd_nunca_publica(r):
         await drenar()
         s["funil"] = (len(posts(mundo)), vinculo("nerdofertas", mid))
     cenario(corpo)
-    r.check(s["handlers"] == [("_ao_aval", [PEER["nerdofertas"]])], "30.handler_so_observa",
-            str(s["handlers"]))
+    r.check(s["handlers"] == [("_ao_aval", "NewMessage", [PEER["nerdofertas"]]),
+                              ("_ao_aval", "MessageEdited", [PEER["nerdofertas"]])],
+            "30.handlers_so_observam_nova_e_edicao", str(s["handlers"]))
     r.check(s["sem_segurada"] == ([], []), "30.nerd_sozinho_nao_despacha_nada",
             str(s["sem_segurada"]))
     r.check(s["solta"][0] == [(CHAT["promotom"], s["solta"][2])] and s["solta"][1] == 1
@@ -2365,6 +2382,345 @@ def test_57_aprovado_do_post_inclui_a_familia_e_a_data_original(r):
     e = s["entradas"]
     r.check(e["amazon|B0FAMI0004"] - e["amazon|B0FAMI0003"] > 15 * 60,
             "57.o_novo_entra_pelo_edit_date_o_antigo_pela_original", str(e))
+
+
+# ══════════════════════════════════════════════════════════════════
+# ÚLTIMA AUDITORIA (03/11/2026) — edição no Nerd, reentrada, EDIT_ANTIGO
+# ══════════════════════════════════════════════════════════════════
+def versao_nerd(mid, texto, links, idade_s=5.0, edit_idade_s=None):
+    """Uma VERSÃO da mensagem do Nerd: `links` = {url: idents}; cada link de
+    teste leva às chaves dele (a identificação real fica no teste 32)."""
+    for u, idents in links.items():
+        IDENTS_AVAL[u] = [f"{p}|{i}" for p, i, _ in idents]
+    corpo = texto + "".join(f"\n\n🛒 {u}" for u in links)
+    return mensagem("nerdofertas", mid, corpo, idade_s=idade_s,
+                    editada=edit_idade_s is not None, edit_idade_s=edit_idade_s or 0.0)
+
+
+async def pelo_handler(mundo, m, editada=False):
+    """O update chega pelo handler REAL registrado no canal de aval."""
+    cbs = {type(ev).__name__: cb for cb, ev in mundo.handlers}
+    if editada:
+        await cbs["MessageEdited"](tl_events.MessageEdited.Event(m))
+    else:
+        await cbs["NewMessage"](tl_events.NewMessage.Event(m))
+    await drenar()
+
+
+def avais_de(mid):
+    with _db() as db:
+        return sorted(db.execute("SELECT chave, ts FROM curadoria_aval WHERE fonte=? AND msg_id=?",
+                                 (str(PEER["nerdofertas"]), mid)).fetchall())
+
+
+def test_58_nerd_edita_e_acrescenta_link(r):
+    """Item 1: o Nerd posta sem link (não é aval) e edita acrescentando o
+    link identificável → aval reconhecido NA HORA pela edição; vale também
+    para mensagem antiga do Nerd editada agora (a versão vale pelo
+    edit_date). Nada do Nerd vai ao canal."""
+    s = {}
+
+    async def corpo(mundo):
+        p = await chega(mundo, "promotom", GPU, amz("B0NEDIT001"))
+        mid = novo_id()
+        m0 = versao_nerd(mid, GPU_NERD, {}, idade_s=120)
+        with _Logs() as logs:
+            await pelo_handler(mundo, m0)
+        s["sem_link"] = (retida("promotom", p), len(logs.tem("[CURADORIA_AVAL_SEM_PRODUTO]")),
+                         avais_de(mid))
+        m1 = versao_nerd(mid, GPU_NERD, {"https://nerd.teste/e/1": amz("B0NEDIT001")},
+                         idade_s=120, edit_idade_s=0)
+        await pelo_handler(mundo, m1, editada=True)
+        s["editou"] = (retida("promotom", p), len(posts(mundo)),
+                       all("😱" not in t for _, t in mundo.criados))
+        q = await chega(mundo, "fumotom", GPU, amz("B0NEDIT002"))
+        mid2 = novo_id()
+        await pelo_handler(mundo, versao_nerd(mid2, GPU_NERD, {}, idade_s=30 * 60))
+        await pelo_handler(mundo, versao_nerd(mid2, GPU_NERD,
+                                              {"https://nerd.teste/e/2": amz("B0NEDIT002")},
+                                              idade_s=30 * 60, edit_idade_s=0), editada=True)
+        s["antiga"] = (retida("fumotom", q), len(posts(mundo)))
+    cenario(corpo)
+    r.check(s["sem_link"] == ("retida", 1, []), "58.sem_link_nao_e_aval", str(s["sem_link"]))
+    r.check(s["editou"] == ("liberada", 1, True), "58.edicao_com_link_e_aval_e_nerd_nao_publica",
+            str(s["editou"]))
+    r.check(s["antiga"] == ("liberada", 2), "58.mensagem_antiga_editada_agora_vale",
+            str(s["antiga"]))
+
+
+def test_59_nerd_acrescenta_b_a_conserva_data(r):
+    """Item 1: o Nerd posta A e depois edita acrescentando B: A conserva a
+    data original, B entra pelo edit_date; rever a mesma versão (handler de
+    novo, varredura) não duplica aval. A segurada de B que só cabe na janela
+    pela data ORIGINAL do Nerd não é solta (B vale pela edição)."""
+    s = {}
+
+    async def corpo(mundo):
+        q = await chega(mundo, "fumotom", RX, amz("B0NERDB001"))
+        envelhecer(mundo, "fumotom", q, 400)          # B entrou na fonte há 400 s
+        mid = novo_id()
+        la, lb = "https://nerd.teste/a59", "https://nerd.teste/b59"
+        m0 = versao_nerd(mid, GPU_NERD, {la: amz("B0NERDA001")}, idade_s=200)
+        await pelo_handler(mundo, m0)
+        m1 = versao_nerd(mid, GPU_NERD, {la: amz("B0NERDA001"), lb: amz("B0NERDB001")},
+                         idade_s=200, edit_idade_s=0)
+        await pelo_handler(mundo, m1, editada=True)
+        await pelo_handler(mundo, m1, editada=True)                     # o mesmo update de novo
+        mundo.historico[PEER["nerdofertas"]] = [m1]
+        await curadoria._varrer_canal(PEER["nerdofertas"], ENT["nerdofertas"])   # e a varredura
+        await drenar()
+        s["avais"] = avais_de(mid)
+        s["q"] = retida("fumotom", q)
+    cenario(corpo)
+    a = dict(s["avais"])
+    agora = time.time()
+    r.check(len(s["avais"]) == 2, "59.um_aval_por_produto_sem_duplicar", str(s["avais"]))
+    r.check(abs(a["amazon|B0NERDA001"] - (agora - 200)) < 5
+            and abs(a["amazon|B0NERDB001"] - agora) < 5,
+            "59.a_conserva_data_b_pelo_edit_date", str(s["avais"]))
+    r.check(s["q"] == "retida", "59.b_nao_vale_pela_data_original_do_nerd", str(s["q"]))
+
+
+def test_60_handler_e_varredura_nao_duplicam_edicao(r):
+    """Item 1: a versão editada chega pelo handler e pela varredura — é lida
+    UMA vez; a edição que o handler perdeu é achada pela varredura (que lê
+    sempre a página mais recente). O Nerd nunca entra no funil."""
+    s = {}
+
+    async def corpo(mundo):
+        leituras, despachos = [], []
+        real_reg, real_desp = curadoria._registrar_aval, curadoria._estado["despachar"]
+
+        def conta(*a, **k):
+            leituras.append(a[1])
+            return real_reg(*a, **k)
+
+        async def espia(ev, is_edit=False):
+            despachos.append(str(ev.chat_id))
+            await real_desp(ev, is_edit=is_edit)
+        curadoria._registrar_aval, curadoria._estado["despachar"] = conta, espia
+        try:
+            peer, ent = PEER["nerdofertas"], ENT["nerdofertas"]
+            mid = novo_id()
+            m0 = versao_nerd(mid, GPU_NERD, {"https://nerd.teste/a60": amz("B0DUPL0001")})
+            mundo.historico[peer] = [m0]
+            await pelo_handler(mundo, m0)
+            await curadoria._varrer_canal(peer, ent)
+            await drenar()
+            s["original"] = len(leituras)
+            m1 = versao_nerd(mid, GPU_NERD, {"https://nerd.teste/a60": amz("B0DUPL0001"),
+                                             "https://nerd.teste/b60": amz("B0DUPL0002")},
+                             edit_idade_s=0)
+            mundo.historico[peer] = [m1]
+            await curadoria._varrer_canal(peer, ent)           # o handler perdeu a edição
+            await drenar()
+            s["achada"] = len(avais_de(mid))                   # a varredura achou B
+            await pelo_handler(mundo, m1, editada=True)        # chega atrasado
+            await curadoria._varrer_canal(peer, ent)
+            await drenar()
+            s["edicao"] = (len(leituras), len(avais_de(mid)))
+            s["funil"] = (len(posts(mundo)), [d for d in despachos if d == CHAT["nerdofertas"]])
+        finally:
+            curadoria._registrar_aval, curadoria._estado["despachar"] = real_reg, real_desp
+    cenario(corpo)
+    r.check(s["original"] == 1, "60.original_lida_uma_vez", str(s))
+    r.check(s["achada"] == 2 and s["edicao"] == (2, 2),
+            "60.edicao_achada_pela_varredura_e_lida_uma_vez", str(s))
+    r.check(s["funil"] == (0, []), "60.nerd_nunca_no_funil", str(s["funil"]))
+
+
+def test_61_produto_removido_e_reintroduzido(r):
+    """Item 2: A entra; o Nerd avalia A (dentro de 300 s da entrada) quando A
+    já tinha sido trocada por B; passados mais de 5 min, A volta — é uma
+    ocorrência NOVA (data da edição): o aval antigo de A não a solta; ela
+    espera nova aprovação; o aval novo, dentro dos 300 s, solta. No banco:
+    o que permanece conserva a data (A→A+B), o que sai e volta ganha a
+    data da reintrodução."""
+    _limpar_curadoria()
+    b = time.time()
+    av = lambda ch, ts: dbc.db_curadoria_avaliar(  # noqa: E731
+        "-1001", 1, dbc.NOVA, ch, "ssd", b, ts, 300, 120, time.time())
+
+    def entradas():
+        with _db() as db:
+            return {c: (round(t - b), a) for c, t, a in db.execute(
+                "SELECT chave, ts_entrada, atual FROM curadoria_chave WHERE msg_id=1")}
+    av(["k|A"], b)
+    av(["k|A", "k|B"], b + 10)
+    e1 = entradas()
+    av(["k|B"], b + 20)
+    av(["k|A", "k|B"], b + 400)
+    e2 = entradas()
+    r.check(e1 == {"k|A": (0, 1), "k|B": (10, 1)}, "61.a_mais_b_a_conserva_b_pela_edicao", str(e1))
+    r.check(e2 == {"k|A": (400, 1), "k|B": (10, 1)}, "61.a_que_volta_ganha_a_data_da_volta", str(e2))
+    s = {}
+
+    async def corpo(mundo):
+        p = await chega(mundo, "promotom", GPU, amz("B0REINT001"))          # A entra
+        await chega(mundo, "promotom", RX, amz("B0REINT002"), mid=p, idade_s=20,
+                    editada=True)                                          # A → B
+        await nerd(mundo, GPU_NERD, amz("B0REINT001"))                      # aval de A
+        s["a_fora"] = retida("promotom", p)
+        envelhecer(mundo, "promotom", p, 330)                               # passam 5,5 min
+        with _db() as db:
+            db.execute("UPDATE curadoria_aval SET ts=ts-330 WHERE chave=?", ("amazon|B0REINT001",))
+        await chega(mundo, "promotom", GPU, amz("B0REINT001"), mid=p, idade_s=350,
+                    editada=True)                                          # A volta
+        s["volta"] = (retida("promotom", p), atuais("promotom", p), len(posts(mundo)))
+        await nerd(mundo, GPU_NERD, amz("B0REINT001"))                      # aval novo
+        s["novo_aval"] = (retida("promotom", p), len(posts(mundo)))
+    cenario(corpo)
+    r.check(s["a_fora"] == "retida", "61.aval_de_a_fora_do_conjunto_nao_solta", str(s["a_fora"]))
+    r.check(s["volta"] == ("retida", ["amazon|B0REINT001"], 0),
+            "61.aval_antigo_nao_solta_a_reintroduzida", str(s["volta"]))
+    r.check(s["novo_aval"] == ("liberada", 1), "61.aval_novo_solta", str(s["novo_aval"]))
+
+
+def test_62_nerd_produto_que_sai_e_volta(r):
+    """Item 2 (lado do avalista): no Nerd, o produto que uma edição tirou e
+    outra trouxe de volta ganha um aval NOVO com a data da volta; o aval
+    antigo continua (é fato); o que permaneceu não ganha linha."""
+    s = {}
+
+    async def corpo(mundo):
+        mid = novo_id()
+        la, lb = "https://nerd.teste/a62", "https://nerd.teste/b62"
+        await pelo_handler(mundo, versao_nerd(mid, GPU_NERD, {la: amz("B0VOLT0001")}, idade_s=300))
+        await pelo_handler(mundo, versao_nerd(mid, GPU_NERD, {lb: amz("B0VOLT0002")}, idade_s=300,
+                                              edit_idade_s=200), editada=True)
+        await pelo_handler(mundo, versao_nerd(mid, GPU_NERD, {la: amz("B0VOLT0001"),
+                                                              lb: amz("B0VOLT0002")},
+                                              idade_s=300, edit_idade_s=0), editada=True)
+        s["avais"] = [(c, round(time.time() - t)) for c, t in avais_de(mid)]
+    cenario(corpo)
+    r.check(sorted(s["avais"]) == sorted([("amazon|B0VOLT0001", 300), ("amazon|B0VOLT0001", 0),
+                                          ("amazon|B0VOLT0002", 200)]),
+            "62.volta_ganha_aval_novo_o_que_ficou_nao", str(s["avais"]))
+
+
+def test_63_edit_antigo_e_a_edicao_pendente(r):
+    """Item 3: a edição recente de mensagem com quase 1 h, vinculada a post
+    VIVO, fica pendente; o aval chega quando a mensagem já passou de 1 h — a
+    reinjeção (via CURADORIA + prova no banco + edit_date recente) passa a
+    trava EDIT_ANTIGO e a edição é aplicada no mesmo post. Sem prova, por
+    outra via, ou com a versão velha: a trava continua."""
+    s = {}
+
+    async def corpo(mundo):
+        p, post = await publicada(mundo, "promotom", GPU, "B0VIDA0001")
+        await chega(mundo, "promotom", RX, amz("B0VIDA0002"), mid=p, idade_s=3590,
+                    editada=True)                                   # 59min50s: entra
+        s["pendente"] = linha("promotom", p)
+        mundo.servidor[(PEER["promotom"], p)].date = _agora() - dt.timedelta(seconds=3700)
+        e0, c0 = len(mundo.edits), len(mundo.criados)
+        await nerd(mundo, GPU_NERD, amz("B0VIDA0002"))
+        s["aplicada"] = ([m for m, _ in mundo.edits[e0:]], len(mundo.criados) - c0,
+                         linha("promotom", p))
+        s["post"] = post
+        e1 = len(mundo.edits)
+        await chega(mundo, "promotom", RX + "\n-CUPOM: X", amz("B0VIDA0002"), mid=p,
+                    idade_s=3700, editada=True)                     # edição normal > 1 h
+        s["normal_velha"] = len(mundo.edits) - e1
+    cenario(corpo)
+    r.check(s["pendente"] == ("edicao", "retida"), "63.edicao_recente_fica_pendente",
+            str(s["pendente"]))
+    r.check(s["aplicada"] == ([s["post"]], 0, ("edicao", "liberada")),
+            "63.aval_aplica_depois_de_1h_com_prova", str(s["aplicada"]))
+    r.check(s["normal_velha"] == 0, "63.edicao_normal_velha_continua_descartada")
+
+    admitidas = []
+
+    async def espiao(ev, is_edit):
+        admitidas.append((ev.message.id, getattr(ev, "via", "TELEGRAM")))
+
+    def prova(mid, estado="liberando"):
+        with _db() as db:
+            db.execute("INSERT OR REPLACE INTO curadoria_retida(chat,msg_id,tipo,categoria,ts,"
+                       "ts_ref,estado,ts_estado) VALUES(?,?,?,?,?,?,?,?)",
+                       (CHAT["fumotom"], mid, "edicao", "placa_de_video", time.time() - 3700,
+                        time.time(), estado, time.time()))
+    real = orchestrator._enfileirar
+    orchestrator._enfileirar = espiao
+    _limpar_curadoria()
+    try:
+        async def corpo2():
+            g._encerrando = False
+            ev = lambda mid, via, ed=0.0: EventoRecuperado(  # noqa: E731
+                mensagem("fumotom", mid, RX, idade_s=3700, editada=True, edit_idade_s=ed), via=via)
+            await orchestrator.processar(tl_events.MessageEdited.Event(
+                mensagem("fumotom", 920001, RX, idade_s=3700, editada=True)), is_edit=True)
+            await orchestrator.processar(ev(920002, "CURADORIA"), is_edit=True)       # sem prova
+            prova(920003)
+            await orchestrator.processar(ev(920003, "RECUPERACAO"), is_edit=True)     # outra via
+            prova(920004)
+            await orchestrator.processar(ev(920004, "CURADORIA", ed=600), is_edit=True)  # velha
+            prova(920005, estado="retida")
+            await orchestrator.processar(ev(920005, "CURADORIA"), is_edit=True)       # sem soltura
+            prova(920006)
+            await orchestrator.processar(ev(920006, "CURADORIA"), is_edit=True)       # ADMITE
+            await orchestrator.processar(tl_events.MessageEdited.Event(
+                mensagem("fumotom", 920007, RX, idade_s=3500, editada=True)), is_edit=True)
+        asyncio.run(corpo2())
+    finally:
+        orchestrator._enfileirar = real
+    r.check(admitidas == [(920006, "CURADORIA"), (920007, "TELEGRAM")],
+            "63.trava_so_abre_com_as_tres_provas", str(admitidas))
+
+
+def test_64_leitura_parcial_do_nerd_nao_remove_produto(r):
+    """Item 1: a edição do Nerd em que um link falha na leitura (rede) não
+    tira esse produto da mensagem dele: a nova tentativa o acha de novo e
+    ele CONSERVA a data — não vira uma 'volta' com data nova."""
+    s = {}
+
+    async def corpo(mundo):
+        respostas = iter([(["amazon|B0PARC0001", "amazon|B0PARC0002"], False),
+                          (["amazon|B0PARC0001"], True),
+                          (["amazon|B0PARC0001", "amazon|B0PARC0002"], False)])
+
+        async def ident(links):
+            return next(respostas)
+        real_rep = curadoria._REPETIR_S
+        curadoria._identificar, curadoria._REPETIR_S = ident, (0.01, 0.01)
+        try:
+            mid = novo_id()
+            await pelo_handler(mundo, versao_nerd(mid, GPU_NERD, {}, idade_s=100))
+            await pelo_handler(mundo, versao_nerd(mid, GPU_NERD + " (editado)", {}, idade_s=100,
+                                                  edit_idade_s=0), editada=True)
+            await asyncio.sleep(0.05)
+            await drenar()
+            s["avais"] = [(c, round(time.time() - t)) for c, t in avais_de(mid)]
+        finally:
+            curadoria._REPETIR_S = real_rep
+    cenario(corpo)
+    r.check(sorted(s["avais"]) == [("amazon|B0PARC0001", 100), ("amazon|B0PARC0002", 100)],
+            "64.produto_nao_lido_conserva_a_data", str(s["avais"]))
+
+
+def test_65_update_atrasado_de_versao_velha_do_nerd(r):
+    """Item 1: a edição do Nerd já foi lida (pela varredura) e o update da
+    versão ORIGINAL chega atrasado pelo handler: é ignorado — não tira do
+    conjunto o produto da edição nem cria aval novo."""
+    s = {}
+
+    async def corpo(mundo):
+        mid = novo_id()
+        la, lb = "https://nerd.teste/a65", "https://nerd.teste/b65"
+        m0 = versao_nerd(mid, GPU_NERD, {la: amz("B0ATRAS001")}, idade_s=100)
+        m1 = versao_nerd(mid, GPU_NERD, {lb: amz("B0ATRAS002")}, idade_s=100, edit_idade_s=10)
+        m2 = versao_nerd(mid, GPU_NERD, {la: amz("B0ATRAS001"), lb: amz("B0ATRAS002")},
+                         idade_s=100, edit_idade_s=0)
+        await pelo_handler(mundo, m2, editada=True)      # a mais nova primeiro
+        await pelo_handler(mundo, m1, editada=True)      # atrasadas
+        await pelo_handler(mundo, m0)
+        with _db() as db:
+            s["conj"] = sorted(c for (c,) in db.execute(
+                "SELECT chave FROM curadoria_chave WHERE chat=? AND msg_id=? AND atual=1",
+                (str(PEER["nerdofertas"]), mid)))
+        s["avais"] = len(avais_de(mid))
+    cenario(corpo)
+    r.check(s["conj"] == ["amazon|B0ATRAS001", "amazon|B0ATRAS002"] and s["avais"] == 2,
+            "65.versao_velha_atrasada_ignorada", str(s))
 
 
 if __name__ == "__main__":

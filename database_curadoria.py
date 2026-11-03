@@ -4,10 +4,14 @@ Camada 7 — Banco: estado da CURADORIA (pipeline.curadoria).
 Responsabilidade ÚNICA: as tabelas `curadoria_aval`, `curadoria_retida` e
 `curadoria_chave`.
 
-  curadoria_aval    um canal avalista (Fada Promoções, Nerd Ofertas) postou
-                    o produto `chave` no instante `ts` (data em que o
-                    produto entrou na mensagem dele no Telegram). Uma linha
-                    por (chave, fonte, msg); aval repetido não muda a data.
+  curadoria_aval    um canal avalista (Fada Promoções, Nerd Ofertas) pôs o
+                    produto `chave` na mensagem dele no instante `ts` (data
+                    da mensagem, ou edit_date da edição que trouxe o
+                    produto). Uma linha por ENTRADA do produto na mensagem:
+                    rever a mesma versão (handler, varredura, edição que não
+                    mexe no produto) não grava de novo nem muda a data; o
+                    produto que sai e volta numa edição posterior ganha uma
+                    linha nova, com a data da edição que o trouxe de volta.
   curadoria_retida  a mensagem (chat, msg_id) de uma fonte retentora, de
                     categoria vigiada, que a curadoria avaliou. `tipo`:
                       nova    mensagem que ainda não foi ao canal
@@ -32,12 +36,15 @@ Responsabilidade ÚNICA: as tabelas `curadoria_aval`, `curadoria_retida` e
                       expirada     a janela fechou sem aval
                       ausente      sumiu da fonte antes de ser reinjetada
                       falhou       a reinjeção não aconteceu
-  curadoria_chave   as identidades de produto da mensagem: `atual`=1 nas
-                    da VERSÃO ATUAL, 0 nas que uma edição tirou;
-                    `ts_entrada` = quando a chave entrou na mensagem (data
-                    da mensagem, ou edit_date da edição que a trouxe). Uma
-                    chave que sai e volta mantém a PRIMEIRA entrada: editar
-                    não recomeça janela de produto que já estava lá.
+  curadoria_chave   as identidades de produto da mensagem — da fonte
+                    retentora e também do avalista: `atual`=1 nas da VERSÃO
+                    ATUAL, 0 nas que uma edição tirou; `ts_entrada` = quando
+                    a chave entrou (data da mensagem, ou edit_date da edição
+                    que a trouxe). A chave que PERMANECE de uma versão para
+                    a outra conserva a entrada (editar preço não recomeça a
+                    janela); a que SAIU e depois VOLTA é uma entrada nova,
+                    com a data da edição que a reintroduziu — o aval da
+                    ocorrência antiga não vale para ela.
 
 A REGRA, em uma frase: a versão atual passa se ALGUMA chave atual tem aval
 (mesma chave = mesma loja + mesmo id) com data a até `janela` da entrada
@@ -84,25 +91,40 @@ def _chaves(valores: Iterable[str]) -> List[str]:
 
 def _gravar_versao(db, chat: str, msg_id: int, chaves: Sequence[str],
                    ts_versao: float, ja_estavam: Iterable[str] = (),
-                   ts_original: Optional[float] = None) -> Dict[str, float]:
+                   ts_original: Optional[float] = None,
+                   parcial: bool = False) -> Dict[str, float]:
     """Troca o conjunto ATUAL da mensagem pelo da versão (mesma transação
-    do chamador). Chave nova entra com `ts_versao`; chave que já esteve na
-    mensagem mantém a primeira entrada; chave que saiu fica atual=0. Chave
-    sem histórico aqui mas que `ja_estavam` na mensagem (o post publicado já
-    a tem) entra com `ts_original`: a data em que ela entrou, não a da
-    edição. Devolve {chave: ts_entrada} do conjunto atual."""
+    do chamador) e devolve {chave: ts_entrada} do conjunto atual.
+      · chave que já era ATUAL: conserva a entrada;
+      · chave que tinha SAÍDO e volta: entrada nova = `ts_versao` (a edição
+        que a reintroduziu);
+      · chave nunca vista: `ts_versao` — ou `ts_original` se ela `ja_estavam`
+        na mensagem (o post publicado já a tem e aqui não há histórico);
+      · chave atual que não veio nesta versão: sai (atual=0) — salvo com
+        `parcial` (a leitura desta versão falhou em parte: o que não foi lido
+        não é dado como removido)."""
     ja_estavam = set(ja_estavam or ())
-    hist = dict(db.execute(
-        "SELECT chave, ts_entrada FROM curadoria_chave WHERE chat=? AND msg_id=?",
-        (chat, msg_id)).fetchall())
-    db.execute("UPDATE curadoria_chave SET atual=0 WHERE chat=? AND msg_id=?",
-               (chat, msg_id))
+    hist = {c: (float(t), int(a)) for c, t, a in db.execute(
+        "SELECT chave, ts_entrada, atual FROM curadoria_chave WHERE chat=? AND msg_id=?",
+        (chat, msg_id)).fetchall()}
+    novas = set(chaves)
     atual: Dict[str, float] = {}
-    for c in chaves:
-        if c in hist:
-            db.execute("UPDATE curadoria_chave SET atual=1"
+    for c, (t, a) in hist.items():
+        if c in novas or not a:
+            continue
+        if parcial:
+            atual[c] = t                    # não lida nesta versão: fica
+        else:
+            db.execute("UPDATE curadoria_chave SET atual=0"
                        " WHERE chat=? AND msg_id=? AND chave=?", (chat, msg_id, c))
-            atual[c] = float(hist[c])
+    for c in novas:
+        if c in hist and hist[c][1]:
+            atual[c] = hist[c][0]           # permaneceu: conserva a entrada
+        elif c in hist:
+            db.execute("UPDATE curadoria_chave SET atual=1, ts_entrada=?"
+                       " WHERE chat=? AND msg_id=? AND chave=?",
+                       (float(ts_versao), chat, msg_id, c))
+            atual[c] = float(ts_versao)     # saiu e voltou: entrada nova
         else:
             ts = ts_original if (c in ja_estavam and ts_original is not None) else ts_versao
             db.execute("INSERT INTO curadoria_chave(chat,msg_id,chave,ts_entrada,atual)"
@@ -195,17 +217,23 @@ def db_curadoria_avaliar(chat: str, msg_id: int, tipo: str, chaves: Sequence[str
 
 
 def db_curadoria_registrar_aval(chaves: Sequence[str], fonte: str, msg_id: int,
-                                ts_aval: float, janela: float, piso: float,
-                                agora: float) -> Optional[List[Tuple[str, int, str, str]]]:
-    """Grava o aval e, na MESMA transação, separa as mensagens seguradas que
-    ele solta: estado `retida`, com uma chave ATUAL igual cuja entrada está
-    a até `janela` da data do aval e não é mais velha que `piso` (aval
-    atrasado nunca solta produto antigo). As separadas passam a `liberando`
-    e voltam como [(chat, msg_id, categoria, tipo)]. None = banco
-    indisponível.
+                                ts_versao: float, janela: float, piso: float,
+                                agora: float, parcial: bool = False
+                                ) -> Optional[List[Tuple[str, int, str, str]]]:
+    """A versão atual da mensagem do avalista, numa transação: grava o
+    conjunto atual dela (mesma regra das fontes — _gravar_versao: o produto
+    que permanece conserva a data; o acrescentado e o que volta entram com
+    `ts_versao`, o edit_date da edição), grava um aval por ENTRADA de
+    produto (rever a mesma versão não duplica nada) e separa as mensagens
+    seguradas que o aval solta: estado `retida`, com uma chave ATUAL igual
+    cuja entrada está a até `janela` da data do aval e não é mais velha que
+    `piso` (aval atrasado nunca solta produto antigo). As separadas passam a
+    `liberando` e voltam como [(chat, msg_id, categoria, tipo)]. None =
+    banco indisponível. `parcial`: a leitura desta versão falhou em parte
+    (o produto não lido não sai do conjunto).
 
-    Aval repetido (a mesma mensagem do avalista vista de novo: edição,
-    varredura) não muda a data do primeiro: a soltura usa a data GRAVADA."""
+    O aval é um FATO (o avalista pôs o produto na mensagem naquela hora): a
+    edição que tira o produto do avalista não apaga o aval já dado."""
     chaves = _chaves(chaves)
     if not chaves:
         return []
@@ -213,16 +241,14 @@ def db_curadoria_registrar_aval(chaves: Sequence[str], fonte: str, msg_id: int,
         with _db() as db:
             db.execute("BEGIN IMMEDIATE")
             try:
+                atual = _gravar_versao(db, fonte, int(msg_id), chaves, ts_versao,
+                                       parcial=parcial)
                 db.executemany(
                     "INSERT OR IGNORE INTO curadoria_aval(chave,fonte,msg_id,ts)"
                     " VALUES(?,?,?,?)",
-                    [(c, fonte, int(msg_id), float(ts_aval)) for c in chaves])
-                marcas = ",".join("?" * len(chaves))
-                gravadas = db.execute(
-                    f"SELECT chave, ts FROM curadoria_aval WHERE fonte=? AND msg_id=?"
-                    f" AND chave IN ({marcas})", (fonte, int(msg_id), *chaves)).fetchall()
+                    [(c, fonte, int(msg_id), t) for c, t in atual.items()])
                 soltas: Dict[Tuple[str, int], Tuple[str, str]] = {}
-                for chave, ts in gravadas:
+                for chave, ts in atual.items():
                     for chat, mid, cat, tipo in db.execute(
                             "SELECT r.chat, r.msg_id, r.categoria, r.tipo"
                             "  FROM curadoria_chave k JOIN curadoria_retida r"
