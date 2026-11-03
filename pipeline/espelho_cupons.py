@@ -10,8 +10,10 @@ e nenhum produto), e manter as duas mensagens iguais depois.
     operação, com o mesmo texto e a mesma imagem;
   - não toca identidade, família, convergência nem locks;
   - não loga — só a medição (⏱ [ENVIO_MS] da publicação e ⏱ [EDICAO_MS]
-    das edições, pelo medicao_edicao: destino, operação, ms, resultado;
-    nada de texto, link ou código).
+    das edições, pelo medicao_edicao: destino, operação, ms, resultado)
+    e a remoção da cópia (🗑 [CUPONS_REMOCAO]: post, cópia, motivo e o
+    que ficou provado — ver _registrar_remocao); nada de texto, link ou
+    código.
 
 SEM um esperar o outro:
   - publicação SEM mídia: o envio ao canal de cupons é disparado no
@@ -66,7 +68,8 @@ provas distintas, nunca uma pela outra:
     operação seguinte daquele post toca o canal de cupons.
 Sem nenhuma das duas provas (delete ou leitura falhou, ou respondeu 0 com a
 cópia ainda lá): nada de segunda mensagem e o vínculo FICA como estava — a
-falha sobe e a próxima operação do post tenta de novo. Nunca uma mensagem no
+falha sobe e a próxima operação do post tenta de novo (na remoção do post
+não há operação seguinte: a cópia fica no ar, rastreada). Nunca uma mensagem no
 canal de cupons sem vínculo, por este módulo, nos caminhos de edição,
 reconciliação e remoção (publicação: ver _apagar_mensagem).
 
@@ -298,6 +301,7 @@ def substituido(antigo: int, mensagem) -> None:
 def removido(msg_id_dest: int) -> None:
     """O post saiu do canal principal (fusão): sai do de cupons também."""
     if _aberto:
+        _registrar_remocao(msg_id_dest, None, "post_removido", None)
         _encadear(msg_id_dest, lambda: _remover(msg_id_dest))
 
 
@@ -369,7 +373,7 @@ async def _concluir_publicacao(mid: int, tarefa: asyncio.Task, principal) -> Non
         db_espelho_set(mid, copia.id)
         return
     if copia is not None:
-        await _apagar_mensagem(copia.id)
+        await _apagar_mensagem(copia.id, mid, "publicacao_refeita")
     await _criar(mid, principal)
 
 
@@ -405,7 +409,7 @@ async def _descartar(tarefa: asyncio.Task) -> None:
     await _aguardar(tarefa)
     copia = _resultado(tarefa)
     if copia is not None:
-        await _apagar_mensagem(copia.id)
+        await _apagar_mensagem(copia.id, None, "publicacao_abortada")
 
 
 def _medida(mid: int, rastro, troca) -> "medicao_edicao.Medida":
@@ -456,11 +460,20 @@ async def _substituir(antigo: int, principal) -> None:
 
 
 async def _remover(mid: int) -> None:
-    esp = db_espelho_get(mid)
+    # Leitura ESTRITA só para o registro: a decisão é a de sempre (leitura
+    # que falha = None = nada a apagar, como em db_espelho_get), mas a linha
+    # só diz "sem_copia" quando a leitura CONFIRMOU que não há vínculo.
+    try:
+        esp, falha = db_espelho_get(mid, estrito=True), None
+    except Exception as e:                             # noqa: BLE001
+        esp, falha = None, f"falha_leitura:{type(e).__name__}"
     if esp == _AUSENTE:
         db_espelho_del(mid)               # nada no ar: só o vínculo AUSENTE sai
+        _registrar_remocao(mid, None, "post_removido", "ausente_antes")
     elif esp is not None:
-        await _apagar(mid, esp)
+        await _apagar(mid, esp, "post_removido")
+    else:
+        _registrar_remocao(mid, None, "post_removido", falha or "sem_copia")
 
 
 async def _reconciliar(mid: int, midia: bool, principal=None) -> str:
@@ -473,7 +486,7 @@ async def _reconciliar(mid: int, midia: bool, principal=None) -> str:
     if esp is None and not cupom:
         return "nao_cupom"
     if esp is not None and not cupom:
-        await _apagar(mid, esp)
+        await _apagar(mid, esp, "deixou_de_ser_cupom")
         return "apagou"
     if principal is None:
         principal = await _io(lambda c: c.get_messages(GRUPO_DESTINO, ids=mid))
@@ -517,7 +530,7 @@ async def _editar(mid: int, esp: int, principal, midia: bool) -> str:
         # limitação do canal principal): refaz como cópia fiel do que está
         # no ar, SÓ com a exclusão PROVADA. Ausente: não recria. Sem prova
         # (CopiaNoAr ou o delete/leitura falhou): sobe, o vínculo fica.
-        if await _apagar_copia(esp) == "ausente":
+        if await _apagar_copia_registrada(mid, esp, "refazer_copia") == "ausente":
             db_espelho_set(mid, _AUSENTE)
             return "ausente"
         db_espelho_del(mid)
@@ -526,12 +539,24 @@ async def _editar(mid: int, esp: int, principal, midia: bool) -> str:
     return "editou_ref" if arquivo is not None else "editou"
 
 
-async def _apagar(mid: int, esp: int) -> None:
+async def _apagar(mid: int, esp: int, motivo: str) -> None:
     """Tira a cópia do canal de cupons e SÓ ENTÃO o vínculo (apagada com
     prova, ou ausente). Sem prova, a exceção sobe e o vínculo fica: nunca
     uma mensagem publicada sem rastro no banco."""
-    await _apagar_copia(esp)
+    await _apagar_copia_registrada(mid, esp, motivo)
     db_espelho_del(mid)
+
+
+async def _apagar_copia_registrada(mid: int, esp: int, motivo: str) -> str:
+    """_apagar_copia + a linha 🗑 [CUPONS_REMOCAO] do que ela provou (ou da
+    falha, que continua subindo igual). Não muda nada do que é feito."""
+    try:
+        prova = await _apagar_copia(esp)
+    except Exception as e:                             # noqa: BLE001
+        _registrar_remocao(mid, esp, motivo, f"falha:{type(e).__name__}")
+        raise
+    _registrar_remocao(mid, esp, motivo, prova)
+    return prova
 
 
 async def _apagar_copia(msg_id: int) -> str:
@@ -553,12 +578,45 @@ async def _ler(msg_id: int):
     return await _io(lambda c: c.get_messages(_canal, ids=msg_id))
 
 
-async def _apagar_mensagem(msg_id: int) -> None:
+async def _apagar_mensagem(msg_id: int, mid: Optional[int] = None, motivo: str = "-") -> None:
     """Publicação (_concluir_publicacao, _descartar): apagar sem prova e
     sem levantar — LIMITE conhecido, anterior a este módulo de edição: se
-    o delete falhar, a cópia pode ficar no ar sem vínculo (ver o PR)."""
+    o delete falhar, a cópia pode ficar no ar sem vínculo (ver o PR). A
+    linha 🗑 [CUPONS_REMOCAO] só DIZ o que a resposta provou ("sem_prova"
+    quando não provou): nada aqui depende disso."""
+    try:
+        resultado = await _io(lambda c: c.delete_messages(_canal, msg_id))
+    except Exception as e:                             # noqa: BLE001
+        _registrar_remocao(mid, msg_id, motivo, f"falha:{type(e).__name__}")
+        return
+    prova = "sem_prova"
     with contextlib.suppress(Exception):
-        await _io(lambda c: c.delete_messages(_canal, msg_id))
+        prova = "apagada" if saida.exclusao_provada(resultado) else "sem_prova"
+    _registrar_remocao(mid, msg_id, motivo, prova)
+
+
+def _registrar_remocao(mid: Optional[int], copia: Optional[int], motivo: str,
+                       resultado: Optional[str]) -> None:
+    """🗑 [CUPONS_REMOCAO] — remoção da cópia do post `mid` do principal.
+    `resultado` None: o PEDIDO (removido(), antes da fila do post). Depois,
+    o que ficou PROVADO: "apagada" (pts_count > 0), "ausente" (o delete não
+    apagou e a leitura não a acha), "ausente_antes" (vínculo AUSENTE: nada
+    no ar), "sem_copia" (a leitura do vínculo funcionou e não achou cópia),
+    "sem_prova" (publicação: a resposta não provou), "falha:<Classe>" ou
+    "falha_leitura:<Classe>" (a leitura do vínculo falhou: nada foi apagado
+    e NÃO se afirma que não havia cópia). Só ids, motivo e resultado
+    — nada de texto, link ou código. NUNCA levanta: o log não cria nem
+    impede exclusão."""
+    with contextlib.suppress(Exception):
+        alvo = f"post:{mid if mid is not None else '-'} copia:{copia if copia is not None else '-'}"
+        if resultado is None:
+            log_sys.info(f"🗑 [CUPONS_REMOCAO] {alvo} etapa=pedido motivo={motivo}")
+        elif resultado in ("apagada", "ausente", "ausente_antes", "sem_copia"):
+            log_sys.info(f"🗑 [CUPONS_REMOCAO] {alvo} etapa=fim motivo={motivo} "
+                         f"resultado={resultado}")
+        else:
+            log_sys.warning(f"🗑 [CUPONS_REMOCAO] {alvo} etapa=fim motivo={motivo} "
+                            f"resultado={resultado}")
 
 
 def _midia_copiavel(mensagem):

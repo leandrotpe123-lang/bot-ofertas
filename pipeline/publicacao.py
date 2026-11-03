@@ -33,6 +33,7 @@ from database import db_exibida, db_get_post
 from logger import log_out
 from pipeline.decisao import (EVOLUIR, IGNORAR, RENASCER, SINCRONIZAR,
                               decidir)
+from pipeline import campanha_resgate_sombra
 from pipeline import convergencia
 from pipeline import exclusao
 from pipeline import familia
@@ -251,6 +252,9 @@ async def _enviar_inner(montada: MensagemMontada,
             msg_id_rel, via_lancamento = familia.lancamento_cupom(
                 ofertas, norm.texto_analise, norm.chat, norm.msg_id,
                 msg_id_rel, destinos=destinos, container=container)
+            # [CAMPANHA POR PÁGINA DE RESGATE] SOMBRA: só registra o que a
+            # regra faria; não devolve nada e não muda a família.
+            campanha_resgate_sombra.registrar(norm, ofertas, msg_id_rel)
         if msg_id_rel is not None:
             alvo_existente = True
             post_lock = await exclusao.lock_post(msg_id_rel)

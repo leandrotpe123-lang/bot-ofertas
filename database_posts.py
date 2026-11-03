@@ -43,13 +43,19 @@ from database_conexao import _db
 # (`superar`) transferem posse. Âncoras fracas seguem a política de
 # sempre (a última gravação aponta).
 # ─────────────────────────────────────────────────────────────────
+# LEITURA ESTRITA (opt-in): as leituras abaixo devolvem o vazio do tipo
+# ([], set(), None) também quando a LEITURA falha — o contrato de sempre
+# dos seus consumidores. Quem precisa distinguir "não há" de "não consegui
+# ler" (a sombra de pipeline.campanha_resgate_sombra) passa estrito=True:
+# a falha é registrada igual e LEVANTA. O padrão não muda.
 _VIVO_SQL = "janela_fim > ? AND fused_into IS NULL"
 _VIVO_PE = "pe.janela_fim > ? AND pe.fused_into IS NULL"
 
 
 # ── post_estado / oferta_index (modelo container/oferta) ──────────
-def db_get_post(msg_id_dest: int) -> Optional[dict]:
-    """Estado real do post, consumido por decidir(...)."""
+def db_get_post(msg_id_dest: int, *, estrito: bool = False) -> Optional[dict]:
+    """Estado real do post, consumido por decidir(...).
+    `estrito=True` (opt-in, ver LEITURA ESTRITA): a falha levanta."""
     try:
         with _db() as db:
             row = db.execute(
@@ -77,6 +83,8 @@ def db_get_post(msg_id_dest: int) -> Optional[dict]:
             }
     except Exception as e:
         log_db.error(f"❌ db_get_post: {e}")
+        if estrito:
+            raise
     return None
 
 def db_overlap_posts(ofertas: list[str]) -> list[tuple[int, int]]:
@@ -113,7 +121,7 @@ def db_overlap_posts(ofertas: list[str]) -> list[tuple[int, int]]:
         return []
 
 
-def db_posts_vivos_com_prefixo(prefixo: str) -> list[int]:
+def db_posts_vivos_com_prefixo(prefixo: str, *, estrito: bool = False) -> list[int]:
     """Posts VIVOS (mesma régua de db_overlap_posts: janela aberta e não
     fundido) que possuem ou exibem alguma âncora começando por
     `prefixo`. Uso: adoção de cupom sem nome (familia), que precisa
@@ -141,10 +149,12 @@ def db_posts_vivos_com_prefixo(prefixo: str) -> list[int]:
         return [r[0] for r in rows]
     except Exception as e:
         log_db.error(f"❌ db_posts_vivos_com_prefixo: {e}")
+        if estrito:
+            raise
         return []
 
 
-def db_ofertas_de_post(msg_id_dest: int) -> list[str]:
+def db_ofertas_de_post(msg_id_dest: int, *, estrito: bool = False) -> list[str]:
     """Todas as ofertas que compõem um post (caminho inverso, via
     idx_oi_dest). Usado para calcular ofertas novas na evolução e
     re-apontar na substituição."""
@@ -156,6 +166,8 @@ def db_ofertas_de_post(msg_id_dest: int) -> list[str]:
         return [r[0] for r in rows]
     except Exception as e:
         log_db.error(f"❌ db_ofertas_de_post: {e}")
+        if estrito:
+            raise
         return []
 
 def db_absorver_ofertas(msg_id_dest: int, ofertas: list[str]) -> int:
@@ -475,7 +487,7 @@ def db_posts_vivos_recentes(agora: float, limite: int = 100) -> list[int]:
         return []
 
 
-def db_origens_do_post(dest: int) -> list:
+def db_origens_do_post(dest: int, *, estrito: bool = False) -> list:
     """[(chat, msg_id)] das origens ligadas ao post, da ligação mais
     recente para a mais antiga."""
     try:
@@ -485,6 +497,8 @@ def db_origens_do_post(dest: int) -> list:
                 " ORDER BY ts DESC, chat DESC, msg_id DESC", (dest,)).fetchall()]
     except Exception as e:
         log_db.error(f"❌ db_origens_do_post: {e}")
+        if estrito:
+            raise
         return []
 
 
@@ -557,7 +571,7 @@ def db_remover_post(msg_id_dest: int):
 # ─────────────────────────────────────────────────────────────────
 # [Frente 8] COMPOSIÇÃO EXIBIDA, FUSÃO E TOMBSTONE
 # ─────────────────────────────────────────────────────────────────
-def db_exibida(msg_id_dest: int) -> set:
+def db_exibida(msg_id_dest: int, *, estrito: bool = False) -> set:
     """Composição que o post EXIBE agora (vazio: legado ou sem conteúdo)."""
     try:
         with _db() as db:
@@ -566,6 +580,8 @@ def db_exibida(msg_id_dest: int) -> set:
                 (msg_id_dest,)).fetchall()}
     except Exception as e:
         log_db.error(f"❌ db_exibida: {e}")
+        if estrito:
+            raise
         return set()
 
 

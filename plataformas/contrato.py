@@ -220,6 +220,18 @@ class Plataforma:
                           diferentes. Não contém lógica. None equivale
                           a não declarar; o core ignora.
 
+      - paginas_resgate : frozenset[str] | None. URLs CANÔNICAS (a
+                          forma que a normalização deriva, sem rastreio)
+                          das páginas de RESGATE DE CUPONS desta
+                          plataforma — a página "resgate todos os
+                          cupons", não a carteira, o carrinho, uma
+                          campanha sazonal ou uma live. Só declara quem
+                          dá UM link publicado por destino (o mesmo link
+                          para a mesma página, venha de que fonte vier):
+                          o core compara posts pelo link publicado
+                          (pipeline.campanha_resgate). Não contém lógica.
+                          None equivale a não declarar; o core ignora.
+
       - afiliacao_vigente : (Afiliacao) -> bool | None. Pura, sem I/O.
                             Diz se uma afiliação guardada no cache de
                             links ainda obedece ao contrato VIGENTE
@@ -253,4 +265,5 @@ class Plataforma:
     hosts_campanha:       Optional[frozenset[str]] = None
     sinais_cashback:      Optional[frozenset[str]] = None
     hosts_container:      Optional[frozenset[str]] = None
+    paginas_resgate:      Optional[frozenset[str]] = None
     afiliacao_vigente:    Optional[Callable[["Afiliacao"], bool]] = None
