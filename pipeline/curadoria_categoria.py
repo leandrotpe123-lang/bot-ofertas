@@ -50,7 +50,7 @@ import re
 import unicodedata
 from typing import List, Optional, Tuple
 
-__all__ = ["CATEGORIAS", "categoria", "titulo"]
+__all__ = ["CATEGORIAS", "categoria", "titulo", "regiao_titulo", "itens_com_preco"]
 
 PLACA_DE_VIDEO = "placa_de_video"
 FONTE = "fonte"
@@ -336,6 +336,41 @@ def titulo(texto: str) -> str:
         if _substantivo(_normalizar(linha)) is not None:
             return linha
     return ""
+
+
+def regiao_titulo(texto: str) -> str:
+    """O TÍTULO como o leitor o vê: as linhas do começo do post até a
+    linha-título, inclusive — o cabeçalho que a fonte põe acima do produto
+    ("-Ainda ativo, bom preço em 12x sem juros") faz parte dele. "" se o
+    post não nomeia produto nas 3 primeiras linhas."""
+    linhas = _linhas(texto)
+    for i, linha in enumerate(linhas):
+        if _substantivo(_normalizar(linha)) is not None:
+            return "\n".join(linhas[:i + 1])
+    return ""
+
+
+# ITEM com preço próprio: linha com "R$ <número>" que não é valor de cupom,
+# forma de pagamento nem moeda/cashback ("R$ 50 OFF em R$ 249", "R$ 1289 -
+# Sem Juros", "R$ 549 - PIX", "em 10x"). O MESMO produto em duas formas de
+# pagamento não vira dois itens.
+_PRECO = re.compile(r"r\$\s?\d")
+_NAO_ITEM = re.compile(
+    r"\boff\b|cupo|desconto|cashback|moedas|frete|\bparcel|\bem\s+\d+\s?x\b"
+    r"|\d+\s?x\s+sem|sem\s+juros|\bpix\b")
+
+
+def itens_com_preco(texto: str) -> int:
+    """Quantas linhas do post são ITEM com preço próprio. Junto com a
+    contagem de produtos identificados, é o que separa LISTA ("Placas Mães
+    B550M em Oferta: Gigabyte R$ 556 / Asus R$ 588") de um produto só com
+    dois links (dois anúncios, "Resgate cupons" + "Link produto")."""
+    n = 0
+    for linha in (texto or "").splitlines():
+        t = _normalizar(linha)
+        if _PRECO.search(t) and not _NAO_ITEM.search(t):
+            n += 1
+    return n
 
 
 def categoria(texto: str) -> str:

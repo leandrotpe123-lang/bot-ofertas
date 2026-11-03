@@ -16,6 +16,10 @@ A REGRA
     monitor comum ficam de fora);
   · só vale para post de PRODUTO (natureza "produto"): cupom e campanha
     seguem o fluxo de sempre;
+  · passam SEM aval (decisão do Léo, 03/11): LISTA de vários produtos com
+    preço próprio; frase de DESTAQUE no título ("Ainda ativo!", "Bom
+    preço!", "Vai esgotar!" — pipeline.destaque); retorno de oferta
+    ("Voltando!", "de volta" — pipeline.reativacao);
   · CURADOR (config.CURADORES): o post dele passa normal e é o aval. O Fada
     Promoções é fonte comum (publica); o Nerd Ofertas só é lido
     (config.GRUPOS_AVAL) — nada dele vai ao canal;
@@ -80,8 +84,10 @@ from database_curadoria import (AVAL, AUSENTE, ERRO, FALHOU, JA_LIBERADA,
 from logger import _idade_seg, log_ded
 from pipeline import ingestao, origem
 from pipeline.completude import EventoRecuperado
-from pipeline.curadoria_categoria import categoria
+from pipeline.curadoria_categoria import categoria, itens_com_preco, regiao_titulo
+from pipeline.destaque import frase_de_destaque
 from pipeline.identidade import username_de
+from pipeline.reativacao import eh_reativacao
 
 __all__ = ["instalar", "portao", "reinjecao", "encerrar", "VIA"]
 
@@ -103,6 +109,10 @@ _LOTE = 20
 _PAGINAS = 5
 _VISTOS_MAX = 2000
 _DRENO_S = 5.0
+# LISTA: a partir de quantos produtos, cada um com preço próprio, o post é
+# lista (passa sem aval). Produto + variante com preço ("23,8" R$ 449 /
+# 27" por R$ 539") já são dois produtos.
+_MIN_ITENS_LISTA = 2
 
 
 def _modo() -> str:
@@ -250,6 +260,11 @@ def portao(norm, enr, is_edit: bool, data_msg=None) -> bool:
             return True
         if origem.consultar(chat, msg_id):
             return True             # já publicada/vinculada: edição e afins seguem
+        livre = _isencao(norm, chaves)
+        if livre:
+            log_ded.info(f"🎯 [CURADORIA_LIVRE] {_nome(chat)} id={msg_id} cat={cat} "
+                         f"motivo={livre} — passa sem aval")
+            return True
         resposta, nova = db_curadoria_avaliar(chat, msg_id, chaves, cat, ts_msg,
                                               _janela(), time.time())
         if resposta in (AVAL, LIBERACAO, JA_LIBERADA):
@@ -283,6 +298,30 @@ def portao(norm, enr, is_edit: bool, data_msg=None) -> bool:
         log_ded.error(f"❌ curadoria.portao: {type(e).__name__}: {e} — segue sem conferir",
                       exc_info=True)
         return True
+
+
+def _isencao(norm, chaves: List[str]) -> str:
+    """Por que este post de categoria vigiada passa SEM aval (decisão do
+    Léo, 03/11/2026), ou "" se não há motivo:
+      LISTA     vários produtos, cada um com preço próprio — qualquer que
+                seja a categoria. Exige as duas provas: >= 2 produtos
+                identificados E >= 2 itens com preço (o mesmo produto em dois
+                anúncios, ou "Resgate cupons" + "Link produto", não é lista);
+      DESTAQUE  frase que chama atenção para o preço no TÍTULO (cabeçalho +
+                linha do produto): "Ainda ativo!", "Bom preço!", "Vai
+                esgotar!"… (dono do vocabulário: pipeline.destaque);
+      VOLTANDO  retorno de oferta, pela MESMA detecção que a deduplicação e a
+                decisão usam (pipeline.reativacao — sem regex própria)."""
+    texto = getattr(norm, "texto_analise", "") or ""
+    itens = itens_com_preco(texto)
+    if len(chaves) >= _MIN_ITENS_LISTA and itens >= _MIN_ITENS_LISTA:
+        return f"LISTA({len(chaves)} produtos, {itens} itens com preço)"
+    frase = frase_de_destaque(regiao_titulo(texto))
+    if frase:
+        return f"DESTAQUE({frase})"
+    if eh_reativacao(getattr(norm, "texto_limpo", "") or ""):
+        return "VOLTANDO"
+    return ""
 
 
 def reinjecao(event) -> bool:

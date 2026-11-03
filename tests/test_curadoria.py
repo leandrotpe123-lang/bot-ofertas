@@ -874,6 +874,89 @@ def test_23_custo_do_classificador(r):
     r.check(media_ms < 2.0, "23.menos_de_2ms_por_post", f"{media_ms:.3f} ms")
 
 
+def test_24_lista_de_varios_produtos_passa(r):
+    """Lista com vários produtos (cada um com preço) passa sem aval, seja
+    qual for a categoria. Um produto só com dois links NÃO é lista."""
+    s = {}
+    lista = ("🔥 Placas Mães B550M AM4 em Oferta\n\n🎟 Resgate cupom do anúncio\n\n"
+             "🔹Gigabyte Aorus Elite - R$ 556\nhttps://meli.la/1BRngkh\n\n"
+             "🔹 Asus Tuf Gaming Plus - R$ 588\nhttps://meli.la/1KN1RGJ")      # Samuel 124289
+    dois_anuncios = ("Water Cooler Kalkan Aura Com Tela Lcd 360mm Argb Intel Amd\n\nR$ 299\n"
+                     "-CUPOM: MELIPROMO3111\n\n1 https://meli.la/1GFJVtN\n"
+                     "2 https://meli.la/1YWGhpw")                                  # Promotom 112558
+    shopee = ("Amd Ryzen 5 5500x3D Processador, 4.0GHz Max Turbo, Am4\n\nR$ 1250\n"
+              "-Resgate todos os cupons desta página:\nhttps://s.shopee.com.br/A\n\n"
+              "-Link produto:\nhttps://s.shopee.com.br/B")                        # Fumotom 44636
+
+    async def corpo(mundo):
+        await chega(mundo, "SamuelF3lipePromo", lista,
+                    [("mercadolivre", "MLB1001", "produto"), ("mercadolivre", "MLB1002", "produto")])
+        s["lista"] = len(posts(mundo))
+        k = await chega(mundo, "promotom", dois_anuncios,
+                        [("mercadolivre", "MLB2001", "produto"),
+                         ("mercadolivre", "MLB2002", "produto")])
+        h = await chega(mundo, "fumotom", shopee, [("shopee", "77.88", "produto")])
+        s["presos"] = (len(posts(mundo)), retida("promotom", k), retida("fumotom", h))
+    cenario(corpo)
+    r.check(s["lista"] == 1, "24.lista_passa", str(s["lista"]))
+    r.check(s["presos"] == (1, "retida", "retida"), "24.um_produto_com_dois_links_trava",
+            str(s["presos"]))
+
+
+def test_25_frase_de_destaque_no_titulo_passa(r):
+    s = {}
+
+    async def corpo(mundo):
+        await chega(mundo, "promotom", "Ainda ativo! Monitor Gamer Philips Evnia 23.8\" 144Hz "
+                    "0, 5Ms 24M2n3200nf\n\nR$ 449", amz("B0DEST0001"))          # Promotom 112445
+        await chega(mundo, "SamuelF3lipePromo", "-Ainda ativo, bom preço em 12x sem juros\n"
+                    "🔥 Monitor Gamer AOC AGON G42 27\" 200Hz 0,3ms\n\n💵 R$ 599",
+                    amz("B0DEST0002"))                                           # Samuel 124721
+        await chega(mundo, "fumotom", "Preção! Placa de Vídeo RTX 5060 8GB\n\nR$ 1899",
+                    amz("B0DEST0003"))
+        s["passaram"] = len(posts(mundo))
+        a = await chega(mundo, "fumotom", "Placa de Vídeo RTX 5060 8GB\n\nR$ 1899\n-Ainda ativo",
+                        amz("B0DEST0004"))                                       # só no corpo
+        b = await chega(mundo, "promotom", "Esgotou! Placa de Vídeo RTX 5070\n\nR$ 3299",
+                        amz("B0DEST0005"))
+        s["presos"] = (len(posts(mundo)), retida("fumotom", a), retida("promotom", b))
+    cenario(corpo)
+    r.check(s["passaram"] == 3, "25.frase_no_titulo_ou_cabecalho_passa", str(s["passaram"]))
+    r.check(s["presos"] == (3, "retida", "retida"), "25.frase_fora_do_titulo_e_esgotou_travam",
+            str(s["presos"]))
+
+
+def test_26_voltando_passa(r):
+    s = {}
+
+    async def corpo(mundo):
+        for i, t in enumerate(("Voltando! Placa de Vídeo Gigabyte RTX 5060 Ti 8GB",
+                               "Voltou! Redragon Water Cooler GamerStorm Le240 Rd 240mm Rgb",
+                               "Está de volta: SSD Kingston NV3 1TB NVMe",
+                               "Estoque voltou! Fonte Mach1 Steady 750W 80 Plus Bronze")):
+            await chega(mundo, "promotom", t + "\n\nR$ 999", amz(f"B0VOLTA00{i}"))
+        s["n"] = len(posts(mundo))
+    cenario(corpo)
+    r.check(s["n"] == 4, "26.retorno_passa", str(s["n"]))
+
+
+def test_27_isencao_nao_vira_aval(r):
+    """Quem passa por isenção NÃO é curador: a segurada de outra fonte, do
+    mesmo produto, continua segurada (o canal tem um post só)."""
+    s = {}
+
+    async def corpo(mundo):
+        a = "B0ISENC001"
+        f = await chega(mundo, "fumotom", GPU, amz(a))
+        await chega(mundo, "promotom", "Ainda ativo! " + GPU, amz(a))
+        s["x"] = (len(posts(mundo)), retida("fumotom", f), list(mundo.buscas))
+        with _db() as db:
+            s["avais"] = db.execute("SELECT COUNT(*) FROM curadoria_aval").fetchone()[0]
+    cenario(corpo)
+    r.check(s["x"] == (1, "retida", []) and s["avais"] == 0, "27.nao_e_aval",
+            str((s["x"], s["avais"])))
+
+
 def test_20_catalogo(r):
     r.check(catalogo.TIPOS.get("curadoria.retida") == "DESCARTADA"
             and "curadoria.aval" in catalogo.TIPOS

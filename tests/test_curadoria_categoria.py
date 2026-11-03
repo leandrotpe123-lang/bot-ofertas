@@ -265,6 +265,50 @@ def test_06_o_primeiro_substantivo_decide(r):
     r.check(errados == [], "06.substantivo", str(errados))
 
 
+# Posts REAIS (texto da prévia pública, canal/id) para a forma do post.
+LISTA_SAMUEL = ("🔥 Placas Mães B550M AM4 em Oferta\n\n🎟 Resgate cupom do anúncio\n\n"
+                "🔹Gigabyte Aorus Elite - R$ 556\nℹ️ Selecione a loja Oficial Gigabyte\n"
+                "https://meli.la/1BRngkh\n\n🔹 Asus Tuf Gaming Plus - R$ 588\n"
+                "ℹ️ Selecione a loja INPOWER\nhttps://meli.la/1KN1RGJ")          # Samuel 124289
+LISTA_NERD = ("➡️ Placa Mãe Asus Tuf Gaming B550m-plus Ddr4 AMD Am4 mATX RGB\n\n✅ R$ 599 😱😱\n"
+              "🏷 Cupom: Do anuncio\n\n🛒 https://meli.la/1CbFEi8\n\n➡️ Placa Mae Gigabyte "
+              "B550m Aorus Elite Am4 Ddr4 Hdmi M-atx Cor Preto\n\n✅ R$ 556 😱😱\n"
+              "🏷 Cupom: Do anuncio\n\n🛒 https://meli.la/2x")                  # Nerd 148143
+VARIANTE = ("Monitor Gamer Philips Evnia 23.8\" 144Hz 0, 5Ms 24M2n3200nf\n\nR$ 449\n\n"
+            "https://link.amazon/B036bVJ0o\n\n-27\" por R$ 539\nhttps://link.amazon/B0auAuV0x"
+            "\n\n-Anúncio")                                                     # Promotom 112298
+DOIS_ANUNCIOS = ("Water Cooler Kalkan Aura Com Tela Lcd 360mm Argb Intel Amd\n\nR$ 299\n"
+                 "-CUPOM: MELIPROMO3111\n\n1 https://meli.la/1GFJVtN\n2 https://meli.la/1YWGhpw"
+                 "\n\n-Anúncio")                                                # Promotom 112558
+SHOPEE = ("Amd Ryzen 5 5500x3D Processador, 4.0GHz Max Turbo, Cache 96Mb, Am4\n\nR$ 1250\n"
+          "-Resgate todos os cupons desta página:\nhttps://s.shopee.com.br/AAIQJdjRvF\n\n"
+          "-Link produto:\nhttps://s.shopee.com.br/9fM9iip\n\n-Anúncio")       # Fumotom 44636
+PIX = ("Redragon Water Cooler GamerStorm LE240 RD 240mm ARGB\n\nR$ 153 - PIX\n"
+       "-CUPOM: DOMINGO40OF ou resgate cupom do anúncio\n\nhttps://link.amazon/B0emOVS43")
+
+
+def test_08_itens_com_preco(r):
+    casos = [(LISTA_SAMUEL, 2), (LISTA_NERD, 2), (VARIANTE, 2), (DOIS_ANUNCIOS, 1),
+             (SHOPEE, 1), (PIX, 0),
+             ("Jbl, Caixa de Som, PartyBox Encore Essential 2 Mic\n\nR$ 1289 - Sem Juros", 0),
+             ("Cupom Shopee\n\nR$ 50 OFF em R$ 249: ENORME50\n\n-Resgate aqui:", 0),
+             ("Placa X\n\nR$ 1.299 em 10x\nR$ 1.199 no Pix", 0)]
+    errados = [(t[:40], e, cc.itens_com_preco(t)) for t, e in casos
+               if cc.itens_com_preco(t) != e]
+    r.check(errados == [], "08.itens", str(errados))
+
+
+def test_09_regiao_do_titulo(r):
+    r.check(cc.regiao_titulo("-Ainda ativo, bom preço em 12x sem juros\n🔥 Monitor Gamer AOC "
+                             "AGON G42 27\"\n\nR$ 599")
+            == "-Ainda ativo, bom preço em 12x sem juros\n🔥 Monitor Gamer AOC AGON G42 27\"",
+            "09.cabecalho_faz_parte")
+    r.check(cc.regiao_titulo("Placa de Vídeo RTX 5060\n\nR$ 2299\n-Ainda ativo")
+            == "Placa de Vídeo RTX 5060", "09.corpo_nao_faz_parte")
+    r.check(cc.regiao_titulo("WD-40 300ml\nR$ 29") == "" and cc.regiao_titulo(None) == "",
+            "09.sem_produto")
+
+
 def test_07_modulo_puro(r):
     arvore = ast.parse(ler_fonte("pipeline/curadoria_categoria.py"))
     importados = set()

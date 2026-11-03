@@ -180,7 +180,10 @@ CUPOM_LIMITE_SUPERIOR_S = 30 * 60
 # vão ao canal quando o MESMO produto (mesma identidade: ASIN, MLB, item da
 # Shopee…) sai num canal curador até CURADORIA_JANELA_S antes ou depois. Sem
 # aval, a mensagem fica segurada; o aval que chega dentro da janela a solta.
-# Notebook, PC gamer e os outros monitores passam normal.
+# Notebook, PC gamer e os outros monitores passam normal. Também passam sem
+# aval (decisão do Léo, 03/11): LISTA de vários produtos com preço próprio,
+# frase de DESTAQUE no título ("Ainda ativo!", "Bom preço!", "Vai esgotar!" —
+# pipeline.destaque) e retorno de oferta ("Voltando!" — pipeline.reativacao).
 #
 # Medido nas prévias públicas (27/10 → 03/11): quando o Nerd posta o mesmo
 # produto que Promotom/Fumotom, é quase sempre o mesmo anúncio, de 0 a 8 min
