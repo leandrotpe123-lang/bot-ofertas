@@ -135,6 +135,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import hashlib
 import time
 from collections import OrderedDict
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
@@ -226,9 +227,10 @@ _maior: Dict[int, int] = {}
 _falha_varredura: Dict[int, bool] = {}
 _pausa_ate: Dict[int, float] = {}
 _tentativas: Dict[tuple, int] = {}
-# A versão mais recente já lida de cada mensagem do canal de aval: um update
-# atrasado de versão MAIS VELHA não desfaz o conjunto da mais nova.
-_ultima_versao: Dict[tuple, int] = {}
+# A versão APLICADA por último de cada mensagem do canal de aval —
+# (edit_date em s, assinatura do conteúdo): um update atrasado de versão
+# MAIS VELHA não desfaz o conjunto da mais nova.
+_ultima_versao: Dict[tuple, Tuple[int, str]] = {}
 # A versão segurada, como chegou (ou na última edição): (chat, msg) ->
 # (Message, instante). É o que sai na hora quando o aval chega.
 _SEGURADAS: Dict[tuple, Tuple[object, float]] = {}
@@ -320,6 +322,12 @@ def instalar(cliente, fontes: Iterable, avais: Iterable,
     papeis = ", ".join(f"@{u or cid}={cid}:{_papel(cid)}" for cid, u in por_id.items())
     lidos = ", ".join(f"@{(getattr(e, 'username', None) or '').lower()}={get_peer_id(e)}"
                       for e in avais)
+    resolvidos = {(getattr(e, "username", None) or "").lower() for e in avais}
+    faltam = [c for c in config.GRUPOS_AVAL if c.lower() not in resolvidos]
+    if faltam:
+        log_ded.error(f"❌ curadoria: canal de aval {['@' + c for c in faltam]} NÃO resolvido "
+                      f"no boot — sem o aval dele (só o Fada Promoções solta); confira o @ "
+                      f"e se a conta segue o canal")
     log_ded.info(f"🎯 curadoria {_modo()} | janela={_janela():g}s | fontes: {papeis} | "
                  f"aval só-sinal: {lidos or 'nenhum'} | lojas: "
                  f"{sorted(config.CURADORIA_LOJAS_AVAL)}")
@@ -885,8 +893,7 @@ def _repor_pendentes() -> None:
     agora = time.time()
     for k, p in list(_PENDENTES.items()):
         if agora > p["limite"]:
-            _PENDENTES.pop(k, None)
-            _SEGURADAS.pop(k, None)
+            _soltar_memoria(k)
             log_ded.error(f"⌛ [CURADORIA_PENDENTE_EXPIROU] {_nome(k[0])} id={k[1]} — a "
                           f"janela fechou com ela só na memória; NÃO vai ao canal")
     for k, (chaves, cat, ts_aval, parcial) in list(_AVAIS_PENDENTES.items()):
@@ -930,13 +937,23 @@ async def _ao_aval(event) -> None:
         log_ded.warning(f"⚠️ curadoria: aval do handler ({type(e).__name__})")
 
 
-def _versao(message) -> int:
-    """A versão da mensagem: 0 a original; o edit_date (s) de cada edição."""
+def _versao(message) -> Tuple[int, str]:
+    """A versão da mensagem: (quando, o quê).
+      quando     0 na original; o edit_date (s) em cada edição — o Telegram
+                 dá segundos: duas edições no MESMO segundo empatam aqui;
+      o quê      assinatura DETERMINÍSTICA (sha256, igual em qualquer
+                 processo) do conteúdo que o aval lê: o texto da mensagem e
+                 os links dele — o que distingue as duas edições do mesmo
+                 segundo e reconhece a mesma versão trazida de novo."""
     editada = getattr(message, "edit_date", None)
-    return int(_ts(editada)) if editada else 0
+    texto = ingestao.texto_de(message)
+    corpo = texto + "\x00" + "\x00".join(ingestao.links_de(texto))
+    return (int(_ts(editada)) if editada else 0,
+            hashlib.sha256(corpo.encode("utf-8", "surrogatepass")).hexdigest()[:24])
 
 
-async def _observar_aval(chat_id: int, message, repeticao: bool = False) -> None:
+async def _observar_aval(chat_id: int, message, repeticao: bool = False,
+                         autoritativa: bool = False) -> None:
     """Uma VERSÃO de mensagem do canal de aval (a original ou uma edição):
     categoria vigiada + produto identificado (sem afiliar) → aval do
     conteúdo ATUAL. Cada versão é olhada uma vez (handler e varredura podem
@@ -945,24 +962,45 @@ async def _observar_aval(chat_id: int, message, repeticao: bool = False) -> None
     edit_date, nenhum aval anterior é duplicado (database_curadoria). Se a
     identificação FALHOU (rede, encurtador que não abriu), ela é refeita
     depois de _REPETIR_S. Nada desta mensagem entra no funil de
-    publicação."""
+    publicação.
+
+    Versão = (edit_date, assinatura do conteúdo) — _versao. Regras:
+      · edit_date MAIS VELHO que o da versão aplicada: update atrasado,
+        ignorado (não desfaz a mais nova);
+      · a mesma versão de novo (handler repetido, varredura): ignorada;
+      · edit_date IGUAL e conteúdo diferente (duas edições no mesmo
+        segundo): a nova é lida. A ordem dentro do segundo não se sabe pela
+        data; quem desempata é a VARREDURA (`autoritativa`: o servidor
+        devolve o conteúdo ATUAL): se ela traz uma versão já vista que não
+        é a aplicada, reaplica — o update atrasado do mesmo segundo se
+        corrige na rodada seguinte, sem aval duplicado;
+      · nova tentativa (`repeticao`) de versão que já não é a aplicada:
+        ignorada."""
     if chat_id not in _estado["avais"]:
         return
-    chave = (chat_id, int(getattr(message, "id", 0) or 0), _versao(message))
-    if chave[2] < _ultima_versao.get(chave[:2], -1):
-        log_ded.info(f"🎯 [CURADORIA_AVAL_VERSAO_VELHA] {_nome(chat_id)} id={chave[1]} — "
-                     f"update atrasado de versão anterior à já lida; ignorado")
+    mid = int(getattr(message, "id", 0) or 0)
+    versao = _versao(message)
+    chave = (chat_id, mid, *versao)
+    ultima = _ultima_versao.get((chat_id, mid))
+    if ultima is not None and (versao[0] < ultima[0] or (repeticao and versao != ultima)):
+        log_ded.info(f"🎯 [CURADORIA_AVAL_VERSAO_VELHA] {_nome(chat_id)} id={mid} — "
+                     f"versão anterior à já aplicada; ignorada")
         return
-    _ultima_versao[chave[:2]] = chave[2]
     if not repeticao:
-        if chave in _vistos:
+        if chave in _vistos and not (autoritativa and ultima is not None
+                                     and versao != ultima):
             return
+        if chave in _vistos:
+            log_ded.info(f"🎯 [CURADORIA_AVAL_REAPLICA] {_nome(chat_id)} id={mid} — a "
+                         f"varredura traz como atual uma versão do mesmo segundo que não "
+                         f"é a aplicada; reaplica a do servidor")
         _vistos[chave] = None
         if len(_vistos) > _VISTOS_MAX:
             for k in list(_vistos)[:_VISTOS_MAX // 2]:
                 _vistos.pop(k, None)
             for k in list(_ultima_versao)[:len(_ultima_versao) // 2]:
                 _ultima_versao.pop(k, None)
+    _ultima_versao[(chat_id, mid)] = versao
     try:
         # A versão vale pela data DELA (a edição, pelo edit_date). Idade
         # negativa = relógio local atrás do Telegram: é recente.
@@ -1118,10 +1156,17 @@ async def _varrer_canal(chat_id: int, ent) -> None:
             pagina = [m for m in (await cliente.get_messages(ent, **kw) or [])
                       if m is not None]
             lote += pagina
-            if (maior is None or len(pagina) < _LOTE
-                    or min(m.id for m in pagina) <= maior):
+            if len(pagina) < _LOTE:
                 break
-            teto = min(m.id for m in pagina)
+            mais_velha = min(pagina, key=lambda m: m.id)
+            if maior is None:
+                # 1ª leitura (boot): continua até cobrir a janela — uma
+                # rajada maior que _LOTE durante o reinício não perde aval.
+                if _idade_seg(getattr(mais_velha, "date", None)) > _janela() + _ATRASO_MAX_S:
+                    break
+            elif mais_velha.id <= maior:
+                break
+            teto = mais_velha.id
     except asyncio.CancelledError:
         raise
     except Exception as e:                              # noqa: BLE001
@@ -1144,7 +1189,8 @@ async def _varrer_canal(chat_id: int, ent) -> None:
         _maior[chat_id] = 0
     for m in sorted(lote, key=lambda x: x.id):
         if getattr(m, "action", None) is None:
-            await _observar_aval(chat_id, m)
+            # O que o servidor devolve é o conteúdo ATUAL: desempata.
+            await _observar_aval(chat_id, m, autoritativa=True)
 
 
 def _expirar() -> None:

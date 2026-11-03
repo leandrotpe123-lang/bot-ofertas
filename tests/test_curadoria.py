@@ -127,6 +127,15 @@ Auditoria forense (itens 1 a 4):
       barrado
   64  leitura parcial do Nerd não tira o produto nem dá data nova a ele
   65  update atrasado de versão velha do Nerd é ignorado
+Versão do Nerd = edit_date + assinatura do conteúdo:
+  66  duas edições diferentes no mesmo segundo são duas versões; a mesma
+      versão não é relida; datas por produto; Nerd fora do funil
+  67  atrasada no mesmo segundo: a varredura (conteúdo atual do servidor)
+      reaplica a certa sem duplicar; a de 1 s antes é ignorada
+  68  a varredura acha a edição do mesmo segundo que o handler perdeu
+  69  nova tentativa de versão superada no mesmo segundo é ignorada
+  70  reavaliação de robustez: memória sem vazamento, canal de aval não
+      resolvido é erro, boot cobre a janela na rajada
 
 Execução (standalone, stdlib + Telethon):  python3 tests/test_curadoria.py
 """
@@ -849,9 +858,9 @@ def test_16_varredura_do_canal_de_aval(r):
         chamadas = []
         real = curadoria._observar_aval
 
-        async def conta(chat_id, m):
+        async def conta(chat_id, m, **kw):
             chamadas.append(m.id)
-            await real(chat_id, m)
+            await real(chat_id, m, **kw)
         curadoria._observar_aval = conta
         try:
             await curadoria._varrer_canal(peer, ent)
@@ -2387,14 +2396,20 @@ def test_57_aprovado_do_post_inclui_a_familia_e_a_data_original(r):
 # ══════════════════════════════════════════════════════════════════
 # ÚLTIMA AUDITORIA (03/11/2026) — edição no Nerd, reentrada, EDIT_ANTIGO
 # ══════════════════════════════════════════════════════════════════
-def versao_nerd(mid, texto, links, idade_s=5.0, edit_idade_s=None):
+def versao_nerd(mid, texto, links, idade_s=5.0, edit_idade_s=None, edit_em=None):
     """Uma VERSÃO da mensagem do Nerd: `links` = {url: idents}; cada link de
-    teste leva às chaves dele (a identificação real fica no teste 32)."""
+    teste leva às chaves dele (a identificação real fica no teste 32).
+    `edit_em`: edit_date exato (o Telegram dá segundos — duas edições podem
+    ter o MESMO)."""
     for u, idents in links.items():
         IDENTS_AVAL[u] = [f"{p}|{i}" for p, i, _ in idents]
     corpo = texto + "".join(f"\n\n🛒 {u}" for u in links)
-    return mensagem("nerdofertas", mid, corpo, idade_s=idade_s,
-                    editada=edit_idade_s is not None, edit_idade_s=edit_idade_s or 0.0)
+    m = mensagem("nerdofertas", mid, corpo, idade_s=idade_s,
+                 editada=edit_idade_s is not None or edit_em is not None,
+                 edit_idade_s=edit_idade_s or 0.0)
+    if edit_em is not None:
+        m.edit_date = edit_em
+    return m
 
 
 async def pelo_handler(mundo, m, editada=False):
@@ -2721,6 +2736,258 @@ def test_65_update_atrasado_de_versao_velha_do_nerd(r):
     cenario(corpo)
     r.check(s["conj"] == ["amazon|B0ATRAS001", "amazon|B0ATRAS002"] and s["avais"] == 2,
             "65.versao_velha_atrasada_ignorada", str(s))
+
+
+def _segundo():
+    """Um edit_date com a precisão do Telegram (segundos)."""
+    return _agora().replace(microsecond=0)
+
+
+def _espiar_leituras():
+    """Conta cada leitura (versão processada) do canal de aval e cada
+    entrega ao ponto de entrada — para provar 'sem duplicar' e 'Nerd fora
+    do funil'."""
+    leituras, despachos = [], []
+    real_reg, real_desp = curadoria._registrar_aval, curadoria._estado["despachar"]
+
+    def conta(*a, **k):
+        leituras.append((a[1], tuple(a[2])))
+        return real_reg(*a, **k)
+
+    async def espia(ev, is_edit=False):
+        despachos.append(str(ev.chat_id))
+        await real_desp(ev, is_edit=is_edit)
+    curadoria._registrar_aval, curadoria._estado["despachar"] = conta, espia
+
+    def desfaz():
+        curadoria._registrar_aval, curadoria._estado["despachar"] = real_reg, real_desp
+    return leituras, despachos, desfaz
+
+
+def atuais_nerd(mid):
+    with _db() as db:
+        return sorted(c for (c,) in db.execute(
+            "SELECT chave FROM curadoria_chave WHERE chat=? AND msg_id=? AND atual=1",
+            (str(PEER["nerdofertas"]), mid)))
+
+
+def test_66_duas_edicoes_no_mesmo_segundo(r):
+    """Versão = edit_date + assinatura do conteúdo: duas edições DIFERENTES
+    no mesmo segundo são duas versões (a segunda é lida e dá aval); a mesma
+    edição de novo (handler repetido, varredura) não é relida; o produto
+    que permanece conserva a data, o acrescentado entra pelo edit_date.
+    Vale também quando só o TEXTO muda no mesmo segundo (o mesmo link passa
+    a ter categoria vigiada). O Nerd nunca entra no funil."""
+    s = {}
+
+    async def corpo(mundo):
+        leituras, despachos, desfaz = _espiar_leituras()
+        try:
+            peer, ent = PEER["nerdofertas"], ENT["nerdofertas"]
+            q = await chega(mundo, "fumotom", RX, amz("B0SEG00002"))       # espera B
+            mid = novo_id()
+            la, lb = "https://nerd.teste/a66", "https://nerd.teste/b66"
+            await pelo_handler(mundo, versao_nerd(mid, GPU_NERD, {la: amz("B0SEG00001")},
+                                                  idade_s=200))
+            t = _segundo()
+            e1 = versao_nerd(mid, GPU_NERD + " ✏️", {la: amz("B0SEG00001")}, idade_s=200,
+                             edit_em=t)
+            e2 = versao_nerd(mid, GPU_NERD, {la: amz("B0SEG00001"), lb: amz("B0SEG00002")},
+                             idade_s=200, edit_em=t)                         # MESMO segundo
+            await pelo_handler(mundo, e1, editada=True)
+            await pelo_handler(mundo, e2, editada=True)
+            s["dois"] = (len(leituras), retida("fumotom", q))
+            await pelo_handler(mundo, e2, editada=True)                     # repetido
+            mundo.historico[peer] = [e2]
+            await curadoria._varrer_canal(peer, ent)                        # e na varredura
+            await drenar()
+            s["sem_dup"] = (len(leituras), avais_de(mid), atuais_nerd(mid))
+            # só o texto muda no mesmo segundo: o mesmo link passa a ser aval
+            p = await chega(mundo, "promotom", GPU, amz("B0SEG00003"))
+            mid2 = novo_id()
+            t2 = _segundo()
+            lc = "https://nerd.teste/c66"
+            await pelo_handler(mundo, versao_nerd(mid2, "Promoção relâmpago!",
+                                                  {lc: amz("B0SEG00003")}, edit_em=t2),
+                               editada=True)
+            await pelo_handler(mundo, versao_nerd(mid2, GPU_NERD, {lc: amz("B0SEG00003")},
+                                                  edit_em=t2), editada=True)
+            s["texto"] = retida("promotom", p)
+            s["funil"] = (len([x for x in mundo.criados if "😱" in x[1]]),
+                          [d for d in despachos if d == CHAT["nerdofertas"]])
+        finally:
+            desfaz()
+    cenario(corpo)
+    r.check(s["dois"] == (3, "liberada"), "66.duas_edicoes_no_mesmo_segundo_sao_duas_versoes",
+            str(s["dois"]))
+    a = dict(s["sem_dup"][1])
+    r.check(s["sem_dup"][0] == 3 and len(s["sem_dup"][1]) == 2
+            and s["sem_dup"][2] == ["amazon|B0SEG00001", "amazon|B0SEG00002"],
+            "66.mesma_versao_nao_relida_nem_duplicada", str(s["sem_dup"]))
+    r.check(abs(a["amazon|B0SEG00001"] - (time.time() - 200)) < 5
+            and abs(a["amazon|B0SEG00002"] - time.time()) < 5,
+            "66.permanece_conserva_acrescentado_pelo_edit_date", str(s["sem_dup"][1]))
+    r.check(s["texto"] == "liberada", "66.so_o_texto_muda_no_mesmo_segundo", str(s["texto"]))
+    r.check(s["funil"] == (0, []), "66.nerd_nunca_no_funil", str(s["funil"]))
+
+
+def test_67_atrasada_no_mesmo_segundo_a_varredura_corrige(r):
+    """O update de uma edição MAIS VELHA chega atrasado no MESMO segundo da
+    mais nova (a data não desempata): a varredura, que traz o conteúdo
+    ATUAL do servidor, reaplica a versão certa — o conjunto atual volta a
+    ser o da mais nova e nenhum aval é duplicado. A atrasada de um segundo
+    antes é ignorada na hora."""
+    s = {}
+
+    async def corpo(mundo):
+        leituras, _, desfaz = _espiar_leituras()
+        try:
+            peer, ent = PEER["nerdofertas"], ENT["nerdofertas"]
+            mid = novo_id()
+            la, lb = "https://nerd.teste/a67", "https://nerd.teste/b67"
+            t = _segundo()
+            velha = versao_nerd(mid, GPU_NERD, {la: amz("B0ATR00001")}, idade_s=100, edit_em=t)
+            nova = versao_nerd(mid, GPU_NERD, {lb: amz("B0ATR00002")}, idade_s=100, edit_em=t)
+            await pelo_handler(mundo, nova, editada=True)
+            await pelo_handler(mundo, velha, editada=True)                   # atrasada
+            s["errado"] = atuais_nerd(mid)
+            mundo.historico[peer] = [nova]                                   # o servidor
+            await curadoria._varrer_canal(peer, ent)
+            await drenar()
+            s["corrigido"] = (atuais_nerd(mid), sorted(c for c, _ in avais_de(mid)))
+            await curadoria._varrer_canal(peer, ent)                         # estável
+            await drenar()
+            n = len(leituras)
+            antes = versao_nerd(mid, GPU_NERD, {la: amz("B0ATR00001")}, idade_s=100,
+                                edit_em=t - dt.timedelta(seconds=1))
+            await pelo_handler(mundo, antes, editada=True)                   # 1 s antes
+            s["um_seg_antes"] = (len(leituras) - n, atuais_nerd(mid))
+        finally:
+            desfaz()
+    cenario(corpo)
+    r.check(s["errado"] == ["amazon|B0ATR00001"], "67.sem_varredura_o_empate_fica_na_ordem",
+            str(s["errado"]))
+    r.check(s["corrigido"] == (["amazon|B0ATR00002"], ["amazon|B0ATR00001", "amazon|B0ATR00002"]),
+            "67.varredura_reaplica_a_atual_sem_duplicar", str(s["corrigido"]))
+    r.check(s["um_seg_antes"] == (0, ["amazon|B0ATR00002"]),
+            "67.edicao_de_segundo_anterior_ignorada", str(s["um_seg_antes"]))
+
+
+def test_68_varredura_recupera_edicao_do_mesmo_segundo(r):
+    """A edição do mesmo segundo que o handler PERDEU é achada pela
+    varredura (outra assinatura) e solta a segurada; varredura repetida não
+    relê."""
+    s = {}
+
+    async def corpo(mundo):
+        leituras, _, desfaz = _espiar_leituras()
+        try:
+            peer, ent = PEER["nerdofertas"], ENT["nerdofertas"]
+            q = await chega(mundo, "promotom", RX, amz("B0REC00002"))
+            mid = novo_id()
+            la, lb = "https://nerd.teste/a68", "https://nerd.teste/b68"
+            t = _segundo()
+            e1 = versao_nerd(mid, GPU_NERD, {la: amz("B0REC00001")}, edit_em=t)
+            e2 = versao_nerd(mid, GPU_NERD, {la: amz("B0REC00001"), lb: amz("B0REC00002")},
+                             edit_em=t)
+            await pelo_handler(mundo, e1, editada=True)
+            s["antes"] = retida("promotom", q)
+            mundo.historico[peer] = [e2]                     # o handler não trouxe a e2
+            await curadoria._varrer_canal(peer, ent)
+            await drenar()
+            s["achou"] = (retida("promotom", q), len(leituras))
+            await curadoria._varrer_canal(peer, ent)
+            await drenar()
+            s["estavel"] = len(leituras)
+        finally:
+            desfaz()
+    cenario(corpo)
+    r.check(s["antes"] == "retida" and s["achou"] == ("liberada", 2) and s["estavel"] == 2,
+            "68.varredura_acha_a_edicao_perdida_do_mesmo_segundo", str(s))
+
+
+def test_69_nova_tentativa_de_versao_superada_no_mesmo_segundo(r):
+    """A leitura da edição e1 falha (rede) e fica para nova tentativa; antes
+    dela, chega a e2 do MESMO segundo: a nova tentativa da e1 é ignorada —
+    não desfaz o conjunto da e2."""
+    s = {}
+
+    async def corpo(mundo):
+        respostas = {"https://nerd.teste/a69": iter([([], True), (["amazon|B0TENT0001"], False)])}
+
+        async def ident(links):
+            if "https://nerd.teste/b69" in links:
+                return ["amazon|B0TENT0002"], False
+            return next(respostas["https://nerd.teste/a69"])
+        real_rep = curadoria._REPETIR_S
+        curadoria._identificar, curadoria._REPETIR_S = ident, (0.05, 0.05)
+        try:
+            mid = novo_id()
+            t = _segundo()
+            e1 = versao_nerd(mid, GPU_NERD, {"https://nerd.teste/a69": []}, edit_em=t)
+            e2 = versao_nerd(mid, GPU_NERD, {"https://nerd.teste/b69": []}, edit_em=t)
+            cbs = {type(ev).__name__: cb for cb, ev in mundo.handlers}
+            await cbs["MessageEdited"](tl_events.MessageEdited.Event(e1))
+            await asyncio.sleep(0)
+            await cbs["MessageEdited"](tl_events.MessageEdited.Event(e2))
+            await asyncio.sleep(0.15)
+            await drenar()
+            s["x"] = (atuais_nerd(mid), sorted(c for c, _ in avais_de(mid)))
+        finally:
+            curadoria._REPETIR_S = real_rep
+    cenario(corpo)
+    r.check(s["x"] == (["amazon|B0TENT0002"], ["amazon|B0TENT0002"]),
+            "69.nova_tentativa_da_superada_ignorada", str(s["x"]))
+
+
+def test_70_reavaliacao_de_robustez(r):
+    """Achados da reavaliação geral: (a) a mensagem que expira só na memória
+    não deixa contador de falha para trás; (b) canal de aval que não resolve
+    no boot é ERRO explícito; (c) a 1ª varredura (boot) cobre a janela
+    inteira mesmo com mais de _LOTE mensagens novas no Nerd."""
+    s = {}
+
+    async def corpo(mundo):
+        real = (curadoria.db_curadoria_avaliar, curadoria._marcar_repor)
+        curadoria.db_curadoria_avaliar = lambda *a, **k: (dbc.ERRO, False)
+        curadoria._marcar_repor = lambda: None
+        try:
+            p = await chega(mundo, "fumotom", GPU, amz("B0ROBU0001"))
+            k = (CHAT["fumotom"], p)
+            s["antes"] = (k in curadoria._falhas, k in curadoria._PENDENTES)
+            curadoria._PENDENTES[k]["limite"] = time.time() - 1
+            curadoria._repor_pendentes()
+            s["depois"] = (k in curadoria._falhas, k in curadoria._PENDENTES,
+                           k in curadoria._SEGURADAS)
+        finally:
+            curadoria.db_curadoria_avaliar, curadoria._marcar_repor = real
+        # (c) 45 mensagens novas no Nerd durante o reinício (todas na janela)
+        peer, ent = PEER["nerdofertas"], ENT["nerdofertas"]
+        alvo = await chega(mundo, "promotom", GPU, amz("B0ROBU0002"))
+        hist = [msg_nerd(800000 + i, GPU_NERD, amz(f"B0RAJ{i:05d}"), idade_s=200 - i)
+                for i in range(44)]
+        hist.insert(0, msg_nerd(799999, GPU_NERD, amz("B0ROBU0002"), idade_s=250))  # a mais velha
+        mundo.historico[peer] = hist
+        curadoria._maior.pop(peer, None)
+        await curadoria._varrer_canal(peer, ent)
+        await drenar()
+        s["rajada"] = (retida("promotom", alvo), len(mundo.varreduras))
+
+    cenario(corpo)
+    r.check(s["antes"] == (True, True) and s["depois"] == (False, False, False),
+            "70a.expira_na_memoria_sem_deixar_contador", str(s))
+    r.check(s["rajada"][0] == "liberada" and s["rajada"][1] >= 3,
+            "70c.boot_cobre_a_janela_na_rajada", str(s["rajada"]))
+
+    async def boot():
+        g._init_globals()
+        with _Logs() as logs:
+            curadoria.instalar(Mundo(), FONTES, [], orchestrator.processar)
+            await curadoria.encerrar()
+        return logs
+    logs = asyncio.run(boot())
+    r.check(len(logs.tem("canal de aval ['@nerdofertas'] NÃO resolvido")) == 1,
+            "70b.canal_de_aval_nao_resolvido_e_erro", str(logs.linhas)[-300:])
 
 
 if __name__ == "__main__":
