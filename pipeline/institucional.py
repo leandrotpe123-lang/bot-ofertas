@@ -73,8 +73,11 @@ def tem_contexto(texto: str) -> bool:
     if not linhas:
         return False
     total = " ".join(linhas)
+    # Singular E plural: "Mais cupons Amazon" (Promotom 113100, 03/11) era
+    # barrado — `cupom` não casa com "cupons", nem `promoção` com
+    # "promoções".
     indicadores = [
-        r'off', r'%', r'r\$', r'cupom', r'desconto', r'promoção', r'oferta',
+        r'off', r'%', r'r\$', r'cupo(?:m|ns)', r'desconto', r'promo(?:ção|ções)', r'oferta',
         r'grátis', r'evento', r'live', r'relâmpago', r'flash', r'volta',
         r'normalizou', r'a\s+partir', r'ativo', r'disponivel', r'pix',
         r'voltando', r'reativado', r'jogos?\s+gr[aá]tis',
