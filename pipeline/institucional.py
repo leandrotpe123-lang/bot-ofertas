@@ -61,11 +61,28 @@ def deve_descartar(texto: str) -> str:
 # ─────────────────────────────────────────────────────────────────
 # VIABILIDADE DO TEXTO
 # ─────────────────────────────────────────────────────────────────
-def tem_contexto(texto: str) -> bool:
+def tem_contexto(texto: str, midia_visual: bool = False) -> bool:
     """
-    Verifica se o texto possui conteúdo promocional relevante o
+    Verifica se a mensagem possui conteúdo promocional relevante o
     suficiente para prosseguir.
+
+    Com MÍDIA VISUAL (foto, vídeo ou imagem — ingestao.tipo_midia_visual;
+    PDF, áudio, voz, figurinha e a prévia de link NÃO contam) o conteúdo
+    está na imagem, que não é lida (sem OCR): a legenda curta não tira o
+    contexto. Medido nas prévias públicas (8.024 mensagens com link de
+    loja, 6 fontes, 26/10→03/11): dos 7 posts que este filtro barrava, os
+    6 com foto eram todos promoção — "Mais cupons Amazon"
+    (Promotom 113100), "🔥 Nova Roleta Shopee" (Fada dos Cupons 17839, o
+    mesmo post que passava como "🔥 Nova Chance Roleta Shopee"), "👀" (18222,
+    a mesma Roleta Shopee do post seguinte), "Libera 17h"/"Libera 18h"
+    (Promotom 112082/112017, cupom ML), foto + link (Promotom 112322, o link
+    do "Cupons Shopee — Resgate aqui"). O sétimo, só um link sem foto,
+    continua barrado. Legenda vazia, ou sem link de loja — inclusive só
+    link do Telegram ("Pocando" → t.me/fumotom, Promotom 112021) —, é
+    descartada adiante (normalizacao), com ou sem mídia.
     """
+    if midia_visual:
+        return True
     linhas = [
         l.strip() for l in texto.splitlines()
         if l.strip() and not re.match(r'https?://', l.strip())
@@ -73,8 +90,14 @@ def tem_contexto(texto: str) -> bool:
     if not linhas:
         return False
     total = " ".join(linhas)
+    # Singular E plural: "Mais cupons Amazon" (Promotom 113100, 03/11) era
+    # barrado — `cupom` não casa com "cupons", nem `promoção` com
+    # "promoções". `roleta`: campanha promocional (Roleta Shopee) — sem ela,
+    # "Nova Roleta Shopee" (18 caracteres) caía e "Nova Chance Roleta Shopee"
+    # (25) passava.
     indicadores = [
-        r'off', r'%', r'r\$', r'cupom', r'desconto', r'promoção', r'oferta',
+        r'off', r'%', r'r\$', r'cupo(?:m|ns)', r'desconto', r'promo(?:ção|ções)', r'oferta',
+        r'roleta',
         r'grátis', r'evento', r'live', r'relâmpago', r'flash', r'volta',
         r'normalizou', r'a\s+partir', r'ativo', r'disponivel', r'pix',
         r'voltando', r'reativado', r'jogos?\s+gr[aá]tis',

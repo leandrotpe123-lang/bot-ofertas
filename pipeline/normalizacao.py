@@ -137,6 +137,21 @@ class MensagemNormalizada:
 # ─────────────────────────────────────────────────────────────────
 # ENTRYPOINT — NORMALIZAÇÃO
 # ─────────────────────────────────────────────────────────────────
+# [#43] Legenda para LOG, sem nenhuma URL: link markdown [rótulo](url)
+# vira só o rótulo; URL com esquema (http, https, tg) ou www., e domínio
+# sem esquema (meli.la/abc, t.me/canal, a.co/d/x), saem inteiros — em linha
+# própria ou no meio da linha.
+_RE_LINK_MD = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_RE_URL_LOG = re.compile(
+    r"(?:https?://|tg://|www\.)\S+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/\S*)?", re.I)
+
+
+def legenda_sem_links(texto: str) -> str:
+    """A legenda sem nenhuma URL, espaços colapsados. Pura."""
+    t = _RE_LINK_MD.sub(r"\1", texto or "")
+    return " ".join(_RE_URL_LOG.sub(" ", t).split())
+
+
 def _cupons_no_texto(cupons: List[str], texto: str) -> List[str]:
     """Os cupons que continuam no texto publicado, na ordem original."""
     alvo = (texto or "").upper()
@@ -169,7 +184,14 @@ async def normalizar(
         return None
 
     if not tem_contexto(bruta.texto):
-        return None
+        visual = getattr(bruta, "midia_visual", "") or ""
+        if not tem_contexto(bruta.texto, midia_visual=bool(visual)):
+            return None
+        # Passou SÓ pela mídia visual (legenda curta, sem indicador):
+        # monitorado — foto com legenda irrelevante e link de loja não pode
+        # passar calada. A legenda sai SEM nenhuma URL.
+        log_nrm.info(f"🖼️ [CONTEXTO_MIDIA] id={bruta.msg_id} @{bruta.chat} midia={visual} "
+                     f"legenda={legenda_sem_links(bruta.texto)[:40]!r} — passa pela mídia")
 
     from pipeline.filtros import filtrar
     texto_limpo = filtrar(limpar_texto(bruta.texto))
