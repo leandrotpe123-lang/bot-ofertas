@@ -168,8 +168,17 @@ async def normalizar(
         log_nrm.info(f"🚫 Post vetado | motivo='{veto}' | @{bruta.chat}")
         return None
 
-    if not tem_contexto(bruta.texto, tem_midia=bruta.tem_midia):
-        return None
+    if not tem_contexto(bruta.texto):
+        if not tem_contexto(bruta.texto, tem_midia=bruta.tem_midia):
+            return None
+        # Passou SÓ pela mídia (legenda curta, sem indicador): monitorado —
+        # foto com legenda irrelevante e link de loja não pode passar calada.
+        legenda = " ".join(
+            l.strip() for l in bruta.texto.splitlines()
+            if l.strip() and not l.strip().startswith(("http://", "https://")))
+        midia = (bruta.midia_key or "").split(":")[0] or "outra"
+        log_nrm.info(f"🖼️ [CONTEXTO_MIDIA] id={bruta.msg_id} @{bruta.chat} midia={midia} "
+                     f"legenda={legenda[:40]!r} — passa pela mídia")
 
     from pipeline.filtros import filtrar
     texto_limpo = filtrar(limpar_texto(bruta.texto))

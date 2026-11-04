@@ -36,6 +36,9 @@ conteúdo estava na imagem, que não é lida (sem OCR); o 7º era só um link.
       + foto antes morria aqui; agora normaliza, e o texto que a curadoria
       classifica (texto_analise) dá placa_de_video — fica retido como
       qualquer hardware vigiado de fonte retentora
+  10  monitoramento: o post que passa SÓ pela mídia sai no log como
+      [CONTEXTO_MIDIA] (tipo da mídia e legenda); quem passa pelo texto, sem
+      mídia ou só com prévia de link, não sai
 
     python3 tests/test_tem_contexto.py
 """
@@ -264,6 +267,73 @@ def test_09_hardware_com_foto_e_legenda_curta_chega_a_curadoria(r):
             and any("B0C8ZQTRD7" in str(i) for i in (n.ids_globais or [])),
             "09.normaliza_com_categoria_e_identidade",
             repr((getattr(n, "texto_analise", None), getattr(n, "ids_globais", None))))
+
+
+
+def test_10_marcador_de_quem_passa_so_pela_midia(r):
+    """Revisão do #43: "monitorar o risco de uma foto com legenda irrelevante
+    e link de loja passar". Ingestão real (o tipo da mídia vem dela)."""
+    import logging
+    import types as _t
+    from pipeline.completude import EventoRecuperado
+    from pipeline.ingestao import ingerir
+    from telethon.tl.types import (MessageMediaDocument, MessageMediaPhoto,
+                                   MessageMediaWebPage)
+
+    class Coleta(logging.Handler):
+        def __init__(self):
+            super().__init__(logging.DEBUG)
+            self.linhas = []
+
+        def emit(self, rec):
+            self.linhas.append(rec.getMessage())
+
+    async def falso_resolver(converter, msg_id=0):
+        mapa = {u: "https://afiliado.teste/" + str(abs(hash(u)) % 10 ** 8) for u in converter}
+        return mapa, dict(mapa), ["amazon"] * len(mapa)
+
+    async def canal():
+        return _t.SimpleNamespace(username="promotom", usernames=None)
+
+    def passa(mid, texto, media):
+        m = _t.SimpleNamespace(id=mid, chat_id=-1001825680721, text=texto, message=texto,
+                               raw_text=texto, media=media, reply_to=None, entities=None,
+                               get_chat=canal)
+        bruta = asyncio.run(ingerir(EventoRecuperado(m)))
+        return asyncio.run(normalizacao.normalizar(bruta)) is not None
+
+    def marcas(mid):
+        return [l for l in col.linhas if "[CONTEXTO_MIDIA]" in l and f"id={mid} " in l]
+
+    libera = REAIS_COM_FOTO["promotom/112082"]           # "Libera 17h" + meli.la
+    cupons = REAIS_COM_FOTO["promotom/113100"]           # passa pelo texto (plural)
+    foto = MessageMediaPhoto(photo=_t.SimpleNamespace(id=1))
+    video = MessageMediaDocument(document=_t.SimpleNamespace(id=2))
+    col = Coleta()
+    lg = logging.getLogger("NORMAL")
+    lg.addHandler(col)
+    real = normalizacao.resolver_e_afiliar
+    normalizacao.resolver_e_afiliar = falso_resolver
+    try:
+        ok = {
+            "foto": passa(940001, libera, foto),
+            "video": passa(940002, libera, video),
+            "texto_com_foto": passa(940003, cupons, foto),
+            "sem_midia": passa(940004, libera, None),
+            "previa": passa(940005, libera, MessageMediaWebPage()),
+        }
+    finally:
+        normalizacao.resolver_e_afiliar = real
+        lg.removeHandler(col)
+    r.check(ok == {"foto": True, "video": True, "texto_com_foto": True,
+                   "sem_midia": False, "previa": False}, "10.quem_passa", str(ok))
+    m1, m2 = marcas(940001), marcas(940002)
+    r.check(len(m1) == 1 and "midia=photo" in m1[0] and "legenda='Libera 17h'" in m1[0]
+            and "meli.la" not in m1[0], "10.foto_marcada_com_legenda_sem_link", str(m1))
+    r.check(len(m2) == 1 and "midia=doc" in m2[0], "10.video_marcado", str(m2))
+    r.check(not any(marcas(i) for i in (940003, 940004, 940005)),
+            "10.texto_sem_midia_e_previa_nao_marcam",
+            str([l for l in col.linhas if "[CONTEXTO_MIDIA]" in l]))
 
 
 if __name__ == "__main__":
