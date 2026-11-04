@@ -6,7 +6,8 @@ from typing import List
 
 from telethon.tl.types import (MessageMediaWebPage, MessageMediaPhoto,
                                MessageMediaDocument, MessageEntityCode,
-                               MessageEntityPre)
+                               MessageEntityPre, DocumentAttributeVideo,
+                               DocumentAttributeAudio, DocumentAttributeSticker)
 
 from logger import log_ing
 from pipeline.identidade import chat_canonico, username_para_log
@@ -34,6 +35,11 @@ class MensagemBruta:
     # no update — pura, sem rede, sem download, sem hash de bytes.
     # Cadeia vazia significa NÃO SEI, nunca "igual".
     midia_key: str = ""
+    # [#43] Tipo VISUAL da mídia — "foto", "video" ou "imagem" — ou ""
+    # (sem mídia, prévia de link, PDF, áudio, voz, figurinha, outros).
+    # Só a viabilidade do texto lê (institucional.tem_contexto). NÃO muda
+    # tem_midia, que segue valendo para todo o resto (envio, mídia).
+    midia_visual: str = ""
 
 
 def chave_midia(message) -> str:
@@ -64,6 +70,42 @@ def chave_midia(message) -> str:
         if isinstance(media, MessageMediaDocument):
             ident = getattr(getattr(media, "document", None), "id", None)
             return f"doc:{ident}" if ident is not None else ""
+        return ""
+    except Exception:
+        return ""
+
+
+def tipo_midia_visual(message) -> str:
+    """[#43] O tipo VISUAL da mídia da mensagem: "foto", "video" ou
+    "imagem" (imagem enviada como arquivo); "" quando a mídia não é visual
+    ou não existe — PDF e outros arquivos, áudio, voz, figurinha, enquete,
+    prévia de link, tipo desconhecido.
+
+    Pura: só lê atributos de um objeto JÁ desserializado pelo Telethon.
+    Vídeo é reconhecido pelo atributo (DocumentAttributeVideo — inclui GIF
+    e vídeo redondo) ou, sem ele, pelo MIME video/*. Nunca levanta: na
+    dúvida, "" (a legenda volta a ser julgada só pelo texto)."""
+    try:
+        media = getattr(message, "media", None)
+        if isinstance(media, MessageMediaPhoto):
+            return "foto" if getattr(media, "photo", None) is not None else ""
+        if not isinstance(media, MessageMediaDocument):
+            return ""
+        doc = getattr(media, "document", None)
+        if doc is None:
+            return ""
+        atributos = list(getattr(doc, "attributes", None) or [])
+        if any(isinstance(a, DocumentAttributeSticker) for a in atributos):
+            return ""
+        if any(isinstance(a, DocumentAttributeVideo) for a in atributos):
+            return "video"
+        if any(isinstance(a, DocumentAttributeAudio) for a in atributos):
+            return ""
+        mime = (getattr(doc, "mime_type", "") or "").lower()
+        if mime.startswith("video/"):
+            return "video"
+        if mime.startswith("image/"):
+            return "imagem"
         return ""
     except Exception:
         return ""
@@ -131,6 +173,7 @@ async def ingerir(event) -> MensagemBruta:
     # [E4.0] Só derivamos chave quando há mídia real; preview de link
     # já foi excluído por tem_midia acima.
     midia_key = chave_midia(event.message) if tem_midia else ""
+    midia_visual = tipo_midia_visual(event.message) if tem_midia else ""
 
     # Identidade vem do Módulo 1 (id numérico canônico). Username só p/ log.
     chat = chat_canonico(event)
@@ -155,5 +198,6 @@ async def ingerir(event) -> MensagemBruta:
         links=links, tem_midia=tem_midia, media_obj=event.message,
         is_reply=is_reply, reply_to=reply_to,
         code_entities=code_entities, midia_key=midia_key,
+        midia_visual=midia_visual,
                     )
             

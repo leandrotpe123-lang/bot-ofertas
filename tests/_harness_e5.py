@@ -98,6 +98,21 @@ def _instalar_telethon() -> None:
         def __init__(self, document=None):
             self.document = document
 
+    # [#43] Atributos de documento que ingestao.tipo_midia_visual lê por
+    # isinstance(): vídeo, áudio (voice = mensagem de voz) e figurinha.
+    class DocumentAttributeVideo:
+        def __init__(self, duration=0, w=0, h=0, round_message=None):
+            self.duration, self.w, self.h = duration, w, h
+            self.round_message = round_message
+
+    class DocumentAttributeAudio:
+        def __init__(self, duration=0, voice=None):
+            self.duration, self.voice = duration, voice
+
+    class DocumentAttributeSticker:
+        def __init__(self, alt="", stickerset=None):
+            self.alt, self.stickerset = alt, stickerset
+
     class MessageEntityCode:
         def __init__(self, offset=0, length=0):
             self.offset, self.length = offset, length
@@ -120,6 +135,9 @@ def _instalar_telethon() -> None:
     for _n, _c in (("MessageMediaWebPage", MessageMediaWebPage),
                    ("MessageMediaPhoto", MessageMediaPhoto),
                    ("MessageMediaDocument", MessageMediaDocument),
+                   ("DocumentAttributeVideo", DocumentAttributeVideo),
+                   ("DocumentAttributeAudio", DocumentAttributeAudio),
+                   ("DocumentAttributeSticker", DocumentAttributeSticker),
                    ("MessageEntityCode", MessageEntityCode),
                    ("MessageEntityPre", MessageEntityPre)):
         setattr(tl_types, _n, _c)

@@ -61,16 +61,17 @@ def deve_descartar(texto: str) -> str:
 # ─────────────────────────────────────────────────────────────────
 # VIABILIDADE DO TEXTO
 # ─────────────────────────────────────────────────────────────────
-def tem_contexto(texto: str, tem_midia: bool = False) -> bool:
+def tem_contexto(texto: str, midia_visual: bool = False) -> bool:
     """
     Verifica se a mensagem possui conteúdo promocional relevante o
     suficiente para prosseguir.
 
-    Com MÍDIA real (foto, vídeo, arquivo — a prévia de link NÃO conta:
-    ingestao.tem_midia) o conteúdo está na imagem, que não é lida (sem OCR):
-    a legenda curta não tira o contexto. Medido nas prévias públicas (8.024
-    mensagens com link de loja, 6 fontes, 26/10→03/11): dos 7 posts que este
-    filtro barrava, os 6 com foto eram todos promoção — "Mais cupons Amazon"
+    Com MÍDIA VISUAL (foto, vídeo ou imagem — ingestao.tipo_midia_visual;
+    PDF, áudio, voz, figurinha e a prévia de link NÃO contam) o conteúdo
+    está na imagem, que não é lida (sem OCR): a legenda curta não tira o
+    contexto. Medido nas prévias públicas (8.024 mensagens com link de
+    loja, 6 fontes, 26/10→03/11): dos 7 posts que este filtro barrava, os
+    6 com foto eram todos promoção — "Mais cupons Amazon"
     (Promotom 113100), "🔥 Nova Roleta Shopee" (Fada dos Cupons 17839, o
     mesmo post que passava como "🔥 Nova Chance Roleta Shopee"), "👀" (18222,
     a mesma Roleta Shopee do post seguinte), "Libera 17h"/"Libera 18h"
@@ -80,7 +81,7 @@ def tem_contexto(texto: str, tem_midia: bool = False) -> bool:
     link do Telegram ("Pocando" → t.me/fumotom, Promotom 112021) —, é
     descartada adiante (normalizacao), com ou sem mídia.
     """
-    if tem_midia:
+    if midia_visual:
         return True
     linhas = [
         l.strip() for l in texto.splitlines()
