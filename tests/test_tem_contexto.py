@@ -32,6 +32,10 @@ conteúdo estava na imagem, que não é lida (sem OCR); o 7º era só um link.
       preço:" → t.me/fadapromos/13861 (Fada dos Cupons 17867) — o filtro
       de contexto os barrava; agora quem barra é a afiliação REAL (nenhuma
       plataforma reivindica t.me: "Zero links convertidos")
+  09  hardware com foto e legenda curta não escapa da curadoria: "RTX 4060"
+      + foto antes morria aqui; agora normaliza, e o texto que a curadoria
+      classifica (texto_analise) dá placa_de_video — fica retido como
+      qualquer hardware vigiado de fonte retentora
 
     python3 tests/test_tem_contexto.py
 """
@@ -231,6 +235,35 @@ def test_08_so_link_do_telegram_com_foto_nao_publica(r):
            for i, (p, t) in enumerate(reais.items())}
     r.check(all(v is None for v in res.values()), "08.so_t_me_com_foto_nao_normaliza",
             str({p: v is None for p, v in res.items()}))
+
+
+
+def test_09_hardware_com_foto_e_legenda_curta_chega_a_curadoria(r):
+    """A regra da mídia não abre atalho para fora da curadoria: a categoria
+    é lida do texto_analise da normalização real (afiliação simulada)."""
+    from pipeline.curadoria import categoria
+
+    async def falso_resolver(converter, msg_id=0):
+        mapa = {u: u + "?tag=teste-20" for u in converter}
+        return mapa, dict(mapa), ["amazon"] * len(mapa)
+
+    class Foto:
+        pass
+
+    texto = "RTX 4060\n\nhttps://www.amazon.com.br/dp/B0C8ZQTRD7"
+    r.check(not tem_contexto(texto), "09.sem_foto_continua_barrado")
+    real = normalizacao.resolver_e_afiliar
+    normalizacao.resolver_e_afiliar = falso_resolver
+    try:
+        n = asyncio.run(normalizacao.normalizar(MensagemBruta(
+            msg_id=930000, chat="-1001825680721", texto=texto, links=links_de(texto),
+            tem_midia=True, media_obj=Foto())))
+    finally:
+        normalizacao.resolver_e_afiliar = real
+    r.check(n is not None and categoria(n.texto_analise) == "placa_de_video"
+            and any("B0C8ZQTRD7" in str(i) for i in (n.ids_globais or [])),
+            "09.normaliza_com_categoria_e_identidade",
+            repr((getattr(n, "texto_analise", None), getattr(n, "ids_globais", None))))
 
 
 if __name__ == "__main__":
