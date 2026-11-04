@@ -136,6 +136,7 @@ ponto de entrada): este módulo não importa a orquestração nem o cliente.
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import contextvars
 import hashlib
@@ -235,6 +236,12 @@ _vistos: Dict[tuple, None] = {}
 _falha_varredura: Dict[int, bool] = {}
 _pausa_ate: Dict[int, float] = {}
 _tentativas: Dict[tuple, int] = {}
+# @ público de cada canal resolvido no boot (fontes e avalistas), para os
+# logs: o cache de identidade do pipeline só conhece o `username` principal.
+_NOMES: Dict[int, str] = {}
+# Diagnóstico das RELEITURAS do canal de aval: o retrato (sem conteúdo nem
+# URL) da última leitura de cada mensagem — (chat, msg) -> dict.
+_LEITURAS: Dict[tuple, dict] = {}
 # A versão APLICADA por último de cada mensagem do canal de aval —
 # (edit_date em s, assinatura do conteúdo): um update atrasado de versão
 # MAIS VELHA não desfaz o conjunto da mais nova.
@@ -254,6 +261,32 @@ _repor_marcado = False
 
 class _BancoFora(Exception):
     """db_curadoria_avaliar respondeu ERRO: a versão NÃO passa."""
+
+
+def nomes_publicos(entidade) -> List[str]:
+    """Os @ públicos ATIVOS de uma entidade do Telegram — minúsculas, sem o
+    "@" inicial, sem repetição, o principal primeiro:
+      · `username` (o principal; vem VAZIO quando o canal tem vários @);
+      · `usernames[*].username`, só os com active=True (o Telegram manda
+        nessa lista os @ do canal com vários @; inativo não conta).
+    Serve para CONFERIR o @ configurado e para os logs; a autoridade de
+    papel continua sendo o ID real do chat."""
+    nomes: List[str] = []
+
+    def _add(u) -> None:
+        u = (u or "").strip().lstrip("@").lower()
+        if u and u not in nomes:
+            nomes.append(u)
+    _add(getattr(entidade, "username", None))
+    for alias in getattr(entidade, "usernames", None) or ():
+        if getattr(alias, "active", False):
+            _add(getattr(alias, "username", None))
+    return nomes
+
+
+def _arroba(entidade, cid=None) -> str:
+    nomes = nomes_publicos(entidade)
+    return f"@{nomes[0]}" if nomes else f"(sem @ público){'' if cid is None else ' ' + str(cid)}"
 
 
 def _papel(chat_id: int) -> str:
@@ -276,7 +309,7 @@ def fontes_sem_aval(fontes: Iterable, avais: Iterable) -> list:
     saida = []
     for e in fontes:
         if get_peer_id(e) in ids_aval:
-            log_ded.error(f"❌ curadoria: @{getattr(e, 'username', '')} é canal de AVAL e "
+            log_ded.error(f"❌ curadoria: {_arroba(e, get_peer_id(e))} é canal de AVAL e "
                           f"estava nas fontes — retirado: canal de aval nunca publica")
             continue
         saida.append(e)
@@ -309,6 +342,12 @@ def instalar(cliente, fontes: Iterable, avais: Iterable,
     _vistos.clear()
     _pausa_ate.clear()
     _tentativas.clear()
+    _LEITURAS.clear()
+    _NOMES.clear()
+    for e in [*fontes, *avais]:
+        nomes = nomes_publicos(e)
+        if nomes:
+            _NOMES[get_peer_id(e)] = nomes[0]
     _ultima_versao.clear()
     _SEGURADAS.clear()
     _PENDENTES.clear()
@@ -324,20 +363,22 @@ def instalar(cliente, fontes: Iterable, avais: Iterable,
         # handlers só LEEM o aval; a publicação dele é a do handler de fonte.
         cliente.add_event_handler(_ao_aval, events.NewMessage(chats=lidos_ent))
         cliente.add_event_handler(_ao_aval, events.MessageEdited(chats=lidos_ent))
-    # Conferência: o ID configurado é a autoridade; o @ só confirma.
-    por_id = {get_peer_id(e): (getattr(e, "username", None) or "").lower() for e in fontes}
+    # Conferência: o ID configurado é a autoridade; o @ só confirma — e o @
+    # do canal pode estar em `username` OU nos `usernames` ativos.
+    por_id = {get_peer_id(e): nomes_publicos(e) for e in fontes}
     for nome, cid in config.GRUPO_ID.items():
         if cid not in por_id:
             log_ded.warning(f"⚠️ curadoria: {nome} ({cid}) não está entre as fontes "
                             f"resolvidas — papel {_papel(cid)} sem efeito")
-        elif por_id[cid] != nome.lower():
+        elif nome.lstrip("@").lower() not in por_id[cid]:
+            achados = ", ".join("@" + n for n in por_id[cid]) or "nenhum @ público ativo"
             log_ded.error(f"❌ curadoria: o chat {cid} configurado como @{nome} responde "
-                          f"como @{por_id[cid]} — vale o ID")
-    papeis = ", ".join(f"@{u or cid}={cid}:{_papel(cid)}" for cid, u in por_id.items())
-    lidos = ", ".join(f"@{(getattr(e, 'username', None) or '').lower()}={get_peer_id(e)}"
-                      for e in avais)
-    resolvidos = {(getattr(e, "username", None) or "").lower() for e in avais}
-    faltam = [c for c in config.GRUPOS_AVAL if c.lower() not in resolvidos]
+                          f"como {achados} — vale o ID")
+    papeis = ", ".join(f"@{(u or [str(cid)])[0]}={cid}:{_papel(cid)}"
+                       for cid, u in por_id.items())
+    lidos = ", ".join(f"{_arroba(e)}={get_peer_id(e)}" for e in avais)
+    resolvidos = {n for e in avais for n in nomes_publicos(e)}
+    faltam = [c for c in config.GRUPOS_AVAL if c.lstrip("@").lower() not in resolvidos]
     if faltam:
         log_ded.error(f"❌ curadoria: canal de aval {['@' + c for c in faltam]} NÃO resolvido "
                       f"no boot — sem o aval dele (só o Fada Promoções solta); confira o @ "
@@ -396,6 +437,11 @@ def _agendar(coro) -> None:
 # ─────────────────────────────────────────────────────────────────
 def _nome(chat) -> str:
     u = username_de(str(chat))
+    if not u:
+        try:
+            u = _NOMES.get(int(chat), "")
+        except (TypeError, ValueError):
+            u = ""
     return f"@{u}" if u else str(chat)
 
 
@@ -932,7 +978,8 @@ async def _ao_aval(event) -> None:
     (o Telegram só entrega o update se a conta segue o canal). Só agenda e
     volta: nada daqui entra no funil de publicação."""
     try:
-        _agendar(_observar_aval(int(event.chat_id), event.message))
+        origem = "edicao" if "MessageEdited" in type(event).__qualname__ else "nova"
+        _agendar(_observar_aval(int(event.chat_id), event.message, origem=origem))
     except Exception as e:                              # noqa: BLE001
         log_ded.warning(f"⚠️ curadoria: aval do handler ({type(e).__name__})")
 
@@ -953,7 +1000,7 @@ def _versao(message) -> Tuple[int, str]:
 
 
 async def _observar_aval(chat_id: int, message, repeticao: bool = False,
-                         autoritativa: bool = False) -> None:
+                         autoritativa: bool = False, origem: str = "") -> None:
     """Uma VERSÃO de mensagem do canal de aval (a original ou uma edição):
     categoria vigiada + produto identificado (sem afiliar) → aval do
     conteúdo ATUAL. Cada versão é olhada uma vez (handler e varredura podem
@@ -1000,6 +1047,9 @@ async def _observar_aval(chat_id: int, message, repeticao: bool = False,
                 _vistos.pop(k, None)
             for k in list(_ultima_versao)[:len(_ultima_versao) // 2]:
                 _ultima_versao.pop(k, None)
+    _diagnosticar_leitura(chat_id, mid, message, versao, origem or
+                          ("nova_tentativa" if repeticao else
+                           "varredura" if autoritativa else "?"))
     _ultima_versao[(chat_id, mid)] = versao
     try:
         # A versão vale pela data DELA (a edição, pelo edit_date). Idade
@@ -1039,9 +1089,50 @@ async def _observar_aval(chat_id: int, message, repeticao: bool = False,
                         f"não lido ({type(e).__name__})")
 
 
+def _retrato(message, versao: Tuple[int, str], origem: str) -> dict:
+    """O que distingue duas leituras da MESMA mensagem — sem conteúdo e sem
+    URL: a origem da leitura, o edit_date, a assinatura (prefixo), os
+    comprimentos do texto cru e do formatado, quantos links o aval leu, o
+    resumo das entidades (tipo:quantidade) e o tipo de mídia."""
+    texto = ingestao.texto_de(message)
+    ents = collections.Counter(type(e).__name__.replace("MessageEntity", "")
+                               for e in (getattr(message, "entities", None) or ()))
+    midia = getattr(message, "media", None)
+    return {"origem": origem, "ed": versao[0], "sig": versao[1][:10],
+            "cru": len(getattr(message, "message", None) or ""), "fmt": len(texto),
+            "links": len(ingestao.links_de(texto)),
+            "ent": ",".join(f"{k}:{v}" for k, v in sorted(ents.items())) or "-",
+            "midia": type(midia).__name__.replace("MessageMedia", "") if midia else "-"}
+
+
+def _fmt_retrato(r: dict) -> str:
+    return " ".join(f"{k}={r[k]}" for k in ("origem", "ed", "sig", "cru", "fmt", "links",
+                                            "ent", "midia"))
+
+
+def _diagnosticar_leitura(chat_id: int, mid: int, message, versao, origem: str) -> None:
+    """Diagnóstico LIMITADO das releituras do canal de aval: só quando a
+    MESMA mensagem é processada de novo (outra versão, nova tentativa,
+    reaplicação) sai uma linha [CURADORIA_AVAL_RELEITURA] com o retrato da
+    leitura anterior e o desta — sem texto e sem URL. A versão repetida que
+    a deduplicação descarta não chega aqui. Nunca interfere na leitura."""
+    try:
+        agora = _retrato(message, versao, origem)
+        antes = _LEITURAS.get((chat_id, mid))
+        _LEITURAS[(chat_id, mid)] = agora
+        if len(_LEITURAS) > _VISTOS_MAX:
+            for k in list(_LEITURAS)[:_VISTOS_MAX // 2]:
+                _LEITURAS.pop(k, None)
+        if antes is not None:
+            log_ded.info(f"🔬 [CURADORIA_AVAL_RELEITURA] {_nome(chat_id)} id={mid} | antes: "
+                         f"{_fmt_retrato(antes)} | agora: {_fmt_retrato(agora)}")
+    except Exception as e:                              # noqa: BLE001
+        log_ded.debug(f"curadoria: diagnóstico da leitura ({type(e).__name__})")
+
+
 async def _repetir_aval(chat_id: int, message, atraso: float) -> None:
     await asyncio.sleep(atraso)
-    await _observar_aval(chat_id, message, repeticao=True)
+    await _observar_aval(chat_id, message, repeticao=True, origem="nova_tentativa")
 
 
 def _sem_http():
@@ -1183,7 +1274,7 @@ async def _varrer_canal(chat_id: int, ent) -> None:
     for m in sorted(lote, key=lambda x: x.id):
         if getattr(m, "action", None) is None:
             # O que o servidor devolve é o conteúdo ATUAL: desempata.
-            await _observar_aval(chat_id, m, autoritativa=True)
+            await _observar_aval(chat_id, m, autoritativa=True, origem="varredura")
 
 
 def _expirar() -> None:

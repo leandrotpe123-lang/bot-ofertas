@@ -141,6 +141,13 @@ Pendências finais:
       post do Fada falhar não tira o aval; Fada dos Cupons não dá aval
   72  toda rodada da varredura cobre a janela inteira (150 no boot, 130
       depois); fora da janela para; teto de segurança tem log
+Pós-deploy (04/11):
+  73  nomes públicos ativos: username + usernames[*] com active=True,
+      minúsculas, sem "@", sem repetição
+  74  boot confere GRUPOS_AVAL e GRUPO_ID pelo nome público ativo (o Nerd de
+      produção, sem `username`, não dá mais ERRO falso); ID é a autoridade
+  75  diagnóstico das releituras do aval: origem, edit_date, assinatura,
+      comprimentos e entidades — sem conteúdo nem URL; repetida não loga
 
 Execução (standalone, stdlib + Telethon):  python3 tests/test_curadoria.py
 """
@@ -152,6 +159,7 @@ import dataclasses
 import datetime as dt
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -3111,6 +3119,134 @@ def test_72_varredura_cobre_a_janela_inteira(r):
             "72.boot_le_a_janela_inteira_e_para_nela", str(s["boot"]))
     r.check(s["depois"] == "liberada", "72.rodada_seguinte_tambem_cobre_rajada", str(s["depois"]))
     r.check(s["teto"] == 1, "72.teto_de_seguranca_tem_log", str(s.get("teto")))
+
+
+# ══════════════════════════════════════════════════════════════════
+# PÓS-DEPLOY (04/11/2026) — nomes públicos ativos; diagnóstico de releituras
+# ══════════════════════════════════════════════════════════════════
+def _canal_aliases(cid, principal, aliases):
+    """Canal com vários @ (como o Nerd em produção: `username` vazio e os @
+    em `usernames`, cada um com active)."""
+    return types.Channel(id=cid, title="canal", photo=types.ChatPhotoEmpty(),
+                         date=dt.datetime.now(dt.timezone.utc), access_hash=77,
+                         username=principal, broadcast=True,
+                         usernames=[types.Username(username=u, editable=False, active=a)
+                                    for u, a in aliases])
+
+
+def test_73_nomes_publicos_ativos(r):
+    """username principal + usernames[*] só com active=True; minúsculas, sem
+    "@", sem repetição, o principal primeiro."""
+    np = curadoria.nomes_publicos
+    r.check(np(_canal_aliases(1, None, [("NerdOfertas", True)])) == ["nerdofertas"],
+            "73.username_ausente_alias_ativo")
+    r.check(np(_canal_aliases(1, None, [("nerd_antigo", False)])) == [],
+            "73.alias_inativo_nao_conta")
+    r.check(np(_canal_aliases(1, "Promotom", [])) == ["promotom"], "73.username_principal")
+    r.check(np(_canal_aliases(1, None, [("A1", True), ("b2", True), ("c3", False),
+                                        ("a1", True)])) == ["a1", "b2"],
+            "73.varios_aliases_sem_repeticao")
+    r.check(np(_canal_aliases(1, "@Fumotom", [("FUMOTOM", True), ("Fumo2", True)]))
+            == ["fumotom", "fumo2"], "73.caixa_e_arroba")
+    r.check(np(object()) == [] and np(ENT["promotom"]) == ["promotom"],
+            "73.entidade_sem_atributos_e_canal_comum")
+
+
+def test_74_boot_confere_pelo_nome_publico_ativo(r):
+    """O Nerd de produção (username vazio, @nerdofertas só em `usernames`)
+    não gera mais o ERRO falso de 'NÃO resolvido'; o boot e os logs mostram
+    o @; alias INATIVO não conta; nas fontes, o ID continua a autoridade e o
+    @ é conferido também pelos aliases ativos."""
+    nerd = _canal_aliases(_IDS["nerdofertas"], None, [("NerdOfertas", True)])
+    fontes_alias = list(FONTES)
+    i = next(k for k, e in enumerate(fontes_alias) if e.id == _IDS["promotom"])
+    fontes_alias[i] = _canal_aliases(_IDS["promotom"], None, [("PROMOTOM", True)])
+    fontes_outro = list(FONTES)
+    fontes_outro[i] = _canal_aliases(_IDS["promotom"], None, [("outro_nome", True)])
+
+    def boot(fontes, avais):
+        async def _b():
+            g._init_globals()
+            # Como em produção: o cache de identidade do pipeline só guarda o
+            # `username` principal — o Nerd (sem ele) não está lá.
+            fora = _CHAT_USERNAME.pop(PEER["nerdofertas"], None)
+            try:
+                with _Logs() as logs:
+                    curadoria.instalar(Mundo(), fontes, avais, orchestrator.processar)
+                    nome = curadoria._nome(utils.get_peer_id(avais[0])) if avais else ""
+                    papel_promotom = curadoria._papel(utils.get_peer_id(fontes[i]))
+                    await curadoria.encerrar()
+            finally:
+                if fora is not None:
+                    _CHAT_USERNAME[PEER["nerdofertas"]] = fora
+            return logs, nome, papel_promotom
+        return asyncio.run(_b())
+    logs, nome, _ = boot(fontes_alias, [nerd])
+    boot_linha = (logs.tem("🎯 curadoria ATIVO") or [""])[0]
+    r.check(logs.tem("NÃO resolvido") == [] and logs.tem("responde como") == [],
+            "74.alias_ativo_sem_erro_falso", str(logs.linhas)[-400:])
+    r.check(f"@nerdofertas={PEER['nerdofertas']}" in boot_linha and "@promotom=" in boot_linha
+            and nome == "@nerdofertas", "74.boot_e_logs_mostram_o_arroba",
+            boot_linha[:300] + " | " + nome)
+    logs2, _, _ = boot(FONTES, [_canal_aliases(_IDS["nerdofertas"], None,
+                                               [("nerdofertas", False)])])
+    r.check(len(logs2.tem("canal de aval ['@nerdofertas'] NÃO resolvido")) == 1,
+            "74.alias_inativo_nao_confirma", str(logs2.linhas)[-300:])
+    logs3, _, papel = boot(fontes_outro, [nerd])
+    r.check(len(logs3.tem("configurado como @promotom responde como @outro_nome — vale o ID"))
+            == 1 and papel == "RETÉM", "74.fonte_com_outro_arroba_vale_o_id",
+            str(logs3.linhas)[-300:])
+
+
+def test_75_diagnostico_de_releitura_sem_conteudo(r):
+    """Instrumentação LIMITADA das releituras do aval: só quando a mesma
+    mensagem é processada de novo sai [CURADORIA_AVAL_RELEITURA], com a
+    origem (nova / edição / varredura / nova tentativa), o edit_date, a
+    assinatura, os comprimentos do texto cru e do formatado, o resumo das
+    entidades e a mídia — sem texto e sem URL. A versão repetida que a
+    deduplicação descarta não loga. Assinatura e regras de versão: as
+    mesmas (os avais não mudam)."""
+    s = {}
+
+    async def corpo(mundo):
+        peer, ent = PEER["nerdofertas"], ENT["nerdofertas"]
+        mid = novo_id()
+        link = "https://nerd.teste/r75"
+        cru = f"Placa de Vídeo RTX 5060 Ti 8GB\n\n🛒 {link}"
+        IDENTS_AVAL[link] = ["amazon|B0DIAG0001"]
+
+        def versao(bold=False):
+            m = mensagem("nerdofertas", mid, cru, idade_s=30)
+            if bold:                      # edição silenciosa: só a formatação
+                m.entities = [types.MessageEntityBold(offset=0, length=13)]
+                m._text = None
+            return m
+        with _Logs() as logs:
+            m0 = versao()
+            mundo.historico[peer] = [m0]
+            await pelo_handler(mundo, m0)                       # nova
+            await pelo_handler(mundo, m0)                       # mesma versão: sem log
+            await curadoria._varrer_canal(peer, ent)            # varredura, mesma versão
+            await drenar()
+            s["sem_releitura"] = len(logs.tem("[CURADORIA_AVAL_RELEITURA]"))
+            m1 = versao(bold=True)
+            await pelo_handler(mundo, m1, editada=True)         # edição só de formato
+            s["releituras"] = logs.tem("[CURADORIA_AVAL_RELEITURA]")
+        s["avais"] = avais_de(mid)
+    cenario(corpo)
+    linha = s["releituras"][0] if s["releituras"] else ""
+    r.check(s["sem_releitura"] == 0, "75.versao_repetida_nao_loga", str(s["sem_releitura"]))
+    r.check(len(s["releituras"]) == 1 and "antes: origem=nova" in linha
+            and "agora: origem=edicao" in linha and "ent=-" in linha and "ent=Bold:1" in linha,
+            "75.releitura_mostra_origem_e_entidades", linha)
+    cru = re.findall(r"cru=(\d+)", linha)
+    fmt = re.findall(r"fmt=(\d+)", linha)
+    r.check(len(cru) == 2 and cru[0] == cru[1] and fmt[0] != fmt[1],
+            "75.cru_igual_formatado_diferente", linha)
+    r.check("http" not in linha and "RTX" not in linha and "nerd.teste" not in linha,
+            "75.sem_conteudo_nem_url", linha)
+    r.check([c for c, _ in s["avais"]] == ["amazon|B0DIAG0001"],
+            "75.aval_nao_duplica", str(s["avais"]))
 
 
 if __name__ == "__main__":
