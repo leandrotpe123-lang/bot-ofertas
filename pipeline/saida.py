@@ -37,6 +37,7 @@ CONTRATO DE AQUISIÇÃO — uma operação de saída, UMA aquisição:
       editar_por_id               (herdada; mesma família de editar_msg)
       _substituir_post_com_midia
       apagar_post                 ([Frente 8] remoção do post fundido)
+      responder                   ([Comentários] resposta ao post do canal)
 
   INTERNAS (NÃO adquirem; uso EXCLUSIVO de dentro de uma pública):
       _enviar_msg_no_sem
@@ -142,6 +143,25 @@ async def _enviar_msg_no_sem(texto: str, img, *,
                 log.warning(f"⚠️ send_file longo: {e}")
     return await client.send_message(destino, texto,
                                      parse_mode="md", link_preview=True)
+
+
+async def responder(msg_id_dest: int, texto: str) -> object:
+    """[Comentários] Responde ao post `msg_id_dest` do canal principal —
+    a mensagem do canal MARCANDO o post, como as fontes fazem ("Precinho"
+    respondendo a Fritadeira). Não é o grupo de discussão vinculado: é o
+    próprio canal, onde o inscrito é notificado.
+
+    Texto PURO (parse_mode=None: o texto da fonte vai como está), sem mídia
+    e sem prévia de link, NÃO silencioso (silent=False: toca para os
+    inscritos). Canal não tem tópico: reply_to é só o id do post.
+
+    PÚBLICA: adquire o _SEM_ENVIO UMA vez. Devolve a Message enviada (o id
+    é a prova do fato) ou levanta."""
+    from client import client
+    async with config._SEM_ENVIO:
+        return await client.send_message(
+            GRUPO_DESTINO, texto, reply_to=int(msg_id_dest), parse_mode=None,
+            link_preview=False, silent=False)
 
 
 async def _enviar_msg(texto: str, img) -> object:

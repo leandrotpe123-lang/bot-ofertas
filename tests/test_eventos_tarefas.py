@@ -883,6 +883,9 @@ _INVENTARIO = {
     ("pipeline/curadoria.py", "_agendar", "create_task"): "INDEPENDENTE: contexto vazio (aval do handler e liberação)",
     ("pipeline/curadoria.py", "_agendar", "add_done_callback"): "CALLBACK: _TAREFAS.discard",
     ("pipeline/curadoria.py", "encerrar", "wait"): "shutdown: liberações em curso (aguardado, com prazo)",
+    # [Comentários] repasse seletivo da resposta da fonte ao nosso post
+    ("pipeline/comentarios.py", "_agendar", "create_task"): "INDEPENDENTE: contexto vazio (repasse do comentário)",
+    ("pipeline/comentarios.py", "_agendar", "add_done_callback"): "CALLBACK: _TAREFAS.discard",
     ("pipeline/curadoria.py", "encerrar", "gather"): "shutdown: varredura e liberações canceladas (aguardado)",
     ("pipeline/curadoria.py", "_identificar", "gather"): "AGUARDADA dentro da observação do aval (contexto vazio)",
     ("pipeline/post_apagado.py", "encerrar", "gather"): "shutdown: tasks da frente M canceladas (aguardado)",
@@ -980,7 +983,8 @@ def test_e03_as_unicas_contextvar_sao_as_da_coleta(r):
             "E03.so_execucao_e_adiamento", f"ContextVar nova: {_REAVALIAR} — {sorted(criadas)}")
     r.check(citacoes == {"eventos/coleta.py"}, "E03.contextvar_so_citada_na_coleta",
             f"ContextVar citada fora da coleta: {_REAVALIAR} — {sorted(citacoes)}")
-    r.check(importadores == {"eventos/coleta.py", "main.py", "pipeline/convergencia.py",
+    r.check(importadores == {"eventos/coleta.py", "main.py", "pipeline/comentarios.py",
+                             "pipeline/convergencia.py",
                              "pipeline/curadoria.py", "pipeline/espelho_cupons.py",
                              "pipeline/post_apagado.py"},
             "E03.importadores_de_contextvars_lista_fechada",
@@ -1070,7 +1074,7 @@ def test_e05_callbacks_de_termino_so_limpam_estrutura(r):
                 ok = _so_limpa_estrutura(arg)
             if not ok:
                 ruins.append((rel, dono, ast.unparse(arg)[:80] if arg is not None else "?"))
-    r.check(len(sitios) == 10 and ruins == [], "E05.callbacks_so_limpam_estrutura",
+    r.check(len(sitios) == 11 and ruins == [], "E05.callbacks_so_limpam_estrutura",
             f"sitios={len(sitios)} ruins={ruins}")
 
 
