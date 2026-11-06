@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 
+import config
 from plataformas import registry
 from utils.categorias_universais import classificar_universal
 
@@ -32,6 +33,94 @@ _RE_GRUPO_EXT = re.compile(
     r'https?://(?:t\.me|telegram\.me|telegram\.org|chat\.whatsapp\.com)[^\s]*',
     re.I,
 )
+
+# ── Convite de OUTRO grupo (pedido do dono, 06/11) ────────────────
+# Formas do Telegram, com ou sem esquema: https://t.me/x, t.me/x,
+# telegram.me/x, t.me/+hash, t.me/joinchat/hash, tg://resolve|join, e o
+# hiperlink embutido [rótulo](t.me/x); mais os convites que _RE_GRUPO_EXT
+# já reconhecia (telegram.org, chat.whatsapp.com). E o @ de um grupo
+# CONHECIDO — nunca qualquer @: vendedor e loja não são grupo.
+_RE_CONVITE_MD = re.compile(
+    r'\[[^\]\n]*\]\(\s*(?:(?:https?://)?(?:www\.)?(?:t\.me|telegram\.(?:me|dog))/'
+    r'|tg://(?:resolve|join)\b)[^)\n]*\)', re.I)
+_RE_CONVITE = re.compile(
+    r'https?://(?:www\.)?(?:t\.me|telegram\.(?:me|dog|org)|chat\.whatsapp\.com)'
+    r'(?:/[^\s)\]>]*)?'
+    r'|(?<![\w./@:-])(?:t\.me|telegram\.(?:me|dog))/[^\s)\]>]*'
+    r'|tg://(?:resolve|join)\?[^\s)\]>]*', re.I)
+_RE_ARROBA = re.compile(r'(?<![\w.@])@([A-Za-z][A-Za-z0-9_]{3,31})\b')
+# Identificadores medidos no corpus (prévias públicas, 17.106 mensagens,
+# 26/10–04/11/2026) além das fontes e avalistas do config: chats, bots e
+# canais-irmãos que as fontes divulgam.
+_GRUPOS_EXTRAS = frozenset({
+    "promotomofertaschat", "chatcupons", "cupomlinkbot", "cupomkabum",
+    "compraremgrupo", "compraemgrupobr", "alertasdepromos_bot", "shopeefigurinha",
+    "clubedotom", "samuelf3lipechat", "nerdcupons", "maismoedasbot",
+    "cuponsvoltando", "nerdavisobot",
+})
+_GRUPOS_CONHECIDOS = frozenset(
+    {n.lower().lstrip("@") for n in (*config.GRUPOS_ORIGEM, *config.GRUPOS_AVAL)}
+    | {n.lower() for n in config.GRUPO_ID} | _GRUPOS_EXTRAS)
+# O que sobrou da linha depois de tirar o convite é a CHAMADA dele quando
+# não tem conteúdo de oferta e é (a) vazio/só pontuação, (b) um rótulo
+# (termina em ":" ou seta) ou (c) vocabulário de convite. Lista FECHADA,
+# só verbos e nomes de chamada: nunca vocabulário de produto.
+_RE_CHAMADA = re.compile(
+    r'\b(?:entr(?:e|em|a|ar)|participe|junte|venha|vem|vai\s+pr[oa]|siga|sigam|segue|'
+    r'grupos?|canal|canais|chat|comunidade|notifica\w*|inscrev\w*|aqui|l[aá]|'
+    r'link|clique|acesse|primeir[oa]|bot)\b', re.I)
+_RE_ROTULO_FINAL = re.compile(r'(?::|->|→|=>|👉|👇|⬇️?|\s[-–—])\s*$')
+# Sobrou terminando em preposição: o complemento era o convite ("bugs no
+# t.me/x", "Quem aí pegou alguma coisa no @fadapromos?").
+_RE_PONTEIRO_FINAL = re.compile(
+    r'\b(?:n[oa]s?|em|pr[oa]s?|para|pra|d[oa]s?|pel[oa]s?)\s*$', re.I)
+_RE_CONTEUDO_DURO = re.compile(
+    r'R\$|%|https?://'
+    r'|\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{5,}\b'           # código CUPOM10
+    r'|(?i:\b(?:cupo(?:m|ns)|c[oó]digo)\b)\s*:?\s*[A-Z0-9]{4,}\b')   # cupom PRIMEIRO
+_PONTAS = " \t:|–—-•→>,;👉👇"
+
+
+def _sem_convite(linha: str) -> tuple:
+    """(linha_sem_convite, removeu). Tira os convites; se o que sobrou é
+    só a chamada do convite, devolve "" (a linha sai inteira). Conteúdo de
+    oferta (R$, %, link de loja, código de cupom) nunca sai."""
+    n = 0
+    novo, k = _RE_CONVITE_MD.subn(" ", linha)
+    n += k
+    novo, k = _RE_CONVITE.subn(" ", novo)
+    n += k
+
+    def _arroba(m):
+        nonlocal n
+        if m.group(1).lower() in _GRUPOS_CONHECIDOS:
+            n += 1
+            return " "
+        return m.group(0)
+    novo = _RE_ARROBA.sub(_arroba, novo)
+    if not n:
+        return linha, False
+    novo = " ".join(novo.split())
+    if _RE_CONTEUDO_DURO.search(novo):
+        return novo.strip(_PONTAS), True
+    resto = novo.strip(" \t,;.!?")
+    if (not re.search(r'\w', resto) or _RE_ROTULO_FINAL.search(resto)
+            or _RE_PONTEIRO_FINAL.search(resto) or _RE_CHAMADA.search(resto)):
+        return "", True
+    return novo.strip(_PONTAS), True
+
+
+def sem_convites(texto: str) -> str:
+    """O texto sem convite de outro grupo, linha a linha (a mesma regra do
+    filtrar). Para o texto que não passa pelo filtrar — o comentário
+    repassado (pipeline.comentarios)."""
+    saida = []
+    for linha in (texto or "").split("\n"):
+        l, _ = _sem_convite(linha)
+        if l.strip():
+            saida.append(l)
+    return "\n".join(saida).strip()
+
 
 # ── Ruído estrutural ──────────────────────────────────────────────
 # R6: "-Anúncio" e "Publicidade" NÃO são removidos (decisão de
@@ -215,11 +304,10 @@ def filtrar(texto: str) -> str:
                 em_redes = False
         if _RE_CTA.match(l) or _RE_LIXO_STRUCT.match(l):
             continue
-        if _RE_GRUPO_EXT.search(l):
-            l = _RE_GRUPO_EXT.sub("", l).strip()
-            if not l:
-                _podar_rotulo_orfao(saida)
-                continue
+        l, removeu = _sem_convite(l)
+        if removeu and not l:
+            _podar_rotulo_orfao(saida)
+            continue
         l = _tirar_credito(l)
         if not l:
             _podar_rotulo_orfao(saida)

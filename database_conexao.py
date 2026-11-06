@@ -273,6 +273,12 @@ def _init_db():
             chat TEXT NOT NULL, msg_id INTEGER NOT NULL, chave TEXT NOT NULL,
             ts_entrada REAL NOT NULL, atual INTEGER NOT NULL,
             PRIMARY KEY(chat, msg_id, chave));
+        CREATE TABLE IF NOT EXISTS comentario_repasse(
+            chat TEXT NOT NULL, msg_id INTEGER NOT NULL, dest INTEGER NOT NULL,
+            estado TEXT NOT NULL, resposta INTEGER, texto TEXT NOT NULL,
+            ts REAL NOT NULL, ts_estado REAL NOT NULL,
+            PRIMARY KEY(chat, msg_id));
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_crp_dest ON comentario_repasse(dest);
         CREATE INDEX IF NOT EXISTS idx_lc_plat     ON links_cache(plat);
         CREATE INDEX IF NOT EXISTS idx_lc_ts       ON links_cache(ts);
         CREATE INDEX IF NOT EXISTS idx_sl_code     ON short_links(code);

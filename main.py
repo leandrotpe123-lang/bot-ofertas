@@ -61,6 +61,7 @@ from logger import log_sys, log_hc
 
 from pipeline.orchestrator import processar, _iniciar_orchestrator
 from pipeline.identidade import precarregar_usernames
+from pipeline import comentarios
 from pipeline import completude
 from pipeline import convergencia
 from pipeline import curadoria
@@ -476,6 +477,14 @@ async def _preparar_processo() -> bool:
         _TASKS_FUNDO["curadoria"] = curadoria.instalar(client, fontes, avais, processar)
     except Exception as e:
         log_sys.error(f"❌ curadoria: {e}")
+    # [Comentários] A resposta da fonte ao próprio post que é SINAL OBJETIVO
+    # ("Precinho", "Esgotado") vira resposta ao nosso post. Handler próprio,
+    # depois dos da casa: só decide e agenda — nunca espera, nunca entra no
+    # pipeline da oferta.
+    try:
+        comentarios.instalar(client, fontes)
+    except Exception as e:
+        log_sys.error(f"❌ comentarios: {e}")
 
     # 6. Tarefas de fundo — UMA instância de cada por processo.
     # _iniciar_orchestrator é aguardado, não posto em task: ele apenas
