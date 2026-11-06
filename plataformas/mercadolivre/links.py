@@ -82,10 +82,15 @@ _DOMINIOS = frozenset({
 ENCURTADORES = frozenset({"meli.la"})
 
 # Quirk HTTP: hosts que não respondem corretamente a HEAD.
-# Declarado EXPLICITAMENTE VAZIO — meli.la responde bem a HEAD.
-# Vazio registra que a consideração foi feita; não declarar (None)
-# significaria que ninguém olhou.
-ENCURTADORES_FORCA_GET = frozenset()
+# meli.la NÃO responde a HEAD — medido em produção (04–05/11, 456afa4):
+# [RES_FINAL_ERRO] via=head status=405 plataforma=mercadolivre saltos=0
+# erros=150/150. saltos=0: o 405 vem do próprio host pedido, e o único
+# host do ML que chega ao HEAD do expansor é este encurtador (_expandir só
+# roda em CENARIO_ENCURTADO, e a recursão só desce em encurtador
+# declarado). Com 405 e sem redirecionamento, o expansor já caía no GET de
+# qualquer jeito: o HEAD era uma ida e volta paga à toa por link novo.
+# Só o encurtador: os demais hosts do ML seguem com HEAD primeiro.
+ENCURTADORES_FORCA_GET = frozenset({"meli.la"})
 
 # Página de listagem do próprio Mercado Livre.
 _HOSTS_LISTAGEM = frozenset({"lista.mercadolivre.com.br"})
