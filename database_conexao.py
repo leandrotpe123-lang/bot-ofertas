@@ -62,10 +62,12 @@ validação de armazenamento é a única adição desde então.
 from __future__ import annotations
 import os
 import sqlite3
+import time
 from contextlib import contextmanager
 from threading import Lock
 from typing import Optional
 
+import medicao_desempenho
 from config import _DB_MONTAGENS_PERSISTENTES, _DB_PATH
 from logger import log_db
 
@@ -314,11 +316,22 @@ def _init_db():
 
 @contextmanager
 def _db():
-    with _db_lock:
-        try:
-            yield _db_conn
-        except sqlite3.Error as e:
-            log_db.error(f"❌ DB: {e}"); raise
+    # [P0] Só MEDE: o mesmo mutex, a mesma conexão, a mesma exceção. Acima
+    # de medicao_desempenho.DB_LENTO_MS vira ⏱ [DB_LENTO] — depois de soltar
+    # o mutex, com o nome de quem abriu (nunca SQL, parâmetro ou valor).
+    t0 = time.monotonic()
+    quem = medicao_desempenho.origem_db()
+    t1, ok = None, False
+    try:
+        with _db_lock:
+            t1 = time.monotonic()
+            try:
+                yield _db_conn
+                ok = True
+            except sqlite3.Error as e:
+                log_db.error(f"❌ DB: {e}"); raise
+    finally:
+        medicao_desempenho.db(quem, t0, t1, ok)
 
 
 def _fechar_db() -> None:

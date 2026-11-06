@@ -45,9 +45,11 @@ CONTRATO INTERNO DA CAMADA — LEIA ANTES DE ALTERAR:
 from __future__ import annotations
 
 import asyncio
+import time
 
 import eventos
 import globals as g
+import medicao_desempenho
 from logger import log_sys
 from pipeline.orchestrator_pipeline import _pipeline
 from pipeline.vida_oferta import VIDA_OFERTA_S
@@ -76,10 +78,12 @@ async def _executar(event, is_edit: bool) -> None:
     [F1.2-A2-E] inicio_na_fila() marca o fim da espera (lane + orçamento)
     da execução — só depois de tomar a vaga (espera_ms do execucao.fim).
     """
+    t_lane = time.monotonic()     # [P0] já dentro da lane: daqui conta o orçamento
     async with _orcamento:
         g._w_ativos += 1
         try:
             eventos.inicio_na_fila()
+            medicao_desempenho.fila(event, is_edit, t_lane, len(g._buf), g._w_ativos)
             await _pipeline(event, is_edit)
         finally:
             g._w_ativos -= 1
@@ -158,6 +162,7 @@ async def _enfileirar(event, is_edit: bool) -> None:
     # remove a entrada quando a task termina.
     g._buf.add(tarefa)
     tarefa.add_done_callback(g._buf.discard)
+    medicao_desempenho.admitida(tarefa)     # [P0] hora da admissão (sem await)
 
 
 async def _iniciar_orchestrator() -> None:

@@ -22,6 +22,7 @@ import io
 
 from typing import Optional
 
+import medicao_desempenho
 from logger import log_enr
 from pipeline.normalizacao import MensagemNormalizada
 
@@ -33,6 +34,8 @@ async def preparar_imagem_tg(media_obj) -> Optional[object]:
 
     from client import client
     import config
+
+    t0 = medicao_desempenho.agora()
 
     try:
 
@@ -54,24 +57,29 @@ async def preparar_imagem_tg(media_obj) -> Optional[object]:
                 f"⏱ download_media timeout após "
                 f"{config._TIMEOUT_DOWNLOAD_MIDIA}s"
             )
+            medicao_desempenho.midia(t0, 0, "timeout", media_obj)
 
             return None
 
         if res is None:
+            medicao_desempenho.midia(t0, 0, "vazio", media_obj)
             return None
 
         buf.seek(0)
 
         if buf.getbuffer().nbytes < 500:
+            medicao_desempenho.midia(t0, buf.getbuffer().nbytes, "pequeno", media_obj)
             return None
 
         buf.name = "imagem.jpg"
+        medicao_desempenho.midia(t0, buf.getbuffer().nbytes, "ok", media_obj)
 
         return buf
 
     except Exception as e:
 
         log_enr.warning(f"⚠️ download_media: {e}")
+        medicao_desempenho.midia(t0, 0, "erro", media_obj)
 
         return None
 

@@ -72,6 +72,7 @@ from typing import Any, Optional
 import aiohttp
 
 import config
+import medicao_desempenho
 from logger import log_nrm
 
 from . import ajustes, links
@@ -313,12 +314,15 @@ async def descobrir(
                     log_nrm.info(
                         f"🛒 ML descoberta | HTTP {resposta.status}"
                     )
+                    medicao_desempenho.motivo("descoberta_http")
                     return None
                 documento = await resposta.text(errors="ignore")
     except Exception as exc:
         log_nrm.warning(
             f"🛒 ML descoberta falhou: {type(exc).__name__}"
         )
+        medicao_desempenho.motivo(
+            "timeout_descoberta" if isinstance(exc, TimeoutError) else "falha_descoberta")
         return None
 
     if len(documento) > _TETO_BYTES:

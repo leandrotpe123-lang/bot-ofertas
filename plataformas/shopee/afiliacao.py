@@ -25,6 +25,7 @@ from collections import OrderedDict
 import aiohttp
 
 import config
+import medicao_desempenho
 from logger import log_nrm
 from plataformas.contrato import AUSENTE, Afiliacao
 from utils.cache_links import consultar_link, descartar_link, registrar_link
@@ -227,6 +228,8 @@ async def _chamar_servico_afiliados(
                     )
         except Exception as e:
             log_nrm.warning(f"⚠️ SHP t={tentativa}: {e}")
+            if isinstance(e, TimeoutError):
+                medicao_desempenho.motivo("timeout_afiliado")
         if tentativa < _TENTATIVAS_AFILIACAO:
             await asyncio.sleep(tentativa * _ESPERA_ENTRE_TENTATIVAS)
     return None
@@ -305,6 +308,7 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
     # Expansão de encurtador próprio, quando aplicável.
     url_expandida = url
     if netloc in _ENCURTADORES:
+        t_exp = medicao_desempenho.agora()
         try:
             _t = _perf_agora()
             async with config._SEM_HTTP:
@@ -312,7 +316,11 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
             _perf_marca("expansao", _t)
         except Exception as e:
             log_nrm.warning(f"⚠️ SHP expansão falhou: {e}")
+            medicao_desempenho.etapa(_IDENTIFICADOR, "expandir", t_exp, False)
+            medicao_desempenho.motivo("falha_expansao")
             return AUSENTE
+        medicao_desempenho.etapa(_IDENTIFICADOR, "expandir", t_exp,
+                                 _netloc(url_expandida) not in _ENCURTADORES)
         # desencurtar devolve a PRÓPRIA entrada em timeout/falha de rede.
         # Continuar daria à API a URL curta e gravaria no cache uma
         # canônica curta — identidade única por link, nunca o produto.
@@ -321,6 +329,7 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         if _netloc(url_expandida) in _ENCURTADORES:
             log_nrm.warning(
                 f"⚠️ SHP expansão não resolveu o encurtador — ausente: {url[:60]}")
+            medicao_desempenho.motivo("falha_expansao")
             return AUSENTE
 
     url_limpa = limpa_url(url_expandida)
@@ -350,7 +359,9 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
 
     # Chamada ao serviço de afiliados, sobre a URL limpa.
     _t = _perf_agora()
+    t_api = medicao_desempenho.agora()
     link = await _chamar_servico_afiliados(url_limpa, sessao)
+    medicao_desempenho.etapa(_IDENTIFICADOR, "api", t_api, bool(link))
     _perf_marca("api", _t)
     pela_limpa = bool(link)
 
@@ -359,16 +370,20 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
         url_canonica = _url_produto_canonica(url_expandida)
         if url_canonica and url_canonica != url_limpa:
             log_nrm.info(f"🔄 SHP recuperação: {url_canonica[:60]}")
+            t_rec = medicao_desempenho.agora()
             link = await _chamar_servico_afiliados(url_canonica, sessao)
+            medicao_desempenho.etapa(_IDENTIFICADOR, "api_recuperacao", t_rec, bool(link))
 
     # Falha legítima: ausência explícita.
     if not link:
         log_nrm.warning(f"⚠️ SHP sem afiliação: {url[:60]}")
+        medicao_desempenho.motivo("falha_afiliado")
         return AUSENTE
 
     # Validação da URL afiliada resultante.
     if "shopee" not in _netloc(link):
         log_nrm.warning(f"⚠️ SHP validação falhou: {link}")
+        medicao_desempenho.motivo("afiliado_invalido")
         return AUSENTE
 
     resultado = Afiliacao(publicada=link, canonica=canonica)

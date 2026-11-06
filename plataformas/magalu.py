@@ -33,6 +33,7 @@ _MGL_PARTNER = os.environ.get("MAGALU_PARTNER_ID", "")
 _MGL_PROMOTER = os.environ.get("MAGALU_PROMOTER_ID", "")
 _MGL_PID = os.environ.get("MAGALU_PID", "")
 _MGL_SLUG = os.environ.get("MAGALU_SLUG", "")
+import medicao_desempenho
 from logger import log_nrm
 from plataformas.contrato import (
     AUSENTE,
@@ -497,6 +498,7 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
 
     # Expansão de encurtador próprio, com validação pós-expansão.
     if _netloc(url) in _ENCURTADORES:
+        t_exp = medicao_desempenho.agora()
         try:
             async with config._SEM_HTTP:
                 url_expandida = await desencurtar(url, sessao)
@@ -504,12 +506,17 @@ async def afilia(url: str, sessao: aiohttp.ClientSession) -> object:
             log_nrm.warning(
                 f"⚠️ MGL expansão falhou | erro={type(exc).__name__}"
             )
+            medicao_desempenho.etapa(_IDENTIFICADOR, "expandir", t_exp, False)
+            medicao_desempenho.motivo("falha_expansao")
             return AUSENTE
+        medicao_desempenho.etapa(_IDENTIFICADOR, "expandir", t_exp,
+                                 _eh_url_magalu(url_expandida))
 
         if not _eh_url_magalu(url_expandida):
             log_nrm.warning(
                 "⚠️ MGL expansão não resultou em URL Magalu — descarta"
             )
+            medicao_desempenho.motivo("expansao_fora_do_dominio")
             return AUSENTE
         url = url_expandida
 

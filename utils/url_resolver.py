@@ -26,6 +26,7 @@ import time
 import aiohttp
 from bs4 import BeautifulSoup
 
+import medicao_desempenho
 from config import USER_AGENTS
 from globals import _get_raw, _set_raw
 from logger import log_nrm
@@ -378,7 +379,9 @@ async def desencurtar(
 
     except asyncio.TimeoutError:
         log_nrm.warning(f"⏱ Timeout desencurtar d={depth}: {url[:60]}")
+        medicao_desempenho.motivo("timeout_expansao")
         return url
     except Exception as e:
         log_nrm.error(f"❌ desencurtar d={depth}: {e}")
+        medicao_desempenho.motivo("falha_expansao")
         return url

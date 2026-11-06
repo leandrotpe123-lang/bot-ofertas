@@ -25,10 +25,12 @@ comportamento.
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import aiohttp
 
+import medicao_desempenho
 from globals import _get_session
 from logger import log_nrm
 from utils.categorias_universais import classificar_universal, eh_encurtador_generico
@@ -137,6 +139,7 @@ async def _normalizar_um(
     # 1. Categorias universais do core, decididas antes do registry.
     categoria = classificar_universal(url_original)
     if categoria == "bloqueado":
+        medicao_desempenho.motivo("bloqueado")
         return url_original, None, "none"
     if categoria in ("mundial", "preservar"):
         return url_original, url_original, categoria
@@ -153,6 +156,7 @@ async def _normalizar_um(
             )
                 categoria = classificar_universal(url)
                 if categoria == "bloqueado":
+                    medicao_desempenho.motivo("bloqueado")
                     return url_original, None, "none"
                 if categoria in ("mundial", "preservar"):
                     return url_original, url, categoria
@@ -160,6 +164,7 @@ async def _normalizar_um(
             log_nrm.warning(
                 f"⚠️ expansão de encurtador genérico falhou: {e}"
             )
+            medicao_desempenho.motivo("falha_expansao")
             return url_original, None, "none"
 
     # 3. Cache de link já afiliado. O cache armazena exclusivamente
@@ -183,15 +188,38 @@ async def _normalizar_um(
     # 4. Resolução de plataforma via registry (fonte soberana).
     plataforma = registry.resolver(url)
     if plataforma is None:
+        medicao_desempenho.motivo("nao_suportada")
         return url_original, None, "none"
 
     # 5. Afiliação pela capacidade do contrato. Devolve a URL
     #    afiliada LONGA.
+    t_afilia = medicao_desempenho.agora()
     afiliada = await plataforma.afilia(url, sessao)
+    medicao_desempenho.afiliou(plataforma.identificador, t_afilia, afiliada is not AUSENTE)
     if afiliada is AUSENTE:
         return url_original, None, plataforma.identificador
 
     return url_original, afiliada, plataforma.identificador
+
+
+async def _normalizar_medido(
+    url_original: str,
+    sessao: aiohttp.ClientSession,
+    msg_id: int,
+    motivos: Counter,
+) -> Tuple[str, Optional[str], str]:
+    """[P0] _normalizar_um dentro da ficha de medição do link: devolve
+    EXATAMENTE o que ele devolve e repassa a exceção. Só conta o motivo
+    do link que não converteu (🚫 Zero links convertidos)."""
+    with medicao_desempenho.link() as ficha:
+        try:
+            res = await _normalizar_um(url_original, sessao, msg_id)
+        except Exception:
+            motivos["erro"] += 1
+            raise
+    if not res[1] or res[2] in ("none", None):     # o mesmo critério do mapa
+        motivos[ficha.rotulo(res[2])] += 1
+    return res
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -248,11 +276,13 @@ async def resolver_e_afiliar(
     depois do guard, exatamente onde sempre esteve.
     """
     sessao = await _get_session()
+    motivos: Counter = Counter()
     resultados = await asyncio.gather(
-        *[uma_por_vez(_cache_key(url), _normalizar_um, url, sessao, msg_id)
+        *[uma_por_vez(_cache_key(url), _normalizar_medido, url, sessao, msg_id, motivos)
           for url in converter[:50]],
         return_exceptions=True,
     )
+    medicao_desempenho.guardar_motivos(motivos)
 
     # mapa: URLs afiliadas LONGAS. Base semântica até o encurtamento.
     mapa:      Dict[str, str] = {}

@@ -53,6 +53,7 @@ from typing import Optional
 import aiohttp
 
 import config
+import medicao_desempenho
 from logger import log_nrm
 from plataformas.contrato import AUSENTE, Afiliacao, IdentidadeProduto, TipoLink
 from utils.cache_links import consultar_link, registrar_link
@@ -107,8 +108,11 @@ async def _resolver_alvo(
     # ── Expansão, só quando é encurtador próprio ──────────────────
     alvo = url
     if links.precisa_expandir(url):
+        t_exp = medicao_desempenho.agora()
         expandida = await _expandir(url, sessao_http)
+        medicao_desempenho.etapa(afiliado.IDENTIFICADOR, "expandir", t_exp, expandida is not None)
         if expandida is None:
+            medicao_desempenho.motivo("falha_expansao")
             return None
         alvo = expandida
 
@@ -132,8 +136,11 @@ async def _resolver_alvo(
     #   prova de que sejam ignorados na escolha. Quem é sanitizado é
     #   o DESTINO descoberto, logo abaixo — e é só ele que viaja.
     if links.precisa_descobrir(alvo):
+        t_desc = medicao_desempenho.agora()
         destino = await descoberta.descobrir(alvo, sessao_http)
+        medicao_desempenho.etapa(afiliado.IDENTIFICADOR, "descoberta", t_desc, destino is not None)
         if destino is None:
+            medicao_desempenho.motivo("falha_descoberta")
             log_nrm.info("🛒 ML vitrine sem destino reconhecível → ausente")
             return None
         log_nrm.info(
@@ -282,6 +289,7 @@ async def afilia(url: str, sessao_http: aiohttp.ClientSession) -> object:
     """
     url = _sanitizar_url(url)
     if not url or not links.reconhece(url):
+        medicao_desempenho.motivo("link_invalido")
         return AUSENTE
 
     # ── Cache antes de qualquer I/O ───────────────────────────────
@@ -300,6 +308,7 @@ async def afilia(url: str, sessao_http: aiohttp.ClientSession) -> object:
 
     if not afiliado.configurado():
         log_nrm.error("🛒 ML sem ML_TAG configurada → ausente")
+        medicao_desempenho.motivo("sem_configuracao")
         return AUSENTE
 
     # ── Expansão e descoberta ─────────────────────────────────────
@@ -341,19 +350,23 @@ async def afilia(url: str, sessao_http: aiohttp.ClientSession) -> object:
         log_nrm.info(
             f"🛒 ML não elegível nesta frente | cenario={cenario or '?'}"
         )
+        medicao_desempenho.motivo("nao_elegivel")
         return AUSENTE
 
     # ── Sanitização e última barreira de identidade ───────────────
     alvo = links.sanitizar(alvo)
     if links.tem_identidade_externa(alvo):
         log_nrm.error("🛒 ML identidade externa sobreviveu → descarta")
+        medicao_desempenho.motivo("identidade_externa")
         return AUSENTE
 
     # ── Credencial ────────────────────────────────────────────────
     if not sessao.disponivel():
         if sessao.expirada():
             log_nrm.info("🛒 ML sessão expirada — aguardando renovação")
+            medicao_desempenho.motivo("sessao_expirada")
         else:
+            medicao_desempenho.motivo("sem_credencial")
             log_nrm.error(
                 "🛒 ML sem credencial provisionada "
                 "(ML_SESSION_COOKIE / ML_CSRF_TOKEN) → ausente"
@@ -363,9 +376,11 @@ async def afilia(url: str, sessao_http: aiohttp.ClientSession) -> object:
     try:
         credencial = sessao.carregar()
     except sessao.SessaoExpirada:
+        medicao_desempenho.motivo("sessao_expirada")
         return AUSENTE
     except sessao.SessaoAusente as exc:
         log_nrm.error(f"🛒 ML credencial ausente: {exc}")
+        medicao_desempenho.motivo("sem_credencial")
         return AUSENTE
 
     # ── Chamada ───────────────────────────────────────────────────
@@ -378,36 +393,44 @@ async def afilia(url: str, sessao_http: aiohttp.ClientSession) -> object:
     resultado = None
     for tentativa in range(1, _TENTATIVAS + 1):
         try:
-            resultado = await cliente.criar_link(alvo, credencial, geracao)
+            with medicao_desempenho.cronometro(afiliado.IDENTIFICADOR, "createlink"):
+                resultado = await cliente.criar_link(alvo, credencial, geracao)
             break
 
         except cliente.CredencialRecusada as exc:
             # Sem retry: outra tentativa com a mesma credencial
             # morta só produz o mesmo erro.
+            medicao_desempenho.motivo("credencial_recusada")
             await sessao.marcar_expirada(str(exc))
             return AUSENTE
 
         except cliente.UrlRecusada as exc:
             # Sessão continua válida; esta URL é que não serve.
             log_nrm.info(f"🛒 ML URL recusada pelo programa: {exc}")
+            medicao_desempenho.motivo("url_recusada")
             return AUSENTE
 
         except cliente.DisjuntorAberto as exc:
             # Proteção da conta, não falha desta oferta. Repetir
             # derrotaria o propósito do disjuntor.
             log_nrm.info(f"🛒 ML chamadas suspensas: {exc}")
+            medicao_desempenho.motivo("disjuntor")
             return AUSENTE
 
         except cliente.ErroCliente as exc:
             log_nrm.warning(f"🛒 ML tentativa {tentativa} falhou: {exc}")
             if tentativa >= _TENTATIVAS:
+                medicao_desempenho.motivo(
+                    "timeout_afiliado" if "Timeout" in str(exc) else "falha_afiliado")
                 return AUSENTE
 
         except Exception as exc:
             log_nrm.error(f"🛒 ML erro inesperado: {type(exc).__name__}")
+            medicao_desempenho.motivo("erro")
             return AUSENTE
 
     if resultado is None:
+        medicao_desempenho.motivo("falha_afiliado")
         return AUSENTE
 
     # ── CANÔNICA = O ALVO ENVIADO ────────────────────────────────
