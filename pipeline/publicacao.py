@@ -28,6 +28,7 @@ from dataclasses import replace
 from typing import Optional
 
 import globals as g
+import medicao_desempenho
 
 from database import db_exibida, db_get_post
 from logger import log_out
@@ -88,7 +89,8 @@ async def enviar(montada: MensagemMontada,
 
 # ── Camada 0: ORIGEM (Fase 1 do MB) — lock mais externo (I6) ──
     if norm is not None:
-        async with await origem.lock_origem(norm.chat, norm.msg_id):
+        async with medicao_desempenho.lock_medido(
+                "origem", await origem.lock_origem(norm.chat, norm.msg_id)):
             if origem_apagada.apagada(norm.chat, norm.msg_id):
                 # [Origem apagada] a fonte apagou esta mensagem enquanto
                 # ela estava na fila: nada publica nem edita. Conferido
@@ -106,8 +108,8 @@ async def enviar(montada: MensagemMontada,
             if ofertas:
                 async with contextlib.AsyncExitStack() as stack:
                     for chave in travas:
-                        await stack.enter_async_context(
-                            await exclusao.lock_identidade(chave))
+                        await stack.enter_async_context(medicao_desempenho.lock_medido(
+                            "identidade", await exclusao.lock_identidade(chave)))
                     return await _enviar_resolvido(
                         montada, norm, ofertas, score, is_edit, dest_fix,
                         destinos=destinos)
@@ -117,7 +119,8 @@ async def enviar(montada: MensagemMontada,
     if ofertas:
         async with contextlib.AsyncExitStack() as stack:
             for chave in travas:
-                await stack.enter_async_context(await exclusao.lock_identidade(chave))
+                await stack.enter_async_context(medicao_desempenho.lock_medido(
+                    "identidade", await exclusao.lock_identidade(chave)))
             return await _enviar_resolvido(montada, norm, ofertas, score,
                                            is_edit, destinos=destinos)
     return await _enviar_resolvido(montada, norm, ofertas, score, is_edit,
@@ -254,7 +257,7 @@ async def _enviar_inner(montada: MensagemMontada,
         if msg_id_rel is not None:
             alvo_existente = True
             post_lock = await exclusao.lock_post(msg_id_rel)
-            async with post_lock:
+            async with medicao_desempenho.lock_medido("post", post_lock):
                 estado = db_get_post(msg_id_rel)   # re-verifica sob o lock
                 if estado and estado.get("fused_into"):
                     # [Frente 8] fundido: nenhuma decisão aqui — e nunca

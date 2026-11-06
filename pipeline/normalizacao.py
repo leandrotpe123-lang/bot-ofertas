@@ -50,6 +50,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+import medicao_desempenho
 from logger import log_nrm
 from pipeline.ingestao import MensagemBruta
 from pipeline.normalizacao_identidade import (
@@ -203,9 +204,11 @@ async def normalizar(
       
     mapa, canonicas, plats = await resolver_e_afiliar(
         converter, bruta.msg_id)
+    motivos_zero = medicao_desempenho.tirar_motivos()
 
     if converter and not mapa and not preservar_lst:
         log_nrm.warning(f"🚫 Zero links convertidos | @{bruta.chat}")
+        medicao_desempenho.links_zero(bruta.chat, bruta.msg_id, len(converter), motivos_zero)
         return None
 
     plat_dom = max(set(plats), key=plats.count) if plats else ""

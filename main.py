@@ -47,6 +47,7 @@ from client import client
 import ack_imediato
 import heartbeat_sessao
 import espera_telethon
+import medicao_desempenho
 from pipeline import espelho_cupons
 
 import config
@@ -275,6 +276,12 @@ async def _encerrar() -> None:
         t.cancel()
         await asyncio.gather(t, return_exceptions=True)
 
+    # [P0] amostrador do event loop — cancela e aguarda.
+    t = _TASKS_FUNDO.get("loop")
+    if t is not None and not t.done():
+        t.cancel()
+        await asyncio.gather(t, return_exceptions=True)
+
     # [Frente M] conferência do destino — cancela e aguarda.
     t = _TASKS_FUNDO.get("conferencia_destino")
     if t is not None and not t.done():
@@ -491,6 +498,9 @@ async def _preparar_processo() -> bool:
     # [Frente M] conferência do canal de destino (cobre o aviso de exclusão
     # perdido) — UMA task por processo, contexto vazio.
     _TASKS_FUNDO["conferencia_destino"] = post_apagado.iniciar_conferencia()
+    # [P0] amostrador do atraso do event loop — UMA task por processo (a
+    # própria corrotina recusa uma segunda instância); encerrada em _encerrar.
+    _TASKS_FUNDO["loop"] = asyncio.create_task(medicao_desempenho.amostrar_loop())
 
     # 7. Sinais — instalados no PROCESSO, onde nascem os recursos que o
     # teardown finaliza (simetria criar/finalizar). add_signal_handler e
