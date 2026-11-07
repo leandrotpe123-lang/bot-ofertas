@@ -15,7 +15,9 @@ FLUXO
                          entrada de contrato anterior → reparo:
                          expande + descobre, sem createLink,
                          `publicada` preservada
-      → expande          (só encurtador próprio, com o core)
+      → expande          (só encurtador próprio, com o core;
+                         meli.la → vitrine: expande e descobre numa
+                         requisição só — `_busca_unica`, P2-A)
       → descobre         (vitrine → produto ou lista, query intacta)
       → /sec/ próprio    (substituição, sem rede)
       → classifica
@@ -56,6 +58,7 @@ import config
 import medicao_desempenho
 from logger import log_nrm
 from plataformas.contrato import AUSENTE, Afiliacao, IdentidadeProduto, TipoLink
+from utils import url_resolver
 from utils.cache_links import consultar_link, registrar_link
 from utils.url_resolver import desencurtar
 from utils.urls import _sanitizar_url
@@ -92,6 +95,78 @@ async def _expandir(
     return expandida
 
 
+# ══════════════════════════════════════════════════════════════════
+# BUSCA ÚNICA (P2-A)
+# ══════════════════════════════════════════════════════════════════
+# Caso real (produção c74f62e, 06–07/11, [CONV_MS]): link novo do ML =
+# expandir p50 647 ms + descoberta p50 595 ms — DUAS requisições à MESMA
+# vitrine. O expansor segue meli.la → /social/… e sai sem ler o corpo (o
+# aiohttp fecha a conexão com corpo pendente); `descobrir` pede a mesma
+# página de novo, com conexão nova. A busca única lê o documento da
+# resposta que já chegou.
+_SEGUIR = object()        # não concluiu: o caminho anterior decide
+
+
+async def _busca_unica(
+    url: str,
+    sessao_http: aiohttp.ClientSession,
+) -> object:
+    """
+    meli.la → vitrine → destino numa requisição só (`descoberta.buscar`).
+
+    Só ENCURTA o caminho feliz. Em todo outro desfecho o caminho anterior
+    decide, sem nenhuma requisição a mais do que ele fazia:
+
+      expansão já no cache de resolução → caminho anterior, intocado;
+      vitrine lida e destino reconhecido → o alvo (1 requisição, eram 2);
+      redirecionamento aceito sem destino (não é vitrine; vitrine com
+        HTTP ≠ 200, acima do teto ou de estrutura não reconhecida) → grava
+        a expansão no cache de resolução — o MESMO registro do expansor —
+        e o caminho anterior segue: expande pelo cache, sem rede, e, se
+        for vitrine, `descobrir` pede a página como sempre pediu;
+      sem redirecionamento, ou destino que o expansor seguiria adiante
+        (outro encurtador) → caminho anterior inteiro, cache intocado;
+      erro de rede → o desfecho que o caminho anterior teria com a mesma
+        falha, SEM nova tentativa: antes do documento, o do expansor (que
+        devolvia a própria URL); lendo o documento, o da descoberta (None);
+      defeito (exceção que não é de rede) → caminho anterior, intocado: a
+        otimização nunca tira uma conversão por defeito dela mesma.
+
+    Cache e critério de parada são os do expansor, pelo módulo dele.
+    Devolve o alvo (str), None ou _SEGUIR. Nunca levanta.
+    """
+    chave = _sanitizar_url(url)
+    if url_resolver._get_raw(chave):
+        return _SEGUIR
+    t_busca = medicao_desempenho.agora()
+    busca = await descoberta.buscar(chave, sessao_http)
+    final = busca.final
+    if busca.erro is None and not final:
+        return _SEGUIR
+    medicao_desempenho.etapa(afiliado.IDENTIFICADOR, "busca_unica", t_busca, busca.erro is None)
+
+    if busca.erro is not None:
+        log_nrm.warning(f"🛒 ML busca única falhou: {type(busca.erro).__name__}")
+        estourou = isinstance(busca.erro, TimeoutError)
+        if not final:
+            medicao_desempenho.motivo("timeout_expansao" if estourou else "falha_expansao")
+            return chave
+        url_resolver._set_raw(chave, final)
+        medicao_desempenho.motivo("timeout_descoberta" if estourou else "falha_descoberta")
+        log_nrm.info("🛒 ML vitrine sem destino reconhecível → ausente")
+        return None
+
+    if final == chave or url_resolver._eh_intermediario(final):
+        return _SEGUIR
+    url_resolver._set_raw(chave, final)
+    if busca.destino is None:
+        if busca.razao:
+            log_nrm.info(f"🛒 ML busca única sem destino ({busca.razao}) → descoberta de antes")
+        return _SEGUIR
+    log_nrm.info(f"🛒 ML descoberta | tipo={busca.destino.tipo} | origem=social")
+    return busca.destino.url
+
+
 async def _resolver_alvo(
     url: str,
     sessao_http: aiohttp.ClientSession,
@@ -108,6 +183,9 @@ async def _resolver_alvo(
     # ── Expansão, só quando é encurtador próprio ──────────────────
     alvo = url
     if links.precisa_expandir(url):
+        rapido = await _busca_unica(url, sessao_http)
+        if rapido is not _SEGUIR:
+            return rapido
         t_exp = medicao_desempenho.agora()
         expandida = await _expandir(url, sessao_http)
         medicao_desempenho.etapa(afiliado.IDENTIFICADOR, "expandir", t_exp, expandida is not None)

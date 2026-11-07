@@ -8,6 +8,11 @@ devolver a URL desse conteúdo.
 NÃO afilia. NÃO conhece cache, credencial, createLink nem publicação.
 NÃO sabe se a URL devolvida é elegível: isso é de `links`.
 
+`buscar` faz o mesmo partindo do ENCURTADOR (meli.la): segue o
+redirecionamento até a vitrine e lê o documento da MESMA resposta — o
+que antes custava duas requisições à mesma página (ver P2-A em
+`buscar`).
+
 ═══════════════════════════════════════════════════════════════════
 FRONTEIRA COM `links`
 ═══════════════════════════════════════════════════════════════════
@@ -64,6 +69,7 @@ conteúdo é público e a credencial só entra no `createLink`.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -212,7 +218,7 @@ def _com_esquema(url: str) -> str:
 # ══════════════════════════════════════════════════════════════════
 # LEITURA DA ESTRUTURA
 # ══════════════════════════════════════════════════════════════════
-def interpretar(documento: str) -> Optional[Destino]:
+def interpretar(documento: str, nota=None) -> Optional[Destino]:
     """
     Lê o destino a partir do documento servido. Pura, sem I/O.
 
@@ -221,7 +227,12 @@ def interpretar(documento: str) -> Optional[Destino]:
 
     Devolve None sempre que a estrutura não for exatamente a
     esperada — nunca escolhe candidato por conta própria.
+
+    `nota` recebe o porquê de cada None; o padrão é o log de sempre.
+    A busca única passa o seu, para não repetir a linha quando o
+    caminho anterior roda em seguida.
     """
+    nota = nota or log_nrm.info
     if not documento:
         return None
 
@@ -250,7 +261,7 @@ def interpretar(documento: str) -> Optional[Destino]:
             break
 
     if info is None:
-        log_nrm.info("🛒 ML descoberta | estrutura não reconhecida")
+        nota("🛒 ML descoberta | estrutura não reconhecida")
         return None
 
     # ── LISTA: campo nomeado, o valor já é a URL ──────────────────
@@ -259,13 +270,13 @@ def interpretar(documento: str) -> Optional[Destino]:
         url = _com_esquema(ver_mais)
         if links.cenario_de(url) == links.CENARIO_LISTAGEM:
             return Destino(tipo=TIPO_LISTA, url=url)
-        log_nrm.info("🛒 ML descoberta | seeMoreLink não é listagem")
+        nota("🛒 ML descoberta | seeMoreLink não é listagem")
         return None
 
     # ── PRODUTO: exatamente um polycard ───────────────────────────
     cartoes = info.get("polycards")
     if not isinstance(cartoes, list) or len(cartoes) != 1:
-        log_nrm.info(
+        nota(
             f"🛒 ML descoberta | polycards inesperado "
             f"({len(cartoes) if isinstance(cartoes, list) else 'ausente'})"
         )
@@ -277,7 +288,7 @@ def interpretar(documento: str) -> Optional[Destino]:
     bruta = cartao.get("url") or (cartao.get("metadata") or {}).get("url")
     url = _com_esquema(str(bruta or ""))
     if links.cenario_de(url) != links.CENARIO_PRODUTO:
-        log_nrm.info("🛒 ML descoberta | polycard não é produto")
+        nota("🛒 ML descoberta | polycard não é produto")
         return None
 
     return Destino(tipo=TIPO_PRODUTO, url=url)
@@ -330,3 +341,91 @@ async def descobrir(
         return None
 
     return interpretar(documento)
+
+
+# ══════════════════════════════════════════════════════════════════
+# BUSCA ÚNICA — encurtador → vitrine → destino (P2-A)
+# ══════════════════════════════════════════════════════════════════
+# Teto de saltos: o MESMO do expansor do core (`url_resolver`), porque a
+# cadeia percorrida aqui é a mesma que ele percorria.
+_MAX_SALTOS = 20
+
+# DOIS prazos INDEPENDENTES — os mesmos que o caminho anterior tinha:
+#   até a resposta FINAL (DNS, conexão, redirecionamentos, cabeçalhos):
+#     `_TIMEOUT_ATE_RESPOSTA_S`, o do GET de expansão do core
+#     (`url_resolver._TIMEOUT_GET`), que era quem cobria esse trecho;
+#   depois que ela chega, o documento: `_TIMEOUT_S`, o da descoberta,
+#     contado a partir da chegada da resposta.
+# O `ClientTimeout(total=…)` do aiohttp é CUMULATIVO desde o pedido
+# (conexão, saltos e corpo): deixaria ao corpo só o que sobrasse da
+# primeira fase. Por isso ele fica desligado aqui, e os dois prazos são do
+# `asyncio.timeout`, remarcado quando a resposta chega.
+_TIMEOUT_ATE_RESPOSTA_S = 20
+
+
+@dataclass(frozen=True)
+class Busca:
+    """Desfecho da busca única. Só `destino` preenchido é conclusão."""
+    final: str = ""                         # aonde o redirecionamento levou
+    destino: Optional[Destino] = None       # lido do documento DESSA resposta
+    erro: Optional[BaseException] = None    # a rede falhou
+    razao: str = ""                         # por que a vitrine não deu destino
+
+
+async def buscar(
+    url_curta: str,
+    sessao_http: aiohttp.ClientSession,
+) -> Busca:
+    """
+    Encurtador → vitrine → destino numa requisição SÓ.
+
+    O GET começa no encurtador, segue o redirecionamento e, quando a
+    resposta final é uma vitrine com HTTP 200, o documento é lido DESSA
+    MESMA resposta. Antes eram duas idas à mesma página: o expansor do
+    core seguia o redirecionamento e descartava o corpo — o que fecha a
+    conexão —, e `descobrir` pedia a página de novo, numa conexão nova.
+
+    Os prazos são os do caminho anterior, independentes: até a resposta
+    final, o do GET de expansão; depois dela, o documento tem o prazo
+    inteiro da descoberta. O resto é o de `descobrir`: cabeçalhos,
+    anonimato, teto e a regra (`interpretar`, aqui sem log — quem registra
+    é o caminho anterior, se precisar rodar). Não grava cache nem decide
+    nada além do destino: o que fazer com o desfecho é de `afiliacao`.
+
+    Erro de REDE (aiohttp, OSError, timeout) vem em `erro`, com `final`
+    preenchido só se a leitura do documento já tinha começado. Qualquer
+    outra exceção é defeito, não rede: devolve Busca() vazia, e o caminho
+    anterior roda como sempre. Nunca levanta.
+    """
+    final, documento = "", None
+    try:
+        async with config._SEM_HTTP, asyncio.timeout(_TIMEOUT_ATE_RESPOSTA_S) as prazo:
+            async with sessao_http.get(
+                url_curta,
+                headers=_CABECALHOS,
+                allow_redirects=True,
+                max_redirects=_MAX_SALTOS,
+                timeout=aiohttp.ClientTimeout(total=None),
+            ) as resposta:
+                prazo.reschedule(asyncio.get_running_loop().time() + _TIMEOUT_S)
+                vista = str(resposta.url)
+                if not links.precisa_descobrir(vista):
+                    return Busca(final=vista)
+                if resposta.status != 200:
+                    return Busca(final=vista, razao=f"HTTP {resposta.status}")
+                final = vista
+                documento = await resposta.text(errors="ignore")
+        if len(documento) > _TETO_BYTES:
+            return Busca(final=final, razao="documento acima do teto")
+        notas: list = []
+        destino = interpretar(documento, nota=notas.append)
+    except (aiohttp.ClientError, OSError, asyncio.TimeoutError) as exc:
+        return Busca(final=final, erro=exc)
+    except Exception as exc:                            # noqa: BLE001
+        log_nrm.warning(f"🛒 ML busca única: defeito {type(exc).__name__} → caminho anterior")
+        return Busca()
+
+    if destino is None:
+        razao = notas[0].rsplit("| ", 1)[-1] if notas else "sem destino"
+        return Busca(final=final, razao=razao)
+    return Busca(final=final, destino=destino)
