@@ -1359,9 +1359,10 @@ def test_32_nerd_identifica_sem_afiliar(r):
     encurtador genérico): só expansão + extração de identidade. Nenhum
     `afilia` (SiteStripe/createLink), nenhum cache de afiliação, nenhuma
     linha nova em links_cache/short_links; o rodapé nerdofertas.com nem é
-    aberto."""
+    aberto. A busca única do ML (P2-A) é fronteira de rede como o
+    expansor: vê o MESMO mundo falso e só toca o link do ML."""
     from plataformas import registry
-    from plataformas.mercadolivre import afiliacao as ml_afil
+    from plataformas.mercadolivre import afiliacao as ml_afil, descoberta as ml_desc
     import utils.cache_links as cache_links
     destinos = {
         "https://link.amazon/B0nerd1": "https://www.amazon.com.br/dp/B0REALAMZ1?ref_=x",
@@ -1370,11 +1371,15 @@ def test_32_nerd_identifica_sem_afiliar(r):
         "https://cutt.ly/rtx5060": "https://link.amazon/B0nerd2",
         "https://link.amazon/B0nerd2": "https://www.amazon.com.br/dp/B0REALAMZ2",
     }
-    abertos, proibidos = [], []
+    abertos, proibidos, buscados = [], [], []
 
     async def desencurtar_falso(url, sessao, depth=0):
         abertos.append(url)
         return destinos.get(url, url)
+
+    async def buscar_falso(url, sessao):
+        buscados.append(url)
+        return ml_desc.Busca(final=destinos.get(url, url))
 
     def proibido(nome):
         async def _a(*a, **k):
@@ -1410,12 +1415,14 @@ def test_32_nerd_identifica_sem_afiliar(r):
         antes = linhas_cache()
         orig_cat = dict(registry._catalogo)
         orig = (curadoria.desencurtar, ml_afil.desencurtar, g._set_final,
-                ml_afil.registrar_link, ml_afil.consultar_link, cache_links.registrar_link)
+                ml_afil.registrar_link, ml_afil.consultar_link, cache_links.registrar_link,
+                ml_desc.buscar)
         try:
             for nome, plat in orig_cat.items():
                 registry._catalogo[nome] = dataclasses.replace(
                     plat, afilia=proibido(f"afilia:{nome}")[0])
             curadoria.desencurtar = ml_afil.desencurtar = desencurtar_falso
+            ml_desc.buscar = buscar_falso
             g._set_final = proibido("_set_final")[1]
             ml_afil.registrar_link = proibido("registrar_link")[0]
             ml_afil.consultar_link = proibido("consultar_link")[0]
@@ -1428,7 +1435,8 @@ def test_32_nerd_identifica_sem_afiliar(r):
             registry._catalogo.clear()
             registry._catalogo.update(orig_cat)
             (curadoria.desencurtar, ml_afil.desencurtar, g._set_final,
-             ml_afil.registrar_link, ml_afil.consultar_link, cache_links.registrar_link) = orig
+             ml_afil.registrar_link, ml_afil.consultar_link, cache_links.registrar_link,
+             ml_desc.buscar) = orig
         s["estados"] = {c: retida(c, i) for c, i in ids.items()} | {"rx": retida("promotom", q)}
         s["cache"] = (antes, linhas_cache())
         with _db() as db:
@@ -1444,6 +1452,8 @@ def test_32_nerd_identifica_sem_afiliar(r):
             str(s["cache"]))
     r.check("https://nerdofertas.com/t" not in abertos and len(abertos) == 5,
             "32.so_abre_os_links_de_produto", str(abertos))
+    r.check(buscados == ["https://meli.la/1XyZw"], "32.busca_unica_so_no_link_do_ml",
+            str(buscados))
 
 
 def test_33_janela_de_300s_nos_dois_sentidos(r):
