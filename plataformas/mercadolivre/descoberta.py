@@ -350,6 +350,18 @@ async def descobrir(
 # cadeia percorrida aqui é a mesma que ele percorria.
 _MAX_SALTOS = 20
 
+# DOIS prazos INDEPENDENTES — os mesmos que o caminho anterior tinha:
+#   até a resposta FINAL (DNS, conexão, redirecionamentos, cabeçalhos):
+#     `_TIMEOUT_ATE_RESPOSTA_S`, o do GET de expansão do core
+#     (`url_resolver._TIMEOUT_GET`), que era quem cobria esse trecho;
+#   depois que ela chega, o documento: `_TIMEOUT_S`, o da descoberta,
+#     contado a partir da chegada da resposta.
+# O `ClientTimeout(total=…)` do aiohttp é CUMULATIVO desde o pedido
+# (conexão, saltos e corpo): deixaria ao corpo só o que sobrasse da
+# primeira fase. Por isso ele fica desligado aqui, e os dois prazos são do
+# `asyncio.timeout`, remarcado quando a resposta chega.
+_TIMEOUT_ATE_RESPOSTA_S = 20
+
 
 @dataclass(frozen=True)
 class Busca:
@@ -373,10 +385,12 @@ async def buscar(
     core seguia o redirecionamento e descartava o corpo — o que fecha a
     conexão —, e `descobrir` pedia a página de novo, numa conexão nova.
 
-    O resto é o de `descobrir`: cabeçalhos, anonimato, timeout, teto e a
-    regra (`interpretar`, aqui sem log — quem registra é o caminho
-    anterior, se precisar rodar). Não grava cache nem decide nada além do
-    destino: o que fazer com o desfecho é de `afiliacao`.
+    Os prazos são os do caminho anterior, independentes: até a resposta
+    final, o do GET de expansão; depois dela, o documento tem o prazo
+    inteiro da descoberta. O resto é o de `descobrir`: cabeçalhos,
+    anonimato, teto e a regra (`interpretar`, aqui sem log — quem registra
+    é o caminho anterior, se precisar rodar). Não grava cache nem decide
+    nada além do destino: o que fazer com o desfecho é de `afiliacao`.
 
     Erro de REDE (aiohttp, OSError, timeout) vem em `erro`, com `final`
     preenchido só se a leitura do documento já tinha começado. Qualquer
@@ -385,14 +399,15 @@ async def buscar(
     """
     final, documento = "", None
     try:
-        async with config._SEM_HTTP:
+        async with config._SEM_HTTP, asyncio.timeout(_TIMEOUT_ATE_RESPOSTA_S) as prazo:
             async with sessao_http.get(
                 url_curta,
                 headers=_CABECALHOS,
                 allow_redirects=True,
                 max_redirects=_MAX_SALTOS,
-                timeout=aiohttp.ClientTimeout(total=_TIMEOUT_S),
+                timeout=aiohttp.ClientTimeout(total=None),
             ) as resposta:
+                prazo.reschedule(asyncio.get_running_loop().time() + _TIMEOUT_S)
                 vista = str(resposta.url)
                 if not links.precisa_descobrir(vista):
                     return Busca(final=vista)

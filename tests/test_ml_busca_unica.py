@@ -13,10 +13,17 @@ documentados).
   01  aiohttp REAL + servidor local: URL final e documento saem da MESMA
       resposta; caminho anterior = 2 GETs na vitrine em 2 conexões TCP;
       busca única = 1 GET e 1 conexão, com os cabeçalhos da descoberta
-  02  aiohttp REAL: timeout ANTES da resposta e LENDO o documento — onde o
-      aiohttp levanta, e o desfecho de cada um
-  03  produto: destino, 1 GET, cabeçalhos/timeout/saltos da descoberta,
-      cache de resolução gravado como o expansor gravaria
+  02  aiohttp REAL, DOIS PRAZOS INDEPENDENTES (escala 1/10: 20 s → 2,0;
+      25 s → 2,5), os mesmos do caminho anterior: até a resposta final, o
+      do GET de expansão; depois dela, o corpo tem o prazo INTEIRO da
+      descoberta. Resposta lenta (no meli.la ou na vitrine) + corpo lento
+      dentro do prazo dele → converte; resposta passa de 2,0 → falha da
+      expansão, sem segunda requisição; corpo passa de 2,5 → falha da
+      descoberta; vitrine 503 depois de 2,0 → falha aos 2,0, sem pedido a
+      mais; cancelamento externo propaga. Sempre: conexão devolvida,
+      _SEM_HTTP devolvido, etapa = tempo real
+  03  produto: destino, 1 GET, cabeçalhos/saltos da descoberta, aiohttp sem
+      prazo próprio, cache de resolução gravado como o expansor gravaria
   04  lista (seeMoreLink)
   05  estrutura desconhecida → caminho anterior; o motivo não repete no log
   06  vitrine com HTTP ≠ 200 → caminho anterior
@@ -46,6 +53,7 @@ import os
 import re
 import socket
 import sys
+import time
 from collections import Counter
 
 # aiohttp REAL, antes do harness (que só instala o falso se não houver o
@@ -60,6 +68,7 @@ import _harness_e5 as harness                                   # noqa: E402
 
 harness.preparar()
 
+import config                                                   # noqa: E402
 import globals as g                                             # noqa: E402
 import medicao_desempenho as md                                 # noqa: E402
 import plataformas                                              # noqa: E402
@@ -284,12 +293,17 @@ class _ResolverLocal(AbstractResolver):
 
 class _Servidor:
     """meli.la/<código> → 302 → www.mercadolivre.com.br/social/terceiro?ref=…;
-    a vitrine serve o documento. Conta pedidos e CONEXÕES TCP por host."""
-    def __init__(self, documento, atraso_meli=0.0, trava_corpo=False):
-        self.documento, self.atraso_meli, self.trava_corpo = documento, atraso_meli, trava_corpo
+    a vitrine serve o documento. Conta pedidos e CONEXÕES TCP por host.
+    Atrasos por fase: antes do 302, antes do cabeçalho da vitrine e no meio
+    do corpo (o cabeçalho e o começo do corpo saem antes da pausa)."""
+    def __init__(self, documento, atraso_meli=0.0, atraso_cab=0.0, corpo=0.0, status=200):
+        self.documento, self.atraso_meli, self.atraso_cab = documento, atraso_meli, atraso_cab
+        self.corpo, self.status = corpo, status
         self.pedidos, self.conexoes, self.uas = Counter(), {}, []
 
     async def _tratar(self, req):
+        if req.path == "/ping":
+            return web.Response(text="ok")
         host = req.host.split(":")[0]
         self.pedidos[host] += 1
         self.conexoes.setdefault(host, set()).add(req.transport.get_extra_info("peername")[1])
@@ -299,19 +313,22 @@ class _Servidor:
             ref = req.path.strip("/")
             return web.Response(status=302, headers={
                 "Location": f"http://www.mercadolivre.com.br:{self.porta}/social/terceiro?ref={ref}"})
-        if self.trava_corpo:
-            resp = web.StreamResponse(status=200, headers={"Content-Type": "text/html"})
-            resp.content_length = len(self.documento)
-            await resp.prepare(req)
-            await resp.write(self.documento[:1000].encode())
-            await asyncio.sleep(5)
-            return resp
-        return web.Response(text=self.documento, content_type="text/html")
+        await asyncio.sleep(self.atraso_cab)
+        if not self.corpo:
+            return web.Response(text=self.documento, status=self.status, content_type="text/html")
+        dados = self.documento.encode()
+        resp = web.StreamResponse(status=self.status, headers={"Content-Type": "text/html"})
+        resp.content_length = len(dados)
+        await resp.prepare(req)
+        await resp.write(dados[:1000])
+        await asyncio.sleep(self.corpo)
+        await resp.write(dados[1000:])
+        return resp
 
     async def __aenter__(self):
         app = web.Application()
         app.router.add_route("GET", "/{resto:.*}", self._tratar)
-        self._runner = web.AppRunner(app)
+        self._runner = web.AppRunner(app, shutdown_timeout=0.5)
         await self._runner.setup()
         site = web.TCPSite(self._runner, "127.0.0.1", 0)
         await site.start()
@@ -366,31 +383,129 @@ def test_01_aiohttp_real_uma_resposta_uma_conexao(r):
             "01.cache_de_resolucao_gravado", b["cache"])
 
 
-def test_02_aiohttp_real_timeout_antes_e_lendo(r):
-    async def caso(atraso_meli, trava_corpo):
-        async with _Servidor(_DOC_PRODUTO + " " * 5000, atraso_meli, trava_corpo) as srv, \
-                _sessao_local() as sessao:
-            curta = srv.curta(f"t{_n()}")
-            with _Troca((ml_desc, "_TIMEOUT_S", 0.5)):
-                busca = await asyncio.wait_for(ml_desc.buscar(curta, sessao), 10)
-                with md.link() as f:
-                    alvo = await asyncio.wait_for(ml._resolver_alvo(curta, sessao), 10)
-            return busca, alvo, f.motivo, dict(srv.pedidos), url_resolver._get_raw(curta)
+class _SemContado:
+    """O `_SEM_HTTP`, contado: quanto a busca segura e se devolve sempre."""
+    def __init__(self):
+        self.em_uso = self.pico = self.entradas = 0
 
-    busca, alvo, motivo, pedidos, cache = _rodar(lambda: caso(2.0, False))
-    r.check(isinstance(busca.erro, TimeoutError) and busca.final == "" and busca.destino is None,
-            "02.antes.timeout_sem_final", busca)
-    r.check(alvo is not None and alvo.startswith("http://meli.la:") and motivo == "timeout_expansao"
-            and cache is None, "02.antes.desfecho_do_expansor", (alvo, motivo, cache))
-    r.check(pedidos == {"meli.la": 2}, "02.antes.sem_nova_tentativa", pedidos)
+    async def __aenter__(self):
+        self.em_uso += 1
+        self.entradas += 1
+        self.pico = max(self.pico, self.em_uso)
+        return self
 
-    busca, alvo, motivo, pedidos, cache = _rodar(lambda: caso(0.0, True))
-    r.check(isinstance(busca.erro, TimeoutError) and "/social/terceiro" in busca.final
-            and busca.destino is None, "02.lendo.timeout_com_final", busca)
-    r.check(alvo is None and motivo == "timeout_descoberta" and cache is not None,
-            "02.lendo.desfecho_da_descoberta", (alvo, motivo, cache))
-    r.check(pedidos == {"meli.la": 2, "www.mercadolivre.com.br": 2},
-            "02.lendo.sem_nova_tentativa", pedidos)
+    async def __aexit__(self, *exc):
+        self.em_uso -= 1
+        return False
+
+
+def _dois_prazos(direto=False, cancelar_em=None, **servidor):
+    """Um link do meli.la contra o servidor local, na escala 1/10 dos prazos
+    (20 s → 2,0 s; 25 s → 2,5 s). Conector de UMA conexão: se a busca vazasse
+    a conexão, o pedido de conferência logo depois travaria."""
+    async def corpo():
+        sem = config._SEM_HTTP = _SemContado()
+        conector = aiohttp.TCPConnector(resolver=_ResolverLocal(), limit=1)
+        async with _Servidor(_DOC_PRODUTO + " " * 5000, **servidor) as srv, \
+                aiohttp.ClientSession(connector=conector) as sessao:
+            curta = srv.curta(f"p{_n()}")
+            with _Troca((ml_desc, "_TIMEOUT_ATE_RESPOSTA_S", 2.0), (ml_desc, "_TIMEOUT_S", 2.5)), \
+                    md.link() as f:
+                t0 = time.perf_counter()
+                if cancelar_em is not None:          # cancelamento EXTERNO (ex.: desligamento)
+                    tarefa = asyncio.ensure_future(ml._resolver_alvo(curta, sessao))
+                    await asyncio.sleep(cancelar_em)
+                    tarefa.cancel()
+                    try:
+                        saida = await tarefa
+                    except asyncio.CancelledError:
+                        saida = "CANCELADA"
+                    except BaseException as exc:         # noqa: BLE001
+                        saida = exc
+                elif direto:
+                    saida = await asyncio.wait_for(ml_desc.buscar(curta, sessao), 15)
+                else:
+                    saida = await asyncio.wait_for(ml._resolver_alvo(curta, sessao), 15)
+                dt = time.perf_counter() - t0
+            pedidos = dict(srv.pedidos)
+
+            async def conferir():
+                async with sessao.get(f"http://www.mercadolivre.com.br:{srv.porta}/ping") as p:
+                    return p.status
+            try:
+                livre = await asyncio.wait_for(conferir(), 1.5) == 200
+            except asyncio.TimeoutError:
+                livre = False
+        return dict(saida=saida, curta=curta, dt=dt, motivo=f.motivo, pedidos=pedidos,
+                    cache=url_resolver._get_raw(curta), sem=(sem.em_uso, sem.pico, sem.entradas),
+                    livre=livre, etapas=[(n, ms, ok) for n, ms, ok in f.etapas])
+    return _rodar(corpo)
+
+
+def _conferir_recursos(r, nome, x):
+    r.check(x["sem"] == (0, 1, 1), f"02.{nome}.sem_http_devolvido", x["sem"])
+    r.check(x["livre"], f"02.{nome}.conexao_devolvida")
+
+
+def test_02_aiohttp_real_dois_prazos_independentes(r):
+    r.check(ml_desc._TIMEOUT_ATE_RESPOSTA_S == url_resolver._TIMEOUT_GET == 20
+            and ml_desc._TIMEOUT_S == 25, "02.os_prazos_de_antes",
+            (ml_desc._TIMEOUT_ATE_RESPOSTA_S, url_resolver._TIMEOUT_GET, ml_desc._TIMEOUT_S))
+    ambos = {"meli.la": 1, "www.mercadolivre.com.br": 1}
+
+    # Resposta lenta (1,5 de 2,0) + corpo lento (2,2 de 2,5): 3,7 s no total —
+    # um prazo cumulativo (2,5) ou um prazo só (2,0) derrubaria; os dois
+    # independentes convertem. Vale para a lentidão no meli.la e na vitrine.
+    for nome, kw in (("resposta_lenta_no_meli", dict(atraso_meli=1.5, corpo=2.2)),
+                     ("resposta_lenta_na_vitrine", dict(atraso_cab=1.5, corpo=2.2))):
+        x = _dois_prazos(**kw)
+        r.check(x["saida"] == _PRODUTO and x["motivo"] is None and x["pedidos"] == ambos,
+                f"02.{nome}.converte", x)
+        r.check(3.4 <= x["dt"] <= 4.6, f"02.{nome}.tempo", x["dt"])
+        r.check([(n, ok) for n, _, ok in x["etapas"]] == [("busca_unica", True)]
+                and abs(x["etapas"][0][1] - x["dt"] * 1000) <= 50, f"02.{nome}.etapa_e_tempo_real",
+                (x["etapas"], x["dt"]))
+        _conferir_recursos(r, nome, x)
+
+    # Resposta passa de 2,0: falha da EXPANSÃO aos 2,0 — a própria URL, sem
+    # cache, sem segunda requisição (o desfecho e o tempo de antes).
+    for nome, kw, esperado in (("resposta_passa_no_meli", dict(atraso_meli=2.6), {"meli.la": 1}),
+                               ("resposta_passa_na_vitrine", dict(atraso_cab=2.6), ambos),
+                               ("vitrine_503_depois_do_prazo", dict(atraso_cab=2.2, status=503),
+                                ambos)):
+        x = _dois_prazos(**kw)
+        r.check(x["saida"] == x["curta"] and x["motivo"] == "timeout_expansao"
+                and x["cache"] is None and x["pedidos"] == esperado, f"02.{nome}.falha_da_expansao", x)
+        r.check(1.8 <= x["dt"] <= 2.45, f"02.{nome}.aos_2_0", x["dt"])
+        r.check([(n, ok) for n, _, ok in x["etapas"]] == [("busca_unica", False)]
+                and abs(x["etapas"][0][1] - x["dt"] * 1000) <= 50, f"02.{nome}.etapa", x["etapas"])
+        _conferir_recursos(r, nome, x)
+
+    # Corpo passa de 2,5 (contados da resposta): falha da DESCOBERTA, sem nova
+    # tentativa; a expansão já entrou no cache, como o expansor teria gravado.
+    x = _dois_prazos(corpo=3.5)
+    r.check(x["saida"] is None and x["motivo"] == "timeout_descoberta" and x["cache"] is not None
+            and x["pedidos"] == ambos, "02.corpo_passa.falha_da_descoberta", x)
+    r.check(2.3 <= x["dt"] <= 3.0, "02.corpo_passa.aos_2_5_da_resposta", x["dt"])
+    _conferir_recursos(r, "corpo_passa", x)
+
+    # Cancelamento EXTERNO no meio de cada fase: propaga como cancelamento
+    # (não vira timeout, não é engolido) e devolve conexão e _SEM_HTTP.
+    for nome, kw in (("cancelada_esperando_resposta", dict(atraso_meli=5.0)),
+                     ("cancelada_lendo_corpo", dict(corpo=5.0))):
+        x = _dois_prazos(cancelar_em=0.4, **kw)
+        r.check(x["saida"] == "CANCELADA" and x["dt"] < 1.0, f"02.{nome}.propaga", x)
+        _conferir_recursos(r, nome, x)
+
+    # A Busca em si: onde o aiohttp parou e o que ela devolve.
+    x = _dois_prazos(direto=True, atraso_meli=2.6)
+    b = x["saida"]
+    r.check(isinstance(b.erro, TimeoutError) and b.final == "" and b.destino is None,
+            "02.busca.antes_da_resposta_sem_final", b)
+    x = _dois_prazos(direto=True, corpo=3.5)
+    b = x["saida"]
+    r.check(isinstance(b.erro, TimeoutError) and "/social/terceiro" in b.final
+            and b.destino is None, "02.busca.lendo_com_final", b)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -406,9 +521,11 @@ def test_03_produto(r):
     r.check(x["alvo"] == _PRODUTO, "03.destino", x["alvo"])
     r.check(x["gets"] == 1 and x["leituras"] == 1, "03.uma_requisicao_um_corpo",
             (x["gets"], x["leituras"]))
+    t = k["timeout"]
     r.check(k.get("headers") == ml_desc._CABECALHOS and k.get("allow_redirects") is True
-            and k.get("max_redirects") == 20 and k["timeout"].total == ml_desc._TIMEOUT_S,
-            "03.cabecalhos_timeout_saltos_da_descoberta", k)
+            and k.get("max_redirects") == 20, "03.cabecalhos_e_saltos_da_descoberta", k)
+    r.check(t.total is None and t.connect is None and t.sock_connect is None
+            and t.sock_read is None, "03.aiohttp_sem_prazo_proprio_os_prazos_sao_os_do_02", t)
     r.check("Cookie" not in k.get("headers", {}) and "cookie" not in k.get("headers", {}),
             "03.anonima")
     r.check(x["cache"] == "<SOCIAL>", "03.cache_como_o_expansor", x["cache"])
